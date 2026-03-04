@@ -1,3 +1,189 @@
+/* ── Clipboard screen root ────────────────────────────────────────────────── */
+
+.clipboard-screen-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Layout viewport (fade wrapper) ──────────────────────────────────────── */
+
+.layout-viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  opacity: 1;
+  transition: opacity 0.16s ease;
+}
+
+.layout-viewport--fading {
+  opacity: 0;
+}
+
+
+/* ── Timeline ─────────────────────────────────────────────────────────────── */
+
+/* layout-viewport scrolls; the timeline-wrap inside fills its content height */
+.layout-viewport {
+  overflow-y: auto;
+}
+
+/* Flex row: [1px rail] [groups] */
+.timeline-wrap {
+  display: flex;
+  flex-direction: row;
+  min-height: 100%;
+  padding: 10px 0 14px;
+}
+
+/* Thin vertical accent line */
+.timeline-rail {
+  width: 1px;
+  flex-shrink: 0;
+  margin-left: 20px;
+  background: linear-gradient(to bottom,
+      transparent 0%,
+      var(--accent) 10%,
+      var(--accent) 90%,
+      transparent 100%);
+  align-self: stretch;
+  opacity: 0.4;
+}
+
+/* Groups column */
+.timeline-groups {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each day section */
+.timeline-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Day header — "Today   Mar 5, 2026  ─────────────────" ── */
+.timeline-day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 8px 0;
+  position: relative;
+}
+
+/* Small filled circle sitting on the rail */
+.timeline-day-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  flex-shrink: 0;
+  margin-left: -6px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Bold primary label: "Today" / "Yesterday" / "Mar 4" */
+.timeline-day-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Lighter secondary date: "Mar 5, 2026" */
+.timeline-day-subtitle {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Horizontal rule that fills remaining space after the labels */
+.timeline-day-row::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.25;
+  margin-left: 4px;
+}
+
+/* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
+.timeline-groups .entry-grid,
+.timeline-groups .entry-list {
+  padding-left: 10px;
+  flex: none;
+}
+
+
+/* ── Layout toggle pill ───────────────────────────────────────────────────── */
+
+.layout-toggle-wrap {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 14px 0;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.layout-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  gap: 1px;
+}
+
+.layout-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  transition:
+    background 0.13s ease,
+    color 0.13s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.layout-switch-btn:hover {
+  color: var(--text-secondary);
+}
+
+.layout-switch-btn--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.layout-switch-btn--active:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+
 /* ── Entry grid (Pinterest masonry) ──────────────────────────────────────── */
 
 .entry-grid {
@@ -66,6 +252,7 @@
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -342,6 +529,7 @@ button.card-type-chip.open .card-type-chevron {
   color: var(--success);
   font-weight: 600;
 }
+
 /* ── Card hover action overlay ───────────────────────────────────────────── */
 
 .card-actions {
@@ -417,4 +605,133 @@ button.card-type-chip.open .card-type-chevron {
   color: var(--text-muted);
   max-width: 240px;
   line-height: 1.6;
+}
+
+/* ── List layout (Windows 11 Clipboard style) ─────────────────────────────── */
+/* The list container is basically .entry-grid with columns: 1, so each card  */
+/* renders full-width but keeps the exact same internal structure as masonry.  */
+
+.entry-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  columns: 2;
+  column-gap: 10px;
+}
+
+.entry-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.entry-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.entry-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}
+
+.entry-list::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* Text: show more content in list mode (4 lines) */
+.entry-list .card-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+/* All cards: fixed uniform height, horizontal row layout */
+.entry-list .entry-card {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  height: 76px;
+  min-height: 76px;
+  max-height: 76px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+/* Image thumbnail: height fills card, width adapts to image aspect ratio */
+.entry-list .card-media {
+  width: auto;
+  min-width: 60px;
+  max-width: 65%;
+  height: 100%;
+  flex-shrink: 0;
+  border-bottom: none;
+  border-right: 1px solid var(--border);
+  border-radius: var(--radius) 0 0 var(--radius);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  background: var(--bg);
+}
+
+.entry-list .card-media-img {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  max-height: unset;
+  object-fit: contain;
+  display: block;
+}
+
+/* Multi-image strip: horizontal thumbnails, variable width */
+.entry-list .card-media--multi {
+  width: auto;
+  min-width: 80px;
+  max-width: 65%;
+  height: 100%;
+  flex-shrink: 0;
+  flex-direction: row;
+  border-bottom: none;
+  border-right: 1px solid var(--border);
+  border-radius: var(--radius) 0 0 var(--radius);
+  gap: 1px;
+}
+
+.entry-list .card-media-thumb {
+  aspect-ratio: unset;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+/* Body: text at top, footer pinned to bottom */
+.entry-list .card-body {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+/* Clamp text to 2 lines to fit the compact card height */
+.entry-list .card-text {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* File preview: limit to 2 items */
+.entry-list .card-file-preview {
+  max-height: 34px;
+  overflow: hidden;
+}
+
+/* Hide expanded file list in fixed-height cards */
+.entry-list .card-file-list {
+  max-height: 30px;
+  overflow: hidden;
+}
+
+/* Footer always pinned to the bottom of the card body */
+.entry-list .card-footer {
+  margin-top: auto;
 }
