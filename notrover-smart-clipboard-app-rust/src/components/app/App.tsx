@@ -4,10 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { ClipboardEntry, AppScreen, AppTheme } from "../../types";
 import { classifyFileEntry } from "../../types";
-import Sidebar from "../sidebar/Sidebar";
-import StatusPill from "../status-pill/StatusPill";
-import SettingsScreen from "../settings-screen/SettingsScreen";
-import ClipboardScreen from "../clipboard-screen/ClipboardScreen";
+import Sidebar from "./sidebar/Sidebar";
+import StatusPill from "./status-pill/StatusPill";
+import SettingsScreen from "./settings-screen/SettingsScreen";
+import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import "./App.css";
 
 // ── App ──────────────────────────────────────────────────────────────────────

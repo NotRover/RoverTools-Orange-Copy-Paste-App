@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import type { ClipboardEntry } from "../../types";
+import type { ClipboardEntry } from "../../../types";
 import {
   filePaths,
   isImageFile,
   isVideoFile,
   truncateText,
   timeAgo,
-} from "../../types";
+} from "../../../types";
 import "./ClipboardScreen.css";
 
 // ── Entry Card ────────────────────────────────────────────────────────────
