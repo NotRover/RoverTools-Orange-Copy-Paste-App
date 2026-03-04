@@ -9,6 +9,7 @@ use windows_sys::Win32::{
     Foundation::POINT,
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST},
     UI::{
+        HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
         Input::KeyboardAndMouse::{keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_SHIFT},
         WindowsAndMessaging::GetCursorPos,
     },
@@ -59,9 +60,24 @@ pub fn cursor_pos() -> (i32, i32) {
     (pt.x, pt.y)
 }
 
-/// Work area (screen minus taskbar) of the monitor under the given point.
+/// DPI scale factor (logical → physical) for the monitor under the given point.
 ///
-/// Returns `(left, top, right, bottom)` in physical coordinates.
+/// Returns `1.0` on failure (safe fallback — clamping will use logical units,
+/// which is the previous behaviour).
+pub fn scale_factor_for_point(x: i32, y: i32) -> f64 {
+    unsafe {
+        let pt = POINT { x, y };
+        let hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+
+        let mut dpi_x: u32 = 0;
+        let mut dpi_y: u32 = 0;
+        if GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == 0 {
+            return dpi_x as f64 / 96.0;
+        }
+        1.0
+    }
+}
+
 pub fn work_area_for_point(x: i32, y: i32) -> (i32, i32, i32, i32) {
     unsafe {
         let pt = POINT { x, y };

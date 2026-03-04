@@ -156,5 +156,6 @@ fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHist
         let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
         let _ = win.emit("paste-popup:entries", &entries);
         let _ = win.show();
+        let _ = win.set_focus();
     }
 }

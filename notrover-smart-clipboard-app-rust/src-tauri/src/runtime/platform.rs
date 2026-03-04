@@ -11,18 +11,29 @@ mod platform_windows;
 // ── Re-export the platform API ────────────────────────────────────────────────
 
 #[cfg(windows)]
-pub use self::platform_windows::{cursor_pos, simulate_copy, simulate_paste, work_area_for_point};
+pub use self::platform_windows::{
+    cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste, work_area_for_point,
+};
 
 // ── Cross-platform utilities ──────────────────────────────────────────────────
 
-/// Compute the best (x, y) position for a popup of `(width, height)` pixels
-/// so that it appears just below-right of the cursor and stays within the
-/// monitor work area.
+/// Compute the best (x, y) position for a popup of `(popup_w, popup_h)` *logical*
+/// pixels so that it appears just below-right of the cursor and stays fully
+/// within the monitor work area.
+///
+/// The work area bounds are in physical pixels (from Win32), so we first scale
+/// the logical popup dimensions to physical pixels using the monitor DPI before
+/// clamping — this prevents clipping on HiDPI / scaled displays.
 pub fn popup_position(popup_w: i32, popup_h: i32) -> (i32, i32) {
     let (cx, cy) = cursor_pos();
     let (wa_left, wa_top, wa_right, wa_bottom) = work_area_for_point(cx, cy);
 
-    let px = (cx + 8).max(wa_left).min(wa_right - popup_w);
-    let py = (cy + 8).max(wa_top).min(wa_bottom - popup_h);
+    // Convert logical popup size → physical pixels for correct clamping.
+    let scale = scale_factor_for_point(cx, cy);
+    let phys_w = (popup_w as f64 * scale).round() as i32;
+    let phys_h = (popup_h as f64 * scale).round() as i32;
+
+    let px = (cx + 8).max(wa_left).min(wa_right - phys_w);
+    let py = (cy + 8).max(wa_top).min(wa_bottom - phys_h);
     (px, py)
 }
