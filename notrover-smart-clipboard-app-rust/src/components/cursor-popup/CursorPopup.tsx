@@ -5,6 +5,12 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./popup.css";
 
+type AppTheme = "dark" | "light";
+
+function readTheme(): AppTheme {
+  return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
+}
+
 const IMAGE_FILE_EXTENSIONS = new Set([
   "jpg",
   "jpeg",
@@ -63,7 +69,22 @@ const CursorPopup: React.FC = () => {
   const [copiedText, setCopiedText] = useState<string>("");
   const [imageFilePreview, setImageFilePreview] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
+  const [theme, setTheme] = useState<AppTheme>(readTheme);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sync theme with main app via shared localStorage
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "sc-theme") setTheme((e.newValue as AppTheme) ?? "dark");
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Also re-read on each popup show so it's always up to date
+  useEffect(() => {
+    if (visible) setTheme(readTheme());
+  }, [visible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +100,8 @@ const CursorPopup: React.FC = () => {
         requestAnimationFrame(() => setVisible(true));
       },
     ).then((fn) => {
-      if (cancelled) fn(); else actualUnlisten = fn;
+      if (cancelled) fn();
+      else actualUnlisten = fn;
     });
     return () => {
       cancelled = true;
@@ -92,13 +114,16 @@ const CursorPopup: React.FC = () => {
     let cancelled = false;
     let actualUnlisten: (() => void) | undefined;
     const win = getCurrentWindow();
-    win.listen("tauri://blur", () => {
-      if (cancelled) return;
-      setVisible(false);
-      invoke("close_cursor_popup").catch(console.error);
-    }).then((fn) => {
-      if (cancelled) fn(); else actualUnlisten = fn;
-    });
+    win
+      .listen("tauri://blur", () => {
+        if (cancelled) return;
+        setVisible(false);
+        invoke("close_cursor_popup").catch(console.error);
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else actualUnlisten = fn;
+      });
     return () => {
       cancelled = true;
       actualUnlisten?.();
@@ -142,6 +167,7 @@ const CursorPopup: React.FC = () => {
   return (
     <div
       className={`popup-container${visible ? " visible" : ""}`}
+      data-theme={theme}
       ref={containerRef}
     >
       {/* ── Header ──────────────────────────────── */}
@@ -203,11 +229,11 @@ const CursorPopup: React.FC = () => {
                 </p>
               </div>
             )
-        : previewText && (
-            <div className="popup-clipboard-text">
-              <p className="clipboard-preview">{previewText}</p>
-            </div>
-          )}
+          : previewText && (
+              <div className="popup-clipboard-text">
+                <p className="clipboard-preview">{previewText}</p>
+              </div>
+            )}
 
       <div className="popup-divider" />
 
@@ -241,4 +267,6 @@ export default CursorPopup;
 
 // ── Mount ────────────────────────────────────────────────────────────────────
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<CursorPopup />);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <CursorPopup />,
+);

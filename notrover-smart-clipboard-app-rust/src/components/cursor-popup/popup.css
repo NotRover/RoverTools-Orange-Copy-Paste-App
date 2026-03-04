@@ -2,28 +2,38 @@
 
 :root {
   --popup-bg: #181818;
-  --popup-surface: #222222;
-  --popup-border: #2e2e2e;
+  --popup-surface: #202020;
+  --popup-border: #272727;
+  --popup-border-light: #333333;
   --popup-text: #f0f0f0;
-  --popup-text-muted: #888888;
+  --popup-text-secondary: #a0a0a0;
+  --popup-text-muted: #606060;
   --popup-accent: #ff3e1c;
+  --popup-accent-hover: #ff5535;
   --popup-accent-dim: rgba(255, 62, 28, 0.1);
+  --popup-accent-dim-strong: rgba(255, 62, 28, 0.18);
   --popup-danger: #ff3e1c;
-  --popup-radius: 16px;
-  --popup-btn-radius: 11px;
+  --popup-success: #22c55e;
+  --popup-radius: 14px;
+  --popup-btn-radius: 10px;
+  --popup-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --popup-bg: #ffffff;
-    --popup-surface: #f5f5f5;
-    --popup-border: #e4e4e4;
-    --popup-text: #111111;
-    --popup-text-muted: #909090;
-    --popup-accent: #ff3e1c;
-    --popup-accent-dim: rgba(255, 62, 28, 0.08);
-    --popup-danger: #ff3e1c;
-  }
+[data-theme="light"] {
+  --popup-bg: #ffffff;
+  --popup-surface: #f7f7f7;
+  --popup-border: #dcdcdc;
+  --popup-border-light: #c8c8c8;
+  --popup-text: #111111;
+  --popup-text-secondary: #555555;
+  --popup-text-muted: #909090;
+  --popup-accent: #ff3e1c;
+  --popup-accent-hover: #e0300f;
+  --popup-accent-dim: rgba(255, 62, 28, 0.08);
+  --popup-accent-dim-strong: rgba(255, 62, 28, 0.15);
+  --popup-danger: #ff3e1c;
+  --popup-success: #16a34a;
+  --popup-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
 }
 
 * {
@@ -34,7 +44,6 @@
 
 html {
   background: transparent !important;
-  border-radius: 14px;
   overflow: hidden;
   height: 100%;
   margin: 0;
@@ -48,12 +57,17 @@ body {
     "Segoe UI",
     -apple-system,
     BlinkMacSystemFont,
+    "Inter",
     sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-app-region: no-drag;
   margin: 0;
-  padding: 0;
+  /* transparent gutter so the OS window outline falls outside the rounded container */
+  padding: 6px;
   height: 100%;
+  box-sizing: border-box;
 }
 
 #root {
@@ -66,7 +80,7 @@ body {
   background: var(--popup-bg);
   border-radius: var(--popup-radius);
   border: 1px solid var(--popup-border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--popup-shadow);
   padding: 10px;
   width: 100%;
   height: 100%;
@@ -76,6 +90,7 @@ body {
   opacity: 0;
   transform: scale(0.93) translateY(5px);
   will-change: transform, opacity;
+  box-sizing: border-box;
 }
 
 .popup-container.visible {
@@ -207,9 +222,10 @@ body {
   background: var(--popup-surface);
   color: var(--popup-text);
   font-size: 12px;
+  font-family: inherit;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all 0.14s ease;
   position: relative;
   overflow: hidden;
   will-change: transform;
@@ -219,15 +235,16 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, var(--popup-accent-dim), transparent);
+  background: var(--popup-accent-dim);
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.14s ease;
 }
 
 .popup-btn:hover {
   border-color: var(--popup-accent);
+  color: var(--popup-accent);
   transform: translate3d(0, -1px, 0);
-  box-shadow: 0 4px 12px rgba(255, 62, 28, 0.18);
+  box-shadow: 0 4px 12px var(--popup-accent-dim-strong);
 }
 
 .popup-btn:hover::before {

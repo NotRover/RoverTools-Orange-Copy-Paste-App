@@ -2,7 +2,14 @@ import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./pastePopup.css";
+
+type AppTheme = "dark" | "light";
+
+function readTheme(): AppTheme {
+  return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +50,21 @@ function preview(entry: PopupEntry): string {
 const PastePopup: React.FC = () => {
   const [entries, setEntries] = useState<PopupEntry[]>([]);
   const [visible, setVisible] = useState(false);
+  const [theme, setTheme] = useState<AppTheme>(readTheme);
+
+  // Sync theme with main app via shared localStorage
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "sc-theme") setTheme((e.newValue as AppTheme) ?? "dark");
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Re-read theme on each popup show
+  useEffect(() => {
+    if (visible) setTheme(readTheme());
+  }, [visible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,12 +74,39 @@ const PastePopup: React.FC = () => {
       setEntries(event.payload);
       setVisible(true);
     }).then((fn) => {
-      if (cancelled) fn(); else actualUnlisten = fn;
+      if (cancelled) fn();
+      else actualUnlisten = fn;
     });
     return () => {
       cancelled = true;
       actualUnlisten?.();
     };
+  }, []);
+
+  // Dismiss when the popup loses OS focus (user clicked/tabbed away)
+  useEffect(() => {
+    let cancelled = false;
+    let actualUnlisten: (() => void) | undefined;
+    const win = getCurrentWindow();
+    win
+      .listen("tauri://blur", () => {
+        if (cancelled) return;
+        setVisible(false);
+        invoke("close_paste_popup").catch(console.error);
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else actualUnlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      actualUnlisten?.();
+    };
+  }, []);
+
+  const handleClose = useCallback(() => {
+    setVisible(false);
+    invoke("close_paste_popup").catch(console.error);
   }, []);
 
   /** Write the entry to the clipboard and simulate Ctrl+V via Rust. */
@@ -67,10 +116,28 @@ const PastePopup: React.FC = () => {
   }, []);
 
   return (
-    <div className={`paste-container${visible ? " visible" : ""}`}>
+    <div
+      className={`paste-container${visible ? " visible" : ""}`}
+      data-theme={theme}
+    >
       {/* ── Header ──────────────────────────────── */}
       <div className="paste-header">
         <span className="paste-title">Paste Recent</span>
+        <button className="paste-close" onClick={handleClose} title="Close">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
       </div>
 
       <div className="paste-divider" />
@@ -91,7 +158,11 @@ const PastePopup: React.FC = () => {
               }}
             >
               <span className="paste-item-icon">
-                {entry.type === "image" ? "🖼️" : entry.type === "file" ? "📁" : "📋"}
+                {entry.type === "image"
+                  ? "🖼️"
+                  : entry.type === "file"
+                    ? "📁"
+                    : "📋"}
               </span>
               <span className="paste-item-text">
                 <span className="paste-item-index">{index + 1}. </span>
@@ -109,4 +180,6 @@ export default PastePopup;
 
 // ── Mount ────────────────────────────────────────────────────────────────────
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<PastePopup />);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <PastePopup />,
+);

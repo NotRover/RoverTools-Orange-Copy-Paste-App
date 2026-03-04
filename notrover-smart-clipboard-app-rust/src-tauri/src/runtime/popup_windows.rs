@@ -22,6 +22,7 @@ fn build_popup_window(
         .position(OFFSCREEN_POS, OFFSCREEN_POS)
         .decorations(false)
         .transparent(true)
+        .shadow(false)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
