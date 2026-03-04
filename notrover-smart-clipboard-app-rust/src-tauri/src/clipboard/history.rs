@@ -26,6 +26,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 pub enum EntryKind {
     Text,
     Image,
+    File,
 }
 
 /// A single clipboard history entry.
@@ -74,6 +75,18 @@ impl ClipboardEntry {
             timestamp: Self::now_ms(),
         }
     }
+
+    /// Create a new **file-list** entry.
+    ///
+    /// `content` stores newline-delimited absolute file paths.
+    pub fn new_file(content: String) -> Self {
+        Self {
+            id: Self::next_id(),
+            kind: EntryKind::File,
+            content,
+            timestamp: Self::now_ms(),
+        }
+    }
 }
 
 // History
@@ -98,6 +111,23 @@ impl ClipboardHistory {
         self.entries.insert(0, entry.clone());
         self.entries.truncate(MAX_HISTORY);
         entry
+    }
+
+    /// Prepend an entry only when it differs from the current top entry.
+    /// Returns the existing top entry when duplicate, or the inserted entry.
+    pub fn push_if_distinct(&mut self, entry: ClipboardEntry) -> ClipboardEntry {
+        self.push_if_distinct_with_flag(entry).0
+    }
+
+    /// Same as [`Self::push_if_distinct`], but also returns whether insertion happened.
+    pub fn push_if_distinct_with_flag(&mut self, entry: ClipboardEntry) -> (ClipboardEntry, bool) {
+        if let Some(existing) = self.entries.first() {
+            if existing.kind == entry.kind && existing.content == entry.content {
+                return (existing.clone(), false);
+            }
+        }
+
+        (self.push(entry), true)
     }
 
     /// Return the full history slice (most-recent first).

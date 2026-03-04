@@ -40,6 +40,7 @@ fn entry_kind_label(kind: &EntryKind) -> &'static str {
     match kind {
         EntryKind::Text => "text",
         EntryKind::Image => "image",
+        EntryKind::File => "file",
     }
 }
 
@@ -130,12 +131,14 @@ fn handle_copy_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHisto
             return;
         };
 
-        let entry: ClipboardEntry = {
+        let (entry, inserted): (ClipboardEntry, bool) = {
             let mut hist = history.lock();
-            hist.push(entry)
+            hist.push_if_distinct_with_flag(entry)
         };
 
-        let _ = app.emit("clipboard:new-entry", &entry);
+        if inserted {
+            let _ = app.emit("clipboard:new-entry", &entry);
+        }
         show_cursor_popup(&app, &entry);
     });
 }

@@ -6,6 +6,9 @@ use std::borrow::Cow;
 use arboard::Clipboard;
 use tauri::State;
 
+use crate::clipboard::files::{
+    content_to_files, files_to_content, read_files_from_clipboard, write_files_to_clipboard,
+};
 use crate::clipboard::history::ClipboardEntry;
 use crate::clipboard::image::data_url_to_rgba;
 use crate::runtime::platform::simulate_paste;
@@ -87,6 +90,10 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
             })
             .map_err(|e| e.to_string())?;
         }
+        EntryKind::File => {
+            let files = content_to_files(&entry.content);
+            write_files_to_clipboard(&files)?;
+        }
     }
 
     Ok(())
@@ -101,6 +108,13 @@ pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
     match cb.get_text() {
         Ok(text) if !text.trim().is_empty() => return Some(ClipboardEntry::new_text(text)),
         _ => {}
+    }
+
+    #[cfg(windows)]
+    if crate::clipboard::files::any_file_format_available() {
+        if let Some(paths) = read_files_from_clipboard() {
+            return Some(ClipboardEntry::new_file(files_to_content(&paths)));
+        }
     }
 
     #[cfg(windows)]

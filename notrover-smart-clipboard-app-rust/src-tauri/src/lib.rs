@@ -28,6 +28,10 @@ fn setup_runtime(
 ) -> Result<(), Box<dyn std::error::Error>> {
     crate::runtime::popup_windows::setup_popup_windows(app)?;
     crate::runtime::hotkeys::register_global_shortcuts(app, Arc::clone(history))?;
+    crate::runtime::clipboard_watcher::start_clipboard_watcher(
+        &app.handle().clone(),
+        Arc::clone(history),
+    );
     crate::runtime::popup_windows::setup_main_window_focus_handler(app);
     Ok(())
 }

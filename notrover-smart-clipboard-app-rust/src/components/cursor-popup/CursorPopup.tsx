@@ -16,14 +16,14 @@ import "./popup.css";
  * can hide the window.
  */
 const CursorPopup: React.FC = () => {
-  const [kind, setKind] = useState<"text" | "image">("text");
+  const [kind, setKind] = useState<"text" | "image" | "file">("text");
   const [copiedText, setCopiedText] = useState<string>("");
   const [visible, setVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Listen for the structured payload pushed from Rust when Ctrl+Shift+C fires.
-    const unlisten = listen<{ kind: "text" | "image"; content: string }>(
+    const unlisten = listen<{ kind: "text" | "image" | "file"; content: string }>(
       "clipboard:copied",
       (event) => {
         setVisible(false);
@@ -74,7 +74,11 @@ const CursorPopup: React.FC = () => {
       {/* ── Header ──────────────────────────────── */}
       <div className="popup-header">
         <span className="popup-title">
-          {kind === "image" ? "Copied Image" : "Copied Text"}
+          {kind === "image"
+            ? "Copied Image"
+            : kind === "file"
+              ? "Copied Files"
+              : "Copied Text"}
         </span>
         <button className="popup-close" onClick={handleClose} title="Close">
           ✕
@@ -99,6 +103,14 @@ const CursorPopup: React.FC = () => {
               />
             </div>
           )
+        : kind === "file"
+          ? copiedText && (
+              <div className="popup-clipboard-text">
+                <p className="clipboard-preview">
+                  {copiedText.split("\n").filter(Boolean).length} file(s) copied
+                </p>
+              </div>
+            )
         : previewText && (
             <div className="popup-clipboard-text">
               <p className="clipboard-preview">{previewText}</p>

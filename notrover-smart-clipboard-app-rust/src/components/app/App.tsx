@@ -10,7 +10,7 @@ import "./App.css";
 interface ClipboardEntry {
   id: string;
   /** Serialised as `"type"` from the Rust `#[serde(rename = "type")]` field. */
-  type: "text" | "image";
+  type: "text" | "image" | "file";
   content: string;
   /** Unix epoch in milliseconds. */
   timestamp: number;
@@ -33,6 +33,13 @@ function timeAgo(ts: number): string {
 
 function truncateText(text: string, max = 180): string {
   return text.length <= max ? text : text.slice(0, max) + "…";
+}
+
+function filePaths(content: string): string[] {
+  return content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 // ── Entry Card ───────────────────────────────────────────────────────────────
@@ -79,7 +86,7 @@ const EntryCard: React.FC<{
             <line x1="16" y1="17" x2="8" y2="17" />
             <polyline points="10 9 9 9 8 9" />
           </svg>
-        ) : (
+        ) : entry.type === "image" ? (
           <svg
             width="14"
             height="14"
@@ -94,13 +101,30 @@ const EntryCard: React.FC<{
             <circle cx="8.5" cy="8.5" r="1.5" />
             <polyline points="21 15 16 10 5 21" />
           </svg>
+        ) : (
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="17 8 21 8 21 4" />
+            <line x1="16" y1="9" x2="21" y2="4" />
+            <path d="M7 13h10" />
+            <path d="M7 17h6" />
+          </svg>
         )}
       </div>
 
       <div className="entry-body">
         {entry.type === "text" ? (
           <p className="entry-text">{truncateText(entry.content)}</p>
-        ) : (
+        ) : entry.type === "image" ? (
           <div className="entry-image-wrap">
             <img
               src={entry.content}
@@ -108,6 +132,15 @@ const EntryCard: React.FC<{
               className="entry-image"
             />
           </div>
+        ) : (
+          <p className="entry-text">
+            {(() => {
+              const files = filePaths(entry.content);
+              if (files.length === 0) return "[Files]";
+              if (files.length === 1) return files[0];
+              return `${files[0]} (+${files.length - 1} more)`;
+            })()}
+          </p>
         )}
         <span className="entry-time">{relTime}</span>
       </div>
@@ -185,7 +218,13 @@ const App: React.FC = () => {
 
     // Listen for new entries emitted by the Rust backend.
     const unlisten = listen<ClipboardEntry>("clipboard:new-entry", (event) => {
-      setEntries((prev) => [event.payload, ...prev]);
+      setEntries((prev) => {
+        if (prev.some((entry) => entry.id === event.payload.id)) {
+          return prev;
+        }
+
+        return [event.payload, ...prev];
+      });
     });
 
     // Cleanup the event listener on unmount.
@@ -219,6 +258,7 @@ const App: React.FC = () => {
 
   const textCount = entries.filter((e) => e.type === "text").length;
   const imageCount = entries.filter((e) => e.type === "image").length;
+  const fileCount = entries.filter((e) => e.type === "file").length;
 
   return (
     <div className="app">
@@ -296,6 +336,8 @@ const App: React.FC = () => {
           <span className="stat">{textCount} text</span>
           <span className="stat-dot" />
           <span className="stat">{imageCount} images</span>
+          <span className="stat-dot" />
+          <span className="stat">{fileCount} files</span>
           <span className="stat-dot" />
           <span className="stat">{entries.length} total</span>
         </div>

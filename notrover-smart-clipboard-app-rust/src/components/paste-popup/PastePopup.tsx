@@ -10,7 +10,7 @@ import "./pastePopup.css";
 interface PopupEntry {
   id: string;
   /** Serialised as `"type"` from Rust's `#[serde(rename = "type")]` field. */
-  type: "text" | "image";
+  type: "text" | "image" | "file";
   content: string;
   timestamp: number;
 }
@@ -19,6 +19,13 @@ interface PopupEntry {
 
 function preview(entry: PopupEntry): string {
   if (entry.type === "image") return "🖼️ [Image]";
+  if (entry.type === "file") {
+    const count = entry.content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean).length;
+    return `📁 [${count} file${count === 1 ? "" : "s"}]`;
+  }
   return entry.content.length > 60
     ? entry.content.slice(0, 60) + "…"
     : entry.content;
@@ -79,7 +86,7 @@ const PastePopup: React.FC = () => {
               }}
             >
               <span className="paste-item-icon">
-                {entry.type === "image" ? "🖼️" : "📋"}
+                {entry.type === "image" ? "🖼️" : entry.type === "file" ? "📁" : "📋"}
               </span>
               <span className="paste-item-text">
                 <span className="paste-item-index">{index + 1}. </span>
