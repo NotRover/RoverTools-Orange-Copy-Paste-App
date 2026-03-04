@@ -1,0 +1,125 @@
+/* ── Shortcuts screen ────────────────────────────────────────────────────── */
+
+.shortcuts-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px;
+  gap: 24px;
+  overflow-y: auto;
+}
+
+.shortcuts-screen::-webkit-scrollbar {
+  width: 4px;
+}
+
+.shortcuts-screen::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}
+
+.shortcuts-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+
+.shortcuts-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.shortcuts-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.shortcuts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcuts-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ── Shortcut rows ───────────────────────────────────────────────────────── */
+
+.shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcut-row:last-child {
+  border-bottom: none;
+}
+
+.shortcut-desc {
+  font-size: 12.5px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.shortcut-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+  line-height: 1.6;
+}
+
+.shortcut-plus {
+  font-size: 10px;
+  color: var(--text-muted);
+}
