@@ -49,6 +49,8 @@ pub fn run() {
             crate::clipboard::commands::clear_history,
             crate::clipboard::commands::copy_entry,
             crate::clipboard::commands::paste_entry,
+            crate::clipboard::commands::get_image_file_preview,
+            crate::clipboard::commands::get_video_file_preview,
             crate::runtime::commands::close_cursor_popup,
             crate::runtime::commands::close_paste_popup,
         ])

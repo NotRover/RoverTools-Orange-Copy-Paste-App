@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
@@ -42,6 +42,57 @@ function filePaths(content: string): string[] {
     .filter(Boolean);
 }
 
+const IMAGE_FILE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "svg",
+  "ico",
+  "tiff",
+  "tif",
+  "avif",
+  "heic",
+  "heif",
+]);
+
+const VIDEO_FILE_EXTENSIONS = new Set([
+  "mp4",
+  "webm",
+  "mov",
+  "mkv",
+  "avi",
+  "wmv",
+  "m4v",
+  "mpeg",
+  "mpg",
+]);
+
+function fileExtension(path: string): string {
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) return "";
+  return fileName.slice(dotIndex + 1).toLowerCase();
+}
+
+function isImageFile(path: string): boolean {
+  return IMAGE_FILE_EXTENSIONS.has(fileExtension(path));
+}
+
+function isVideoFile(path: string): boolean {
+  return VIDEO_FILE_EXTENSIONS.has(fileExtension(path));
+}
+
+function classifyFileEntry(content: string): "image" | "video" | "file" {
+  const paths = filePaths(content);
+  if (paths.length === 0) return "file";
+  if (paths.every(isImageFile)) return "image";
+  if (paths.every(isVideoFile)) return "video";
+  return "file";
+}
+
 // ── Entry Card ───────────────────────────────────────────────────────────────
 
 const EntryCard: React.FC<{
@@ -51,6 +102,21 @@ const EntryCard: React.FC<{
 }> = ({ entry, onCopy, onDelete }) => {
   const [copied, setCopied] = useState(false);
   const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
+  const [imageFilePreview, setImageFilePreview] = useState<string | null>(null);
+  const files = entry.type === "file" ? filePaths(entry.content) : [];
+  const firstFile = files[0];
+  const firstFileUrl = firstFile ? convertFileSrc(firstFile) : "";
+
+  useEffect(() => {
+    if (entry.type !== "file" || !firstFile || !isImageFile(firstFile)) {
+      setImageFilePreview(null);
+      return;
+    }
+
+    invoke<string | null>("get_image_file_preview", { path: firstFile })
+      .then((preview) => setImageFilePreview(preview))
+      .catch(() => setImageFilePreview(null));
+  }, [entry.type, firstFile]);
 
   useEffect(() => {
     const timer = setInterval(
@@ -133,14 +199,34 @@ const EntryCard: React.FC<{
             />
           </div>
         ) : (
-          <p className="entry-text">
-            {(() => {
-              const files = filePaths(entry.content);
-              if (files.length === 0) return "[Files]";
-              if (files.length === 1) return files[0];
-              return `${files[0]} (+${files.length - 1} more)`;
-            })()}
-          </p>
+          <>
+            {firstFile && isImageFile(firstFile) && (
+              <div className="entry-file-preview-wrap">
+                <img
+                  src={imageFilePreview ?? firstFileUrl}
+                  alt="Copied image file"
+                  className="entry-file-preview-media"
+                />
+              </div>
+            )}
+            {firstFile && isVideoFile(firstFile) && (
+              <div className="entry-file-preview-wrap">
+                <video
+                  className="entry-file-preview-media"
+                  controls
+                  preload="metadata"
+                  src={firstFileUrl}
+                />
+              </div>
+            )}
+            <p className="entry-text">
+              {(() => {
+                if (files.length === 0) return "[Files]";
+                if (files.length === 1) return files[0];
+                return `${files[0]} (+${files.length - 1} more)`;
+              })()}
+            </p>
+          </>
         )}
         <span className="entry-time">{relTime}</span>
       </div>
@@ -257,8 +343,17 @@ const App: React.FC = () => {
     : entries;
 
   const textCount = entries.filter((e) => e.type === "text").length;
-  const imageCount = entries.filter((e) => e.type === "image").length;
-  const fileCount = entries.filter((e) => e.type === "file").length;
+  const imageCount = entries.filter(
+    (e) =>
+      e.type === "image" ||
+      (e.type === "file" && classifyFileEntry(e.content) === "image"),
+  ).length;
+  const videoCount = entries.filter(
+    (e) => e.type === "file" && classifyFileEntry(e.content) === "video",
+  ).length;
+  const fileCount = entries.filter(
+    (e) => e.type === "file" && classifyFileEntry(e.content) === "file",
+  ).length;
 
   return (
     <div className="app">
@@ -336,6 +431,8 @@ const App: React.FC = () => {
           <span className="stat">{textCount} text</span>
           <span className="stat-dot" />
           <span className="stat">{imageCount} images</span>
+          <span className="stat-dot" />
+          <span className="stat">{videoCount} videos</span>
           <span className="stat-dot" />
           <span className="stat">{fileCount} files</span>
           <span className="stat-dot" />

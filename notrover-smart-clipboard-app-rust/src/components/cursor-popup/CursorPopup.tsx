@@ -1,9 +1,52 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./popup.css";
+
+const IMAGE_FILE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "svg",
+  "ico",
+  "tiff",
+  "tif",
+  "avif",
+  "heic",
+  "heif",
+]);
+
+const VIDEO_FILE_EXTENSIONS = new Set([
+  "mp4",
+  "webm",
+  "mov",
+  "mkv",
+  "avi",
+  "wmv",
+  "m4v",
+  "mpeg",
+  "mpg",
+]);
+
+function fileExtension(path: string): string {
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) return "";
+  return fileName.slice(dotIndex + 1).toLowerCase();
+}
+
+function isImageFile(path: string): boolean {
+  return IMAGE_FILE_EXTENSIONS.has(fileExtension(path));
+}
+
+function isVideoFile(path: string): boolean {
+  return VIDEO_FILE_EXTENSIONS.has(fileExtension(path));
+}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -18,6 +61,7 @@ import "./popup.css";
 const CursorPopup: React.FC = () => {
   const [kind, setKind] = useState<"text" | "image" | "file">("text");
   const [copiedText, setCopiedText] = useState<string>("");
+  const [imageFilePreview, setImageFilePreview] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -65,6 +109,23 @@ const CursorPopup: React.FC = () => {
 
   const previewText =
     copiedText.length > 200 ? copiedText.slice(0, 200) + "…" : copiedText;
+  const files = copiedText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstFile = files[0];
+  const firstFileUrl = firstFile ? convertFileSrc(firstFile) : "";
+
+  useEffect(() => {
+    if (kind !== "file" || !firstFile || !isImageFile(firstFile)) {
+      setImageFilePreview(null);
+      return;
+    }
+
+    invoke<string | null>("get_image_file_preview", { path: firstFile })
+      .then((preview) => setImageFilePreview(preview))
+      .catch(() => setImageFilePreview(null));
+  }, [kind, firstFile]);
 
   return (
     <div
@@ -106,8 +167,27 @@ const CursorPopup: React.FC = () => {
         : kind === "file"
           ? copiedText && (
               <div className="popup-clipboard-text">
+                {firstFile && isImageFile(firstFile) && (
+                  <div className="popup-file-preview-wrap">
+                    <img
+                      src={imageFilePreview ?? firstFileUrl}
+                      alt="Copied image file"
+                      className="popup-file-preview-media"
+                    />
+                  </div>
+                )}
+                {firstFile && isVideoFile(firstFile) && (
+                  <div className="popup-file-preview-wrap">
+                    <video
+                      className="popup-file-preview-media"
+                      controls
+                      preload="metadata"
+                      src={firstFileUrl}
+                    />
+                  </div>
+                )}
                 <p className="clipboard-preview">
-                  {copiedText.split("\n").filter(Boolean).length} file(s) copied
+                  {files.length} file(s) copied
                 </p>
               </div>
             )

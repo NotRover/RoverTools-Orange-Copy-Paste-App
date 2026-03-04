@@ -2,6 +2,9 @@
 //! helpers for reading and writing clipboard content.
 
 use std::borrow::Cow;
+use std::path::Path;
+
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
 use arboard::Clipboard;
 use tauri::State;
@@ -18,6 +21,38 @@ use crate::state::AppState;
 const IMAGE_READ_RETRY_COUNT: usize = 5;
 const IMAGE_READ_RETRY_DELAY_MS: u64 = 90;
 const PASTE_DELAY_MS: u64 = 80;
+const MAX_IMAGE_PREVIEW_BYTES: usize = 12 * 1024 * 1024;
+const MAX_VIDEO_PREVIEW_BYTES: usize = 36 * 1024 * 1024;
+
+fn mime_from_image_ext(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "gif" => Some("image/gif"),
+        "bmp" => Some("image/bmp"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        "ico" => Some("image/x-icon"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "avif" => Some("image/avif"),
+        _ => None,
+    }
+}
+
+fn mime_from_video_ext(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    match ext.as_str() {
+        "mp4" | "m4v" => Some("video/mp4"),
+        "webm" => Some("video/webm"),
+        "mov" => Some("video/quicktime"),
+        "mkv" => Some("video/x-matroska"),
+        "avi" => Some("video/x-msvideo"),
+        "wmv" => Some("video/x-ms-wmv"),
+        "mpeg" | "mpg" => Some("video/mpeg"),
+        _ => None,
+    }
+}
 
 fn find_entry_by_id(state: &State<'_, AppState>, id: &str) -> Option<ClipboardEntry> {
     state.history.lock().find(id).cloned()
@@ -69,6 +104,32 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
     schedule_paste();
 
     true
+}
+
+#[tauri::command]
+pub fn get_image_file_preview(path: String) -> Option<String> {
+    let path = Path::new(&path);
+    let mime = mime_from_image_ext(path)?;
+
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_PREVIEW_BYTES {
+        return None;
+    }
+
+    Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
+}
+
+#[tauri::command]
+pub fn get_video_file_preview(path: String) -> Option<String> {
+    let path = Path::new(&path);
+    let mime = mime_from_video_ext(path)?;
+
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_VIDEO_PREVIEW_BYTES {
+        return None;
+    }
+
+    Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
 }
 
 pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), String> {

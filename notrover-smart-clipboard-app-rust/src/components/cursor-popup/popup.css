@@ -156,6 +156,21 @@ body {
   margin: 0;
 }
 
+.popup-file-preview-wrap {
+  border: 1px solid var(--popup-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.popup-file-preview-media {
+  display: block;
+  width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  background: #141424;
+}
+
 /* ── Button grid ──────────────────────────────── */
 
 .popup-actions {
