@@ -164,7 +164,7 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
               : "[File]"}
           </p>
         )}
-        {entry.type === "file" && isMulti && (
+        {entry.type === "file" && isMulti && !showFileList && (
           <div className="card-file-preview">
             {files.slice(0, 3).map((f) => {
               const name = f.split(/[\\/]/).pop() ?? f;
@@ -210,6 +210,34 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
                 +{files.length - 3} more
               </span>
             )}
+          </div>
+        )}
+        {/* Expanded file list — sits above footer so button stays anchored at bottom */}
+        {entry.type === "file" && isMulti && showFileList && (
+          <div className="card-file-list">
+            {files.map((f) => {
+              const name = f.split(/[\\/]/).pop() ?? f;
+              const isImg = isImageFile(f);
+              const preview = imagePreviews[f];
+              return (
+                <div key={f} className="card-file-list-item">
+                  {isImg && (
+                    <div className="card-file-thumb">
+                      {preview ? (
+                        <img
+                          src={preview}
+                          alt=""
+                          className="card-file-thumb-img"
+                        />
+                      ) : (
+                        <div className="card-file-thumb-placeholder" />
+                      )}
+                    </div>
+                  )}
+                  <span className="card-file-name">{name}</span>
+                </div>
+              );
+            })}
           </div>
         )}
         {/* ── Footer: type chip + timestamp ── */}
@@ -349,34 +377,6 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
             <span className="card-time">{relTime}</span>
           )}
         </div>
-        {/* Expanded file list — renders below footer, grows the card */}
-        {entry.type === "file" && isMulti && showFileList && (
-          <div className="card-file-list">
-            {files.map((f) => {
-              const name = f.split(/[\\/]/).pop() ?? f;
-              const isImg = isImageFile(f);
-              const preview = imagePreviews[f];
-              return (
-                <div key={f} className="card-file-list-item">
-                  {isImg && (
-                    <div className="card-file-thumb">
-                      {preview ? (
-                        <img
-                          src={preview}
-                          alt=""
-                          className="card-file-thumb-img"
-                        />
-                      ) : (
-                        <div className="card-file-thumb-placeholder" />
-                      )}
-                    </div>
-                  )}
-                  <span className="card-file-name">{name}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* ── Hover action overlay ── */}

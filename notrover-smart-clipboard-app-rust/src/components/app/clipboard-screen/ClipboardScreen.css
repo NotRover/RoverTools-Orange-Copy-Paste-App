@@ -266,7 +266,8 @@ button.card-type-chip.open .card-type-chevron {
   gap: 2px;
   max-height: 150px;
   overflow-y: auto;
-  padding: 1px 0;
+  padding: 4px 0 1px;
+  border-top: 1px solid var(--border);
 }
 
 .card-file-list::-webkit-scrollbar {
