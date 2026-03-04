@@ -1,0 +1,46 @@
+/* ── Settings screen ──────────────────────────────────────────────────────── */
+
+.settings-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px;
+  gap: 24px;
+  overflow-y: auto;
+}
+
+.settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+
+.settings-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.settings-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--border-light);
+}
+
+.settings-placeholder-text {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}

@@ -1,0 +1,37 @@
+/* ── Status pill (bottom-right Obsidian-style) ───────────────────────────── */
+
+.status-pill {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7.5px;
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.status-item {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.status-value {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: var(--border-light);
+  flex-shrink: 0;
+}
