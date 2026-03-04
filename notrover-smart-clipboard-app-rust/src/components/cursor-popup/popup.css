@@ -1,0 +1,223 @@
+/* ── Smart Popup Theme ─────────────────────────── */
+
+:root {
+  --popup-bg: #1e1e2e;
+  --popup-surface: #2a2a3c;
+  --popup-border: #35354a;
+  --popup-text: #e0e0e8;
+  --popup-text-muted: #9090a8;
+  --popup-accent: #7c6ff7;
+  --popup-accent-hover: #9488ff;
+  --popup-danger: #f05a6e;
+  --popup-radius: 14px;
+  --popup-btn-radius: 10px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  background: transparent !important;
+  border-radius: 14px;
+  overflow: hidden;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: transparent !important;
+  overflow: hidden;
+  font-family:
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+#root {
+  height: 100%;
+}
+
+/* ── Container ────────────────────────────────── */
+
+.popup-container {
+  background: var(--popup-bg);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 10px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Start hidden — entrance animation plays when .visible is added */
+  opacity: 0;
+  transform: scale(0.92) translateY(4px);
+  will-change: transform, opacity;
+}
+
+.popup-container.visible {
+  animation: popupFadeIn 0.12s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes popupFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translate3d(0, 4px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+
+/* ── Header ───────────────────────────────────── */
+
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+}
+
+.popup-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--popup-text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.popup-close {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--popup-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+}
+
+.popup-close:hover {
+  background: var(--popup-danger);
+  color: #fff;
+}
+
+/* ── Divider ──────────────────────────────────── */
+
+.popup-divider {
+  height: 1px;
+  background: var(--popup-border);
+  margin: 0 2px;
+}
+
+/* ── Clipboard text preview ──────────────────── */
+
+.popup-clipboard-text {
+  background: var(--popup-surface);
+  border: 1px solid var(--popup-border);
+  border-radius: var(--popup-btn-radius);
+  padding: 8px 10px;
+  max-height: 80px;
+  overflow-y: auto;
+  flex-shrink: 1;
+  min-height: 0;
+}
+
+.popup-clipboard-text::-webkit-scrollbar {
+  width: 4px;
+}
+.popup-clipboard-text::-webkit-scrollbar-thumb {
+  background: var(--popup-border);
+  border-radius: 2px;
+}
+
+.clipboard-preview {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--popup-text);
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+/* ── Button grid ──────────────────────────────── */
+
+.popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 2px;
+  margin-top: auto;
+}
+
+.popup-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--popup-border);
+  border-radius: var(--popup-btn-radius);
+  background: var(--popup-surface);
+  color: var(--popup-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  position: relative;
+  overflow: hidden;
+  will-change: transform;
+}
+
+.popup-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(124, 111, 247, 0.08), transparent);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.popup-btn:hover {
+  border-color: var(--popup-accent);
+  background: #2e2e42;
+  transform: translate3d(0, -1px, 0);
+  box-shadow: 0 4px 12px rgba(124, 111, 247, 0.15);
+}
+
+.popup-btn:hover::before {
+  opacity: 1;
+}
+
+.popup-btn:active {
+  transform: translate3d(0, 0, 0);
+  box-shadow: none;
+}
+
+.btn-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.btn-label {
+  font-size: 12px;
+  position: relative;
+  z-index: 1;
+}

@@ -1,0 +1,12 @@
+{
+  "folders": [
+    {
+      "path": ".",
+    },
+  ],
+  "settings": {
+    "rust-analyzer.linkedProjects": [
+      "notrover-smart-clipboard-app-rust/src-tauri/Cargo.toml",
+    ],
+  },
+}
