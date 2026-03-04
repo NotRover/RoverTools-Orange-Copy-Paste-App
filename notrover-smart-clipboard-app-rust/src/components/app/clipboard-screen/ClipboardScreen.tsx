@@ -445,6 +445,10 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
   );
 };
 
+// ── Layout types ─────────────────────────────────────────────────────────
+
+type ClipboardLayout = "masonry" | "list";
+
 // ── Clipboard Screen ──────────────────────────────────────────────────────
 
 interface ClipboardScreenProps {
@@ -462,6 +466,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onCopy,
   onDelete,
 }) => {
+  const [layout, setLayout] = useState<ClipboardLayout>(() => {
+    return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
+  });
+  const [layoutOpen, setLayoutOpen] = useState(false);
+
+  const selectLayout = (l: ClipboardLayout) => {
+    setLayout(l);
+    localStorage.setItem("sc-layout", l);
+    setLayoutOpen(false);
+  };
+
   if (filtered.length === 0) {
     return (
       <div className="empty-state">
@@ -498,16 +513,110 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     );
   }
 
+  const layouts: { id: ClipboardLayout; label: string; icon: React.ReactNode }[] = [
+    {
+      id: "masonry",
+      label: "Masonry",
+      icon: (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="9" rx="1" />
+          <rect x="14" y="3" width="7" height="5" rx="1" />
+          <rect x="14" y="12" width="7" height="9" rx="1" />
+          <rect x="3" y="16" width="7" height="5" rx="1" />
+        </svg>
+      ),
+    },
+    {
+      id: "list",
+      label: "List",
+      icon: (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" />
+          <line x1="3" y1="12" x2="3.01" y2="12" />
+          <line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
+      ),
+    },
+  ];
+
+  const currentLayout = layouts.find((l) => l.id === layout)!;
+
   return (
-    <div className="entry-grid">
-      {filtered.map((entry) => (
-        <EntryCard
-          key={entry.id}
-          entry={entry}
-          onCopy={onCopy}
-          onDelete={onDelete}
-        />
-      ))}
+    <div className="clipboard-screen-root">
+      {/* ── Layout toggle pill ── */}
+      <div className="layout-toggle-wrap">
+        <button
+          className={`layout-pill${layoutOpen ? " layout-pill--open" : ""}`}
+          onClick={() => setLayoutOpen((v) => !v)}
+          title="Change layout"
+          id="layout-toggle-btn"
+        >
+          {currentLayout.icon}
+          <span className="layout-pill-label">{currentLayout.label}</span>
+          <svg
+            className="layout-pill-chevron"
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        {layoutOpen && (
+          <>
+            <div className="layout-dropdown-backdrop" onClick={() => setLayoutOpen(false)} />
+            <div className="layout-dropdown">
+              {layouts.map((l) => (
+                <button
+                  key={l.id}
+                  className={`layout-dropdown-item${layout === l.id ? " layout-dropdown-item--active" : ""}`}
+                  onClick={() => selectLayout(l.id)}
+                  id={`layout-option-${l.id}`}
+                >
+                  {l.icon}
+                  <span>{l.label}</span>
+                  {layout === l.id && (
+                    <svg
+                      className="layout-dropdown-check"
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Entry grid / list ── */}
+      <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
+        {filtered.map((entry) => (
+          <EntryCard
+            key={entry.id}
+            entry={entry}
+            onCopy={onCopy}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
     </div>
   );
 };
