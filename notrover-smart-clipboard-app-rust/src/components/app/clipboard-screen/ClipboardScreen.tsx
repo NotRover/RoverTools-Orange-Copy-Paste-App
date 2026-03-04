@@ -469,12 +469,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
   });
-  const [layoutOpen, setLayoutOpen] = useState(false);
+  const [fading, setFading] = useState(false);
 
   const selectLayout = (l: ClipboardLayout) => {
-    setLayout(l);
-    localStorage.setItem("sc-layout", l);
-    setLayoutOpen(false);
+    if (l === layout) return;
+    setFading(true);
+    setTimeout(() => {
+      setLayout(l);
+      localStorage.setItem("sc-layout", l);
+      setFading(false);
+    }, 160);
   };
 
   if (filtered.length === 0) {
@@ -542,80 +546,38 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     },
   ];
 
-  const currentLayout = layouts.find((l) => l.id === layout)!;
-
   return (
     <div className="clipboard-screen-root">
-      {/* ── Layout toggle pill ── */}
+      {/* ── Layout segmented switch ── */}
       <div className="layout-toggle-wrap">
-        <button
-          className={`layout-pill${layoutOpen ? " layout-pill--open" : ""}`}
-          onClick={() => setLayoutOpen((v) => !v)}
-          title="Change layout"
-          id="layout-toggle-btn"
-        >
-          {currentLayout.icon}
-          <span className="layout-pill-label">{currentLayout.label}</span>
-          <svg
-            className="layout-pill-chevron"
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-
-        {layoutOpen && (
-          <>
-            <div className="layout-dropdown-backdrop" onClick={() => setLayoutOpen(false)} />
-            <div className="layout-dropdown">
-              {layouts.map((l) => (
-                <button
-                  key={l.id}
-                  className={`layout-dropdown-item${layout === l.id ? " layout-dropdown-item--active" : ""}`}
-                  onClick={() => selectLayout(l.id)}
-                  id={`layout-option-${l.id}`}
-                >
-                  {l.icon}
-                  <span>{l.label}</span>
-                  {layout === l.id && (
-                    <svg
-                      className="layout-dropdown-check"
-                      width="11"
-                      height="11"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        <div className="layout-switch" role="group" aria-label="Layout">
+          {layouts.map((l) => (
+            <button
+              key={l.id}
+              id={`layout-option-${l.id}`}
+              className={`layout-switch-btn${layout === l.id ? " layout-switch-btn--active" : ""}`}
+              onClick={() => selectLayout(l.id)}
+              title={l.label}
+            >
+              {l.icon}
+              <span className="layout-pill-label">{l.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Entry grid / list ── */}
-      <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
-        {filtered.map((entry) => (
-          <EntryCard
-            key={entry.id}
-            entry={entry}
-            onCopy={onCopy}
-            onDelete={onDelete}
-          />
-        ))}
+      <div className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}>
+        <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
+          {filtered.map((entry) => (
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              onCopy={onCopy}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
