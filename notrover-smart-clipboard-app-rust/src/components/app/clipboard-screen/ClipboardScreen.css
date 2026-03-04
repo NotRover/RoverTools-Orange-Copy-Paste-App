@@ -23,7 +23,6 @@
   opacity: 0;
 }
 
-
 /* ── Timeline ─────────────────────────────────────────────────────────────── */
 
 /* layout-viewport scrolls; the timeline-wrap inside fills its content height */
@@ -43,14 +42,16 @@
 .timeline-rail {
   width: 1px;
   flex-shrink: 0;
-  margin-left: 20px;
-  background: linear-gradient(to bottom,
-      transparent 0%,
-      var(--accent) 10%,
-      var(--accent) 90%,
-      transparent 100%);
+  margin-left: 15px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--accent) 10%,
+    var(--accent) 90%,
+    transparent 100%
+  );
   align-self: stretch;
-  opacity: 0.4;
+  opacity: 0.6;
 }
 
 /* Groups column */
@@ -83,6 +84,7 @@
   border-radius: 50%;
   background: var(--bg);
   border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
   flex-shrink: 0;
   margin-left: -6px;
   position: relative;
@@ -93,7 +95,7 @@
 .timeline-day-label {
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--accent);
   letter-spacing: -0.2px;
   user-select: none;
   white-space: nowrap;
@@ -110,7 +112,7 @@
 
 /* Horizontal rule that fills remaining space after the labels */
 .timeline-day-row::after {
-  content: '';
+  content: "";
   flex: 1;
   height: 1px;
   background: var(--accent);
@@ -121,10 +123,9 @@
 /* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
 .timeline-groups .entry-grid,
 .timeline-groups .entry-list {
-  padding-left: 10px;
+  padding-left: 15px;
   flex: none;
 }
-
 
 /* ── Layout toggle pill ───────────────────────────────────────────────────── */
 
@@ -182,7 +183,6 @@
   background: var(--accent);
   color: #fff;
 }
-
 
 /* ── Entry grid (Pinterest masonry) ──────────────────────────────────────── */
 
