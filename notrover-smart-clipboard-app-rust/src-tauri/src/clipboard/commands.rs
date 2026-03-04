@@ -87,7 +87,13 @@ pub fn copy_entry(id: String, state: State<'_, AppState>) -> bool {
 
     let Some(entry) = entry else { return false };
 
-    write_entry_to_clipboard(&entry).is_ok()
+    let ok = write_entry_to_clipboard(&entry).is_ok();
+    if ok {
+        state
+            .suppress_next_capture
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    ok
 }
 
 #[tauri::command]
@@ -99,6 +105,10 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
     if write_entry_to_clipboard(&entry).is_err() {
         return false;
     }
+
+    state
+        .suppress_next_capture
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 
     hide_popup(&app, "paste-popup");
     schedule_paste();

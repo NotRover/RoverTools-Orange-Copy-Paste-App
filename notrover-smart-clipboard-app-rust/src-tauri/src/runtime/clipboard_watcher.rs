@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -26,7 +27,17 @@ fn is_duplicate_top(history: &ClipboardHistory, entry: &ClipboardEntry) -> bool 
         .unwrap_or(false)
 }
 
-fn capture_clipboard_change(app: &tauri::AppHandle, history: &Arc<Mutex<ClipboardHistory>>) {
+fn capture_clipboard_change(
+    app: &tauri::AppHandle,
+    history: &Arc<Mutex<ClipboardHistory>>,
+    suppress: &Arc<AtomicBool>,
+) {
+    // If a copy_entry / paste_entry just wrote to the clipboard, skip this
+    // capture so we don't re-add the entry as a duplicate.
+    if suppress.swap(false, Ordering::Relaxed) {
+        return;
+    }
+
     let Some(entry) = read_clipboard_entry() else {
         return;
     };
@@ -48,6 +59,7 @@ fn capture_clipboard_change(app: &tauri::AppHandle, history: &Arc<Mutex<Clipboar
 pub(crate) fn start_clipboard_watcher(
     app: &tauri::AppHandle,
     history: Arc<Mutex<ClipboardHistory>>,
+    suppress: Arc<AtomicBool>,
 ) {
     let app = app.clone();
 
@@ -66,13 +78,13 @@ pub(crate) fn start_clipboard_watcher(
                 }
 
                 last_token = token;
-                capture_clipboard_change(&app, &history);
+                capture_clipboard_change(&app, &history, &suppress);
             }
 
             #[cfg(not(windows))]
             {
                 let _ = token;
-                capture_clipboard_change(&app, &history);
+                capture_clipboard_change(&app, &history, &suppress);
             }
         }
     });
