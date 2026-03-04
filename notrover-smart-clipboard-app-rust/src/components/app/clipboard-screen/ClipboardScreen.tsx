@@ -449,6 +449,51 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
 
 type ClipboardLayout = "masonry" | "list";
 
+// ── Day grouping helpers ─────────────────────────────────────────────────────
+
+function toLocalDateKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function dayLabel(key: string): string {
+  const todayKey = toLocalDateKey(Date.now());
+  const yesterdayKey = toLocalDateKey(Date.now() - 86_400_000);
+  if (key === todayKey) return "Today";
+  if (key === yesterdayKey) return "Yesterday";
+  const [year, month, day] = key.split("-").map(Number);
+  const d = new Date(year, month, day);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function daySubtitle(key: string): string {
+  const [year, month, day] = key.split("-").map(Number);
+  const d = new Date(year, month, day);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+interface DayGroup {
+  key: string;
+  label: string;
+  subtitle: string;
+  entries: ClipboardEntry[];
+}
+
+function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
+  const map = new Map<string, ClipboardEntry[]>();
+  for (const e of entries) {
+    const k = toLocalDateKey(e.timestamp);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(e);
+  }
+  return Array.from(map.entries()).map(([key, entries]) => ({
+    key,
+    label: dayLabel(key),
+    subtitle: daySubtitle(key),
+    entries,
+  }));
+}
+
 // ── Clipboard Screen ──────────────────────────────────────────────────────
 
 interface ClipboardScreenProps {
@@ -546,6 +591,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     },
   ];
 
+  const dayGroups = groupByDay(filtered);
+
   return (
     <div className="clipboard-screen-root">
       {/* ── Layout segmented switch ── */}
@@ -566,17 +613,39 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         </div>
       </div>
 
-      {/* ── Entry grid / list ── */}
+      {/* ── Entry grid / list with timeline ── */}
       <div className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}>
-        <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
-          {filtered.map((entry) => (
-            <EntryCard
-              key={entry.id}
-              entry={entry}
-              onCopy={onCopy}
-              onDelete={onDelete}
-            />
-          ))}
+        <div className="timeline-wrap">
+          {/* Orange vertical rail */}
+          <div className="timeline-rail" />
+
+          {/* Day groups */}
+          <div className="timeline-groups">
+            {dayGroups.map((group) => (
+              <div key={group.key} className="timeline-group">
+                {/* Day marker */}
+                <div className="timeline-day-row">
+                  <div className="timeline-day-dot" />
+                  <span className="timeline-day-label">{group.label}</span>
+                  {group.label !== group.subtitle && (
+                    <span className="timeline-day-subtitle">{group.subtitle}</span>
+                  )}
+                </div>
+
+                {/* Cards for this day */}
+                <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
+                  {group.entries.map((entry) => (
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      onCopy={onCopy}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
