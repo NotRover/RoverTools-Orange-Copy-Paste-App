@@ -51,7 +51,11 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
   };
 
   return (
-    <div className="entry-card">
+    <div
+      className={`entry-card${copied ? " entry-card--copied" : ""}`}
+      onClick={handleCopy}
+      title="Click to copy"
+    >
       {/* ── Media preview (image/video) ── */}
       {entry.type === "image" && (
         <div className="card-media">
@@ -84,55 +88,6 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
 
       {/* ── Card body ── */}
       <div className="card-body">
-        <div className="card-meta-row">
-          <span className="card-badge">
-            {entry.type === "text" ? (
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
-            ) : entry.type === "image" ? (
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            ) : (
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                <polyline points="13 2 13 9 20 9" />
-              </svg>
-            )}
-          </span>
-          <span className="card-time">{relTime}</span>
-        </div>
         {entry.type === "text" && (
           <p className="card-text">{truncateText(entry.content, 160)}</p>
         )}
@@ -147,13 +102,91 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
             })()}
           </p>
         )}
+        {/* ── Footer: type chip + timestamp ── */}
+        <div className="card-footer">
+          <span className={`card-type-chip card-type-chip--${entry.type}`}>
+            {entry.type === "text" ? (
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            ) : entry.type === "image" ? (
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            ) : (
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                <polyline points="13 2 13 9 20 9" />
+              </svg>
+            )}
+            <span className="card-type-label">
+              {entry.type === "text"
+                ? "Text"
+                : entry.type === "image"
+                  ? "Image"
+                  : "File"}
+            </span>
+          </span>
+          {copied ? (
+            <span className="card-time card-time--copied">
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Copied
+            </span>
+          ) : (
+            <span className="card-time">{relTime}</span>
+          )}
+        </div>
       </div>
 
       {/* ── Hover action overlay ── */}
       <div className="card-actions">
         <button
           className={`card-action-btn copy-btn ${copied ? "copied" : ""}`}
-          onClick={handleCopy}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCopy();
+          }}
           title="Copy"
         >
           {copied ? (
@@ -187,7 +220,10 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
         </button>
         <button
           className="card-action-btn delete-btn"
-          onClick={() => onDelete(entry.id)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(entry.id);
+          }}
           title="Delete"
         >
           <svg
