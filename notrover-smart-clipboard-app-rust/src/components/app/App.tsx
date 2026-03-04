@@ -7,6 +7,7 @@ import { classifyFileEntry } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
+import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import "./App.css";
 
@@ -147,6 +148,8 @@ const App: React.FC = () => {
         {/* ── Screen content ── */}
         {screen === "settings" ? (
           <SettingsScreen />
+        ) : screen === "shortcuts" ? (
+          <ShortcutsScreen />
         ) : (
           <ClipboardScreen
             entries={entries}
