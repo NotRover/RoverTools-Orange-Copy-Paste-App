@@ -24,6 +24,108 @@
 }
 
 
+/* ── Timeline ─────────────────────────────────────────────────────────────── */
+
+/* layout-viewport scrolls; the timeline-wrap inside fills its content height */
+.layout-viewport {
+  overflow-y: auto;
+}
+
+/* Flex row: [1px rail] [groups] */
+.timeline-wrap {
+  display: flex;
+  flex-direction: row;
+  min-height: 100%;
+  padding: 10px 0 14px;
+}
+
+/* Thin vertical accent line */
+.timeline-rail {
+  width: 1px;
+  flex-shrink: 0;
+  margin-left: 20px;
+  background: linear-gradient(to bottom,
+      transparent 0%,
+      var(--accent) 10%,
+      var(--accent) 90%,
+      transparent 100%);
+  align-self: stretch;
+  opacity: 0.4;
+}
+
+/* Groups column */
+.timeline-groups {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each day section */
+.timeline-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Day header — "Today   Mar 5, 2026  ─────────────────" ── */
+.timeline-day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 8px 0;
+  position: relative;
+}
+
+/* Small filled circle sitting on the rail */
+.timeline-day-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  flex-shrink: 0;
+  margin-left: -6px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Bold primary label: "Today" / "Yesterday" / "Mar 4" */
+.timeline-day-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Lighter secondary date: "Mar 5, 2026" */
+.timeline-day-subtitle {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Horizontal rule that fills remaining space after the labels */
+.timeline-day-row::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.25;
+  margin-left: 4px;
+}
+
+/* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
+.timeline-groups .entry-grid,
+.timeline-groups .entry-list {
+  padding-left: 10px;
+  flex: none;
+}
+
+
 /* ── Layout toggle pill ───────────────────────────────────────────────────── */
 
 .layout-toggle-wrap {
