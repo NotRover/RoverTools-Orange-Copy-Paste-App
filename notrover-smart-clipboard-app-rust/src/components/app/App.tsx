@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -112,9 +112,8 @@ const EntryCard: React.FC<{
       setImageFilePreview(null);
       return;
     }
-
     invoke<string | null>("get_image_file_preview", { path: firstFile })
-      .then((preview) => setImageFilePreview(preview))
+      .then((p) => setImageFilePreview(p))
       .catch(() => setImageFilePreview(null));
   }, [entry.type, firstFile]);
 
@@ -134,113 +133,114 @@ const EntryCard: React.FC<{
 
   return (
     <div className="entry-card">
-      <div className="entry-type-badge">
-        {entry.type === "text" ? (
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-            <polyline points="10 9 9 9 8 9" />
-          </svg>
-        ) : entry.type === "image" ? (
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <polyline points="21 15 16 10 5 21" />
-          </svg>
-        ) : (
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="17 8 21 8 21 4" />
-            <line x1="16" y1="9" x2="21" y2="4" />
-            <path d="M7 13h10" />
-            <path d="M7 17h6" />
-          </svg>
+      {/* ── Media preview (image/video) ──────── */}
+      {entry.type === "image" && (
+        <div className="card-media">
+          <img
+            src={entry.content}
+            alt="Copied image"
+            className="card-media-img"
+          />
+        </div>
+      )}
+      {entry.type === "file" && firstFile && isImageFile(firstFile) && (
+        <div className="card-media">
+          <img
+            src={imageFilePreview ?? firstFileUrl}
+            alt="Copied image file"
+            className="card-media-img"
+          />
+        </div>
+      )}
+      {entry.type === "file" && firstFile && isVideoFile(firstFile) && (
+        <div className="card-media">
+          <video
+            className="card-media-img"
+            controls
+            preload="metadata"
+            src={firstFileUrl}
+          />
+        </div>
+      )}
+
+      {/* ── Card body ────────── */}
+      <div className="card-body">
+        <div className="card-meta-row">
+          <span className="card-badge">
+            {entry.type === "text" ? (
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            ) : entry.type === "image" ? (
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            ) : (
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                <polyline points="13 2 13 9 20 9" />
+              </svg>
+            )}
+          </span>
+          <span className="card-time">{relTime}</span>
+        </div>
+        {entry.type === "text" && (
+          <p className="card-text">{truncateText(entry.content, 160)}</p>
+        )}
+        {entry.type === "file" && (
+          <p className="card-text card-text--file">
+            {(() => {
+              if (files.length === 0) return "[Files]";
+              const name = files[0].split(/[\\/]/).pop() ?? files[0];
+              return files.length === 1
+                ? name
+                : `${name} +${files.length - 1} more`;
+            })()}
+          </p>
         )}
       </div>
 
-      <div className="entry-body">
-        {entry.type === "text" ? (
-          <p className="entry-text">{truncateText(entry.content)}</p>
-        ) : entry.type === "image" ? (
-          <div className="entry-image-wrap">
-            <img
-              src={entry.content}
-              alt="Copied image"
-              className="entry-image"
-            />
-          </div>
-        ) : (
-          <>
-            {firstFile && isImageFile(firstFile) && (
-              <div className="entry-file-preview-wrap">
-                <img
-                  src={imageFilePreview ?? firstFileUrl}
-                  alt="Copied image file"
-                  className="entry-file-preview-media"
-                />
-              </div>
-            )}
-            {firstFile && isVideoFile(firstFile) && (
-              <div className="entry-file-preview-wrap">
-                <video
-                  className="entry-file-preview-media"
-                  controls
-                  preload="metadata"
-                  src={firstFileUrl}
-                />
-              </div>
-            )}
-            <p className="entry-text">
-              {(() => {
-                if (files.length === 0) return "[Files]";
-                if (files.length === 1) return files[0];
-                return `${files[0]} (+${files.length - 1} more)`;
-              })()}
-            </p>
-          </>
-        )}
-        <span className="entry-time">{relTime}</span>
-      </div>
-
-      <div className="entry-actions">
+      {/* ── Hover action overlay ────── */}
+      <div className="card-actions">
         <button
-          className={`entry-action-btn copy-btn ${copied ? "copied" : ""}`}
+          className={`card-action-btn copy-btn ${copied ? "copied" : ""}`}
           onClick={handleCopy}
-          title="Copy to clipboard"
+          title="Copy"
         >
           {copied ? (
             <svg
-              width="14"
-              height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -252,8 +252,8 @@ const EntryCard: React.FC<{
             </svg>
           ) : (
             <svg
-              width="14"
-              height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -267,13 +267,13 @@ const EntryCard: React.FC<{
           )}
         </button>
         <button
-          className="entry-action-btn delete-btn"
+          className="card-action-btn delete-btn"
           onClick={() => onDelete(entry.id)}
           title="Delete"
         >
           <svg
-            width="14"
-            height="14"
+            width="13"
+            height="13"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -290,41 +290,72 @@ const EntryCard: React.FC<{
   );
 };
 
+// ── Settings Screen ───────────────────────────────────────────────────────────
+
+const SettingsScreen: React.FC = () => (
+  <div className="settings-screen">
+    <div className="settings-header">
+      <h2 className="settings-title">Settings</h2>
+      <p className="settings-subtitle">
+        Manage your Smart Clipboard preferences.
+      </p>
+    </div>
+    <div className="settings-placeholder">
+      <svg
+        width="52"
+        height="52"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+      <p className="settings-placeholder-text">Settings coming soon</p>
+    </div>
+  </div>
+);
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [search, setSearch] = useState("");
-  const listRef = useRef<HTMLDivElement>(null);
+  const [screen, setScreen] = useState<"clipboard" | "settings">("clipboard");
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    return (localStorage.getItem("sc-theme") as "dark" | "light") ?? "dark";
+  });
 
-  // Load history on mount and subscribe to new entries pushed from Rust.
+  const toggleTheme = () => {
+    setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      localStorage.setItem("sc-theme", next);
+      return next;
+    });
+  };
+
   useEffect(() => {
     let cancelled = false;
     let actualUnlisten: (() => void) | undefined;
 
-    // Initial load via Tauri command.
     invoke<ClipboardEntry[]>("get_history").then((history) => {
       if (!cancelled) setEntries(history);
     });
 
-    // Listen for new entries emitted by the Rust backend.
     listen<ClipboardEntry>("clipboard:new-entry", (event) => {
       if (cancelled) return;
       setEntries((prev) => {
-        if (prev.some((entry) => entry.id === event.payload.id)) {
-          return prev;
-        }
+        if (prev.some((entry) => entry.id === event.payload.id)) return prev;
         return [event.payload, ...prev];
       });
     }).then((fn) => {
-      if (cancelled) {
-        fn(); // unsubscribe immediately if already cleaned up
-      } else {
-        actualUnlisten = fn;
-      }
+      if (cancelled) fn();
+      else actualUnlisten = fn;
     });
 
-    // Cleanup the event listener on unmount.
     return () => {
       cancelled = true;
       actualUnlisten?.();
@@ -345,7 +376,6 @@ const App: React.FC = () => {
     setEntries([]);
   }, []);
 
-  // Filter entries by search query (text entries only).
   const filtered = search
     ? entries.filter(
         (e) =>
@@ -360,20 +390,16 @@ const App: React.FC = () => {
       e.type === "image" ||
       (e.type === "file" && classifyFileEntry(e.content) === "image"),
   ).length;
-  const videoCount = entries.filter(
-    (e) => e.type === "file" && classifyFileEntry(e.content) === "video",
-  ).length;
   const fileCount = entries.filter(
     (e) => e.type === "file" && classifyFileEntry(e.content) === "file",
   ).length;
 
   return (
-    <div className="app">
-      {/* ── Header ──────────────────────────────────────── */}
-      <header className="app-header">
-        <div className="header-left">
+    <div className="app" data-theme={theme}>
+      {/* ── Sidebar ─────────────────────────────────────── */}
+      <aside className="sidebar">
+        <div className="sidebar-logo">
           <svg
-            className="header-icon"
             width="22"
             height="22"
             viewBox="0 0 24 24"
@@ -386,75 +412,149 @@ const App: React.FC = () => {
             <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
             <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
           </svg>
-          <h1 className="header-title">Smart Clipboard</h1>
         </div>
-        {entries.length > 0 && (
-          <button className="clear-all-btn" onClick={handleClearAll}>
-            Clear All
-          </button>
-        )}
-      </header>
 
-      {/* ── Search ──────────────────────────────────────── */}
-      <div className="search-bar">
-        <svg
-          className="search-icon"
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Search clipboard history…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {search && (
-          <button className="search-clear" onClick={() => setSearch("")}>
+        <nav className="sidebar-nav">
+          <button
+            className={`nav-btn ${screen === "clipboard" ? "active" : ""}`}
+            onClick={() => setScreen("clipboard")}
+            title="Clipboard"
+          >
             <svg
-              width="12"
-              height="12"
+              width="18"
+              height="18"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.5"
+              strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
             </svg>
           </button>
-        )}
-      </div>
+        </nav>
 
-      {/* ── Stats ───────────────────────────────────────── */}
-      {entries.length > 0 && (
-        <div className="stats-bar">
-          <span className="stat">{textCount} text</span>
-          <span className="stat-dot" />
-          <span className="stat">{imageCount} images</span>
-          <span className="stat-dot" />
-          <span className="stat">{videoCount} videos</span>
-          <span className="stat-dot" />
-          <span className="stat">{fileCount} files</span>
-          <span className="stat-dot" />
-          <span className="stat">{entries.length} total</span>
+        <div className="sidebar-bottom">
+          <button
+            className="nav-btn"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? (
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+          </button>
+          <button
+            className={`nav-btn ${screen === "settings" ? "active" : ""}`}
+            onClick={() => setScreen("settings")}
+            title="Settings"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
         </div>
-      )}
+      </aside>
 
-      {/* ── Entry list ──────────────────────────────────── */}
-      <div className="entry-list" ref={listRef}>
-        {filtered.length === 0 ? (
+      {/* ── Main frame ──────────────────────────────────── */}
+      <div className="main-frame">
+        {/* ── Top bar ── */}
+        <div className="topbar">
+          <div className="search-bar">
+            <svg
+              className="search-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              className="search-input"
+              placeholder="Search clipboard history…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button className="search-clear" onClick={() => setSearch("")}>
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {screen === "clipboard" && entries.length > 0 && (
+            <button className="clear-all-btn" onClick={handleClearAll}>
+              Clear All
+            </button>
+          )}
+        </div>
+
+        {/* ── Content ── */}
+        {screen === "settings" ? (
+          <SettingsScreen />
+        ) : filtered.length === 0 ? (
           <div className="empty-state">
             {entries.length === 0 ? (
               <>
@@ -474,8 +574,7 @@ const App: React.FC = () => {
                 </svg>
                 <p className="empty-title">No clipboard history yet</p>
                 <p className="empty-subtitle">
-                  Press <strong>Ctrl+Shift+C</strong> over any text or image to
-                  capture it here.
+                  Press <strong>Ctrl+Shift+C</strong> to capture anything here.
                 </p>
               </>
             ) : (
@@ -488,14 +587,36 @@ const App: React.FC = () => {
             )}
           </div>
         ) : (
-          filtered.map((entry) => (
-            <EntryCard
-              key={entry.id}
-              entry={entry}
-              onCopy={handleCopy}
-              onDelete={handleDelete}
-            />
-          ))
+          <div className="entry-grid">
+            {filtered.map((entry) => (
+              <EntryCard
+                key={entry.id}
+                entry={entry}
+                onCopy={handleCopy}
+                onDelete={handleDelete}
+              />
+            ))}
+          </div>
+        )}
+        {/* ── Status pill ── */}
+        {screen === "clipboard" && entries.length > 0 && (
+          <div className="status-pill">
+            <span className="status-item">
+              <span className="status-value">{textCount}</span> text
+            </span>
+            <span className="status-dot" />
+            <span className="status-item">
+              <span className="status-value">{imageCount}</span> img
+            </span>
+            <span className="status-dot" />
+            <span className="status-item">
+              <span className="status-value">{fileCount}</span> files
+            </span>
+            <span className="status-dot" />
+            <span className="status-item">
+              <span className="status-value">{entries.length}</span> total
+            </span>
+          </div>
         )}
       </div>
     </div>

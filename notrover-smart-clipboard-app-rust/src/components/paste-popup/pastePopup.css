@@ -1,15 +1,27 @@
-/* ── Paste Popup Theme ─────────────────────────── */
+/* ── Smart Clipboard – Paste Popup ─────────────────────────── */
 
 :root {
-  --pp-bg: #1e1e2e;
-  --pp-surface: #2a2a3c;
-  --pp-border: #35354a;
-  --pp-text: #e0e0e8;
-  --pp-muted: #9090a8;
-  --pp-accent: #7c6ff7;
-  --pp-accent-hover: #9488ff;
-  --pp-radius: 14px;
-  --pp-item-radius: 10px;
+  --pp-bg: #181818;
+  --pp-surface: #222222;
+  --pp-border: #2e2e2e;
+  --pp-text: #f0f0f0;
+  --pp-muted: #888888;
+  --pp-accent: #ff3e1c;
+  --pp-accent-dim: rgba(255, 62, 28, 0.1);
+  --pp-radius: 16px;
+  --pp-item-radius: 11px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --pp-bg: #ffffff;
+    --pp-surface: #f5f5f5;
+    --pp-border: #e4e4e4;
+    --pp-text: #111111;
+    --pp-muted: #909090;
+    --pp-accent: #ff3e1c;
+    --pp-accent-dim: rgba(255, 62, 28, 0.08);
+  }
 }
 
 * {
@@ -47,7 +59,8 @@ body {
 .paste-container {
   background: var(--pp-bg);
   border-radius: var(--pp-radius);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--pp-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: 10px;
   width: 100%;
   height: 100%;
@@ -55,7 +68,7 @@ body {
   flex-direction: column;
   gap: 6px;
   opacity: 0;
-  transform: scale(0.92) translateY(4px);
+  transform: scale(0.93) translateY(5px);
   will-change: transform, opacity;
 }
 
@@ -113,14 +126,14 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border: 1px solid var(--pp-border);
   border-radius: var(--pp-item-radius);
   background: var(--pp-surface);
   color: var(--pp-text);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition: all 0.12s ease;
   position: relative;
   overflow: hidden;
   text-align: left;
@@ -131,16 +144,15 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(124, 111, 247, 0.08), transparent);
+  background: linear-gradient(135deg, var(--pp-accent-dim), transparent);
   opacity: 0;
-  transition: opacity 0.1s ease;
+  transition: opacity 0.12s ease;
 }
 
 .paste-item:hover {
   border-color: var(--pp-accent);
-  background: #2e2e42;
   transform: translate3d(0, -1px, 0);
-  box-shadow: 0 4px 12px rgba(124, 111, 247, 0.15);
+  box-shadow: 0 4px 12px rgba(255, 62, 28, 0.18);
 }
 
 .paste-item:hover::before {
