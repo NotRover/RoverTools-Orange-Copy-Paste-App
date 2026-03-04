@@ -45,13 +45,18 @@ const PastePopup: React.FC = () => {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const unlisten = listen<PopupEntry[]>("paste-popup:entries", (event) => {
+    let cancelled = false;
+    let actualUnlisten: (() => void) | undefined;
+    listen<PopupEntry[]>("paste-popup:entries", (event) => {
+      if (cancelled) return;
       setEntries(event.payload);
       setVisible(true);
+    }).then((fn) => {
+      if (cancelled) fn(); else actualUnlisten = fn;
     });
-
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      actualUnlisten?.();
     };
   }, []);
 
@@ -104,8 +109,4 @@ export default PastePopup;
 
 // ── Mount ────────────────────────────────────────────────────────────────────
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <PastePopup />
-  </React.StrictMode>,
-);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<PastePopup />);

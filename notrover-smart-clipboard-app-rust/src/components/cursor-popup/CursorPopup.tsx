@@ -66,30 +66,42 @@ const CursorPopup: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let actualUnlisten: (() => void) | undefined;
     // Listen for the structured payload pushed from Rust when Ctrl+Shift+C fires.
-    const unlisten = listen<{ kind: "text" | "image" | "file"; content: string }>(
+    listen<{ kind: "text" | "image" | "file"; content: string }>(
       "clipboard:copied",
       (event) => {
+        if (cancelled) return;
         setVisible(false);
         setKind(event.payload.kind);
         setCopiedText(event.payload.content);
         requestAnimationFrame(() => setVisible(true));
       },
-    );
+    ).then((fn) => {
+      if (cancelled) fn(); else actualUnlisten = fn;
+    });
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      actualUnlisten?.();
     };
   }, []);
 
   // Dismiss when the popup loses OS focus (user clicked outside).
   useEffect(() => {
+    let cancelled = false;
+    let actualUnlisten: (() => void) | undefined;
     const win = getCurrentWindow();
-    const unlistenBlur = win.listen("tauri://blur", () => {
+    win.listen("tauri://blur", () => {
+      if (cancelled) return;
       setVisible(false);
       invoke("close_cursor_popup").catch(console.error);
+    }).then((fn) => {
+      if (cancelled) fn(); else actualUnlisten = fn;
     });
     return () => {
-      unlistenBlur.then((fn) => fn());
+      cancelled = true;
+      actualUnlisten?.();
     };
   }, []);
 
@@ -229,8 +241,4 @@ export default CursorPopup;
 
 // ── Mount ────────────────────────────────────────────────────────────────────
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <CursorPopup />
-  </React.StrictMode>,
-);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<CursorPopup />);

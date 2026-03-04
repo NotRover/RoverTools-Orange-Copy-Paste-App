@@ -299,23 +299,35 @@ const App: React.FC = () => {
 
   // Load history on mount and subscribe to new entries pushed from Rust.
   useEffect(() => {
+    let cancelled = false;
+    let actualUnlisten: (() => void) | undefined;
+
     // Initial load via Tauri command.
-    invoke<ClipboardEntry[]>("get_history").then(setEntries);
+    invoke<ClipboardEntry[]>("get_history").then((history) => {
+      if (!cancelled) setEntries(history);
+    });
 
     // Listen for new entries emitted by the Rust backend.
-    const unlisten = listen<ClipboardEntry>("clipboard:new-entry", (event) => {
+    listen<ClipboardEntry>("clipboard:new-entry", (event) => {
+      if (cancelled) return;
       setEntries((prev) => {
         if (prev.some((entry) => entry.id === event.payload.id)) {
           return prev;
         }
-
         return [event.payload, ...prev];
       });
+    }).then((fn) => {
+      if (cancelled) {
+        fn(); // unsubscribe immediately if already cleaned up
+      } else {
+        actualUnlisten = fn;
+      }
     });
 
     // Cleanup the event listener on unmount.
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      actualUnlisten?.();
     };
   }, []);
 
@@ -494,8 +506,4 @@ export default App;
 
 // ── Mount ────────────────────────────────────────────────────────────────────
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
