@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// Constants
 
 /// Maximum number of entries kept in history.
 pub const MAX_HISTORY: usize = 100;
@@ -18,7 +18,7 @@ pub const MAX_HISTORY: usize = 100;
 /// Global monotonically increasing ID counter for clipboard entries.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 /// The content kind of a clipboard entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -76,7 +76,7 @@ impl ClipboardEntry {
     }
 }
 
-// ── History ──────────────────────────────────────────────────────────────────
+// History
 
 /// Shared clipboard history.
 ///

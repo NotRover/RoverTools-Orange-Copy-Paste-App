@@ -14,7 +14,7 @@ use windows_sys::Win32::{
     },
 };
 
-// ── Key simulation ───────────────────────────────────────────────────────────
+// Key simulation
 
 /// Fire a single `keybd_event` call.
 unsafe fn key_event(vk: u16, flags: u32) {
@@ -48,7 +48,7 @@ pub fn simulate_paste() {
     }
 }
 
-// ── Cursor / monitor helpers ─────────────────────────────────────────────────
+// Cursor / monitor helpers
 
 /// Return the cursor position in physical screen coordinates.
 pub fn cursor_pos() -> (i32, i32) {

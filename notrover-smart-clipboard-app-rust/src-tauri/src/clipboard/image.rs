@@ -221,7 +221,7 @@ pub fn read_image_from_clipboard() -> Option<String> {
         .and_then(|img| image_data_to_data_url(img.width, img.height, img.bytes.into_owned()))
 }
 
-// ── arboard image → data-URL ─────────────────────────────────────────────────
+// arboard image → data-URL
 
 /// Encode raw RGBA pixel data (from `arboard`) into a `data:image/png;base64,…`
 /// string suitable for use as an `<img src>`.
@@ -270,7 +270,7 @@ pub fn image_data_to_data_url(
     Some(format!("data:image/png;base64,{}", B64.encode(&png_buf)))
 }
 
-// ── data-URL → arboard image ─────────────────────────────────────────────────
+// data-URL → arboard image
 
 /// Decode a `data:image/png;base64,…` (or JPEG) string back into raw RGBA
 /// pixels for writing to the system clipboard via `arboard`.
