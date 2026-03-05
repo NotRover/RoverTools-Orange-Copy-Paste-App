@@ -329,11 +329,6 @@
   border-color: var(--border-light);
 }
 
-.entry-card--copied .card-actions {
-  opacity: 0 !important;
-  pointer-events: none;
-}
-
 @keyframes cardFadeIn {
   from {
     opacity: 0;
@@ -390,6 +385,11 @@
 .card-type-chip--file {
   background: rgba(139, 92, 246, 0.12);
   color: #8b5cf6;
+}
+
+.card-type-chip--pinned {
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 [data-theme="light"] .card-type-chip--image {
@@ -620,50 +620,12 @@ button.card-type-chip.open .card-type-chevron {
   font-weight: 600;
 }
 
-/*  Card hover action overlay  */
-
-.card-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.14s ease;
-}
-
-.entry-card:hover .card-actions {
-  opacity: 1;
-}
-
-.card-action-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-xs);
-  border: none;
-  background: var(--bg);
-  color: var(--text-secondary);
-  display: flex;
+.card-time--pinned {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.12s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-
-.card-action-btn.copy-btn:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.card-action-btn.copy-btn.copied {
-  background: var(--success);
-  color: #fff;
-}
-
-.card-action-btn.delete-btn:hover {
-  background: var(--danger);
-  color: #fff;
+  gap: 3px;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /*  Empty state  */

@@ -8,6 +8,7 @@ import {
   truncateText,
   timeAgo,
 } from "../../../types";
+import CardMenu from "../card-menu/CardMenu";
 import "./ClipboardScreen.css";
 
 //  Entry Card 
@@ -16,10 +17,21 @@ interface EntryCardProps {
   entry: ClipboardEntry;
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
+  onPin: (id: string, shouldPin: boolean) => void;
 }
 
-export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
+export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, onPin }) => {
   const [copied, setCopied] = useState(false);
+  const [justPinned, setJustPinned] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  const handlePin = (shouldPin: boolean) => {
+    onPin(entry.id, shouldPin);
+    if (shouldPin) {
+      setJustPinned(true);
+      setTimeout(() => setJustPinned(false), 1500);
+    }
+  };
   const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
   const [imagePreviews, setImagePreviews] = useState<
     Record<string, string | null>
@@ -80,7 +92,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
     <div
       className={`entry-card${copied ? " entry-card--copied" : ""}`}
       onClick={handleCopy}
-      title="Click to copy"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMenuPos({ x: e.clientX, y: e.clientY });
+      }}
+      title="Click to copy · Right-click for options"
     >
       {/*  Media preview (image/video)  */}
       {entry.type === "image" && (
@@ -240,8 +257,26 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
             })}
           </div>
         )}
-        {/* Footer: type chip + timestamp */}
+        {/* Footer: type chip + pinned chip + timestamp */}
         <div className="card-footer">
+          {entry.pinned && (
+            <span className="card-type-chip card-type-chip--pinned">
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+              <span className="card-type-label">Pinned</span>
+            </span>
+          )}
           {entry.type === "file" && isMulti ? (
             <button
               className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
@@ -357,7 +392,24 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
               </span>
             </span>
           )}
-          {copied ? (
+          {justPinned ? (
+            <span className="card-time card-time--pinned">
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+              Pinned!
+            </span>
+          ) : copied ? (
             <span className="card-time card-time--copied">
               <svg
                 width="9"
@@ -379,68 +431,18 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
         </div>
       </div>
 
-      {/* Hover action overlay */}
-      <div className="card-actions">
-        <button
-          className={`card-action-btn copy-btn ${copied ? "copied" : ""}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleCopy();
-          }}
-          title="Copy"
-        >
-          {copied ? (
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          ) : (
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          )}
-        </button>
-        <button
-          className="card-action-btn delete-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(entry.id);
-          }}
-          title="Delete"
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
-        </button>
-      </div>
+      {/* Right-click context menu */
+      <CardMenu
+        open={menuPos !== null}
+        anchorX={menuPos?.x ?? 0}
+        anchorY={menuPos?.y ?? 0}
+        onClose={() => setMenuPos(null)}
+        isPinned={entry.pinned}
+        copied={copied}
+        onCopy={handleCopy}
+        onDelete={() => onDelete(entry.id)}
+        onPin={handlePin}
+      />
     </div>
   );
 };
@@ -504,6 +506,7 @@ interface ClipboardScreenProps {
   entries: ClipboardEntry[];
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
+  onPin: (id: string, shouldPin: boolean) => void;
   onClearAll?: () => void;
 }
 
@@ -511,6 +514,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   entries,
   onCopy,
   onDelete,
+  onPin,
   onClearAll,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
@@ -682,6 +686,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                       entry={entry}
                       onCopy={onCopy}
                       onDelete={onDelete}
+                      onPin={onPin}
                     />
                   ))}
                 </div>

@@ -8,6 +8,8 @@ export interface ClipboardEntry {
   content: string;
   /** Unix epoch in milliseconds. */
   timestamp: number;
+  /** Whether this entry is pinned and persists across restarts. */
+  pinned: boolean;
 }
 
 export type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";

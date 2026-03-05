@@ -7,7 +7,7 @@ use std::path::Path;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
 use arboard::Clipboard;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::clipboard::files::{
     content_to_files, files_to_content, read_files_from_clipboard, write_files_to_clipboard,
@@ -79,6 +79,35 @@ pub fn delete_entry(id: String, state: State<'_, AppState>) -> bool {
 pub fn clear_history(state: State<'_, AppState>) -> bool {
     state.history.lock().clear();
     true
+}
+
+#[tauri::command]
+pub fn pin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    let success = state.history.lock().pin(&id);
+    if success {
+        // Auto-save pinned entries
+        if let Some(path) = get_pinned_file_path(&app) {
+            let _ = state.history.lock().save_pinned_to_file(&path);
+        }
+    }
+    success
+}
+
+#[tauri::command]
+pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    let success = state.history.lock().unpin(&id);
+    if success {
+        // Auto-save pinned entries
+        if let Some(path) = get_pinned_file_path(&app) {
+            let _ = state.history.lock().save_pinned_to_file(&path);
+        }
+    }
+    success
+}
+
+fn get_pinned_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let app_data = app.path().app_data_dir().ok()?;
+    Some(app_data.join("pinned_entries.json"))
 }
 
 #[tauri::command]

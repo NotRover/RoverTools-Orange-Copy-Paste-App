@@ -10,6 +10,7 @@ use crate::clipboard::history::ClipboardHistory;
 use parking_lot::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tauri::Manager;
 
 type SharedHistory = Arc<Mutex<ClipboardHistory>>;
 type SuppressFlag = Arc<AtomicBool>;
@@ -82,6 +83,12 @@ fn setup_runtime(
     history: &SharedHistory,
     suppress: &SuppressFlag,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Load pinned entries from disk before starting clipboard monitoring
+    if let Ok(app_data) = app.path().app_data_dir() {
+        let pinned_file: std::path::PathBuf = app_data.join("pinned_entries.json");
+        let _ = history.lock().load_pinned_from_file(&pinned_file);
+    }
+
     crate::runtime::popup_windows::setup_popup_windows(app)?;
     crate::runtime::hotkeys::register_global_shortcuts(app, Arc::clone(history))?;
     crate::runtime::clipboard_watcher::start_clipboard_watcher(
@@ -109,6 +116,8 @@ pub fn run() {
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,
             crate::clipboard::commands::clear_history,
+            crate::clipboard::commands::pin_entry,
+            crate::clipboard::commands::unpin_entry,
             crate::clipboard::commands::copy_entry,
             crate::clipboard::commands::paste_entry,
             crate::clipboard::commands::get_image_file_preview,
