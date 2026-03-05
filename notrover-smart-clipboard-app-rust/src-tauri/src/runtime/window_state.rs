@@ -26,7 +26,7 @@ fn save(app: &tauri::AppHandle, geo: &WindowGeometry) {
     }
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────
+//  Public API
 
 /// Restore saved geometry and show the window.
 /// Position is applied before *and* after show() — Windows resets position

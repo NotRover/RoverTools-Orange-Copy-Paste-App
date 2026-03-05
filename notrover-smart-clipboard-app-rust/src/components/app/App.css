@@ -1,4 +1,4 @@
-﻿/* ── Smart Clipboard – Global Styles & Root Layout ──────────────────────── */
+﻿/*  Smart Clipboard – Global Styles & Root Layout  */
 
 /* Dark theme (default) */
 :root {
@@ -67,7 +67,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Root shell: sidebar + main ──────────────────────────────────────────── */
+/*  Root shell: sidebar + main  */
 
 .app {
   display: flex;
@@ -80,7 +80,7 @@ body {
     color 0.22s ease;
 }
 
-/* ── Slim title bar ────────────────────────────────────────────────────── */
+/*  Slim title bar  */
 
 .titlebar {
   display: flex;
@@ -103,7 +103,7 @@ body {
   pointer-events: none;
 }
 
-/* ── Topbar window controls ───────────────────────────────────────────────── */
+/*  Topbar window controls */
 
 .win-controls {
   display: flex;
@@ -149,7 +149,7 @@ body {
   color: #fff;
 }
 
-/* ── Main frame ───────────────────────────────────────────────────────────── */
+/*  Main frame  */
 
 .main-frame {
   flex: 1;
@@ -162,7 +162,7 @@ body {
   padding-right: 6px;
 }
 
-/* ── Top bar ──────────────────────────────────────────────────────────────── */
+/*  Top bar  */
 
 .topbar {
   display: flex;
@@ -197,7 +197,7 @@ body {
   background: var(--accent-dim);
 }
 
-/* ── Search bar ───────────────────────────────────────────────────────────── */
+/*  Search bar  */
 
 .search-bar {
   position: relative;
