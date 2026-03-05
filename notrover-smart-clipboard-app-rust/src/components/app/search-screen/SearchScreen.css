@@ -12,11 +12,11 @@
 
 .ss-searchbar-wrap {
   flex-shrink: 0;
-  padding: 14px 14px 10px;
+  padding: 10px 10px 8px;
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 7px;
 }
 
 .ss-searchbar {
@@ -310,7 +310,7 @@
 /*  Result count bar ─ */
 
 .ss-result-count {
-  padding: 8px 14px 4px;
+  padding: 6px 10px 2px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
@@ -322,19 +322,48 @@
   color: var(--accent);
 }
 
-/*  Cards list ─ */
+/*  Cards grid (2–3 column masonry) ─ */
 
 .ss-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 14px 14px;
+  columns: 2;
+  column-gap: 8px;
+  padding: 8px 10px 12px;
 }
 
-/* Cards in search are always single-column (list style) */
+@media (min-width: 700px) {
+  .ss-cards {
+    columns: 3;
+  }
+}
+
+/* Each card breaks cleanly inside the column flow */
 .ss-cards .entry-card {
-  break-inside: auto;
-  width: 100%;
+  break-inside: avoid;
   display: flex;
   flex-direction: column;
+  width: 100%;
+}
+
+/* Tighter body padding in search grid */
+.ss-cards .card-body {
+  padding: 8px 10px 7px;
+  gap: 5px;
+}
+
+/* Clamp text to 3 lines to keep cards scannable */
+.ss-cards .card-text {
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+
+/* Cap image height so tall images don't dominate */
+.ss-cards .card-media-img {
+  max-height: 120px;
+  object-fit: cover;
 }
