@@ -397,7 +397,7 @@ const App: React.FC = () => {
   const handleClearAll = useCallback(() => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
-    setEntries([]);
+    setEntries((prev) => prev.filter((e) => e.pinned));
     undoTimerRef.current = setTimeout(async () => {
       undoTimerRef.current = null;
       setUndoSnapshot(null);
