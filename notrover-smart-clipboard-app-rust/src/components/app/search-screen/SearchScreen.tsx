@@ -6,7 +6,7 @@ import "./SearchScreen.css";
 
 // Type filter
 
-type TypeFilter = "all" | "text" | "image" | "file";
+type TypeFilter = "all" | "text" | "image" | "file" | "pinned";
 
 const TYPE_FILTERS: { id: TypeFilter; label: string; icon: React.ReactNode }[] =
   [
@@ -30,6 +30,25 @@ const TYPE_FILTERS: { id: TypeFilter; label: string; icon: React.ReactNode }[] =
           <line x1="3" y1="6" x2="3.01" y2="6" />
           <line x1="3" y1="12" x2="3.01" y2="12" />
           <line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
+      ),
+    },
+    {
+      id: "pinned",
+      label: "Pinned",
+      icon: (
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 17v5" />
+          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
         </svg>
       ),
     },
@@ -133,12 +152,14 @@ interface SearchScreenProps {
   entries: ClipboardEntry[];
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
+  onPin: (id: string, shouldPin: boolean) => void;
 }
 
 const SearchScreen: React.FC<SearchScreenProps> = ({
   entries,
   onCopy,
   onDelete,
+  onPin,
 }) => {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -191,7 +212,9 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
     let pool =
       typeFilter === "all"
         ? entries
-        : entries.filter((e) => e.type === typeFilter);
+        : typeFilter === "pinned"
+          ? entries.filter((e) => e.pinned)
+          : entries.filter((e) => e.type === typeFilter);
 
     if (query.trim()) {
       pool = pool.filter((e) => matchesQuery(e, query.trim()));
@@ -418,6 +441,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                   entry={entry}
                   onCopy={onCopy}
                   onDelete={onDelete}
+                  onPin={onPin}
                 />
               ))}
             </div>

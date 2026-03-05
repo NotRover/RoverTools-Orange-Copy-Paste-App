@@ -42,6 +42,9 @@ pub struct ClipboardEntry {
     pub content: String,
     /// Unix epoch in milliseconds, matching `Date.now()` on the JS side.
     pub timestamp: u64,
+    /// Whether this entry is pinned and persists across restarts.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl ClipboardEntry {
@@ -63,6 +66,7 @@ impl ClipboardEntry {
             kind: EntryKind::Text,
             content,
             timestamp: Self::now_ms(),
+            pinned: false,
         }
     }
 
@@ -73,6 +77,7 @@ impl ClipboardEntry {
             kind: EntryKind::Image,
             content: data_url,
             timestamp: Self::now_ms(),
+            pinned: false,
         }
     }
 
@@ -85,6 +90,7 @@ impl ClipboardEntry {
             kind: EntryKind::File,
             content,
             timestamp: Self::now_ms(),
+            pinned: false,
         }
     }
 }
@@ -105,11 +111,28 @@ impl ClipboardHistory {
         Self::default()
     }
 
-    /// Prepend an entry and trim to [`MAX_HISTORY`].
+    /// Prepend an entry and trim to [`MAX_HISTORY`] (excluding pinned entries).
     /// Returns a clone of the newly inserted entry.
     pub fn push(&mut self, entry: ClipboardEntry) -> ClipboardEntry {
         self.entries.insert(0, entry.clone());
-        self.entries.truncate(MAX_HISTORY);
+        // Keep pinned entries + up to MAX_HISTORY unpinned entries
+        if self.entries.len() > MAX_HISTORY {
+            let pinned_count = self.entries.iter().filter(|e| e.pinned).count();
+            if pinned_count < self.entries.len() {
+                // Remove oldest unpinned entries beyond MAX_HISTORY limit
+                let mut kept = Vec::new();
+                let mut unpinned_count = 0;
+                for e in self.entries.drain(..) {
+                    if e.pinned || unpinned_count < MAX_HISTORY {
+                        if !e.pinned {
+                            unpinned_count += 1;
+                        }
+                        kept.push(e);
+                    }
+                }
+                self.entries = kept;
+            }
+        }
         entry
     }
 
@@ -141,6 +164,7 @@ impl ClipboardHistory {
     }
 
     /// Remove the entry with the given `id`. Returns `true` if found.
+    /// Pinned entries can also be removed.
     pub fn remove(&mut self, id: &str) -> bool {
         if let Some(pos) = self.entries.iter().position(|e| e.id == id) {
             self.entries.remove(pos);
@@ -150,13 +174,75 @@ impl ClipboardHistory {
         }
     }
 
-    /// Clear all entries.
+    /// Clear all unpinned entries. Pinned entries are retained.
     pub fn clear(&mut self) {
-        self.entries.clear();
+        self.entries.retain(|e| e.pinned);
     }
 
     /// Look up an entry by `id`.
     pub fn find(&self, id: &str) -> Option<&ClipboardEntry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Look up a mutable entry by `id`.
+    pub fn find_mut(&mut self, id: &str) -> Option<&mut ClipboardEntry> {
+        self.entries.iter_mut().find(|e| e.id == id)
+    }
+
+    /// Pin an entry by ID. Returns `true` if found and pinned.
+    pub fn pin(&mut self, id: &str) -> bool {
+        if let Some(entry) = self.find_mut(id) {
+            entry.pinned = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Unpin an entry by ID. Returns `true` if found and unpinned.
+    pub fn unpin(&mut self, id: &str) -> bool {
+        if let Some(entry) = self.find_mut(id) {
+            entry.pinned = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get all pinned entries.
+    pub fn pinned_entries(&self) -> Vec<ClipboardEntry> {
+        self.entries.iter().filter(|e| e.pinned).cloned().collect()
+    }
+
+    /// Load pinned entries from a file and merge them into history.
+    /// Any existing entries with matching IDs are replaced.
+    pub fn load_pinned_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let data = std::fs::read_to_string(path)?;
+        let pinned: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
+
+        // Remove entries with IDs that match loaded pinned entries
+        let pinned_ids: std::collections::HashSet<_> = pinned.iter().map(|e| &e.id).collect();
+        self.entries.retain(|e| !pinned_ids.contains(&e.id));
+
+        // Prepend all pinned entries
+        for entry in pinned.into_iter().rev() {
+            self.entries.insert(0, entry);
+        }
+
+        Ok(())
+    }
+
+    /// Save all pinned entries to a file.
+    pub fn save_pinned_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        let pinned = self.pinned_entries();
+        let data = serde_json::to_string_pretty(&pinned)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, data)?;
+        Ok(())
     }
 }

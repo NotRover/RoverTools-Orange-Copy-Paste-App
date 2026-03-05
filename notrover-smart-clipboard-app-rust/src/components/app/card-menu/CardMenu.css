@@ -1,0 +1,106 @@
+/* ── Card Menu ─────────────────────────────────────────────────────────── */
+
+/* Dropdown panel (position: fixed applied via inline style) */
+
+.card-menu-dropdown {
+  z-index: 1000;
+  min-width: 142px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: card-menu-pop 0.11s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Stays visible even if card hover is lost */
+  transform-origin: top right;
+}
+
+@keyframes card-menu-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Menu items */
+
+.card-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+}
+
+.card-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+/* Copy button — always green-tinted on hover */
+.card-menu-item--copy:hover {
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--success);
+}
+
+/* Copy active (just copied) */
+.card-menu-item--success {
+  color: var(--success);
+}
+
+.card-menu-item--success:hover {
+  background: rgba(34, 197, 94, 0.13);
+  color: var(--success);
+}
+
+/* Pin button — always accent-tinted on hover */
+.card-menu-item--pin:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Pin active (currently pinned or just pinned) */
+.card-menu-item--pinned {
+  color: var(--accent);
+}
+
+.card-menu-item--pinned:hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+.card-menu-item--danger {
+  color: var(--text);
+}
+
+.card-menu-item--danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Separator */
+
+.card-menu-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 4px;
+}
+
+

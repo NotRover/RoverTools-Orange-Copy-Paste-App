@@ -24,6 +24,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "Meeting notes: timeline rollout starts Monday at 10:00 AM.",
     timestamp: Date.now() - 1000 * 30,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -31,6 +32,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "https://github.com/tauri-apps/tauri/discussions",
     timestamp: Date.now() - 1000 * 90,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -38,6 +40,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "const handleClick = useCallback(() => { setActive(true); }, []);",
     timestamp: Date.now() - 1000 * 60 * 3,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -45,6 +48,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Desktop/screenshot.png",
     timestamp: Date.now() - 1000 * 60 * 8,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -52,6 +56,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "Draft release note: timeline grouping now supports same-day clustering.",
     timestamp: Date.now() - 1000 * 60 * 15,
+    pinned: true,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -59,6 +64,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "image",
     content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     timestamp: Date.now() - 1000 * 60 * 25,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -66,6 +72,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "john.doe@example.com",
     timestamp: Date.now() - 1000 * 60 * 40,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -73,6 +80,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Documents/presentation.pptx",
     timestamp: Date.now() - 1000 * 60 * 60 * 2,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -80,6 +88,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "npm install @tauri-apps/api",
     timestamp: Date.now() - 1000 * 60 * 60 * 5,
+    pinned: true,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -87,6 +96,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Downloads/video-tutorial.mp4",
     timestamp: Date.now() - 1000 * 60 * 60 * 9,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -94,6 +104,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
     timestamp: Date.now() - 1000 * 60 * 60 * 18,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -101,6 +112,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "image",
     content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC",
     timestamp: Date.now() - 1000 * 60 * 60 * 22,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -108,6 +120,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Desktop/sprint-board.png",
     timestamp: Date.now() - 1000 * 60 * 60 * 24,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -115,6 +128,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "https://stackoverflow.com/questions/12345678/react-state-management",
     timestamp: Date.now() - 1000 * 60 * 60 * 24,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -122,6 +136,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Documents/report.docx",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 1.5,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -129,6 +144,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: '{"name": "Smart Clipboard", "version": "1.0.0", "author": "RoverTools"}',
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 2,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -136,6 +152,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Desktop/project-plan.pdf",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 2,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -143,6 +160,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "SELECT * FROM users WHERE active = 1 ORDER BY created_at DESC;",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 2.5,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -150,6 +168,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "image",
     content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 3,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -157,6 +176,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Pictures/vacation-2025/beach.jpg\nC:/Users/salmantariq2/Pictures/vacation-2025/sunset.jpg",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 3,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -164,6 +184,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "Customer quote: timeline view made old snippets much easier to locate.",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 4,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -171,6 +192,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Downloads/installer.exe",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 5,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -178,6 +200,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "Meeting ID: 123-456-789\nPassword: SecurePass2026!",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 5,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -185,6 +208,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Desktop/design-mockup.fig",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 6,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -192,6 +216,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 7,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -199,6 +224,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "image",
     content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 8,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -206,6 +232,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Desktop/archive/retro-notes.txt",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 8,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -213,6 +240,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "git commit -m \"feat: add timeline grouping for clipboard history\"",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 10,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -220,6 +248,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "file",
     content: "C:/Users/salmantariq2/Documents/contracts/agreement-2026.pdf",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 12,
+    pinned: false,
   },
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
   {
@@ -227,6 +256,7 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
     type: "text",
     content: "+1 (555) 123-4567",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 14,
+    pinned: false,
   },
 ];
 
@@ -280,9 +310,30 @@ const App: React.FC = () => {
   const [screen, setScreen] = useState<AppScreen>("clipboard");
   const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [theme, setTheme] = useState<AppTheme>(
-    () => (localStorage.getItem("sc-theme") as AppTheme) ?? "dark",
-  );
+  const systemPrefersDark = () =>
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+  const [theme, setTheme] = useState<AppTheme>(() => {
+    const saved = localStorage.getItem("sc-theme") as AppTheme | null;
+    return saved ?? (systemPrefersDark() ? "dark" : "light");
+  });
+
+  // Keep document.documentElement in sync so portals (e.g. CardMenu) also
+  // inherit the correct CSS variables.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  // Track OS theme changes and apply them when the user hasn't pinned a preference.
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => {
+      if (localStorage.getItem("sc-theme")) return; // user has a manual preference
+      setTheme(e.matches ? "dark" : "light");
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
@@ -334,6 +385,15 @@ const App: React.FC = () => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
+  const handlePin = useCallback(async (id: string, shouldPin: boolean) => {
+    const success = await invoke<boolean>(shouldPin ? "pin_entry" : "unpin_entry", { id });
+    if (success) {
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, pinned: shouldPin } : e))
+      );
+    }
+  }, []);
+
   const handleClearAll = useCallback(() => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
@@ -377,12 +437,13 @@ const App: React.FC = () => {
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
         ) : screen === "search" ? (
-          <SearchScreen entries={entries} onCopy={handleCopy} onDelete={handleDelete} />
+          <SearchScreen entries={entries} onCopy={handleCopy} onDelete={handleDelete} onPin={handlePin} />
         ) : (
           <ClipboardScreen
             entries={entries}
             onCopy={handleCopy}
             onDelete={handleDelete}
+            onPin={handlePin}
             onClearAll={entries.length > 0 ? handleClearAll : undefined}
           />
         )}
