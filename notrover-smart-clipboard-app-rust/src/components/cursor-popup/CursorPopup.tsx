@@ -54,7 +54,7 @@ function isVideoFile(path: string): boolean {
   return VIDEO_FILE_EXTENSIONS.has(fileExtension(path));
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// Component
 
 /**
  * Cursor popup — shown near the cursor after Ctrl+Shift+C.
@@ -170,7 +170,7 @@ const CursorPopup: React.FC = () => {
       data-theme={theme}
       ref={containerRef}
     >
-      {/* ── Header ──────────────────────────────── */}
+      {/*  Header  */}
       <div className="popup-header">
         <span className="popup-title">
           {kind === "image"
@@ -186,7 +186,7 @@ const CursorPopup: React.FC = () => {
 
       <div className="popup-divider" />
 
-      {/* ── Preview ─────────────────────────────── */}
+      {/*  Preview ─ */}
       {kind === "image"
         ? copiedText && (
             <div className="popup-clipboard-text">
@@ -237,7 +237,7 @@ const CursorPopup: React.FC = () => {
 
       <div className="popup-divider" />
 
-      {/* ── Quick actions ────────────────────────── */}
+      {/*  Quick actions  */}
       <div className="popup-actions">
         <button className="popup-btn" onClick={() => handleAction("summarize")}>
           <span className="btn-icon">✨</span>
@@ -265,7 +265,7 @@ const CursorPopup: React.FC = () => {
 
 export default CursorPopup;
 
-// ── Mount ────────────────────────────────────────────────────────────────────
+// Mount
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <CursorPopup />,

@@ -11,7 +11,7 @@ function readTheme(): AppTheme {
   return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 /** Minimal shape of a clipboard entry sent to this popup from Rust. */
 interface PopupEntry {
@@ -22,7 +22,7 @@ interface PopupEntry {
   timestamp: number;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 function preview(entry: PopupEntry): string {
   if (entry.type === "image") return "🖼️ [Image]";
@@ -38,7 +38,7 @@ function preview(entry: PopupEntry): string {
     : entry.content;
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// Component
 
 /**
  * Paste-picker popup — shown near the cursor after Ctrl+Shift+V.
@@ -120,7 +120,7 @@ const PastePopup: React.FC = () => {
       className={`paste-container${visible ? " visible" : ""}`}
       data-theme={theme}
     >
-      {/* ── Header ──────────────────────────────── */}
+
       <div className="paste-header">
         <span className="paste-title">Paste Recent</span>
         <button className="paste-close" onClick={handleClose} title="Close">
@@ -142,7 +142,7 @@ const PastePopup: React.FC = () => {
 
       <div className="paste-divider" />
 
-      {/* ── Item list ────────────────────────────── */}
+
       {entries.length === 0 ? (
         <div className="paste-empty">No recent items</div>
       ) : (
@@ -178,7 +178,7 @@ const PastePopup: React.FC = () => {
 
 export default PastePopup;
 
-// ── Mount ────────────────────────────────────────────────────────────────────
+// Mount
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <PastePopup />,

@@ -1,7 +1,7 @@
 import React from "react";
 import "./ShortcutsScreen.css";
 
-// ── Data ──────────────────────────────────────────────────────────────────────
+// Data
 
 interface ShortcutEntry {
   keys: string[];
@@ -95,7 +95,7 @@ const SECTIONS: ShortcutSection[] = [
   },
 ];
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// Component
 
 const ShortcutsScreen: React.FC = () => (
   <div className="shortcuts-screen">

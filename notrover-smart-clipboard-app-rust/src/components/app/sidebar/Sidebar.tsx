@@ -16,7 +16,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggleTheme,
 }) => (
   <aside className="sidebar">
-    {/* ── Logo ── */}
+    {/* Logo */}
     <div className="sidebar-logo">
       <svg
         width="22"
@@ -33,7 +33,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </svg>
     </div>
 
-    {/* ── Top nav ── */}
+    {/* Top nav */}
     <nav className="sidebar-nav">
       <button
         className={`nav-btn ${screen === "clipboard" ? "active" : ""}`}
@@ -95,7 +95,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </button>
     </nav>
 
-    {/* ── Bottom actions ── */}
+    {/* Bottom actions */}
     <div className="sidebar-bottom">
       <button
         className="nav-btn"

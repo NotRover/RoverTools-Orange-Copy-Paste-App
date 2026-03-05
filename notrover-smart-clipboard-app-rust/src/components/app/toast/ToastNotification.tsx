@@ -1,8 +1,7 @@
 import React, { useEffect } from "react";
 import "./ToastNotification.css";
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
+// Types 
 export interface ToastAction {
   label: string;
   icon?: React.ReactNode;
@@ -27,7 +26,7 @@ export interface ToastNotificationProps {
   onDismiss?: () => void;
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+// Component 
 
 const ToastNotification: React.FC<ToastNotificationProps> = ({
   message,
@@ -54,7 +53,7 @@ const ToastNotification: React.FC<ToastNotificationProps> = ({
       {/* Action button */}
       {action && (
         <button className="toast-action-btn" onClick={action.onClick}>
-          {action.icon && action.icon}
+          {action.icon}
           {action.label}
         </button>
       )}
