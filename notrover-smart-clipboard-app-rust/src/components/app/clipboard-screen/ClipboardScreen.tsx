@@ -56,6 +56,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
   const firstFileUrl = firstFile ? convertFileSrc(firstFile) : "";
   const imageFiles = files.filter(isImageFile);
   const isMulti = files.length > 1;
+  // A single-file entry whose file is an image should display an "Image" chip.
+  const singleFileIsImage = entry.type === "file" && !isMulti && firstFile != null && isImageFile(firstFile);
 
   // Load image previews for file entries (single or multi)
   useEffect(() => {
@@ -275,139 +277,139 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         {/* Footer: type chip + pinned chip + timestamp */}
         <div className="card-footer">
           <div className="card-chips">
-          {entry.type === "file" && isMulti ? (
-            <button
-              className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowFileList((v) => !v);
-              }}
-              title={
-                showFileList
-                  ? "Collapse"
-                  : `Show ${files.length} ${imageFiles.length === files.length ? "images" : "files"}`
-              }
-            >
-              {imageFiles.length === files.length ? (
-                <svg
-                  width="9"
-                  height="9"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
-              ) : (
-                <svg
-                  width="9"
-                  height="9"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                  <polyline points="13 2 13 9 20 9" />
-                </svg>
-              )}
-              <span className="card-type-label">
-                {imageFiles.length === files.length ? "Images" : "Files"}
-              </span>
-              <svg
-                className="card-type-chevron"
-                width="8"
-                height="8"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {entry.type === "file" && isMulti ? (
+              <button
+                className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowFileList((v) => !v);
+                }}
+                title={
+                  showFileList
+                    ? "Collapse"
+                    : `Show ${files.length} ${imageFiles.length === files.length ? "images" : "files"}`
+                }
               >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-          ) : (
-            <span className={`card-type-chip card-type-chip--${entry.type}`}>
-              {entry.type === "text" ? (
+                {imageFiles.length === files.length ? (
+                  <svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                    <polyline points="13 2 13 9 20 9" />
+                  </svg>
+                )}
+                <span className="card-type-label">
+                  {imageFiles.length === files.length ? "Images" : "Files"}
+                </span>
                 <svg
-                  width="9"
-                  height="9"
+                  className="card-type-chevron"
+                  width="8"
+                  height="8"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2.2"
+                  strokeWidth="2.8"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
+                  <polyline points="6 9 12 15 18 9" />
                 </svg>
-              ) : entry.type === "image" ? (
-                <svg
-                  width="9"
-                  height="9"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
-              ) : (
-                <svg
-                  width="9"
-                  height="9"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                  <polyline points="13 2 13 9 20 9" />
-                </svg>
-              )}
-              <span className="card-type-label">
-                {entry.type === "text"
-                  ? "Text"
-                  : entry.type === "image"
-                    ? "Image"
-                    : "File"}
+              </button>
+            ) : (
+              <span className={`card-type-chip card-type-chip--${singleFileIsImage ? "image" : entry.type}`}>
+                {entry.type === "text" ? (
+                  <svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                ) : entry.type === "image" || singleFileIsImage ? (
+                  <svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                    <polyline points="13 2 13 9 20 9" />
+                  </svg>
+                )}
+                <span className="card-type-label">
+                  {entry.type === "text"
+                    ? "Text"
+                    : entry.type === "image" || singleFileIsImage
+                      ? "Image"
+                      : "File"}
+                </span>
               </span>
-            </span>
-          )}
-          {entry.pinned && (
-            <span className="card-type-chip card-type-chip--pinned">
-              <svg
-                width="9"
-                height="9"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
-              <span className="card-type-label">Pinned</span>
-            </span>
-          )}
+            )}
+            {entry.pinned && (
+              <span className="card-type-chip card-type-chip--pinned">
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 17v5" />
+                  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+                </svg>
+                <span className="card-type-label">Pinned</span>
+              </span>
+            )}
           </div>
           {justPinned ? (
             <span className="card-time card-time--pinned">
@@ -587,51 +589,51 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     label: string;
     icon: React.ReactNode;
   }[] = [
-    {
-      id: "masonry",
-      label: "Masonry",
-      icon: (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <rect x="3" y="3" width="7" height="9" rx="1" />
-          <rect x="14" y="3" width="7" height="5" rx="1" />
-          <rect x="14" y="12" width="7" height="9" rx="1" />
-          <rect x="3" y="16" width="7" height="5" rx="1" />
-        </svg>
-      ),
-    },
-    {
-      id: "list",
-      label: "List",
-      icon: (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="8" y1="6" x2="21" y2="6" />
-          <line x1="8" y1="12" x2="21" y2="12" />
-          <line x1="8" y1="18" x2="21" y2="18" />
-          <line x1="3" y1="6" x2="3.01" y2="6" />
-          <line x1="3" y1="12" x2="3.01" y2="12" />
-          <line x1="3" y1="18" x2="3.01" y2="18" />
-        </svg>
-      ),
-    },
-  ];
+      {
+        id: "masonry",
+        label: "Masonry",
+        icon: (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="3" y="3" width="7" height="9" rx="1" />
+            <rect x="14" y="3" width="7" height="5" rx="1" />
+            <rect x="14" y="12" width="7" height="9" rx="1" />
+            <rect x="3" y="16" width="7" height="5" rx="1" />
+          </svg>
+        ),
+      },
+      {
+        id: "list",
+        label: "List",
+        icon: (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <line x1="3" y1="6" x2="3.01" y2="6" />
+            <line x1="3" y1="12" x2="3.01" y2="12" />
+            <line x1="3" y1="18" x2="3.01" y2="18" />
+          </svg>
+        ),
+      },
+    ];
 
   const dayGroups = groupByDay(entries);
 
