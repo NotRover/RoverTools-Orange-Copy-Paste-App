@@ -224,7 +224,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
   }, [entries, query, typeFilter]);
 
   const hasQuery = query.trim().length > 0;
-  const showResults = hasQuery || typeFilter !== "all";
+  const showResults = hasQuery || typeFilter !== "all" || entries.length > 0;
 
   return (
     <div className="search-screen-root">
