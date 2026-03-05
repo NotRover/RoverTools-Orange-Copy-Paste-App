@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -10,6 +10,8 @@ import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
+import SearchScreen from "./search-screen/SearchScreen";
+import ToastNotification from "./toast/ToastNotification";
 import "./App.css";
 
 // ── Floating window controls ──────────────────────────────────────────────────
@@ -225,8 +227,10 @@ const App: React.FC = () => {
     // TODO: REMOVE BEFORE PRODUCTION — dummy seed controlled by USE_DUMMY_ENTRIES
     USE_DUMMY_ENTRIES ? DUMMY_ENTRIES : [],
   );
-  const [search, setSearch] = useState("");
   const [screen, setScreen] = useState<AppScreen>("clipboard");
+  // Undo-clear state: holds the snapshotted entries while the toast is visible
+  const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [theme, setTheme] = useState<AppTheme>(() => {
     return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
   });
@@ -277,18 +281,33 @@ const App: React.FC = () => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
-  const handleClearAll = useCallback(async () => {
-    await invoke("clear_history");
-    setEntries([]);
+  const handleClearAll = useCallback(() => {
+    // Snapshot current entries so we can restore on undo
+    setUndoSnapshot((prev) => {
+      // If a previous clear timer is still running, cancel it first
+      if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
+      return prev; // will be overwritten below in setEntries callback
+    });
+    setEntries((prev) => {
+      setUndoSnapshot(prev);
+      return [];
+    });
+    // Commit the clear after 5 s unless undone
+    undoTimerRef.current = setTimeout(async () => {
+      undoTimerRef.current = null;
+      setUndoSnapshot(null);
+      await invoke("clear_history");
+    }, 5000);
   }, []);
 
-  const filtered = search
-    ? entries.filter(
-        (e) =>
-          e.type === "text" &&
-          e.content.toLowerCase().includes(search.toLowerCase()),
-      )
-    : entries;
+  const handleUndoClear = useCallback(() => {
+    if (undoTimerRef.current !== null) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setEntries(undoSnapshot ?? []);
+    setUndoSnapshot(null);
+  }, [undoSnapshot]);
 
   const textCount = entries.filter((e) => e.type === "text").length;
   const imageCount = entries.filter(
@@ -316,83 +335,23 @@ const App: React.FC = () => {
           <WindowControls />
         </div>
 
-        {/* ── Search + Clear All bar ── */}
-        <div className="topbar">
-          <div className="search-bar">
-            <svg
-              className="search-icon"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Search clipboard history…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <button className="search-clear" onClick={() => setSearch("")}>
-                <svg
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-          </div>
-          {screen === "clipboard" && entries.length > 0 && (
-            <button
-              className="topbar-clear-btn"
-              onClick={handleClearAll}
-              title="Clear all history"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            </button>
-          )}
-        </div>
-
         {/* ── Screen content ── */}
         {screen === "settings" ? (
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
+        ) : screen === "search" ? (
+          <SearchScreen
+            entries={entries}
+            onCopy={handleCopy}
+            onDelete={handleDelete}
+          />
         ) : (
           <ClipboardScreen
             entries={entries}
-            filtered={filtered}
-            search={search}
             onCopy={handleCopy}
             onDelete={handleDelete}
+            onClearAll={entries.length > 0 ? handleClearAll : undefined}
           />
         )}
 
@@ -403,6 +362,31 @@ const App: React.FC = () => {
             imageCount={imageCount}
             fileCount={fileCount}
             total={entries.length}
+          />
+        )}
+
+        {/* ── Undo-clear toast ── */}
+        {undoSnapshot !== null && (
+          <ToastNotification
+            message="History cleared"
+            icon={
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            }
+            action={{
+              label: "Undo",
+              icon: (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7v6h6" />
+                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
+                </svg>
+              ),
+              onClick: handleUndoClear,
+            }}
+            duration={5000}
+            onDismiss={() => setUndoSnapshot(null)}
           />
         )}
       </div>

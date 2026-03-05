@@ -18,7 +18,7 @@ interface EntryCardProps {
   onDelete: (id: string) => void;
 }
 
-const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
+export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
   const [copied, setCopied] = useState(false);
   const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
   const [imagePreviews, setImagePreviews] = useState<
@@ -502,18 +502,16 @@ function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
 
 interface ClipboardScreenProps {
   entries: ClipboardEntry[];
-  filtered: ClipboardEntry[];
-  search: string;
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
+  onClearAll?: () => void;
 }
 
 const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   entries,
-  filtered,
-  search,
   onCopy,
   onDelete,
+  onClearAll,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
@@ -530,38 +528,27 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     }, 160);
   };
 
-  if (filtered.length === 0) {
+  if (entries.length === 0) {
     return (
       <div className="empty-state">
-        {entries.length === 0 ? (
-          <>
-            <svg
-              className="empty-icon"
-              width="48"
-              height="48"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-            </svg>
-            <p className="empty-title">No clipboard history yet</p>
-            <p className="empty-subtitle">
-              Press <strong>Ctrl+Shift+C</strong> to capture anything here.
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="empty-title">No results</p>
-            <p className="empty-subtitle">
-              Nothing matches &ldquo;{search}&rdquo;
-            </p>
-          </>
-        )}
+        <svg
+          className="empty-icon"
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+        <p className="empty-title">No clipboard history yet</p>
+        <p className="empty-subtitle">
+          Press <strong>Ctrl+Shift+C</strong> to capture anything here.
+        </p>
       </div>
     );
   }
@@ -617,7 +604,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     },
   ];
 
-  const dayGroups = groupByDay(filtered);
+  const dayGroups = groupByDay(entries);
 
   return (
     <div className="clipboard-screen-root">
@@ -637,6 +624,30 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             </button>
           ))}
         </div>
+        {onClearAll && (
+          <div className="layout-switch" role="group">
+            <button
+              className="layout-switch-btn layout-switch-btn--danger"
+              onClick={onClearAll}
+              title="Clear all history"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              <span className="layout-pill-label">Clear</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div

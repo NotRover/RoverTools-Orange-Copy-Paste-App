@@ -235,6 +235,10 @@
   color: #fff;
 }
 
+.layout-switch-btn--danger:hover {
+  color: var(--danger);
+}
+
 /* ── Entry grid (Pinterest masonry) ──────────────────────────────────────── */
 
 .entry-grid {

@@ -10,7 +10,7 @@ export interface ClipboardEntry {
   timestamp: number;
 }
 
-export type AppScreen = "clipboard" | "shortcuts" | "settings";
+export type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";
 export type AppTheme = "dark" | "light";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
