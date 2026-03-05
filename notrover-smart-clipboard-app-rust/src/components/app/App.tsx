@@ -15,7 +15,7 @@ import ToastNotification from "./toast/ToastNotification";
 import "./App.css";
 
 // TODO: Set this to `false`; this demo-only setup must be removed before shipping.
-const SHOW_DEMO_CLIPBOARD_ENTRIES = true;
+const SHOW_DEMO_CLIPBOARD_ENTRIES = false;
 
 const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
