@@ -214,7 +214,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
         )}
         {/* Expanded file list — sits above footer so button stays anchored at bottom */}
         {entry.type === "file" && isMulti && showFileList && (
-          <div className="card-file-list">
+          <div className={`card-file-list${imageFiles.length > 0 ? " card-file-list--bordered" : ""}`}>
             {files.map((f) => {
               const name = f.split(/[\\/]/).pop() ?? f;
               const isImg = isImageFile(f);

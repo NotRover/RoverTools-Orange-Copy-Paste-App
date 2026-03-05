@@ -513,6 +513,9 @@ button.card-type-chip.open .card-type-chevron {
   max-height: 150px;
   overflow-y: auto;
   padding: 4px 0 1px;
+}
+
+.card-file-list--bordered {
   border-top: 1px solid var(--border);
 }
 
