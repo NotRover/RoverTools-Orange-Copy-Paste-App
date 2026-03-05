@@ -30,6 +30,23 @@
   overflow-y: auto;
 }
 
+.layout-viewport::-webkit-scrollbar {
+  width: 6px;
+}
+
+.layout-viewport::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.layout-viewport::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}
+
+.layout-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
 /* Flex row: [1px rail] [groups] */
 .timeline-wrap {
   display: flex;
@@ -133,7 +150,7 @@
   position: relative;
   display: flex;
   justify-content: flex-end;
-  padding: 6px 14px 0;
+  padding: 6px 12px 0;
   flex-shrink: 0;
   z-index: 10;
 }
@@ -205,7 +222,7 @@
 }
 
 .entry-grid::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--bg);
 }
 
 .entry-grid::-webkit-scrollbar-thumb {
@@ -624,7 +641,7 @@ button.card-type-chip.open .card-type-chevron {
 }
 
 .entry-list::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--bg);
 }
 
 .entry-list::-webkit-scrollbar-thumb {
