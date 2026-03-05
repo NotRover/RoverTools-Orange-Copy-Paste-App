@@ -64,13 +64,9 @@
   width: 1px;
   flex-shrink: 0;
   margin-left: 15px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--accent) 10%,
-    var(--accent) 90%,
-    transparent 100%
-  );
+  margin-top: 16px;
+  margin-bottom: 14px;
+  background: var(--accent);
   align-self: stretch;
   opacity: 0.6;
 }
