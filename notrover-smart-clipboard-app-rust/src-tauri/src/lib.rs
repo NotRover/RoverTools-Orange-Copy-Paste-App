@@ -31,36 +31,37 @@ fn kill_previous_instance() {
 
     let current_pid = std::process::id();
 
-    // Use WMIC to find all PIDs for our executable name, then kill ones that
-    // aren't us. Failure is silently ignored — this is best-effort cleanup.
-    let Ok(output) = std::process::Command::new("wmic")
-        .args([
-            "process",
-            "where",
-            &format!("name='{exe}'"),
-            "get",
-            "ProcessId",
-            "/format:csv",
-        ])
+    // Use tasklist (available on all Windows versions) to find PIDs for our
+    // executable, then kill any that aren't us. Failure is silently ignored.
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {exe}"), "/FO", "CSV", "/NH"])
         .output()
     else {
         return;
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut killed = false;
     for line in stdout.lines() {
-        // CSV lines look like: "Node,ProcessId"
-        if let Some(pid_str) = line.split(',').last() {
-            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+        // CSV lines look like: "executable.exe","12345","Console","1","10,000 K"
+        let mut parts = line.splitn(3, ',');
+        let _ = parts.next(); // executable name
+        if let Some(pid_field) = parts.next() {
+            let pid_str = pid_field.trim().trim_matches('"');
+            if let Ok(pid) = pid_str.parse::<u32>() {
                 if pid != current_pid && pid != 0 {
                     let _ = std::process::Command::new("taskkill")
                         .args(["/PID", &pid.to_string(), "/F"])
                         .output();
-                    // Give the OS a moment to reclaim the hotkeys.
-                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    killed = true;
                 }
             }
         }
+    }
+
+    if killed {
+        // Give the OS a moment to reclaim the global hotkeys.
+        std::thread::sleep(std::time::Duration::from_millis(400));
     }
 }
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -15,7 +15,7 @@ import ToastNotification from "./toast/ToastNotification";
 import "./App.css";
 
 // TODO: Set this to `false`; this demo-only setup must be removed before shipping.
-const SHOW_DEMO_CLIPBOARD_ENTRIES = false;
+const SHOW_DEMO_CLIPBOARD_ENTRIES = true;
 
 const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   // TODO: Remove this demo-only entry; this is temporary timeline test data.
@@ -54,7 +54,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-5",
     type: "text",
-    content: "Draft release note: timeline grouping now supports same-day clustering.",
+    content:
+      "Draft release note: timeline grouping now supports same-day clustering.",
     timestamp: Date.now() - 1000 * 60 * 15,
     pinned: true,
   },
@@ -62,7 +63,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-6",
     type: "image",
-    content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    content:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     timestamp: Date.now() - 1000 * 60 * 25,
     pinned: false,
   },
@@ -102,7 +104,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-11",
     type: "text",
-    content: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
+    content:
+      "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
     timestamp: Date.now() - 1000 * 60 * 60 * 18,
     pinned: false,
   },
@@ -110,7 +113,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-12",
     type: "image",
-    content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC",
+    content:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC",
     timestamp: Date.now() - 1000 * 60 * 60 * 22,
     pinned: false,
   },
@@ -126,7 +130,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-14",
     type: "text",
-    content: "https://stackoverflow.com/questions/12345678/react-state-management",
+    content:
+      "https://stackoverflow.com/questions/12345678/react-state-management",
     timestamp: Date.now() - 1000 * 60 * 60 * 24,
     pinned: false,
   },
@@ -142,7 +147,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-16",
     type: "text",
-    content: '{"name": "Smart Clipboard", "version": "1.0.0", "author": "RoverTools"}',
+    content:
+      '{"name": "Smart Clipboard", "version": "1.0.0", "author": "RoverTools"}',
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 2,
     pinned: false,
   },
@@ -166,7 +172,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-19",
     type: "image",
-    content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    content:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 3,
     pinned: false,
   },
@@ -174,7 +181,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-20",
     type: "file",
-    content: "C:/Users/salmantariq2/Pictures/vacation-2025/beach.jpg\nC:/Users/salmantariq2/Pictures/vacation-2025/sunset.jpg",
+    content:
+      "C:/Users/salmantariq2/Pictures/vacation-2025/beach.jpg\nC:/Users/salmantariq2/Pictures/vacation-2025/sunset.jpg",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 3,
     pinned: false,
   },
@@ -182,7 +190,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-21",
     type: "text",
-    content: "Customer quote: timeline view made old snippets much easier to locate.",
+    content:
+      "Customer quote: timeline view made old snippets much easier to locate.",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 4,
     pinned: false,
   },
@@ -222,7 +231,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-26",
     type: "image",
-    content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",
+    content:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 8,
     pinned: false,
   },
@@ -238,7 +248,8 @@ const DEMO_CLIPBOARD_ENTRIES: ClipboardEntry[] = [
   {
     id: "demo-entry-28",
     type: "text",
-    content: "git commit -m \"feat: add timeline grouping for clipboard history\"",
+    content:
+      'git commit -m "feat: add timeline grouping for clipboard history"',
     timestamp: Date.now() - 1000 * 60 * 60 * 24 * 10,
     pinned: false,
   },
@@ -269,14 +280,27 @@ const WindowControls: React.FC = () => {
   useEffect(() => {
     win.isMaximized().then(setMaximized);
     const unlisten = win.onResized(() => win.isMaximized().then(setMaximized));
-    return () => { unlisten.then((fn) => fn()); };
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   return (
     <div className="win-controls">
-      <button className="win-btn win-btn--min" onClick={() => win.minimize()} title="Minimise">
+      <button
+        className="win-btn win-btn--min"
+        onClick={() => win.minimize()}
+        title="Minimise"
+      >
         <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-          <rect x="0" y="4.5" width="10" height="1" rx="0.5" fill="currentColor" />
+          <rect
+            x="0"
+            y="4.5"
+            width="10"
+            height="1"
+            rx="0.5"
+            fill="currentColor"
+          />
         </svg>
       </button>
       <button
@@ -286,19 +310,64 @@ const WindowControls: React.FC = () => {
       >
         {maximized ? (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-            <rect x="2" y="0" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.2" />
-            <rect x="0" y="2" width="8" height="8" rx="1" fill="var(--bg)" stroke="currentColor" strokeWidth="1.2" />
+            <rect
+              x="2"
+              y="0"
+              width="8"
+              height="8"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="0"
+              y="2"
+              width="8"
+              height="8"
+              rx="1"
+              fill="var(--bg)"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
           </svg>
         ) : (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-            <rect x="0.5" y="0.5" width="9" height="9" rx="1" stroke="currentColor" strokeWidth="1.2" />
+            <rect
+              x="0.5"
+              y="0.5"
+              width="9"
+              height="9"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
           </svg>
         )}
       </button>
-      <button className="win-btn win-btn--close" onClick={() => win.close()} title="Close">
+      <button
+        className="win-btn win-btn--close"
+        onClick={() => win.close()}
+        title="Close"
+      >
         <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-          <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <line
+            x1="1"
+            y1="1"
+            x2="9"
+            y2="9"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+          <line
+            x1="9"
+            y1="1"
+            x2="1"
+            y2="9"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
         </svg>
       </button>
     </div>
@@ -308,7 +377,9 @@ const WindowControls: React.FC = () => {
 const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [screen, setScreen] = useState<AppScreen>("clipboard");
-  const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(null);
+  const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
+    null,
+  );
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const systemPrefersDark = () =>
     window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -386,10 +457,13 @@ const App: React.FC = () => {
   }, []);
 
   const handlePin = useCallback(async (id: string, shouldPin: boolean) => {
-    const success = await invoke<boolean>(shouldPin ? "pin_entry" : "unpin_entry", { id });
+    const success = await invoke<boolean>(
+      shouldPin ? "pin_entry" : "unpin_entry",
+      { id },
+    );
     if (success) {
       setEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, pinned: shouldPin } : e))
+        prev.map((e) => (e.id === id ? { ...e, pinned: shouldPin } : e)),
       );
     }
   }, []);
@@ -416,7 +490,9 @@ const App: React.FC = () => {
 
   const textCount = entries.filter((e) => e.type === "text").length;
   const imageCount = entries.filter(
-    (e) => e.type === "image" || (e.type === "file" && classifyFileEntry(e.content) === "image"),
+    (e) =>
+      e.type === "image" ||
+      (e.type === "file" && classifyFileEntry(e.content) === "image"),
   ).length;
   const fileCount = entries.filter(
     (e) => e.type === "file" && classifyFileEntry(e.content) === "file",
@@ -424,7 +500,12 @@ const App: React.FC = () => {
 
   return (
     <div className="app" data-theme={theme}>
-      <Sidebar screen={screen} theme={theme} onNavigate={setScreen} onToggleTheme={toggleTheme} />
+      <Sidebar
+        screen={screen}
+        theme={theme}
+        onNavigate={setScreen}
+        onToggleTheme={toggleTheme}
+      />
 
       <div className="main-frame">
         <div className="titlebar" data-tauri-drag-region>
@@ -437,7 +518,12 @@ const App: React.FC = () => {
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
         ) : screen === "search" ? (
-          <SearchScreen entries={entries} onCopy={handleCopy} onDelete={handleDelete} onPin={handlePin} />
+          <SearchScreen
+            entries={entries}
+            onCopy={handleCopy}
+            onDelete={handleDelete}
+            onPin={handlePin}
+          />
         ) : (
           <ClipboardScreen
             entries={entries}
@@ -461,7 +547,16 @@ const App: React.FC = () => {
           <ToastNotification
             message="History cleared"
             icon={
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
               </svg>
@@ -469,7 +564,16 @@ const App: React.FC = () => {
             action={{
               label: "Undo",
               icon: (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M3 7v6h6" />
                   <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
                 </svg>
