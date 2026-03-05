@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../types";
 import {
@@ -10,6 +10,13 @@ import {
 } from "../../../types";
 import CardMenu from "../card-menu/CardMenu";
 import "./ClipboardScreen.css";
+
+const FEEDBACK_DURATION_MS = 1500;
+const REL_TIME_REFRESH_MS = 15_000;
+
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
 
 //  Entry Card 
 
@@ -24,12 +31,18 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handlePin = (shouldPin: boolean) => {
     onPin(entry.id, shouldPin);
     if (shouldPin) {
       setJustPinned(true);
-      setTimeout(() => setJustPinned(false), 1500);
+      if (pinTimeoutRef.current) clearTimeout(pinTimeoutRef.current);
+      pinTimeoutRef.current = setTimeout(
+        () => setJustPinned(false),
+        FEEDBACK_DURATION_MS,
+      );
     }
   };
   const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
@@ -75,18 +88,29 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
   }, [entry.type, entry.content]);
 
   useEffect(() => {
-    const timer = setInterval(
-      () => setRelTime(timeAgo(entry.timestamp)),
-      15_000,
-    );
+    const timer = setInterval(() => setRelTime(timeAgo(entry.timestamp)), REL_TIME_REFRESH_MS);
     return () => clearInterval(timer);
   }, [entry.timestamp]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      if (pinTimeoutRef.current) clearTimeout(pinTimeoutRef.current);
+    };
+  }, []);
 
   const handleCopy = () => {
     onCopy(entry.id);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(
+      () => setCopied(false),
+      FEEDBACK_DURATION_MS,
+    );
   };
+
+  const visibleImageThumbs = imageFiles.slice(0, 3);
+  const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
 
   return (
     <div
@@ -110,37 +134,30 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         </div>
       )}
       {/* Multi-image file strip */}
-      {entry.type === "file" &&
-        isMulti &&
-        imageFiles.length > 0 &&
-        (() => {
-          const MAX_THUMBS = 3;
-          const visible = imageFiles.slice(0, MAX_THUMBS);
-          const remaining = imageFiles.length - MAX_THUMBS;
-          return (
-            <div className="card-media card-media--multi">
-              {visible.map((f, i) => {
-                const isLast = i === visible.length - 1 && remaining > 0;
-                return (
-                  <div key={f} className="card-media-thumb">
-                    {imagePreviews[f] ? (
-                      <img
-                        src={imagePreviews[f]!}
-                        alt=""
-                        className="card-thumb-img"
-                      />
-                    ) : (
-                      <div className="card-thumb-placeholder" />
-                    )}
-                    {isLast && (
-                      <div className="card-thumb-more">+{remaining}</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
+      {entry.type === "file" && isMulti && imageFiles.length > 0 && (
+        <div className="card-media card-media--multi">
+          {visibleImageThumbs.map((f, i) => {
+            const isLast =
+              i === visibleImageThumbs.length - 1 && remainingImageThumbs > 0;
+            return (
+              <div key={f} className="card-media-thumb">
+                {imagePreviews[f] ? (
+                  <img
+                    src={imagePreviews[f]!}
+                    alt=""
+                    className="card-thumb-img"
+                  />
+                ) : (
+                  <div className="card-thumb-placeholder" />
+                )}
+                {isLast && (
+                  <div className="card-thumb-more">+{remainingImageThumbs}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {/* Single image file */}
       {entry.type === "file" &&
         !isMulti &&
@@ -176,15 +193,13 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         )}
         {entry.type === "file" && !isMulti && (
           <p className="card-text card-text--file">
-            {firstFile
-              ? (firstFile.split(/[\\/]/).pop() ?? firstFile)
-              : "[File]"}
+            {firstFile ? fileNameFromPath(firstFile) : "[File]"}
           </p>
         )}
         {entry.type === "file" && isMulti && !showFileList && (
           <div className="card-file-preview">
             {files.slice(0, 3).map((f) => {
-              const name = f.split(/[\\/]/).pop() ?? f;
+              const name = fileNameFromPath(f);
               const isImg = isImageFile(f);
               return (
                 <span key={f} className="card-file-preview-item">
@@ -233,7 +248,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         {entry.type === "file" && isMulti && showFileList && (
           <div className={`card-file-list${imageFiles.length > 0 ? " card-file-list--bordered" : ""}`}>
             {files.map((f) => {
-              const name = f.split(/[\\/]/).pop() ?? f;
+              const name = fileNameFromPath(f);
               const isImg = isImageFile(f);
               const preview = imagePreviews[f];
               return (
@@ -523,11 +538,19 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
   });
   const [fading, setFading] = useState(false);
+  const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
+    };
+  }, []);
 
   const selectLayout = (l: ClipboardLayout) => {
     if (l === layout) return;
     setFading(true);
-    setTimeout(() => {
+    if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
+    layoutTimerRef.current = setTimeout(() => {
       setLayout(l);
       localStorage.setItem("sc-layout", l);
       setFading(false);
