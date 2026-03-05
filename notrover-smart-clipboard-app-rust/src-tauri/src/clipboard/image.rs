@@ -277,14 +277,13 @@ pub fn image_data_to_data_url(
 ///
 /// Returns `(width, height, rgba_bytes)` or an error string.
 pub fn data_url_to_rgba(data_url: &str) -> Result<(usize, usize, Vec<u8>), String> {
+    // Accept any `data:image/<mime>;base64,<data>` URL regardless of MIME type.
+    // Previously only PNG / JPEG / WebP were handled; other formats (GIF, BMP,
+    // TIFF, ICO, AVIF, …) caused a silent write failure when re-copying an entry.
     let b64_data = data_url
-        .trim_start_matches("data:image/png;base64,")
-        .trim_start_matches("data:image/jpeg;base64,")
-        .trim_start_matches("data:image/webp;base64,");
-
-    if b64_data.len() == data_url.len() {
-        return Err("Unsupported or missing data-URL prefix".into());
-    }
+        .find(";base64,")
+        .map(|pos| &data_url[pos + 8..])
+        .ok_or_else(|| "Unsupported or missing data-URL prefix".to_string())?;
 
     let raw = B64.decode(b64_data).map_err(|e| e.to_string())?;
 

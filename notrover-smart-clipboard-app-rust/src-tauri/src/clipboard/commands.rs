@@ -210,6 +210,11 @@ pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
         _ => {}
     }
 
+    // Handle CF_HDROP (files copied in Explorer).
+    // All file drops — including single image files — are stored as File entries
+    // so that re-copying writes CF_HDROP back and the files can be pasted in
+    // Explorer and other apps that expect file paths.  The frontend handles
+    // showing the correct "Image" chip for single-image file entries.
     #[cfg(windows)]
     if crate::clipboard::files::any_file_format_available() {
         if let Some(paths) = read_files_from_clipboard() {
@@ -217,11 +222,11 @@ pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
         }
     }
 
+    // Non-file images: screenshots, copies from browsers/apps, etc.
     #[cfg(windows)]
     if !crate::clipboard::image::any_image_format_available() {
         return None;
     }
-
     for attempt in 0..IMAGE_READ_RETRY_COUNT {
         if let Some(data_url) = crate::clipboard::image::read_image_from_clipboard() {
             return Some(ClipboardEntry::new_image(data_url));
