@@ -1,7 +1,8 @@
-﻿import React, { useCallback, useEffect, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ClipboardEntry, AppScreen, AppTheme } from "../../types";
 import { classifyFileEntry } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
@@ -9,7 +10,114 @@ import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
+import SearchScreen from "./search-screen/SearchScreen";
+import ToastNotification from "./toast/ToastNotification";
 import "./App.css";
+
+// ── Floating window controls ──────────────────────────────────────────────────
+
+const WindowControls: React.FC = () => {
+  const win = getCurrentWindow();
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    win.isMaximized().then(setMaximized);
+    const unlisten = win.onResized(() => {
+      win.isMaximized().then(setMaximized);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  return (
+    <div className="win-controls">
+      <button
+        className="win-btn win-btn--min"
+        onClick={() => win.minimize()}
+        title="Minimise"
+      >
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+          <rect
+            x="0"
+            y="4.5"
+            width="10"
+            height="1"
+            rx="0.5"
+            fill="currentColor"
+          />
+        </svg>
+      </button>
+      <button
+        className="win-btn win-btn--max"
+        onClick={() => (maximized ? win.unmaximize() : win.maximize())}
+        title={maximized ? "Restore" : "Maximise"}
+      >
+        {maximized ? (
+          <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+            <rect
+              x="2"
+              y="0"
+              width="8"
+              height="8"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="0"
+              y="2"
+              width="8"
+              height="8"
+              rx="1"
+              fill="var(--bg)"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+          </svg>
+        ) : (
+          <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+            <rect
+              x="0.5"
+              y="0.5"
+              width="9"
+              height="9"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+          </svg>
+        )}
+      </button>
+      <button
+        className="win-btn win-btn--close"
+        onClick={() => win.close()}
+        title="Close"
+      >
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+          <line
+            x1="1"
+            y1="1"
+            x2="9"
+            y2="9"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+          <line
+            x1="9"
+            y1="1"
+            x2="1"
+            y2="9"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+};
 
 // ── Dummy data for timeline testing ──────────────────────────────────────────
 // TODO: REMOVE BEFORE PRODUCTION — set to false to use real clipboard history
@@ -119,8 +227,10 @@ const App: React.FC = () => {
     // TODO: REMOVE BEFORE PRODUCTION — dummy seed controlled by USE_DUMMY_ENTRIES
     USE_DUMMY_ENTRIES ? DUMMY_ENTRIES : [],
   );
-  const [search, setSearch] = useState("");
   const [screen, setScreen] = useState<AppScreen>("clipboard");
+  // Undo-clear state: holds the snapshotted entries while the toast is visible
+  const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [theme, setTheme] = useState<AppTheme>(() => {
     return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
   });
@@ -171,18 +281,33 @@ const App: React.FC = () => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
-  const handleClearAll = useCallback(async () => {
-    await invoke("clear_history");
-    setEntries([]);
+  const handleClearAll = useCallback(() => {
+    // Snapshot current entries so we can restore on undo
+    setUndoSnapshot((prev) => {
+      // If a previous clear timer is still running, cancel it first
+      if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
+      return prev; // will be overwritten below in setEntries callback
+    });
+    setEntries((prev) => {
+      setUndoSnapshot(prev);
+      return [];
+    });
+    // Commit the clear after 5 s unless undone
+    undoTimerRef.current = setTimeout(async () => {
+      undoTimerRef.current = null;
+      setUndoSnapshot(null);
+      await invoke("clear_history");
+    }, 5000);
   }, []);
 
-  const filtered = search
-    ? entries.filter(
-        (e) =>
-          e.type === "text" &&
-          e.content.toLowerCase().includes(search.toLowerCase()),
-      )
-    : entries;
+  const handleUndoClear = useCallback(() => {
+    if (undoTimerRef.current !== null) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setEntries(undoSnapshot ?? []);
+    setUndoSnapshot(null);
+  }, [undoSnapshot]);
 
   const textCount = entries.filter((e) => e.type === "text").length;
   const imageCount = entries.filter(
@@ -204,53 +329,10 @@ const App: React.FC = () => {
       />
 
       <div className="main-frame">
-        {/* ── Top bar ── */}
-        <div className="topbar">
-          <div className="search-bar">
-            <svg
-              className="search-icon"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Search clipboard history…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <button className="search-clear" onClick={() => setSearch("")}>
-                <svg
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-          </div>
-          {screen === "clipboard" && entries.length > 0 && (
-            <button className="clear-all-btn" onClick={handleClearAll}>
-              Clear All
-            </button>
-          )}
+        {/* ── Slim title bar (drag region + window controls) ── */}
+        <div className="titlebar" data-tauri-drag-region>
+          <span className="titlebar-title">Smart Clipboard</span>
+          <WindowControls />
         </div>
 
         {/* ── Screen content ── */}
@@ -258,13 +340,18 @@ const App: React.FC = () => {
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
+        ) : screen === "search" ? (
+          <SearchScreen
+            entries={entries}
+            onCopy={handleCopy}
+            onDelete={handleDelete}
+          />
         ) : (
           <ClipboardScreen
             entries={entries}
-            filtered={filtered}
-            search={search}
             onCopy={handleCopy}
             onDelete={handleDelete}
+            onClearAll={entries.length > 0 ? handleClearAll : undefined}
           />
         )}
 
@@ -275,6 +362,31 @@ const App: React.FC = () => {
             imageCount={imageCount}
             fileCount={fileCount}
             total={entries.length}
+          />
+        )}
+
+        {/* ── Undo-clear toast ── */}
+        {undoSnapshot !== null && (
+          <ToastNotification
+            message="History cleared"
+            icon={
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            }
+            action={{
+              label: "Undo",
+              icon: (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7v6h6" />
+                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
+                </svg>
+              ),
+              onClick: handleUndoClear,
+            }}
+            duration={5000}
+            onDismiss={() => setUndoSnapshot(null)}
           />
         )}
       </div>

@@ -18,7 +18,7 @@ interface EntryCardProps {
   onDelete: (id: string) => void;
 }
 
-const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
+export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete }) => {
   const [copied, setCopied] = useState(false);
   const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
   const [imagePreviews, setImagePreviews] = useState<
@@ -469,7 +469,11 @@ function dayLabel(key: string): string {
 function daySubtitle(key: string): string {
   const [year, month, day] = key.split("-").map(Number);
   const d = new Date(year, month, day);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 interface DayGroup {
@@ -498,18 +502,16 @@ function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
 
 interface ClipboardScreenProps {
   entries: ClipboardEntry[];
-  filtered: ClipboardEntry[];
-  search: string;
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
+  onClearAll?: () => void;
 }
 
 const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   entries,
-  filtered,
-  search,
   onCopy,
   onDelete,
+  onClearAll,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
@@ -526,48 +528,50 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     }, 160);
   };
 
-  if (filtered.length === 0) {
+  if (entries.length === 0) {
     return (
       <div className="empty-state">
-        {entries.length === 0 ? (
-          <>
-            <svg
-              className="empty-icon"
-              width="48"
-              height="48"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-            </svg>
-            <p className="empty-title">No clipboard history yet</p>
-            <p className="empty-subtitle">
-              Press <strong>Ctrl+Shift+C</strong> to capture anything here.
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="empty-title">No results</p>
-            <p className="empty-subtitle">
-              Nothing matches &ldquo;{search}&rdquo;
-            </p>
-          </>
-        )}
+        <svg
+          className="empty-icon"
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+        <p className="empty-title">No clipboard history yet</p>
+        <p className="empty-subtitle">
+          Press <strong>Ctrl+Shift+C</strong> to capture anything here.
+        </p>
       </div>
     );
   }
 
-  const layouts: { id: ClipboardLayout; label: string; icon: React.ReactNode }[] = [
+  const layouts: {
+    id: ClipboardLayout;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
     {
       id: "masonry",
       label: "Masonry",
       icon: (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <rect x="3" y="3" width="7" height="9" rx="1" />
           <rect x="14" y="3" width="7" height="5" rx="1" />
           <rect x="14" y="12" width="7" height="9" rx="1" />
@@ -579,7 +583,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       id: "list",
       label: "List",
       icon: (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <line x1="8" y1="6" x2="21" y2="6" />
           <line x1="8" y1="12" x2="21" y2="12" />
           <line x1="8" y1="18" x2="21" y2="18" />
@@ -591,7 +604,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     },
   ];
 
-  const dayGroups = groupByDay(filtered);
+  const dayGroups = groupByDay(entries);
 
   return (
     <div className="clipboard-screen-root">
@@ -611,10 +624,35 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             </button>
           ))}
         </div>
+        {onClearAll && (
+          <div className="layout-switch" role="group">
+            <button
+              className="layout-switch-btn layout-switch-btn--danger"
+              onClick={onClearAll}
+              title="Clear all history"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              <span className="layout-pill-label">Clear</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* ── Entry grid / list with timeline ── */}
-      <div className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}>
+      <div
+        className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
+      >
         <div className="timeline-wrap">
           {/* Orange vertical rail */}
           <div className="timeline-rail" />
@@ -628,12 +666,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   <div className="timeline-day-dot" />
                   <span className="timeline-day-label">{group.label}</span>
                   {group.label !== group.subtitle && (
-                    <span className="timeline-day-subtitle">{group.subtitle}</span>
+                    <span className="timeline-day-subtitle">
+                      {group.subtitle}
+                    </span>
                   )}
                 </div>
 
                 {/* Cards for this day */}
-                <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
+                <div
+                  className={layout === "masonry" ? "entry-grid" : "entry-list"}
+                >
                   {group.entries.map((entry) => (
                     <EntryCard
                       key={entry.id}

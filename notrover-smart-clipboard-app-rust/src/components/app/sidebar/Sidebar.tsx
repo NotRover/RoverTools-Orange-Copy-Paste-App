@@ -1,5 +1,5 @@
 import React from "react";
-import type { AppScreen, AppTheme } from "../../types";
+import type { AppScreen, AppTheme } from "../../../types";
 import "./Sidebar.css";
 
 interface SidebarProps {
@@ -52,6 +52,25 @@ const Sidebar: React.FC<SidebarProps> = ({
         >
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
           <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+      </button>
+      <button
+        className={`nav-btn ${screen === "search" ? "active" : ""}`}
+        onClick={() => onNavigate("search")}
+        title="Search"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
       </button>
       <button

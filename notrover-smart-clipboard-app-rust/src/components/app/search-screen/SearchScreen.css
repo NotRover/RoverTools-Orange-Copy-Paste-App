@@ -1,0 +1,340 @@
+/* ── Search screen root ────────────────────────────────────────────────────── */
+
+.search-screen-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Search bar wrapper ───────────────────────────────────────────────────── */
+
+.ss-searchbar-wrap {
+  flex-shrink: 0;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ss-searchbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ss-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.ss-input {
+  width: 100%;
+  padding: 9px 36px 9px 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.16s ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.ss-input::placeholder {
+  color: var(--text-muted);
+}
+
+.ss-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.ss-clear {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 21px;
+  height: 21px;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.ss-clear:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Type filter chips ────────────────────────────────────────────────────── */
+
+.ss-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ss-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.13s ease,
+    border-color 0.13s ease,
+    color 0.13s ease;
+  user-select: none;
+}
+
+.ss-filter-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ss-filter-chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.ss-filter-chip--active:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── Results area ─────────────────────────────────────────────────────────── */
+
+.ss-results-area {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ss-results-area::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ss-results-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ss-results-area::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
+.ss-results-area::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
+/* ── Idle / empty state ───────────────────────────────────────────────────── */
+
+.ss-idle-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.ss-recent {
+  padding: 14px 14px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ss-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.ss-recent-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ss-recent-clear-all {
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  transition: color 0.12s ease;
+}
+
+.ss-recent-clear-all:hover {
+  color: var(--danger);
+}
+
+.ss-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 10px;
+}
+
+.ss-recent-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s ease;
+}
+
+.ss-recent-item:hover {
+  background: var(--surface-hover);
+}
+
+.ss-recent-term {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.ss-recent-term svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.ss-recent-term span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-recent-term:hover {
+  color: var(--text);
+}
+
+.ss-recent-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease;
+  margin-right: 4px;
+}
+
+.ss-recent-item:hover .ss-recent-remove {
+  opacity: 1;
+}
+
+.ss-recent-remove:hover {
+  color: var(--danger);
+}
+
+.ss-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px 40px;
+  text-align: center;
+  gap: 8px;
+}
+
+.ss-idle-icon {
+  color: var(--text-muted);
+  opacity: 0.45;
+  margin-bottom: 6px;
+}
+
+.ss-idle-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ss-idle-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+/* ── Result count bar ─────────────────────────────────────────────────────── */
+
+.ss-result-count {
+  padding: 8px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.ss-result-query {
+  color: var(--accent);
+}
+
+/* ── Cards list ───────────────────────────────────────────────────────────── */
+
+.ss-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 14px 14px;
+}
+
+/* Cards in search are always single-column (list style) */
+.ss-cards .entry-card {
+  break-inside: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}

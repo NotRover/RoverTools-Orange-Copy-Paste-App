@@ -67,16 +67,86 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Root shell: sidebar + main ───────────────────────────────────────────── */
+/* ── Root shell: sidebar + main ──────────────────────────────────────────── */
 
 .app {
   display: flex;
   flex-direction: row;
   height: 100vh;
   background: var(--bg);
+  position: relative;
   transition:
     background 0.22s ease,
     color 0.22s ease;
+}
+
+/* ── Slim title bar ────────────────────────────────────────────────────── */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.titlebar-title {
+  padding-left: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ── Topbar window controls ───────────────────────────────────────────────── */
+
+.win-controls {
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  gap: 0;
+  margin-left: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.win-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.win-btn:hover {
+  color: var(--text);
+}
+
+.win-btn--min:hover {
+  background: var(--surface-hover);
+}
+.win-btn--max:hover {
+  background: var(--surface-hover);
+}
+.win-btn--close:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 /* ── Main frame ───────────────────────────────────────────────────────────── */
@@ -98,9 +168,33 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px 10px;
+  padding: 8px 8px 8px 14px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+}
+
+.topbar-clear-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    border-color 0.13s ease,
+    color 0.13s ease,
+    background 0.13s ease;
+}
+
+.topbar-clear-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--accent-dim);
 }
 
 /* ── Search bar ───────────────────────────────────────────────────────────── */
@@ -163,25 +257,4 @@ body {
 .search-clear:hover {
   background: var(--accent);
   color: #ffffff;
-}
-
-.clear-all-btn {
-  flex-shrink: 0;
-  padding: 6px 13px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.14s ease;
-  white-space: nowrap;
-  box-shadow: var(--shadow-sm);
-}
-
-.clear-all-btn:hover {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: var(--accent-dim);
 }
