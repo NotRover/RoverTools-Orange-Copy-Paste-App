@@ -11,10 +11,114 @@ import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import "./App.css";
 
+// ── Dummy data for timeline testing ──────────────────────────────────────────
+// TODO: REMOVE BEFORE PRODUCTION — set to false to use real clipboard history
+const USE_DUMMY_ENTRIES = true;
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _now = Date.now();
+const _min = 60_000;
+const _hr = 3_600_000;
+const _day = 86_400_000;
+
+const DUMMY_ENTRIES: ClipboardEntry[] = [
+  // ── Today ──
+  {
+    id: "dummy-1",
+    type: "text",
+    content: "npm install @tauri-apps/api @tauri-apps/plugin-shell",
+    timestamp: _now - 2 * _min,
+  },
+  {
+    id: "dummy-2",
+    type: "text",
+    content:
+      "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.",
+    timestamp: _now - 18 * _min,
+  },
+  {
+    id: "dummy-3",
+    type: "text",
+    content: "https://tauri.app/v2/guides/getting-started/setup/",
+    timestamp: _now - 45 * _min,
+  },
+  {
+    id: "dummy-4",
+    type: "file",
+    content: "C:\\Users\\dev\\Documents\\report_final_v3.pdf",
+    timestamp: _now - 1 * _hr - 10 * _min,
+  },
+  {
+    id: "dummy-5",
+    type: "text",
+    content:
+      "const greet = (name: string) => `Hello, ${name}! Welcome to RoverTools.`;",
+    timestamp: _now - 2 * _hr,
+  },
+  // ── Yesterday ──
+  {
+    id: "dummy-6",
+    type: "text",
+    content: 'git commit -m "feat: add timeline grouping to clipboard screen"',
+    timestamp: _now - _day - 30 * _min,
+  },
+  {
+    id: "dummy-7",
+    type: "file",
+    content:
+      "C:\\Users\\dev\\Pictures\\screenshot_2026-03-04.png\nC:\\Users\\dev\\Pictures\\screenshot_2026-03-04_02.png",
+    timestamp: _now - _day - 2 * _hr,
+  },
+  {
+    id: "dummy-8",
+    type: "text",
+    content:
+      "Remember to update the CHANGELOG before tagging the next release.",
+    timestamp: _now - _day - 5 * _hr,
+  },
+  // ── 3 days ago ──
+  {
+    id: "dummy-9",
+    type: "text",
+    content:
+      "SELECT * FROM clipboard_history ORDER BY created_at DESC LIMIT 50;",
+    timestamp: _now - 3 * _day - 1 * _hr,
+  },
+  {
+    id: "dummy-10",
+    type: "file",
+    content: "C:\\Users\\dev\\Downloads\\tauri_v2_tutorial.mp4",
+    timestamp: _now - 3 * _day - 4 * _hr,
+  },
+  {
+    id: "dummy-11",
+    type: "text",
+    content: "Design review at 3 PM – bring the Figma prototype link.",
+    timestamp: _now - 3 * _day - 6 * _hr,
+  },
+  // ── 6 days ago ──
+  {
+    id: "dummy-12",
+    type: "text",
+    content: "cargo build --release --target x86_64-pc-windows-msvc",
+    timestamp: _now - 6 * _day - 2 * _hr,
+  },
+  {
+    id: "dummy-13",
+    type: "file",
+    content:
+      "C:\\Users\\dev\\Projects\\rover\\src\\lib.rs\nC:\\Users\\dev\\Projects\\rover\\src\\main.rs\nC:\\Users\\dev\\Projects\\rover\\Cargo.toml",
+    timestamp: _now - 6 * _day - 4 * _hr,
+  },
+];
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
-  const [entries, setEntries] = useState<ClipboardEntry[]>([]);
+  const [entries, setEntries] = useState<ClipboardEntry[]>(
+    // TODO: REMOVE BEFORE PRODUCTION — dummy seed controlled by USE_DUMMY_ENTRIES
+    USE_DUMMY_ENTRIES ? DUMMY_ENTRIES : [],
+  );
   const [search, setSearch] = useState("");
   const [screen, setScreen] = useState<AppScreen>("clipboard");
   const [theme, setTheme] = useState<AppTheme>(() => {
@@ -34,7 +138,11 @@ const App: React.FC = () => {
     let actualUnlisten: (() => void) | undefined;
 
     invoke<ClipboardEntry[]>("get_history").then((history) => {
-      if (!cancelled) setEntries(history);
+      if (!cancelled)
+        // TODO: REMOVE BEFORE PRODUCTION — dummy fallback controlled by USE_DUMMY_ENTRIES
+        setEntries(
+          history.length > 0 ? history : USE_DUMMY_ENTRIES ? DUMMY_ENTRIES : [],
+        );
     });
 
     listen<ClipboardEntry>("clipboard:new-entry", (event) => {
