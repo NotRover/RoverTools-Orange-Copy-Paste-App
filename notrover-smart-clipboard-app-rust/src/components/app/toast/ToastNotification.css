@@ -33,7 +33,7 @@
   }
 }
 
-/* ── Message ──────────────────────────────────────────────────────────────── */
+/* Message */
 
 .toast-msg {
   display: flex;
@@ -82,7 +82,7 @@
   opacity: 1;
 }
 
-/* ── Timer progress bar ───────────────────────────────────────────────────── */
+/* Timer progress bar */
 
 .toast-bar {
   position: absolute;

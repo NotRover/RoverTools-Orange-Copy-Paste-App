@@ -170,7 +170,7 @@ const CursorPopup: React.FC = () => {
       data-theme={theme}
       ref={containerRef}
     >
-      {/* ── Header ──────────────────────────────── */}
+      {/*  Header  */}
       <div className="popup-header">
         <span className="popup-title">
           {kind === "image"
@@ -186,7 +186,7 @@ const CursorPopup: React.FC = () => {
 
       <div className="popup-divider" />
 
-      {/* ── Preview ─────────────────────────────── */}
+      {/*  Preview ─ */}
       {kind === "image"
         ? copiedText && (
             <div className="popup-clipboard-text">
@@ -237,7 +237,7 @@ const CursorPopup: React.FC = () => {
 
       <div className="popup-divider" />
 
-      {/* ── Quick actions ────────────────────────── */}
+      {/*  Quick actions  */}
       <div className="popup-actions">
         <button className="popup-btn" onClick={() => handleAction("summarize")}>
           <span className="btn-icon">✨</span>

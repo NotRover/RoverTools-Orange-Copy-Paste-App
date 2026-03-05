@@ -10,7 +10,7 @@ import {
 } from "../../../types";
 import "./ClipboardScreen.css";
 
-// ── Entry Card ────────────────────────────────────────────────────────────
+//  Entry Card 
 
 interface EntryCardProps {
   entry: ClipboardEntry;
@@ -82,7 +82,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
       onClick={handleCopy}
       title="Click to copy"
     >
-      {/* ── Media preview (image/video) ── */}
+      {/*  Media preview (image/video)  */}
       {entry.type === "image" && (
         <div className="card-media">
           <img
@@ -152,7 +152,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
           </div>
         )}
 
-      {/* ── Card body ── */}
+      {/*  Card body  */}
       <div className="card-body">
         {entry.type === "text" && (
           <p className="card-text">{truncateText(entry.content, 160)}</p>
@@ -240,7 +240,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
             })}
           </div>
         )}
-        {/* ── Footer: type chip + timestamp ── */}
+        {/* Footer: type chip + timestamp */}
         <div className="card-footer">
           {entry.type === "file" && isMulti ? (
             <button
@@ -379,7 +379,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
         </div>
       </div>
 
-      {/* ── Hover action overlay ── */}
+      {/* Hover action overlay */}
       <div className="card-actions">
         <button
           className={`card-action-btn copy-btn ${copied ? "copied" : ""}`}
@@ -445,11 +445,11 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete })
   );
 };
 
-// ── Layout types ─────────────────────────────────────────────────────────
+// Layout types 
 
 type ClipboardLayout = "masonry" | "list";
 
-// ── Day grouping helpers ─────────────────────────────────────────────────────
+// Day grouping helpers 
 
 function toLocalDateKey(ts: number): string {
   const d = new Date(ts);
@@ -498,7 +498,7 @@ function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
   }));
 }
 
-// ── Clipboard Screen ──────────────────────────────────────────────────────
+// Clipboard Screen 
 
 interface ClipboardScreenProps {
   entries: ClipboardEntry[];
@@ -608,7 +608,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   return (
     <div className="clipboard-screen-root">
-      {/* ── Layout segmented switch ── */}
+      {/*  Layout segmented switch  */}
       <div className="layout-toggle-wrap">
         <div className="layout-switch" role="group" aria-label="Layout">
           {layouts.map((l) => (

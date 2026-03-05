@@ -120,7 +120,7 @@ const PastePopup: React.FC = () => {
       className={`paste-container${visible ? " visible" : ""}`}
       data-theme={theme}
     >
-      {/* ── Header ──────────────────────────────── */}
+
       <div className="paste-header">
         <span className="paste-title">Paste Recent</span>
         <button className="paste-close" onClick={handleClose} title="Close">
@@ -142,7 +142,7 @@ const PastePopup: React.FC = () => {
 
       <div className="paste-divider" />
 
-      {/* ── Item list ────────────────────────────── */}
+
       {entries.length === 0 ? (
         <div className="paste-empty">No recent items</div>
       ) : (

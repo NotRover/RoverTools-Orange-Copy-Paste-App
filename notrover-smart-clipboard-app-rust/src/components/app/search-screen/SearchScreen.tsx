@@ -4,7 +4,7 @@ import { filePaths } from "../../../types";
 import { EntryCard } from "../clipboard-screen/ClipboardScreen";
 import "./SearchScreen.css";
 
-// ── Type filter ────────────────────────────────────────────────────────────
+// Type filter
 
 type TypeFilter = "all" | "text" | "image" | "file";
 
@@ -93,7 +93,7 @@ const TYPE_FILTERS: { id: TypeFilter; label: string; icon: React.ReactNode }[] =
     },
   ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// Helpers 
 
 function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   const lower = q.toLowerCase();
@@ -110,7 +110,7 @@ function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   return false; // images aren't text-searchable; they still show under type filter
 }
 
-// ── Recent searches helpers ───────────────────────────────────────────────
+// Recent searches helpers 
 
 const RECENT_KEY = "sc-recent-searches";
 const MAX_RECENT = 8;
@@ -127,7 +127,7 @@ function saveRecent(list: string[]) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
 
-// ── Search Screen ──────────────────────────────────────────────────────────
+// Search Screen 
 
 interface SearchScreenProps {
   entries: ClipboardEntry[];
@@ -257,7 +257,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
           )}
         </div>
 
-        {/* ── Type filter chips ── */}
+        {/* Type filter chips */}
         <div className="ss-filter-row">
           {TYPE_FILTERS.map((f) => (
             <button
@@ -272,7 +272,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
         </div>
       </div>
 
-      {/* ── Results area ── */}
+      {/* Results area  */}
       <div className="ss-results-area">
         {!showResults ? (
           // Idle state — show recent searches if any, else generic tip
