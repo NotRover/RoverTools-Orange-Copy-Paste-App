@@ -469,7 +469,11 @@ function dayLabel(key: string): string {
 function daySubtitle(key: string): string {
   const [year, month, day] = key.split("-").map(Number);
   const d = new Date(year, month, day);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 interface DayGroup {
@@ -562,12 +566,25 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     );
   }
 
-  const layouts: { id: ClipboardLayout; label: string; icon: React.ReactNode }[] = [
+  const layouts: {
+    id: ClipboardLayout;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
     {
       id: "masonry",
       label: "Masonry",
       icon: (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <rect x="3" y="3" width="7" height="9" rx="1" />
           <rect x="14" y="3" width="7" height="5" rx="1" />
           <rect x="14" y="12" width="7" height="9" rx="1" />
@@ -579,7 +596,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       id: "list",
       label: "List",
       icon: (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <line x1="8" y1="6" x2="21" y2="6" />
           <line x1="8" y1="12" x2="21" y2="12" />
           <line x1="8" y1="18" x2="21" y2="18" />
@@ -613,8 +639,9 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         </div>
       </div>
 
-      {/* ── Entry grid / list with timeline ── */}
-      <div className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}>
+      <div
+        className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
+      >
         <div className="timeline-wrap">
           {/* Orange vertical rail */}
           <div className="timeline-rail" />
@@ -628,12 +655,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   <div className="timeline-day-dot" />
                   <span className="timeline-day-label">{group.label}</span>
                   {group.label !== group.subtitle && (
-                    <span className="timeline-day-subtitle">{group.subtitle}</span>
+                    <span className="timeline-day-subtitle">
+                      {group.subtitle}
+                    </span>
                   )}
                 </div>
 
                 {/* Cards for this day */}
-                <div className={layout === "masonry" ? "entry-grid" : "entry-list"}>
+                <div
+                  className={layout === "masonry" ? "entry-grid" : "entry-list"}
+                >
                   {group.entries.map((entry) => (
                     <EntryCard
                       key={entry.id}

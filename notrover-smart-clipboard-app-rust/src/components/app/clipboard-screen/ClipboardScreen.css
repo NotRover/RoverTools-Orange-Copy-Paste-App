@@ -31,20 +31,24 @@
 }
 
 .layout-viewport::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .layout-viewport::-webkit-scrollbar-track {
-  background: var(--bg);
+  background: transparent;
 }
 
 .layout-viewport::-webkit-scrollbar-thumb {
   background: var(--border-light);
-  border-radius: 2px;
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
 }
 
 .layout-viewport::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
 }
 
 /* Flex row: [1px rail] [groups] */
@@ -149,10 +153,40 @@
 .layout-toggle-wrap {
   position: relative;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   padding: 6px 12px 0;
   flex-shrink: 0;
   z-index: 10;
+}
+
+.clear-all-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 0.13s ease,
+    color 0.13s ease,
+    background 0.13s ease;
+  white-space: nowrap;
+}
+
+.clear-all-icon-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--accent-dim);
 }
 
 .layout-switch {
@@ -218,20 +252,24 @@
 }
 
 .entry-grid::-webkit-scrollbar {
-  width: 4px;
+  width: 10px;
 }
 
 .entry-grid::-webkit-scrollbar-track {
-  background: var(--bg);
+  background: transparent;
 }
 
 .entry-grid::-webkit-scrollbar-thumb {
   background: var(--border-light);
-  border-radius: 2px;
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
 }
 
 .entry-grid::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
 }
 
 /* ── Entry card (vertical masonry card) ──────────────────────────────────── */
@@ -637,20 +675,24 @@ button.card-type-chip.open .card-type-chevron {
 }
 
 .entry-list::-webkit-scrollbar {
-  width: 4px;
+  width: 10px;
 }
 
 .entry-list::-webkit-scrollbar-track {
-  background: var(--bg);
+  background: transparent;
 }
 
 .entry-list::-webkit-scrollbar-thumb {
   background: var(--border-light);
-  border-radius: 2px;
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
 }
 
 .entry-list::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
 }
 
 /* Text: show more content in list mode (4 lines) */
