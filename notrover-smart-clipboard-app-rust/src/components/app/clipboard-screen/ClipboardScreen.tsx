@@ -259,24 +259,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         )}
         {/* Footer: type chip + pinned chip + timestamp */}
         <div className="card-footer">
-          {entry.pinned && (
-            <span className="card-type-chip card-type-chip--pinned">
-              <svg
-                width="9"
-                height="9"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
-              <span className="card-type-label">Pinned</span>
-            </span>
-          )}
+          <div className="card-chips">
           {entry.type === "file" && isMulti ? (
             <button
               className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
@@ -392,6 +375,25 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
               </span>
             </span>
           )}
+          {entry.pinned && (
+            <span className="card-type-chip card-type-chip--pinned">
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+              <span className="card-type-label">Pinned</span>
+            </span>
+          )}
+          </div>
           {justPinned ? (
             <span className="card-time card-time--pinned">
               <svg
@@ -407,7 +409,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
                 <path d="M12 17v5" />
                 <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
               </svg>
-              Pinned!
+              Pinned
             </span>
           ) : copied ? (
             <span className="card-time card-time--copied">
@@ -431,7 +433,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         </div>
       </div>
 
-      {/* Right-click context menu */
+      {/* Right-click context menu */}
       <CardMenu
         open={menuPos !== null}
         anchorX={menuPos?.x ?? 0}

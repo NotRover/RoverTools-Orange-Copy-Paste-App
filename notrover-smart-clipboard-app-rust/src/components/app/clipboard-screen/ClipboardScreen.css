@@ -606,6 +606,12 @@ button.card-type-chip.open .card-type-chevron {
   gap: 6px;
 }
 
+.card-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .card-time {
   font-size: 10.5px;
   color: var(--text-muted);
