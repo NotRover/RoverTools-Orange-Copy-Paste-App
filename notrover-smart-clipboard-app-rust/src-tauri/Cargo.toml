@@ -50,9 +50,8 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [profile.release]
-opt-level = "z"      # optimize for binary size
-lto = true            # enable link-time optimization
-codegen-units = 1     # single codegen unit for better optimization
-panic = "abort"       # remove panic unwinding code
-strip = true          # strip debug symbols
-
+opt-level = "z"   # optimize for binary size
+lto = true        # enable link-time optimization
+codegen-units = 1 # single codegen unit for better optimization
+panic = "abort"   # remove panic unwinding code
+strip = true      # strip debug symbols
