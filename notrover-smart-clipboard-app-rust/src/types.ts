@@ -1,4 +1,4 @@
-// ── Shared types and utilities ────────────────────────────────────────────
+//  Shared types and utilities 
 
 /** Matches the Rust `ClipboardEntry` struct (serialised by serde). */
 export interface ClipboardEntry {
@@ -13,7 +13,7 @@ export interface ClipboardEntry {
 export type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";
 export type AppTheme = "dark" | "light";
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+//  Helpers 
 
 export function timeAgo(ts: number): string {
   const diff = Date.now() - ts;

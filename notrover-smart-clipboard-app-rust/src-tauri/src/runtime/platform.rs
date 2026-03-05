@@ -8,14 +8,14 @@
 #[path = "platform_windows.rs"]
 mod platform_windows;
 
-// ── Re-export the platform API ────────────────────────────────────────────────
+//  Re-export the platform API
 
 #[cfg(windows)]
 pub use self::platform_windows::{
     cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste, work_area_for_point,
 };
 
-// ── Cross-platform utilities ──────────────────────────────────────────────────
+//  Cross-platform utilities
 
 /// Compute the best (x, y) position for a popup of `(popup_w, popup_h)` *logical*
 /// pixels so that it appears just below-right of the cursor and stays fully

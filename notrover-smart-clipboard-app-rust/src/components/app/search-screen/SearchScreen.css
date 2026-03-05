@@ -78,7 +78,7 @@
   color: #fff;
 }
 
-/* ── Type filter chips ────────────────────────────────────────────────────── */
+/*  Type filter chips  */
 
 .ss-filter-row {
   display: flex;
@@ -123,7 +123,7 @@
   color: #fff;
 }
 
-/* ── Results area ─────────────────────────────────────────────────────────── */
+/*  Results area  */
 
 .ss-results-area {
   flex: 1;
@@ -152,7 +152,7 @@
   background-clip: padding-box;
 }
 
-/* ── Idle / empty state ───────────────────────────────────────────────────── */
+/*  Idle / empty state  */
 
 .ss-idle-wrap {
   display: flex;
@@ -307,7 +307,7 @@
   line-height: 1.5;
 }
 
-/* ── Result count bar ─────────────────────────────────────────────────────── */
+/*  Result count bar ─ */
 
 .ss-result-count {
   padding: 8px 14px 4px;
@@ -322,7 +322,7 @@
   color: var(--accent);
 }
 
-/* ── Cards list ───────────────────────────────────────────────────────────── */
+/*  Cards list ─ */
 
 .ss-cards {
   display: flex;

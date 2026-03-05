@@ -205,7 +205,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
 
   return (
     <div className="search-screen-root">
-      {/* ── Search input ── */}
+      {/*  Search input  */}
       <div className="ss-searchbar-wrap">
         <div className="ss-searchbar">
           <svg

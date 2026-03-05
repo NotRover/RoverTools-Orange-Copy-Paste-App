@@ -35,7 +35,7 @@ base64 = "0.22"
 # Ergonomic lock primitives (no poisoning, direct lock() → MutexGuard)
 parking_lot = "0.12"
 
-# ── Windows-only ── key simulation (keybd_event / GetCursorPos / monitor info)
+#  Windows-only  key simulation (keybd_event / GetCursorPos / monitor info)
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",

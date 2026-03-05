@@ -38,7 +38,7 @@
   color: var(--text-muted);
 }
 
-/* ── Sections ────────────────────────────────────────────────────────────── */
+/*  Sections  */
 
 .shortcuts-sections {
   display: flex;
@@ -63,7 +63,7 @@
   letter-spacing: 0.5px;
 }
 
-/* ── Shortcut rows ───────────────────────────────────────────────────────── */
+/*  Shortcut rows  */
 
 .shortcuts-list {
   display: flex;
