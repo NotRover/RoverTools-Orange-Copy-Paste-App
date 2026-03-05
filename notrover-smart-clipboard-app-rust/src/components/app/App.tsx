@@ -14,7 +14,7 @@ import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
 import "./App.css";
 
-// ── Floating window controls ──────────────────────────────────────────────────
+// Floating window controls
 
 const WindowControls: React.FC = () => {
   const win = getCurrentWindow();
@@ -119,10 +119,9 @@ const WindowControls: React.FC = () => {
   );
 };
 
-// ── Dummy data for timeline testing ──────────────────────────────────────────
+// Dummy data for timeline testing 
 // TODO: REMOVE BEFORE PRODUCTION — set to false to use real clipboard history
 const USE_DUMMY_ENTRIES = true;
-// ─────────────────────────────────────────────────────────────────────────────
 
 const _now = Date.now();
 const _min = 60_000;
@@ -130,7 +129,7 @@ const _hr = 3_600_000;
 const _day = 86_400_000;
 
 const DUMMY_ENTRIES: ClipboardEntry[] = [
-  // ── Today ──
+  // Today
   {
     id: "dummy-1",
     type: "text",
@@ -163,7 +162,7 @@ const DUMMY_ENTRIES: ClipboardEntry[] = [
       "const greet = (name: string) => `Hello, ${name}! Welcome to RoverTools.`;",
     timestamp: _now - 2 * _hr,
   },
-  // ── Yesterday ──
+  // Yesterday
   {
     id: "dummy-6",
     type: "text",
@@ -184,7 +183,7 @@ const DUMMY_ENTRIES: ClipboardEntry[] = [
       "Remember to update the CHANGELOG before tagging the next release.",
     timestamp: _now - _day - 5 * _hr,
   },
-  // ── 3 days ago ──
+  // 3 days ago
   {
     id: "dummy-9",
     type: "text",
@@ -204,7 +203,7 @@ const DUMMY_ENTRIES: ClipboardEntry[] = [
     content: "Design review at 3 PM – bring the Figma prototype link.",
     timestamp: _now - 3 * _day - 6 * _hr,
   },
-  // ── 6 days ago ──
+  // 6 days ago
   {
     id: "dummy-12",
     type: "text",
@@ -220,7 +219,7 @@ const DUMMY_ENTRIES: ClipboardEntry[] = [
   },
 ];
 
-// ── App ──────────────────────────────────────────────────────────────────────
+// App
 
 const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>(
@@ -329,13 +328,13 @@ const App: React.FC = () => {
       />
 
       <div className="main-frame">
-        {/* ── Slim title bar (drag region + window controls) ── */}
+        {/* Slim title bar (drag region + window controls) */}
         <div className="titlebar" data-tauri-drag-region>
           <span className="titlebar-title">Smart Clipboard</span>
           <WindowControls />
         </div>
 
-        {/* ── Screen content ── */}
+        {/* Screen content */}
         {screen === "settings" ? (
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
@@ -355,7 +354,7 @@ const App: React.FC = () => {
           />
         )}
 
-        {/* ── Status pill ── */}
+        {/* Status pill */}
         {screen === "clipboard" && entries.length > 0 && (
           <StatusPill
             textCount={textCount}
@@ -365,7 +364,7 @@ const App: React.FC = () => {
           />
         )}
 
-        {/* ── Undo-clear toast ── */}
+        {/* Undo-clear toast */}
         {undoSnapshot !== null && (
           <ToastNotification
             message="History cleared"
@@ -396,6 +395,6 @@ const App: React.FC = () => {
 
 export default App;
 
-// ── Mount ────────────────────────────────────────────────────────────────────
+// Mount
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

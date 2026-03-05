@@ -1,4 +1,4 @@
-/* ── Clipboard screen root ────────────────────────────────────────────────── */
+/* Clipboard screen root */
 
 .clipboard-screen-root {
   flex: 1;
@@ -8,7 +8,7 @@
   overflow: hidden;
 }
 
-/* ── Layout viewport (fade wrapper) ──────────────────────────────────────── */
+/* Layout viewport (fade wrapper) */
 
 .layout-viewport {
   flex: 1;
@@ -23,7 +23,7 @@
   opacity: 0;
 }
 
-/* ── Timeline ─────────────────────────────────────────────────────────────── */
+/* Timeline */
 
 /* layout-viewport scrolls; the timeline-wrap inside fills its content height */
 .layout-viewport {

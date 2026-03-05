@@ -54,7 +54,7 @@ function isVideoFile(path: string): boolean {
   return VIDEO_FILE_EXTENSIONS.has(fileExtension(path));
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// Component
 
 /**
  * Cursor popup — shown near the cursor after Ctrl+Shift+C.
@@ -265,7 +265,7 @@ const CursorPopup: React.FC = () => {
 
 export default CursorPopup;
 
-// ── Mount ────────────────────────────────────────────────────────────────────
+// Mount
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <CursorPopup />,

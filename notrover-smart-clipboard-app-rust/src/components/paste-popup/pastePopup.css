@@ -1,4 +1,4 @@
-/* ── Smart Clipboard – Paste Popup ─────────────────────────── */
+/* Smart Clipboard – Paste Popup */
 
 :root {
   --pp-bg: #181818;
@@ -67,7 +67,7 @@ body {
   height: 100%;
 }
 
-/* ── Container ────────────────────────────────── */
+/* Container */
 
 .paste-container {
   background: var(--pp-bg);
@@ -101,7 +101,7 @@ body {
   }
 }
 
-/* ── Header ───────────────────────────────────── */
+/* Header */
 
 .paste-header {
   display: flex;
@@ -139,7 +139,7 @@ body {
   color: #fff;
 }
 
-/* ── Divider ──────────────────────────────────── */
+/* Divider */
 
 .paste-divider {
   height: 1px;
@@ -147,7 +147,7 @@ body {
   margin: 0 2px;
 }
 
-/* ── Item list ────────────────────────────────── */
+/* Item list */
 
 .paste-list {
   display: flex;
@@ -223,7 +223,7 @@ body {
   margin-right: 2px;
 }
 
-/* ── Empty state ──────────────────────────────── */
+/* Empty state */
 
 .paste-empty {
   display: flex;
