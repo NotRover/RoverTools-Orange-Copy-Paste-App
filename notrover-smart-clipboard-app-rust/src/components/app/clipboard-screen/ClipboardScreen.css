@@ -51,24 +51,12 @@
   background-clip: padding-box;
 }
 
-/* Flex row: [1px rail] [groups] */
+/* Flex row: [groups] */
 .timeline-wrap {
   display: flex;
   flex-direction: row;
   min-height: 100%;
   padding: 10px 0 14px;
-}
-
-/* Thin vertical accent line */
-.timeline-rail {
-  width: 1px;
-  flex-shrink: 0;
-  margin-left: 15px;
-  margin-top: 16px;
-  margin-bottom: 14px;
-  background: var(--accent);
-  align-self: stretch;
-  opacity: 0.6;
 }
 
 /* Groups column */
@@ -77,12 +65,47 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  margin-left: 15px;
 }
 
-/* Each day section */
+/* Each day section — draws a rail segment on the left with ::before.
+   The rail runs from the top of the group to the bottom, connecting
+   this dot to the next group's dot. The last group stops at its dot. */
 .timeline-group {
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+/* Rail segment per group */
+.timeline-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
+  /* By default start at the very top so the rail connects seamlessly
+     to the previous group's segment (no gap). */
+  top: 0;
+  bottom: 0;
+}
+
+/* First group: rail starts at the dot center, not the top edge */
+.timeline-group:first-child::before {
+  top: 15px;
+}
+
+/* Last group: rail stops at its own dot center instead of extending further */
+.timeline-group--last::before {
+  bottom: auto;
+  height: 15px;
+}
+
+/* When there's only one group, hide the rail entirely */
+.timeline-group--only::before {
+  display: none;
 }
 
 /*  Day header — "Today   Mar 5, 2026  "  */
@@ -103,7 +126,7 @@
   border: 2px solid var(--accent);
   box-shadow: 0 0 0 3px var(--accent-dim);
   flex-shrink: 0;
-  margin-left: -6px;
+  margin-left: -5px;
   position: relative;
   z-index: 1;
 }
