@@ -97,10 +97,13 @@
   top: 15px;
 }
 
-/* Last group: rail stops at its own dot center instead of extending further */
+/* Last group: rail fades out after the dot using a gradient.
+   Extends full height of the group so no fixed pixel value is needed — 
+   the gradient handles the visual terminus dynamically. */
 .timeline-group--last::before {
-  bottom: auto;
-  height: 15px;
+  bottom: 0;
+  height: auto;
+  background: linear-gradient(to bottom, var(--accent) 30%, transparent 80%);
 }
 
 /* When there's only one group, hide the rail entirely */
