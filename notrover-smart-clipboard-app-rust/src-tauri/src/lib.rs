@@ -20,6 +20,9 @@ type SuppressFlag = Arc<AtomicBool>;
 /// the "HotKey already registered" panic on rapid restarts during development.
 #[cfg(windows)]
 fn kill_previous_instance() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
@@ -35,6 +38,7 @@ fn kill_previous_instance() {
     // executable, then kill any that aren't us. Failure is silently ignored.
     let Ok(output) = std::process::Command::new("tasklist")
         .args(["/FI", &format!("IMAGENAME eq {exe}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
     else {
         return;
@@ -52,6 +56,7 @@ fn kill_previous_instance() {
                 if pid != current_pid && pid != 0 {
                     let _ = std::process::Command::new("taskkill")
                         .args(["/PID", &pid.to_string(), "/F"])
+                        .creation_flags(CREATE_NO_WINDOW)
                         .output();
                     killed = true;
                 }
@@ -126,6 +131,14 @@ pub fn run() {
             crate::runtime::commands::close_cursor_popup,
             crate::runtime::commands::close_paste_popup,
         ])
+        .on_window_event(|window, event| {
+            // When the main window is destroyed, exit the entire process.
+            // Without this, hidden popup windows and the clipboard-watcher
+            // thread keep the process alive after the user closes the app.
+            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
+                window.app_handle().exit(0);
+            }
+        })
         .setup(move |app| setup_runtime(app, &history, &suppress))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
