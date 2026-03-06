@@ -1,31 +1,56 @@
-import React from "react";
+import React, { useState } from "react";
 import "./SettingsScreen.css";
 
-const SettingsScreen: React.FC = () => (
-  <div className="settings-screen">
-    <div className="settings-header">
-      <h2 className="settings-title">Settings</h2>
-      <p className="settings-subtitle">
-        Manage your Smart Clipboard preferences.
-      </p>
+const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
+
+function readSlots(): number {
+  const v = parseInt(localStorage.getItem("sc-paste-slots") ?? "3", 10);
+  return Number.isNaN(v) ? 3 : Math.max(3, Math.min(10, v));
+}
+
+const SettingsScreen: React.FC = () => {
+  const [pasteSlots, setPasteSlots] = useState(readSlots);
+
+  const handleSlotsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = parseInt(e.target.value, 10);
+    setPasteSlots(val);
+    localStorage.setItem("sc-paste-slots", String(val));
+  };
+
+  return (
+    <div className="settings-screen">
+      <div className="settings-header">
+        <h2 className="settings-title">Settings</h2>
+        <p className="settings-subtitle">
+          Manage your Smart Clipboard preferences.
+        </p>
+      </div>
+
+      <div className="settings-section">
+        <h3 className="settings-section-title">Quick Paste</h3>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Paste Slots</span>
+            <span className="settings-row-desc">
+              Number of entries shown in the quick paste popup (Ctrl+Shift+V).
+            </span>
+          </div>
+          <select
+            className="settings-select"
+            value={pasteSlots}
+            onChange={handleSlotsChange}
+          >
+            {SLOT_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
     </div>
-    <div className="settings-placeholder">
-      <svg
-        width="52"
-        height="52"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-      <p className="settings-placeholder-text">Settings coming soon</p>
-    </div>
-  </div>
-);
+  );
+};
 
 export default SettingsScreen;

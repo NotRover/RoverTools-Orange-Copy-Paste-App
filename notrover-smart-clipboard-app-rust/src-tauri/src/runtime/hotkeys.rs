@@ -8,7 +8,10 @@ use crate::clipboard::commands::read_clipboard_entry;
 use crate::{
     clipboard::history::{ClipboardEntry, ClipboardHistory, EntryKind},
     runtime::platform,
-    state::{CursorPopupPayload, CURSOR_POPUP_H, CURSOR_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W},
+    state::{
+        CursorPopupPayload, PastePopupPayload, CURSOR_POPUP_H, CURSOR_POPUP_W, PASTE_POPUP_H,
+        PASTE_POPUP_W,
+    },
 };
 
 fn copy_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
@@ -148,13 +151,18 @@ fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHist
         return;
     }
 
-    let entries = history.lock().top(3);
+    let hist = history.lock();
+    let payload = PastePopupPayload {
+        recent: hist.top(10),
+        pinned: hist.pinned_entries().into_iter().take(10).collect(),
+    };
+    drop(hist);
 
     let (px, py) = platform::popup_position(PASTE_POPUP_W as i32, PASTE_POPUP_H as i32);
 
     if let Some(win) = app.get_webview_window("paste-popup") {
         let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
-        let _ = win.emit("paste-popup:entries", &entries);
+        let _ = win.emit("paste-popup:entries", &payload);
         let _ = win.show();
         let _ = win.set_focus();
     }

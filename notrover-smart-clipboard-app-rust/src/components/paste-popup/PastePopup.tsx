@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -6,9 +6,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./pastePopup.css";
 
 type AppTheme = "dark" | "light";
+type Tab = "recent" | "pinned";
 
 function readTheme(): AppTheme {
   return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
+}
+
+function readSlots(): number {
+  const v = parseInt(localStorage.getItem("sc-paste-slots") ?? "3", 10);
+  return Number.isNaN(v) ? 3 : Math.max(3, Math.min(10, v));
 }
 
 interface PopupEntry {
@@ -19,21 +25,23 @@ interface PopupEntry {
   pinned: boolean;
 }
 
-function preview(entry: PopupEntry): string {
-  if (entry.type === "image") return "[Image]";
-  if (entry.type === "file") {
-    const paths = entry.content
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (paths.length === 1) {
-      return paths[0].split(/[\\/]/).pop() ?? paths[0];
-    }
-    return `${paths.length} files`;
-  }
-  return entry.content.length > 55
-    ? entry.content.slice(0, 55) + "\u2026"
-    : entry.content;
+interface PastePayload {
+  recent: PopupEntry[];
+  pinned: PopupEntry[];
+}
+
+function textPreview(content: string, max = 48): string {
+  const line = content.replace(/[\r\n]+/g, " ").trim();
+  return line.length > max ? line.slice(0, max) + "…" : line;
+}
+
+function filePreview(content: string): string {
+  const paths = content
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (paths.length === 1) return paths[0].split(/[\\/]/).pop() ?? paths[0];
+  return `${paths.length} files`;
 }
 
 function relativeTime(ts: number): string {
@@ -44,11 +52,25 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d`;
 }
 
+/** Badge label: 1-9, 0 for slot 10 */
+function badgeLabel(index: number): string {
+  return index === 9 ? "0" : String(index + 1);
+}
+
 const PastePopup: React.FC = () => {
-  const [entries, setEntries] = useState<PopupEntry[]>([]);
+  const [recentAll, setRecentAll] = useState<PopupEntry[]>([]);
+  const [pinnedAll, setPinnedAll] = useState<PopupEntry[]>([]);
   const [visible, setVisible] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
+  const [tab, setTab] = useState<Tab>("recent");
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [slots, setSlots] = useState(readSlots);
+
+  // Active entries for the current tab, sliced to slot count
+  const entries = useMemo(() => {
+    const src = tab === "pinned" ? pinnedAll : recentAll;
+    return src.slice(0, slots);
+  }, [tab, recentAll, pinnedAll, slots]);
 
   // Sync theme
   useEffect(() => {
@@ -60,17 +82,22 @@ const PastePopup: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (visible) setTheme(readTheme());
+    if (visible) {
+      setTheme(readTheme());
+      setSlots(readSlots());
+    }
   }, [visible]);
 
   // Listen for entries
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<PopupEntry[]>("paste-popup:entries", (event) => {
+    listen<PastePayload>("paste-popup:entries", (event) => {
       if (cancelled) return;
-      setEntries(event.payload);
+      setRecentAll(event.payload.recent);
+      setPinnedAll(event.payload.pinned);
       setSelectedIdx(0);
+      setTab("recent");
       setVisible(true);
     }).then((fn) => {
       if (cancelled) fn();
@@ -113,28 +140,41 @@ const PastePopup: React.FC = () => {
     setVisible(false);
   }, []);
 
+  const switchTab = useCallback((t: Tab) => {
+    setTab(t);
+    setSelectedIdx(0);
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
-    if (!visible || entries.length === 0) return;
+    if (!visible) return;
     const handler = (e: KeyboardEvent) => {
-      const num = parseInt(e.key);
+      // Number keys: 1-9 → index 0-8, 0 → index 9
+      const num = e.key === "0" ? 10 : parseInt(e.key);
       if (num >= 1 && num <= entries.length) {
         e.preventDefault();
         handlePaste(entries[num - 1].id);
         return;
       }
+
       switch (e.key) {
+        case "Tab":
+          e.preventDefault();
+          switchTab(tab === "recent" ? "pinned" : "recent");
+          break;
         case "ArrowDown":
           e.preventDefault();
-          setSelectedIdx((i) => (i + 1) % entries.length);
+          if (entries.length > 0)
+            setSelectedIdx((i) => (i + 1) % entries.length);
           break;
         case "ArrowUp":
           e.preventDefault();
-          setSelectedIdx((i) => (i - 1 + entries.length) % entries.length);
+          if (entries.length > 0)
+            setSelectedIdx((i) => (i - 1 + entries.length) % entries.length);
           break;
         case "Enter":
           e.preventDefault();
-          handlePaste(entries[selectedIdx].id);
+          if (entries.length > 0) handlePaste(entries[selectedIdx].id);
           break;
         case "Escape":
           e.preventDefault();
@@ -144,7 +184,7 @@ const PastePopup: React.FC = () => {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [visible, entries, selectedIdx, handlePaste, handleClose]);
+  }, [visible, entries, selectedIdx, tab, handlePaste, handleClose, switchTab]);
 
   return (
     <div
@@ -154,8 +194,31 @@ const PastePopup: React.FC = () => {
       {/* Header */}
       <div className="paste-header">
         <span className="paste-title">Quick Paste</span>
-        <span className="paste-hint">1–{entries.length} to paste</span>
-        <button className="paste-close" onClick={handleClose}>
+        <div className="paste-tabs">
+          <button
+            className={`paste-tab${tab === "recent" ? " paste-tab--active" : ""}`}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              switchTab("recent");
+            }}
+          >
+            Recent
+          </button>
+          <button
+            className={`paste-tab${tab === "pinned" ? " paste-tab--active" : ""}`}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              switchTab("pinned");
+            }}
+          >
+            Pinned
+          </button>
+        </div>
+        <button
+          className="paste-close"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleClose}
+        >
           <svg
             width="10"
             height="10"
@@ -175,7 +238,9 @@ const PastePopup: React.FC = () => {
       <div className="paste-divider" />
 
       {entries.length === 0 ? (
-        <div className="paste-empty">No recent items</div>
+        <div className="paste-empty">
+          {tab === "pinned" ? "No pinned items" : "No recent items"}
+        </div>
       ) : (
         <div className="paste-list">
           {entries.map((entry, index) => (
@@ -188,56 +253,60 @@ const PastePopup: React.FC = () => {
               }}
               onMouseEnter={() => setSelectedIdx(index)}
             >
-              <span className="paste-key-badge">{index + 1}</span>
-              <span className="paste-item-icon">
-                {entry.type === "image" ? (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                  </svg>
-                ) : entry.type === "file" ? (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                    <polyline points="14 2 14 8 20 8" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <line x1="17" y1="10" x2="3" y2="10" />
-                    <line x1="21" y1="6" x2="3" y2="6" />
-                    <line x1="21" y1="14" x2="3" y2="14" />
-                    <line x1="17" y1="18" x2="3" y2="18" />
-                  </svg>
-                )}
+              <span className="paste-key-badge">{badgeLabel(index)}</span>
+
+              {/* Preview: thumbnail for images, icon+text for others */}
+              {entry.type === "image" ? (
+                <img
+                  className="paste-thumb"
+                  src={entry.content}
+                  alt=""
+                  draggable={false}
+                />
+              ) : (
+                <span className="paste-item-icon">
+                  {entry.type === "file" ? (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="17" y1="10" x2="3" y2="10" />
+                      <line x1="21" y1="6" x2="3" y2="6" />
+                      <line x1="21" y1="14" x2="3" y2="14" />
+                      <line x1="17" y1="18" x2="3" y2="18" />
+                    </svg>
+                  )}
+                </span>
+              )}
+
+              <span className="paste-item-text">
+                {entry.type === "image"
+                  ? "Image"
+                  : entry.type === "file"
+                    ? filePreview(entry.content)
+                    : textPreview(entry.content)}
               </span>
-              <span className="paste-item-text">{preview(entry)}</span>
+
               <span className="paste-item-meta">
                 {entry.pinned && (
                   <svg

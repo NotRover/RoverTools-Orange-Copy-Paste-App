@@ -1,12 +1,14 @@
 //! Clipboard-related constants, timing helpers, and event payloads.
 
+use crate::clipboard::history::ClipboardEntry;
+
 //  Popup dimensions
 
 pub(crate) const CURSOR_POPUP_W: f64 = 340.0;
 pub(crate) const CURSOR_POPUP_H: f64 = 260.0;
 
-pub(crate) const PASTE_POPUP_W: f64 = 300.0;
-pub(crate) const PASTE_POPUP_H: f64 = 200.0;
+pub(crate) const PASTE_POPUP_W: f64 = 340.0;
+pub(crate) const PASTE_POPUP_H: f64 = 380.0;
 
 //  Event payloads
 
@@ -18,4 +20,11 @@ pub(crate) struct CursorPopupPayload {
     pub kind: String,
     /// For text: the plain-text content. For images: the `data:image/png;base64,…` URL.
     pub content: String,
+}
+
+/// Payload emitted with the `"paste-popup:entries"` event.
+#[derive(serde::Serialize, Clone)]
+pub(crate) struct PastePopupPayload {
+    pub recent: Vec<ClipboardEntry>,
+    pub pinned: Vec<ClipboardEntry>,
 }
