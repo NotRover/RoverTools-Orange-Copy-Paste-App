@@ -11,7 +11,7 @@ function readTheme(): AppTheme {
   return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
 }
 
-const IMAGE_FILE_EXTENSIONS = new Set([
+const IMAGE_EXTS = new Set([
   "jpg",
   "jpeg",
   "png",
@@ -26,8 +26,7 @@ const IMAGE_FILE_EXTENSIONS = new Set([
   "heic",
   "heif",
 ]);
-
-const VIDEO_FILE_EXTENSIONS = new Set([
+const VIDEO_EXTS = new Set([
   "mp4",
   "webm",
   "mov",
@@ -39,40 +38,32 @@ const VIDEO_FILE_EXTENSIONS = new Set([
   "mpg",
 ]);
 
-function fileExtension(path: string): string {
-  const fileName = path.split(/[\\/]/).pop() ?? path;
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex < 0 || dotIndex === fileName.length - 1) return "";
-  return fileName.slice(dotIndex + 1).toLowerCase();
+function fileExt(path: string): string {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
-function isImageFile(path: string): boolean {
-  return IMAGE_FILE_EXTENSIONS.has(fileExtension(path));
+interface HistoryEntry {
+  id: string;
+  type: "text" | "image" | "file";
+  content: string;
+  timestamp: number;
+  pinned: boolean;
 }
 
-function isVideoFile(path: string): boolean {
-  return VIDEO_FILE_EXTENSIONS.has(fileExtension(path));
-}
-
-// Component
-
-/**
- * Cursor popup — shown near the cursor after Ctrl+Shift+C.
- *
- * Listens for the `"clipboard:text"` event emitted by the Rust backend,
- * displays a preview of the copied text, and offers quick-action buttons.
- * Closing calls the `close_cursor_popup` Tauri command so the Rust backend
- * can hide the window.
- */
 const CursorPopup: React.FC = () => {
   const [kind, setKind] = useState<"text" | "image" | "file">("text");
-  const [copiedText, setCopiedText] = useState<string>("");
-  const [imageFilePreview, setImageFilePreview] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [entryId, setEntryId] = useState<string | null>(null);
+  const [pinned, setPinned] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [visible, setVisible] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Sync theme with main app via shared localStorage
+  // Sync theme
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === "sc-theme") setTheme((e.newValue as AppTheme) ?? "dark");
@@ -81,38 +72,53 @@ const CursorPopup: React.FC = () => {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // Also re-read on each popup show so it's always up to date
   useEffect(() => {
     if (visible) setTheme(readTheme());
   }, [visible]);
 
+  // Listen for clipboard:copied
   useEffect(() => {
     let cancelled = false;
-    let actualUnlisten: (() => void) | undefined;
-    // Listen for the structured payload pushed from Rust when Ctrl+Shift+C fires.
+    let unlisten: (() => void) | undefined;
+
     listen<{ kind: "text" | "image" | "file"; content: string }>(
       "clipboard:copied",
-      (event) => {
+      async (event) => {
         if (cancelled) return;
-        setVisible(false);
+        setDeleted(false);
         setKind(event.payload.kind);
-        setCopiedText(event.payload.content);
+        setContent(event.payload.content);
+        setPinned(false);
+        setEntryId(null);
+        setVisible(false);
         requestAnimationFrame(() => setVisible(true));
+
+        // Resolve entry ID from history so we can pin/delete
+        try {
+          const history = await invoke<HistoryEntry[]>("get_history");
+          if (history.length > 0 && !cancelled) {
+            setEntryId(history[0].id);
+            setPinned(history[0].pinned);
+          }
+        } catch {
+          /* entry actions will be disabled */
+        }
       },
     ).then((fn) => {
       if (cancelled) fn();
-      else actualUnlisten = fn;
+      else unlisten = fn;
     });
+
     return () => {
       cancelled = true;
-      actualUnlisten?.();
+      unlisten?.();
     };
   }, []);
 
-  // Dismiss when the popup loses OS focus (user clicked outside).
+  // Dismiss on blur
   useEffect(() => {
     let cancelled = false;
-    let actualUnlisten: (() => void) | undefined;
+    let unlisten: (() => void) | undefined;
     const win = getCurrentWindow();
     win
       .listen("tauri://blur", () => {
@@ -122,47 +128,65 @@ const CursorPopup: React.FC = () => {
       })
       .then((fn) => {
         if (cancelled) fn();
-        else actualUnlisten = fn;
+        else unlisten = fn;
       });
     return () => {
       cancelled = true;
-      actualUnlisten?.();
+      unlisten?.();
     };
   }, []);
 
-  /** Hide this window via the Rust command. */
+  // Image file preview
+  const files =
+    kind === "file"
+      ? content
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean)
+      : [];
+  const firstFile = files[0] ?? "";
+
+  useEffect(() => {
+    if (kind !== "file" || !firstFile || !IMAGE_EXTS.has(fileExt(firstFile))) {
+      setImagePreview(null);
+      return;
+    }
+    invoke<string | null>("get_image_file_preview", { path: firstFile })
+      .then(setImagePreview)
+      .catch(() => setImagePreview(null));
+  }, [kind, firstFile]);
+
   const handleClose = useCallback(() => {
     setVisible(false);
     invoke("close_cursor_popup").catch(console.error);
   }, []);
 
-  /** Placeholder for future smart-action handlers. */
-  const handleAction = useCallback(
-    (action: string) => {
-      console.log(`[CursorPopup] Action: ${action}`, copiedText);
-    },
-    [copiedText],
-  );
+  const handlePin = useCallback(async () => {
+    if (!entryId) return;
+    const cmd = pinned ? "unpin_entry" : "pin_entry";
+    const ok = await invoke<boolean>(cmd, { id: entryId });
+    if (ok) setPinned(!pinned);
+  }, [entryId, pinned]);
 
+  const handleDelete = useCallback(async () => {
+    if (!entryId) return;
+    await invoke("delete_entry", { id: entryId });
+    setDeleted(true);
+    setTimeout(() => {
+      invoke("close_cursor_popup").catch(console.error);
+    }, 800);
+  }, [entryId]);
+
+  // Preview
   const previewText =
-    copiedText.length > 200 ? copiedText.slice(0, 200) + "…" : copiedText;
-  const files = copiedText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const firstFile = files[0];
-  const firstFileUrl = firstFile ? convertFileSrc(firstFile) : "";
+    content.length > 200 ? content.slice(0, 200) + "\u2026" : content;
 
-  useEffect(() => {
-    if (kind !== "file" || !firstFile || !isImageFile(firstFile)) {
-      setImageFilePreview(null);
-      return;
-    }
-
-    invoke<string | null>("get_image_file_preview", { path: firstFile })
-      .then((preview) => setImageFilePreview(preview))
-      .catch(() => setImageFilePreview(null));
-  }, [kind, firstFile]);
+  const typeLabel =
+    kind === "image"
+      ? "Image"
+      : kind === "file"
+        ? `${files.length} File${files.length !== 1 ? "s" : ""}`
+        : "Text";
 
   return (
     <div
@@ -170,102 +194,151 @@ const CursorPopup: React.FC = () => {
       data-theme={theme}
       ref={containerRef}
     >
-      {/*  Header  */}
-      <div className="popup-header">
-        <span className="popup-title">
-          {kind === "image"
-            ? "Copied Image"
-            : kind === "file"
-              ? "Copied Files"
-              : "Copied Text"}
-        </span>
-        <button className="popup-close" onClick={handleClose} title="Close">
-          ✕
-        </button>
-      </div>
-
-      <div className="popup-divider" />
-
-      {/*  Preview ─ */}
-      {kind === "image"
-        ? copiedText && (
-            <div className="popup-clipboard-text">
-              <img
-                src={copiedText}
-                alt="Copied image"
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: "120px",
-                  borderRadius: "6px",
-                  objectFit: "contain",
-                }}
-              />
+      {deleted ? (
+        <div className="popup-deleted-state">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+          <span>Removed from history</span>
+        </div>
+      ) : (
+        <>
+          {/* Header */}
+          <div className="popup-header">
+            <div className="popup-header-left">
+              <div className="popup-check">
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <span className="popup-title">Copied</span>
+              <span className="popup-type-badge">{typeLabel}</span>
             </div>
-          )
-        : kind === "file"
-          ? copiedText && (
-              <div className="popup-clipboard-text">
-                {firstFile && isImageFile(firstFile) && (
-                  <div className="popup-file-preview-wrap">
-                    <img
-                      src={imageFilePreview ?? firstFileUrl}
-                      alt="Copied image file"
-                      className="popup-file-preview-media"
-                    />
-                  </div>
+            <button className="popup-close" onClick={handleClose}>
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="popup-divider" />
+
+          {/* Preview */}
+          <div className="popup-preview">
+            {kind === "image" && content ? (
+              <img
+                src={content}
+                alt="Copied image"
+                className="popup-preview-media"
+              />
+            ) : kind === "file" ? (
+              <>
+                {firstFile && IMAGE_EXTS.has(fileExt(firstFile)) && (
+                  <img
+                    src={imagePreview ?? convertFileSrc(firstFile)}
+                    alt="File preview"
+                    className="popup-preview-media"
+                  />
                 )}
-                {firstFile && isVideoFile(firstFile) && (
-                  <div className="popup-file-preview-wrap">
-                    <video
-                      className="popup-file-preview-media"
-                      controls
-                      preload="metadata"
-                      src={firstFileUrl}
-                    />
-                  </div>
+                {firstFile && VIDEO_EXTS.has(fileExt(firstFile)) && (
+                  <video
+                    className="popup-preview-media"
+                    controls
+                    preload="metadata"
+                    src={convertFileSrc(firstFile)}
+                  />
                 )}
-                <p className="clipboard-preview">
-                  {files.length} file(s) copied
+                <p className="popup-preview-text">
+                  {files.map((f) => f.split(/[\\/]/).pop()).join(", ")}
                 </p>
-              </div>
-            )
-          : previewText && (
-              <div className="popup-clipboard-text">
-                <p className="clipboard-preview">{previewText}</p>
-              </div>
+              </>
+            ) : (
+              <p className="popup-preview-text">{previewText}</p>
             )}
+          </div>
 
-      <div className="popup-divider" />
+          <div className="popup-divider" />
 
-      {/*  Quick actions  */}
-      <div className="popup-actions">
-        <button className="popup-btn" onClick={() => handleAction("summarize")}>
-          <span className="btn-icon">✨</span>
-          <span className="btn-label">Summarize</span>
-        </button>
+          {/* Actions */}
+          <div className="popup-actions">
+            <button
+              className={`popup-action-btn${pinned ? " popup-action-btn--active" : ""}`}
+              onClick={handlePin}
+              disabled={!entryId}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill={pinned ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+              <span>{pinned ? "Pinned" : "Pin"}</span>
+            </button>
 
-        <button className="popup-btn" onClick={() => handleAction("search")}>
-          <span className="btn-icon">🔍</span>
-          <span className="btn-label">Search</span>
-        </button>
-
-        <button className="popup-btn" onClick={() => handleAction("translate")}>
-          <span className="btn-icon">🌐</span>
-          <span className="btn-label">Translate</span>
-        </button>
-
-        <button className="popup-btn" onClick={() => handleAction("save")}>
-          <span className="btn-icon">💾</span>
-          <span className="btn-label">Save</span>
-        </button>
-      </div>
+            <button
+              className="popup-action-btn popup-action-btn--danger"
+              onClick={handleDelete}
+              disabled={!entryId}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              <span>Delete</span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 };
 
 export default CursorPopup;
-
-// Mount
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <CursorPopup />,

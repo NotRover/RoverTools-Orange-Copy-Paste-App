@@ -21,8 +21,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
   flex-shrink: 0;
+}
+
+.sidebar-divider {
+  width: 28px;
+  border: none;
+  border-top: 1px solid var(--accent);
+  margin: 0 0 10px;
+  opacity: 0.6;
 }
 
 .sidebar-nav {

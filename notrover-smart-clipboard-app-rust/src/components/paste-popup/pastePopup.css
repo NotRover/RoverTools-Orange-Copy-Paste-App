@@ -1,35 +1,44 @@
 /* Smart Clipboard – Paste Popup */
 
 :root {
-  --pp-bg: #181818;
-  --pp-surface: #202020;
-  --pp-border: #272727;
-  --pp-border-light: #333333;
-  --pp-text: #f0f0f0;
-  --pp-text-secondary: #a0a0a0;
-  --pp-muted: #606060;
-  --pp-accent: #ff3e1c;
-  --pp-accent-hover: #ff5535;
-  --pp-accent-dim: rgba(255, 62, 28, 0.1);
-  --pp-accent-dim-strong: rgba(255, 62, 28, 0.18);
-  --pp-radius: 14px;
-  --pp-item-radius: 10px;
-  --pp-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  --bg: #0e0e0e;
+  --surface: #181818;
+  --surface-hover: #202020;
+  --border: #272727;
+  --border-light: #333333;
+  --text: #f0f0f0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #606060;
+  --accent: #ff3e1c;
+  --accent-hover: #ff5535;
+  --accent-dim: rgba(255, 62, 28, 0.1);
+  --accent-dim-strong: rgba(255, 62, 28, 0.18);
+  --danger: #ff3e1c;
+  --success: #22c55e;
+  --radius: 12px;
+  --radius-sm: 10px;
+  --radius-xs: 7px;
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.35);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
 [data-theme="light"] {
-  --pp-bg: #ffffff;
-  --pp-surface: #f7f7f7;
-  --pp-border: #dcdcdc;
-  --pp-border-light: #c8c8c8;
-  --pp-text: #111111;
-  --pp-text-secondary: #555555;
-  --pp-muted: #909090;
-  --pp-accent: #ff3e1c;
-  --pp-accent-hover: #e0300f;
-  --pp-accent-dim: rgba(255, 62, 28, 0.08);
-  --pp-accent-dim-strong: rgba(255, 62, 28, 0.15);
-  --pp-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
+  --bg: #f0f0f0;
+  --surface: #ffffff;
+  --surface-hover: #f7f7f7;
+  --border: #dcdcdc;
+  --border-light: #c8c8c8;
+  --text: #111111;
+  --text-secondary: #555555;
+  --text-muted: #909090;
+  --accent: #ff3e1c;
+  --accent-hover: #e0300f;
+  --accent-dim: rgba(255, 62, 28, 0.08);
+  --accent-dim-strong: rgba(255, 62, 28, 0.15);
+  --danger: #ff3e1c;
+  --success: #16a34a;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
 * {
@@ -57,7 +66,6 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-app-region: no-drag;
-  /* transparent gutter so the OS window outline falls outside the rounded container */
   padding: 6px;
   height: 100%;
   box-sizing: border-box;
@@ -70,16 +78,16 @@ body {
 /* Container */
 
 .paste-container {
-  background: var(--pp-bg);
-  border-radius: var(--pp-radius);
-  border: 1px solid var(--pp-border);
-  box-shadow: var(--pp-shadow);
+  background: var(--bg);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   padding: 10px;
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   opacity: 0;
   transform: scale(0.93) translateY(5px);
   will-change: transform, opacity;
@@ -106,24 +114,30 @@ body {
 .paste-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 2px 4px;
+  padding: 2px 2px;
+  gap: 8px;
 }
 
 .paste-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--pp-muted);
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  color: var(--text);
+}
+
+.paste-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+  margin-right: 6px;
+  letter-spacing: 0.2px;
 }
 
 .paste-close {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border: none;
   background: transparent;
-  color: var(--pp-muted);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -135,7 +149,7 @@ body {
 }
 
 .paste-close:hover {
-  background: var(--pp-accent);
+  background: var(--accent);
   color: #fff;
 }
 
@@ -143,7 +157,7 @@ body {
 
 .paste-divider {
   height: 1px;
-  background: var(--pp-border);
+  background: var(--border);
   margin: 0 2px;
 }
 
@@ -160,53 +174,63 @@ body {
 .paste-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border: 1px solid var(--pp-border);
-  border-radius: var(--pp-item-radius);
-  background: var(--pp-surface);
-  color: var(--pp-text);
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.14s ease;
-  position: relative;
-  overflow: hidden;
+  transition: all 0.12s ease;
   text-align: left;
   width: 100%;
 }
 
-.paste-item::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: var(--pp-accent-dim);
-  opacity: 0;
-  transition: opacity 0.14s ease;
-}
-
-.paste-item:hover {
-  border-color: var(--pp-accent);
-  color: var(--pp-accent);
-  transform: translate3d(0, -1px, 0);
-  box-shadow: 0 4px 12px var(--pp-accent-dim-strong);
-}
-
-.paste-item:hover::before {
-  opacity: 1;
+.paste-item:hover,
+.paste-item--selected {
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .paste-item:active {
-  transform: translate3d(0, 0, 0);
-  box-shadow: none;
+  transform: scale(0.98);
 }
 
-.paste-item-icon {
-  font-size: 14px;
+/* Keyboard badge */
+
+.paste-key-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  position: relative;
-  z-index: 1;
 }
+
+.paste-item:hover .paste-key-badge,
+.paste-item--selected .paste-key-badge {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Type icon */
+
+.paste-item-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* Text */
 
 .paste-item-text {
   flex: 1;
@@ -214,13 +238,25 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.4;
-  position: relative;
-  z-index: 1;
 }
 
-.paste-item-index {
-  color: var(--pp-muted);
-  margin-right: 2px;
+/* Meta (pin + time) */
+
+.paste-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.paste-pin-icon {
+  color: var(--accent);
+}
+
+.paste-item-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* Empty state */
@@ -230,7 +266,7 @@ body {
   align-items: center;
   justify-content: center;
   flex: 1;
-  color: var(--pp-muted);
+  color: var(--text-muted);
   font-size: 12px;
   font-style: italic;
 }

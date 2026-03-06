@@ -12,6 +12,7 @@ import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
+import TooltipPortal from "./tooltip/TooltipPortal";
 import "./App.css";
 
 // TODO: Set this to `false`; this demo-only setup must be removed before shipping.
@@ -500,6 +501,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app" data-theme={theme}>
+      <TooltipPortal />
       <Sidebar
         screen={screen}
         theme={theme}

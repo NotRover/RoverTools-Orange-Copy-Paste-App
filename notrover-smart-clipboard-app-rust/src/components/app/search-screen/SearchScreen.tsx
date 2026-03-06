@@ -112,7 +112,7 @@ const TYPE_FILTERS: { id: TypeFilter; label: string; icon: React.ReactNode }[] =
     },
   ];
 
-// Helpers 
+// Helpers
 
 function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   const lower = q.toLowerCase();
@@ -129,7 +129,7 @@ function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   return false; // images aren't text-searchable; they still show under type filter
 }
 
-// Recent searches helpers 
+// Recent searches helpers
 
 const RECENT_KEY = "sc-recent-searches";
 const MAX_RECENT = 8;
@@ -146,7 +146,7 @@ function saveRecent(list: string[]) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
 
-// Search Screen 
+// Search Screen
 
 interface SearchScreenProps {
   entries: ClipboardEntry[];
@@ -322,7 +322,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                   <button
                     className="ss-recent-clear-all"
                     onClick={clearRecentSearches}
-                    title="Clear all recent searches"
+                    data-tooltip="Clear all recent searches"
                   >
                     Clear all
                   </button>
@@ -352,7 +352,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                       <button
                         className="ss-recent-remove"
                         onClick={() => removeRecentSearch(term)}
-                        title="Remove"
+                        data-tooltip="Remove"
                       >
                         <svg
                           width="9"
@@ -411,14 +411,33 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
             >
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <line x1="8" y1="8" x2="14" y2="14" stroke="currentColor" strokeWidth="1.8" />
-              <line x1="14" y1="8" x2="8" y2="14" stroke="currentColor" strokeWidth="1.8" />
+              <line
+                x1="8"
+                y1="8"
+                x2="14"
+                y2="14"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              />
+              <line
+                x1="14"
+                y1="8"
+                x2="8"
+                y2="14"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              />
             </svg>
             <p className="ss-idle-title">No results</p>
             <p className="ss-idle-subtitle">
-              {hasQuery
-                ? <>Nothing matches &ldquo;{query.trim()}&rdquo;{typeFilter !== "all" ? " in this type" : ""}.</>
-                : <>No {typeFilter} entries in history.</>}
+              {hasQuery ? (
+                <>
+                  Nothing matches &ldquo;{query.trim()}&rdquo;
+                  {typeFilter !== "all" ? " in this type" : ""}.
+                </>
+              ) : (
+                <>No {typeFilter} entries in history.</>
+              )}
             </p>
           </div>
         ) : (
@@ -428,7 +447,8 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
               {results.length} {results.length === 1 ? "result" : "results"}
               {hasQuery && (
                 <span className="ss-result-query">
-                  {" "}for &ldquo;{query.trim()}&rdquo;
+                  {" "}
+                  for &ldquo;{query.trim()}&rdquo;
                 </span>
               )}
             </div>
