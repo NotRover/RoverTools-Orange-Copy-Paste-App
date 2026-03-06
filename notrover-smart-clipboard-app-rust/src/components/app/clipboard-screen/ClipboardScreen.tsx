@@ -541,6 +541,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   });
   const [fading, setFading] = useState(false);
   const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   useEffect(() => {
     return () => {
@@ -697,8 +707,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                       : ""
                 }`}
               >
-                {/* Day marker */}
-                <div className="timeline-day-row">
+                {/* Day marker — click to collapse/expand */}
+                <button
+                  className={`timeline-day-row${collapsed.has(group.key) ? " timeline-day-row--collapsed" : ""}`}
+                  onClick={() => toggleGroup(group.key)}
+                >
                   <div className="timeline-day-dot" />
                   <span className="timeline-day-label">{group.label}</span>
                   {group.label !== group.subtitle && (
@@ -706,21 +719,39 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                       {group.subtitle}
                     </span>
                   )}
-                </div>
+                  {collapsed.has(group.key) && (
+                    <span className="timeline-day-count">{group.entries.length}</span>
+                  )}
+                  <svg
+                    className="timeline-day-chevron"
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
 
-                {/* Cards for this day */}
-                <div
-                  className={layout === "masonry" ? "entry-grid" : "entry-list"}
-                >
-                  {group.entries.map((entry) => (
-                    <EntryCard
-                      key={entry.id}
-                      entry={entry}
-                      onCopy={onCopy}
-                      onDelete={onDelete}
-                      onPin={onPin}
-                    />
-                  ))}
+                {/* Cards for this day — collapses via grid-template-rows */}
+                <div className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}>
+                  <div
+                    className={layout === "masonry" ? "entry-grid" : "entry-list"}
+                  >
+                    {group.entries.map((entry) => (
+                      <EntryCard
+                        key={entry.id}
+                        entry={entry}
+                        onCopy={onCopy}
+                        onDelete={onDelete}
+                        onPin={onPin}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}
