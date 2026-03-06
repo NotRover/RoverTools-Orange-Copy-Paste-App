@@ -220,7 +220,7 @@
 .timeline-group-body {
   display: grid;
   grid-template-rows: 1fr;
-  transition: grid-template-rows 0.22s ease;
+  transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
@@ -228,15 +228,26 @@
   grid-template-rows: 0fr;
 }
 
-.timeline-group-body > div {
+/* Inner wrapper: handles min-height so grid can collapse to 0,
+   and coordinates opacity so content only becomes visible after
+   the height has finished expanding — hiding the columns reflow. */
+.timeline-group-body__inner {
   min-height: 0;
   overflow: hidden;
+  opacity: 1;
+  transform: translateY(0);
+  /* Fade + slide in after height is mostly open */
+  transition: opacity 0.2s ease 0.25s, transform 0.2s ease 0.25s;
 }
 
-.timeline-group-body--collapsed > div {
+.timeline-group-body--collapsed .timeline-group-body__inner {
+  opacity: 0;
+  transform: translateY(-6px);
   visibility: hidden;
   padding: 0 !important;
   margin: 0 !important;
+  /* Fade + slide out immediately before height collapses */
+  transition: opacity 0.15s ease 0s, transform 0.15s ease 0s, visibility 0s linear 0.15s;
 }
 
 /* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
