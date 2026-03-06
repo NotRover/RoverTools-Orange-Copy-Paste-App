@@ -176,9 +176,9 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--surface-hover);
   color: var(--text);
   font-size: 12px;
   font-family: inherit;
@@ -190,8 +190,8 @@ body {
 
 .paste-item:hover,
 .paste-item--selected {
-  border-color: var(--accent);
-  background: var(--accent-dim);
+  background: var(--accent-dim-strong);
+  color: var(--accent);
 }
 
 .paste-item:active {
@@ -204,8 +204,8 @@ body {
   width: 18px;
   height: 18px;
   border-radius: 4px;
-  border: 1px solid var(--border-light);
-  background: var(--bg);
+  border: none;
+  background: var(--border);
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 600;
@@ -217,7 +217,7 @@ body {
 
 .paste-item:hover .paste-key-badge,
 .paste-item--selected .paste-key-badge {
-  border-color: var(--accent);
+  background: var(--accent-dim);
   color: var(--accent);
 }
 

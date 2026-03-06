@@ -154,7 +154,7 @@ const PastePopup: React.FC = () => {
       {/* Header */}
       <div className="paste-header">
         <span className="paste-title">Quick Paste</span>
-        <span className="paste-hint">1\u2013{entries.length} to paste</span>
+        <span className="paste-hint">1–{entries.length} to paste</span>
         <button className="paste-close" onClick={handleClose}>
           <svg
             width="10"
