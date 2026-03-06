@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import "./popup.css";
+import "./copyPopup.css";
 
 type AppTheme = "dark" | "light";
 
@@ -52,7 +52,7 @@ interface HistoryEntry {
   pinned: boolean;
 }
 
-const CursorPopup: React.FC = () => {
+const CopyPopup: React.FC = () => {
   const [kind, setKind] = useState<"text" | "image" | "file">("text");
   const [content, setContent] = useState("");
   const [entryId, setEntryId] = useState<string | null>(null);
@@ -124,7 +124,7 @@ const CursorPopup: React.FC = () => {
       .listen("tauri://blur", () => {
         if (cancelled) return;
         setVisible(false);
-        invoke("close_cursor_popup").catch(console.error);
+        invoke("close_copy_popup").catch(console.error);
       })
       .then((fn) => {
         if (cancelled) fn();
@@ -158,7 +158,7 @@ const CursorPopup: React.FC = () => {
 
   const handleClose = useCallback(() => {
     setVisible(false);
-    invoke("close_cursor_popup").catch(console.error);
+    invoke("close_copy_popup").catch(console.error);
   }, []);
 
   const handlePin = useCallback(async () => {
@@ -173,7 +173,7 @@ const CursorPopup: React.FC = () => {
     await invoke("delete_entry", { id: entryId });
     setDeleted(true);
     setTimeout(() => {
-      invoke("close_cursor_popup").catch(console.error);
+      invoke("close_copy_popup").catch(console.error);
     }, 800);
   }, [entryId]);
 
@@ -324,8 +324,8 @@ const CursorPopup: React.FC = () => {
   );
 };
 
-export default CursorPopup;
+export default CopyPopup;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <CursorPopup />,
+  <CopyPopup />,
 );

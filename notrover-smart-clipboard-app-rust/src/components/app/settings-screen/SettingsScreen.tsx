@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -8,11 +8,91 @@ function readSlots(): number {
   return Number.isNaN(v) ? 3 : Math.max(3, Math.min(10, v));
 }
 
+interface CustomSelectProps {
+  value: number;
+  options: number[];
+  onChange: (val: number) => void;
+}
+
+const CustomSelect: React.FC<CustomSelectProps> = ({
+  value,
+  options,
+  onChange,
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className={`settings-select-wrap${open ? " open" : ""}`} ref={ref}>
+      <button
+        className="settings-select-trigger"
+        onClick={() => setOpen((v) => !v)}
+        type="button"
+      >
+        <span>{value}</span>
+        <svg
+          className="settings-select-chevron"
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div className="settings-select-list">
+          {options.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={`settings-select-option${n === value ? " active" : ""}`}
+              onMouseDown={() => {
+                onChange(n);
+                setOpen(false);
+              }}
+            >
+              {n}
+              {n === value && (
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SettingsScreen: React.FC = () => {
   const [pasteSlots, setPasteSlots] = useState(readSlots);
 
-  const handleSlotsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = parseInt(e.target.value, 10);
+  const handleSlotsChange = (val: number) => {
     setPasteSlots(val);
     localStorage.setItem("sc-paste-slots", String(val));
   };
@@ -36,17 +116,11 @@ const SettingsScreen: React.FC = () => {
               Number of entries shown in the quick paste popup (Ctrl+Shift+V).
             </span>
           </div>
-          <select
-            className="settings-select"
+          <CustomSelect
             value={pasteSlots}
+            options={SLOT_OPTIONS}
             onChange={handleSlotsChange}
-          >
-            {SLOT_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
     </div>

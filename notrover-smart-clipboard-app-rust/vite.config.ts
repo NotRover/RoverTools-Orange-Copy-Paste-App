@@ -38,10 +38,10 @@ export default defineConfig(async () => ({
       input: {
         // Main clipboard-history window
         main: path.resolve(__dirname, "src/components/app/index.html"),
-        // Copy-confirmation popup shown near the cursor
-        "cursor-popup": path.resolve(
+        // Copy-confirmation popup shown after clipboard capture
+        "copy-popup": path.resolve(
           __dirname,
-          "src/components/cursor-popup/cursor-popup.html",
+          "src/components/copy-popup/copy-popup.html",
         ),
         // Quick-paste picker popup shown near the cursor
         "paste-popup": path.resolve(

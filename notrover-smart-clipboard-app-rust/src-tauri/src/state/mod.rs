@@ -9,6 +9,5 @@ pub mod popup_state;
 pub use app_state::AppState;
 
 pub(crate) use popup_state::{
-    CursorPopupPayload, PastePopupPayload, CURSOR_POPUP_H, CURSOR_POPUP_W, PASTE_POPUP_H,
-    PASTE_POPUP_W,
+    CopyPopupPayload, PastePopupPayload, COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W,
 };

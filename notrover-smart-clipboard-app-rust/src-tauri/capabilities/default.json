@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for all Smart Clipboard windows",
-  "windows": ["main", "cursor-popup", "paste-popup"],
+  "windows": ["main", "copy-popup", "paste-popup"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

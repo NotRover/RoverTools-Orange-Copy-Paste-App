@@ -1,6 +1,6 @@
 use tauri::Manager;
 
-use crate::state::{CURSOR_POPUP_H, CURSOR_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W};
+use crate::state::{COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W};
 
 const OFFSCREEN_POS: f64 = -9999.0;
 
@@ -40,20 +40,20 @@ pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
 }
 
 pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
-    hide_popup(app, "cursor-popup");
+    hide_popup(app, "copy-popup");
     hide_popup(app, "paste-popup");
 }
 
-/// Create the cursor-popup and paste-popup windows eagerly but hidden.
+    /// Create the copy-popup and paste-popup windows eagerly but hidden.
 /// Both are frameless, transparent, always-on-top, and non-focusable —
 /// matching the Electron configuration.
 pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let specs = [
         PopupWindowSpec {
-            label: "cursor-popup",
-            url: "src/components/cursor-popup/cursor-popup.html",
-            width: CURSOR_POPUP_W,
-            height: CURSOR_POPUP_H,
+            label: "copy-popup",
+            url: "src/components/copy-popup/copy-popup.html",
+            width: COPY_POPUP_W,
+            height: COPY_POPUP_H,
             focused: true,
         },
         PopupWindowSpec {
