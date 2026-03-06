@@ -4,12 +4,19 @@
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+/// Minimum dimensions (physical pixels) below which we refuse to save or
+/// restore, since they indicate a minimised / transitional window state.
+const MIN_WIDTH: u32 = 200;
+const MIN_HEIGHT: u32 = 200;
+
 #[derive(Serialize, Deserialize)]
 struct WindowGeometry {
     x: i32,
     y: i32,
     width: u32,
     height: u32,
+    #[serde(default)]
+    maximized: bool,
 }
 
 fn load(app: &tauri::AppHandle) -> Option<WindowGeometry> {
@@ -63,8 +70,13 @@ pub fn restore(app: &tauri::App) {
         return;
     };
     if let Some(geo) = load(app.handle()) {
-        let _ = win.set_size(tauri::PhysicalSize::new(geo.width, geo.height));
-        if is_position_on_any_monitor(&win, geo.x, geo.y, geo.width, geo.height) {
+        // Reject saved geometry that is suspiciously small (e.g. from a
+        // minimised window state that slipped past the old guard).
+        let width = geo.width.max(MIN_WIDTH);
+        let height = geo.height.max(MIN_HEIGHT);
+
+        let _ = win.set_size(tauri::PhysicalSize::new(width, height));
+        if is_position_on_any_monitor(&win, geo.x, geo.y, width, height) {
             let _ = win.set_position(tauri::PhysicalPosition::new(geo.x, geo.y));
             let _ = win.show();
             let _ = win.set_focus();
@@ -75,6 +87,9 @@ pub fn restore(app: &tauri::App) {
             let _ = win.show();
             let _ = win.center();
             let _ = win.set_focus();
+        }
+        if geo.maximized {
+            let _ = win.maximize();
         }
     } else {
         let _ = win.show();
@@ -100,12 +115,28 @@ pub fn setup_tracking(app: &tauri::App) {
         let Some(w) = handle.get_webview_window("main") else {
             return;
         };
+
+        let is_maximized = w.is_maximized().unwrap_or(false);
+        let is_minimized = w.is_minimized().unwrap_or(false);
+
+        // When the window is maximized or minimized, only update the
+        // maximized flag — never overwrite the normal-state geometry,
+        // because the OS-reported size in those states is meaningless
+        // for the restored window rectangle.
+        if is_maximized || is_minimized {
+            if let Some(mut geo) = load(&handle) {
+                geo.maximized = is_maximized;
+                save(&handle, &geo);
+            }
+            return;
+        }
+
         let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) else {
             return;
         };
-        if size.width == 0 || size.height == 0 {
+        if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
             return;
-        } // minimised
+        }
         save(
             &handle,
             &WindowGeometry {
@@ -113,6 +144,7 @@ pub fn setup_tracking(app: &tauri::App) {
                 y: pos.y,
                 width: size.width,
                 height: size.height,
+                maximized: false,
             },
         );
     });
