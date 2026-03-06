@@ -724,6 +724,10 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                 </div>
               </div>
             ))}
+            {/* End of timeline marker */}
+            <div className="timeline-end">
+              <span className="timeline-end-text">You&rsquo;re all caught up</span>
+            </div>
           </div>
         </div>
       </div>
