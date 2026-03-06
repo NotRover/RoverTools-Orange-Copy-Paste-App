@@ -9,6 +9,7 @@ import {
   timeAgo,
 } from "../../../../types";
 import CardMenu from "../../card-menu/CardMenu";
+import VideoPlayer from "./VideoPlayer";
 import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
@@ -203,12 +204,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
         firstFile &&
         isVideoFile(firstFile) && (
           <div className="card-media">
-            <video
-              className="card-media-img"
-              controls
-              preload="metadata"
-              src={firstFileUrl}
-            />
+            <VideoPlayer src={firstFileUrl} className="card-media-img" />
           </div>
         )}
 
