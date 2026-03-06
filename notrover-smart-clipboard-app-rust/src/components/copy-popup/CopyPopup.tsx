@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { deriveDisplayKind } from "../../types";
+import { EntryTypePill } from "../entry-types/EntryTypePill";
 import "./copyPopup.css";
 
 type AppTheme = "dark" | "light";
@@ -179,12 +181,13 @@ const CopyPopup: React.FC = () => {
   const previewText =
     content.length > 200 ? content.slice(0, 200) + "\u2026" : content;
 
-  const typeLabel =
-    kind === "image"
-      ? "Image"
-      : kind === "file"
-        ? `${files.length} File${files.length !== 1 ? "s" : ""}`
-        : "Text";
+  const displayKind = deriveDisplayKind({
+    id: entryId ?? "",
+    type: kind,
+    content,
+    timestamp: 0,
+    pinned,
+  });
 
   return (
     <div
@@ -215,7 +218,7 @@ const CopyPopup: React.FC = () => {
           <div className="popup-header">
             <div className="popup-header-left">
               <span className="popup-title">Copied</span>
-              <span className="popup-type-badge">{typeLabel}</span>
+              <EntryTypePill kind={displayKind} />
             </div>
             <button className="popup-close" onClick={handleClose}>
               <svg
