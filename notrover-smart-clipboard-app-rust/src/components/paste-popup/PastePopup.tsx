@@ -42,13 +42,15 @@ function textPreview(content: string, max = 60): string {
   return line.length > max ? line.slice(0, max) + "…" : line;
 }
 
-function filePreview(content: string): string {
-  const paths = content
+function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function getFilePaths(content: string): string[] {
+  return content
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  if (paths.length === 1) return paths[0].split(/[\\/]/).pop() ?? paths[0];
-  return `${paths.length} files`;
 }
 
 function relativeTime(ts: number): string {
@@ -79,6 +81,7 @@ const PastePopup: React.FC = () => {
   const [tab, setTab] = useState<Tab>("recent");
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [slots, setSlots] = useState(readSlots);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const entries = useMemo(() => {
     const src = tab === "pinned" ? pinnedAll : recentAll;
@@ -297,79 +300,152 @@ const PastePopup: React.FC = () => {
       ) : (
         <div className="paste-list">
           {entries.map((entry, index) => (
-            <button
-              key={entry.id}
-              className={`paste-item${index === selectedIdx ? " paste-item--selected" : ""}`}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                handlePaste(entry.id);
-              }}
-              onMouseEnter={() => setSelectedIdx(index)}
-            >
-              <span className="paste-key-badge">{badgeLabel(index)}</span>
+            <React.Fragment key={entry.id}>
+              <button
+                className={`paste-item${index === selectedIdx ? " paste-item--selected" : ""}`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handlePaste(entry.id);
+                }}
+                onMouseEnter={() => setSelectedIdx(index)}
+              >
+                <span className="paste-key-badge">{badgeLabel(index)}</span>
 
-              {/* Type-specific preview */}
-              {entry.type === "image" ? (
-                <div className="paste-preview-wrap">
-                  <img
-                    className="paste-thumb"
-                    src={entry.content}
-                    alt=""
-                    draggable={false}
-                  />
-                  <span className="paste-item-label">Image</span>
-                </div>
-              ) : entry.type === "file" ? (
-                <div className="paste-preview-wrap">
-                  <span className="paste-item-icon">
+                {/* Type-specific preview */}
+                {entry.type === "image" ? (
+                  <div className="paste-preview-wrap">
+                    <img
+                      className="paste-thumb"
+                      src={entry.content}
+                      alt=""
+                      draggable={false}
+                    />
+                    <span className="paste-filename">Image</span>
+                  </div>
+                ) : entry.type === "file" ? (
+                  (() => {
+                    const paths = getFilePaths(entry.content);
+                    const isMulti = paths.length > 1;
+                    const isExpanded = expandedIds.has(entry.id);
+                    return (
+                      <>
+                        <div className="paste-preview-wrap">
+                          <span className="paste-item-icon">
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                          </span>
+                          <span className="paste-filename">
+                            {isMulti
+                              ? `${paths.length} files`
+                              : fileNameFromPath(paths[0])}
+                          </span>
+                          {isMulti && (
+                            <span
+                              className="paste-item-icon"
+                              style={{ cursor: "pointer", marginLeft: "auto" }}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setExpandedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(entry.id)) next.delete(entry.id);
+                                  else next.add(entry.id);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <svg
+                                className={`paste-expand-chevron${isExpanded ? " open" : ""}`}
+                                width="10"
+                                height="10"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="6 9 12 15 18 9" />
+                              </svg>
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()
+                ) : (
+                  <div className="paste-preview-wrap">
+                    <span className="paste-text-snippet">
+                      {textPreview(entry.content)}
+                    </span>
+                  </div>
+                )}
+
+                <span className="paste-item-meta">
+                  {entry.pinned && (
                     <svg
-                      width="13"
-                      height="13"
+                      className="paste-pin-icon"
+                      width="9"
+                      height="9"
                       viewBox="0 0 24 24"
-                      fill="none"
+                      fill="currentColor"
                       stroke="currentColor"
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                      <polyline points="14 2 14 8 20 8" />
+                      <path d="M12 17v5" />
+                      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
                     </svg>
+                  )}
+                  <span className="paste-item-time">
+                    {relativeTime(entry.timestamp)}
                   </span>
-                  <span className="paste-item-label">
-                    {filePreview(entry.content)}
-                  </span>
-                </div>
-              ) : (
-                <div className="paste-preview-wrap">
-                  <span className="paste-text-snippet">
-                    {textPreview(entry.content)}
-                  </span>
-                </div>
-              )}
-
-              <span className="paste-item-meta">
-                {entry.pinned && (
-                  <svg
-                    className="paste-pin-icon"
-                    width="9"
-                    height="9"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 17v5" />
-                    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-                  </svg>
-                )}
-                <span className="paste-item-time">
-                  {relativeTime(entry.timestamp)}
                 </span>
-              </span>
-            </button>
+              </button>
+              {/* Expanded file list for multi-file entries */}
+              {entry.type === "file" &&
+                (() => {
+                  const paths = getFilePaths(entry.content);
+                  return paths.length > 1 && expandedIds.has(entry.id) ? (
+                    <div className="paste-file-list">
+                      {paths.map((f) => (
+                        <div key={f} className="paste-file-list-item">
+                          <span className="paste-file-icon">
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                          </span>
+                          <span className="paste-file-name">
+                            {fileNameFromPath(f)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
+            </React.Fragment>
           ))}
         </div>
       )}

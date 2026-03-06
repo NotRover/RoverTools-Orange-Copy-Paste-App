@@ -126,7 +126,7 @@ body {
 .paste-title {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--accent);
 }
 
 .paste-count {
@@ -192,13 +192,19 @@ body {
   color: var(--accent);
 }
 
+.paste-tab--active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: transparent;
+}
+
 /* ── Close ── */
 
 .paste-close {
   width: 22px;
   height: 22px;
-  border: none;
-  background: transparent;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text-muted);
   display: flex;
   align-items: center;
@@ -211,7 +217,8 @@ body {
 }
 
 .paste-close:hover {
-  background: var(--accent);
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 
@@ -291,6 +298,7 @@ body {
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 600;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -359,6 +367,80 @@ body {
   font-size: 11.5px;
   line-height: 1.4;
   color: var(--text-secondary);
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+/* ── Expanded file list (multi-file entries) ── */
+
+.paste-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 2px 28px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.paste-file-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.paste-file-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}
+
+.paste-file-list-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.paste-file-list-item:hover {
+  background: var(--surface-hover);
+}
+
+.paste-file-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+.paste-file-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.paste-expand-chevron {
+  margin-left: 2px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.paste-expand-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* ── File name label for non-text items ── */
+
+.paste-filename {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
 }
 
