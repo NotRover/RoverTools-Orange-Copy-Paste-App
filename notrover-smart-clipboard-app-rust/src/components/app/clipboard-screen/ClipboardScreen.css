@@ -103,7 +103,7 @@
 .timeline-group--last::before {
   bottom: 0;
   height: auto;
-  background: linear-gradient(to bottom, var(--accent) 30%, transparent 80%);
+  background: linear-gradient(to bottom, var(--accent) 70%, transparent 90%);
 }
 
 /* When there's only one group, hide the rail entirely */
