@@ -5,7 +5,7 @@ import { EntryCard } from "./entry-card/EntryCard";
 export { EntryCard };
 import "./ClipboardScreen.css";
 
-// Layout & sort types 
+// Layout & sort types
 
 type ClipboardLayout = "masonry" | "list";
 type SortMode = "newest" | "oldest" | "a-z" | "z-a" | "type";
@@ -15,8 +15,18 @@ const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
     id: "newest",
     label: "Newest",
     icon: (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="17 11 12 6 7 11" /><line x1="12" y1="18" x2="12" y2="6" />
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="17 11 12 6 7 11" />
+        <line x1="12" y1="18" x2="12" y2="6" />
       </svg>
     ),
   },
@@ -24,8 +34,18 @@ const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
     id: "oldest",
     label: "Oldest",
     icon: (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="7 13 12 18 17 13" /><line x1="12" y1="6" x2="12" y2="18" />
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="7 13 12 18 17 13" />
+        <line x1="12" y1="6" x2="12" y2="18" />
       </svg>
     ),
   },
@@ -33,8 +53,22 @@ const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
     id: "a-z",
     label: "A \u2192 Z",
     icon: (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 6h7" /><path d="M3 12h5" /><path d="M3 18h3" /><path d="M16 6l4 12" /><path d="M20 6l-4 12" /><path d="M14.5 14h7" />
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M3 6h7" />
+        <path d="M3 12h5" />
+        <path d="M3 18h3" />
+        <path d="M16 6l4 12" />
+        <path d="M20 6l-4 12" />
+        <path d="M14.5 14h7" />
       </svg>
     ),
   },
@@ -42,8 +76,22 @@ const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
     id: "z-a",
     label: "Z \u2192 A",
     icon: (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 18h7" /><path d="M3 12h5" /><path d="M3 6h3" /><path d="M16 6l4 12" /><path d="M20 6l-4 12" /><path d="M14.5 14h7" />
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M3 18h7" />
+        <path d="M3 12h5" />
+        <path d="M3 6h3" />
+        <path d="M16 6l4 12" />
+        <path d="M20 6l-4 12" />
+        <path d="M14.5 14h7" />
       </svg>
     ),
   },
@@ -51,8 +99,20 @@ const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
     id: "type",
     label: "Type",
     icon: (
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
       </svg>
     ),
   },
@@ -70,7 +130,10 @@ function sortableText(e: ClipboardEntry): string {
 
 const TYPE_ORDER: Record<string, number> = { text: 0, file: 1, image: 2 };
 
-function applySortWithinGroup(entries: ClipboardEntry[], sort: SortMode): ClipboardEntry[] {
+function applySortWithinGroup(
+  entries: ClipboardEntry[],
+  sort: SortMode,
+): ClipboardEntry[] {
   if (sort === "newest") return entries;
   const sorted = [...entries];
   switch (sort) {
@@ -84,13 +147,15 @@ function applySortWithinGroup(entries: ClipboardEntry[], sort: SortMode): Clipbo
       sorted.sort((a, b) => sortableText(b).localeCompare(sortableText(a)));
       break;
     case "type":
-      sorted.sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9));
+      sorted.sort(
+        (a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9),
+      );
       break;
   }
   return sorted;
 }
 
-// Day grouping helpers 
+// Day grouping helpers
 
 function toLocalDateKey(ts: number): string {
   const d = new Date(ts);
@@ -139,7 +204,7 @@ function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
   }));
 }
 
-// Clipboard Screen 
+// Clipboard Screen
 
 interface ClipboardScreenProps {
   entries: ClipboardEntry[];
@@ -236,51 +301,51 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     label: string;
     icon: React.ReactNode;
   }[] = [
-      {
-        id: "masonry",
-        label: "Masonry",
-        icon: (
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="3" width="7" height="9" rx="1" />
-            <rect x="14" y="3" width="7" height="5" rx="1" />
-            <rect x="14" y="12" width="7" height="9" rx="1" />
-            <rect x="3" y="16" width="7" height="5" rx="1" />
-          </svg>
-        ),
-      },
-      {
-        id: "list",
-        label: "List",
-        icon: (
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="8" y1="6" x2="21" y2="6" />
-            <line x1="8" y1="12" x2="21" y2="12" />
-            <line x1="8" y1="18" x2="21" y2="18" />
-            <line x1="3" y1="6" x2="3.01" y2="6" />
-            <line x1="3" y1="12" x2="3.01" y2="12" />
-            <line x1="3" y1="18" x2="3.01" y2="18" />
-          </svg>
-        ),
-      },
-    ];
+    {
+      id: "masonry",
+      label: "Masonry",
+      icon: (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="9" rx="1" />
+          <rect x="14" y="3" width="7" height="5" rx="1" />
+          <rect x="14" y="12" width="7" height="9" rx="1" />
+          <rect x="3" y="16" width="7" height="5" rx="1" />
+        </svg>
+      ),
+    },
+    {
+      id: "list",
+      label: "List",
+      icon: (
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" />
+          <line x1="3" y1="12" x2="3.01" y2="12" />
+          <line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
+      ),
+    },
+  ];
 
   const dayGroups = groupByDay(entries).map((g) => ({
     ...g,
@@ -296,11 +361,24 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           <button
             className={`sort-dropdown-trigger${sortOpen ? " sort-dropdown-trigger--open" : ""}`}
             onClick={() => setSortOpen((v) => !v)}
-            title="Sort order"
+            data-tooltip="Sort order"
+            data-tooltip-pos="below"
           >
             {SORT_OPTIONS.find((s) => s.id === sort)?.icon}
-            <span className="layout-pill-label">{SORT_OPTIONS.find((s) => s.id === sort)?.label}</span>
-            <svg className="sort-chevron" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+            <span className="layout-pill-label">
+              {SORT_OPTIONS.find((s) => s.id === sort)?.label}
+            </span>
+            <svg
+              className="sort-chevron"
+              width="8"
+              height="8"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
@@ -331,7 +409,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
               id={`layout-option-${l.id}`}
               className={`layout-switch-btn${layout === l.id ? " layout-switch-btn--active" : ""}`}
               onClick={() => selectLayout(l.id)}
-              title={l.label}
+              data-tooltip={l.label}
+              data-tooltip-pos="below"
             >
               {l.icon}
               <span className="layout-pill-label">{l.label}</span>
@@ -343,7 +422,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             <button
               className="layout-switch-btn layout-switch-btn--danger"
               onClick={onClearAll}
-              title="Clear all history"
+              data-tooltip="Clear all history"
+              data-tooltip-pos="below"
             >
               <svg
                 width="12"
@@ -393,7 +473,9 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                     </span>
                   )}
                   {collapsed.has(group.key) && (
-                    <span className="timeline-day-count">{group.entries.length}</span>
+                    <span className="timeline-day-count">
+                      {group.entries.length}
+                    </span>
                   )}
                   <svg
                     className="timeline-day-chevron"
@@ -411,10 +493,14 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                 </button>
 
                 {/* Cards for this day — collapses via grid-template-rows */}
-                <div className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}>
+                <div
+                  className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}
+                >
                   <div className="timeline-group-body__inner">
                     <div
-                      className={layout === "masonry" ? "entry-grid" : "entry-list"}
+                      className={
+                        layout === "masonry" ? "entry-grid" : "entry-list"
+                      }
                     >
                       {group.entries.map((entry) => (
                         <EntryCard
@@ -432,7 +518,9 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             ))}
             {/* End of timeline marker */}
             <div className="timeline-end">
-              <span className="timeline-end-text">You&rsquo;re all caught up</span>
+              <span className="timeline-end-text">
+                You&rsquo;re all caught up
+              </span>
             </div>
           </div>
         </div>

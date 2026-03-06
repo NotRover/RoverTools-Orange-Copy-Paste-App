@@ -73,7 +73,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, className }) => {
         onContextMenu={(e) => e.preventDefault()}
       />
       <div className="video-controls">
-        <button className="video-btn" onClick={togglePlay} title={playing ? "Pause" : "Play"}>
+        <button
+          className="video-btn"
+          onClick={togglePlay}
+          data-tooltip={playing ? "Pause" : "Play"}
+          data-tooltip-pos="above"
+        >
           {playing ? (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="4" width="4" height="16" rx="1" />
@@ -96,15 +101,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, className }) => {
           onClick={(e) => e.stopPropagation()}
           style={{ "--seek-pct": `${pct}%` } as React.CSSProperties}
         />
-        <button className="video-btn" onClick={toggleMute} title={muted ? "Unmute" : "Mute"}>
+        <button
+          className="video-btn"
+          onClick={toggleMute}
+          data-tooltip={muted ? "Unmute" : "Mute"}
+          data-tooltip-pos="above"
+        >
           {muted ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
               <line x1="23" y1="9" x2="17" y2="15" />
               <line x1="17" y1="9" x2="23" y2="15" />
             </svg>
           ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
               <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
             </svg>

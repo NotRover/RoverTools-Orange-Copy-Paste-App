@@ -38,7 +38,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       <button
         className={`nav-btn ${screen === "clipboard" ? "active" : ""}`}
         onClick={() => onNavigate("clipboard")}
-        title="Clipboard"
+        data-tooltip="Clipboard"
+        data-tooltip-pos="right"
       >
         <svg
           width="18"
@@ -57,7 +58,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       <button
         className={`nav-btn ${screen === "search" ? "active" : ""}`}
         onClick={() => onNavigate("search")}
-        title="Search"
+        data-tooltip="Search"
+        data-tooltip-pos="right"
       >
         <svg
           width="18"
@@ -76,7 +78,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       <button
         className={`nav-btn ${screen === "shortcuts" ? "active" : ""}`}
         onClick={() => onNavigate("shortcuts")}
-        title="Shortcuts"
+        data-tooltip="Shortcuts"
+        data-tooltip-pos="right"
       >
         <svg
           width="18"
@@ -100,7 +103,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       <button
         className="nav-btn"
         onClick={onToggleTheme}
-        title={theme === "dark" ? "Light mode" : "Dark mode"}
+        data-tooltip={theme === "dark" ? "Light mode" : "Dark mode"}
+        data-tooltip-pos="right"
       >
         {theme === "dark" ? (
           <svg
@@ -142,7 +146,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       <button
         className={`nav-btn ${screen === "settings" ? "active" : ""}`}
         onClick={() => onNavigate("settings")}
-        title="Settings"
+        data-tooltip="Settings"
+        data-tooltip-pos="right"
       >
         <svg
           width="18"

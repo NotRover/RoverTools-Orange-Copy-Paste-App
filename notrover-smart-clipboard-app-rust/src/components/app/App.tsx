@@ -12,6 +12,7 @@ import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
+import TooltipPortal from "./tooltip/TooltipPortal";
 import "./App.css";
 
 // TODO: Set this to `false`; this demo-only setup must be removed before shipping.
@@ -290,7 +291,8 @@ const WindowControls: React.FC = () => {
       <button
         className="win-btn win-btn--min"
         onClick={() => win.minimize()}
-        title="Minimise"
+        data-tooltip="Minimise"
+        data-tooltip-pos="below"
       >
         <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
           <rect
@@ -306,7 +308,8 @@ const WindowControls: React.FC = () => {
       <button
         className="win-btn win-btn--max"
         onClick={() => (maximized ? win.unmaximize() : win.maximize())}
-        title={maximized ? "Restore" : "Maximise"}
+        data-tooltip={maximized ? "Restore" : "Maximise"}
+        data-tooltip-pos="below"
       >
         {maximized ? (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
@@ -347,7 +350,8 @@ const WindowControls: React.FC = () => {
       <button
         className="win-btn win-btn--close"
         onClick={() => win.close()}
-        title="Close"
+        data-tooltip="Close"
+        data-tooltip-pos="below"
       >
         <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
           <line
@@ -500,6 +504,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app" data-theme={theme}>
+      <TooltipPortal />
       <Sidebar
         screen={screen}
         theme={theme}

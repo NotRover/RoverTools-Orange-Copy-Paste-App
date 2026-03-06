@@ -99,7 +99,7 @@
 .timeline-group--last::before {
   bottom: 0;
   height: auto;
-  background: linear-gradient(to bottom, var(--accent) 70%, transparent 90%);
+  background: linear-gradient(to bottom, var(--accent) 70%, transparent 100%);
 }
 
 /* When there's only one group, hide the rail entirely */
@@ -233,7 +233,9 @@
   opacity: 1;
   transform: translateY(0);
   /* Fade + slide in after height is mostly open */
-  transition: opacity 0.2s ease 0.25s, transform 0.2s ease 0.25s;
+  transition:
+    opacity 0.2s ease 0.25s,
+    transform 0.2s ease 0.25s;
 }
 
 .timeline-group-body--collapsed .timeline-group-body__inner {
@@ -243,7 +245,10 @@
   padding: 0 !important;
   margin: 0 !important;
   /* Fade + slide out immediately before height collapses */
-  transition: opacity 0.15s ease 0s, transform 0.15s ease 0s, visibility 0s linear 0.15s;
+  transition:
+    opacity 0.15s ease 0s,
+    transform 0.15s ease 0s,
+    visibility 0s linear 0.15s;
 }
 
 /* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
@@ -334,8 +339,14 @@
 }
 
 @keyframes sortDropIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .sort-dropdown-item {
@@ -352,7 +363,9 @@
   font-family: inherit;
   cursor: pointer;
   letter-spacing: 0.2px;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
   white-space: nowrap;
   user-select: none;
 }
