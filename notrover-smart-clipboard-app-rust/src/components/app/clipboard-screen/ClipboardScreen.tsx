@@ -1,12 +1,94 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { ClipboardEntry } from "../../../types";
+import { filePaths } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 export { EntryCard };
 import "./ClipboardScreen.css";
 
-// Layout types 
+// Layout & sort types 
 
 type ClipboardLayout = "masonry" | "list";
+type SortMode = "newest" | "oldest" | "a-z" | "z-a" | "type";
+
+const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
+  {
+    id: "newest",
+    label: "Newest",
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="17 11 12 6 7 11" /><line x1="12" y1="18" x2="12" y2="6" />
+      </svg>
+    ),
+  },
+  {
+    id: "oldest",
+    label: "Oldest",
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="7 13 12 18 17 13" /><line x1="12" y1="6" x2="12" y2="18" />
+      </svg>
+    ),
+  },
+  {
+    id: "a-z",
+    label: "A \u2192 Z",
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 6h7" /><path d="M3 12h5" /><path d="M3 18h3" /><path d="M16 6l4 12" /><path d="M20 6l-4 12" /><path d="M14.5 14h7" />
+      </svg>
+    ),
+  },
+  {
+    id: "z-a",
+    label: "Z \u2192 A",
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 18h7" /><path d="M3 12h5" /><path d="M3 6h3" /><path d="M16 6l4 12" /><path d="M20 6l-4 12" /><path d="M14.5 14h7" />
+      </svg>
+    ),
+  },
+  {
+    id: "type",
+    label: "Type",
+    icon: (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+      </svg>
+    ),
+  },
+];
+
+function sortableText(e: ClipboardEntry): string {
+  if (e.type === "text") return e.content.toLowerCase();
+  if (e.type === "file") {
+    const paths = filePaths(e.content);
+    const name = (paths[0] ?? "").split(/[\\/]/).pop() ?? "";
+    return name.toLowerCase();
+  }
+  return "";
+}
+
+const TYPE_ORDER: Record<string, number> = { text: 0, file: 1, image: 2 };
+
+function applySortWithinGroup(entries: ClipboardEntry[], sort: SortMode): ClipboardEntry[] {
+  if (sort === "newest") return entries;
+  const sorted = [...entries];
+  switch (sort) {
+    case "oldest":
+      sorted.sort((a, b) => a.timestamp - b.timestamp);
+      break;
+    case "a-z":
+      sorted.sort((a, b) => sortableText(a).localeCompare(sortableText(b)));
+      break;
+    case "z-a":
+      sorted.sort((a, b) => sortableText(b).localeCompare(sortableText(a)));
+      break;
+    case "type":
+      sorted.sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9));
+      break;
+  }
+  return sorted;
+}
 
 // Day grouping helpers 
 
@@ -77,9 +159,26 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
   });
+  const [sort, setSort] = useState<SortMode>(() => {
+    return (localStorage.getItem("sc-sort") as SortMode) ?? "newest";
+  });
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
   const [fading, setFading] = useState(false);
   const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // Close sort dropdown on outside click
+  useEffect(() => {
+    if (!sortOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
+        setSortOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [sortOpen]);
 
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
@@ -183,12 +282,48 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       },
     ];
 
-  const dayGroups = groupByDay(entries);
+  const dayGroups = groupByDay(entries).map((g) => ({
+    ...g,
+    entries: applySortWithinGroup(g.entries, sort),
+  }));
 
   return (
     <div className="clipboard-screen-root">
-      {/*  Layout segmented switch  */}
+      {/*  Toolbar: sort + layout + clear  */}
       <div className="layout-toggle-wrap">
+        {/* Sort dropdown */}
+        <div className="sort-dropdown" ref={sortRef}>
+          <button
+            className={`sort-dropdown-trigger${sortOpen ? " sort-dropdown-trigger--open" : ""}`}
+            onClick={() => setSortOpen((v) => !v)}
+            title="Sort order"
+          >
+            {SORT_OPTIONS.find((s) => s.id === sort)?.icon}
+            <span className="layout-pill-label">{SORT_OPTIONS.find((s) => s.id === sort)?.label}</span>
+            <svg className="sort-chevron" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {sortOpen && (
+            <div className="sort-dropdown-menu">
+              {SORT_OPTIONS.map((s) => (
+                <button
+                  key={s.id}
+                  className={`sort-dropdown-item${sort === s.id ? " sort-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    setSort(s.id);
+                    localStorage.setItem("sc-sort", s.id);
+                    setSortOpen(false);
+                  }}
+                >
+                  {s.icon}
+                  <span>{s.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="layout-switch" role="group" aria-label="Layout">
           {layouts.map((l) => (
             <button
