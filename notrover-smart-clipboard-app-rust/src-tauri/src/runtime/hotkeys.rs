@@ -53,6 +53,7 @@ fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
     if let Some(win) = app.get_webview_window("copy-popup") {
         let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
         let payload = CopyPopupPayload {
+            id: entry.id.clone(),
             kind: entry_kind_label(&entry.kind).to_string(),
             content: entry.content.clone(),
         };

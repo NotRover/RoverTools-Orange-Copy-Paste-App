@@ -1,0 +1,87 @@
+/* ── Entry type pills ── */
+
+.type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.type-pill-label {
+  line-height: 1;
+}
+
+/* ── Kind colors (dark) ── */
+
+.type-pill--text {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.type-pill--image {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
+.type-pill--file {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+.type-pill--video {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.type-pill--url {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.type-pill--document {
+  background: rgba(249, 115, 22, 0.12);
+  color: #f97316;
+}
+
+.type-pill--folder {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+/* ── Kind colors (light) ── */
+
+[data-theme="light"] .type-pill--image {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+[data-theme="light"] .type-pill--file {
+  background: rgba(139, 92, 246, 0.1);
+  color: #7c3aed;
+}
+
+[data-theme="light"] .type-pill--video {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+[data-theme="light"] .type-pill--url {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+[data-theme="light"] .type-pill--document {
+  background: rgba(249, 115, 22, 0.1);
+  color: #ea6a0a;
+}
+
+[data-theme="light"] .type-pill--folder {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0284c7;
+}

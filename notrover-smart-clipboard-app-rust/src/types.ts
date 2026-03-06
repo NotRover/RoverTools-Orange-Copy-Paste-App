@@ -1,4 +1,4 @@
-//  Shared types and utilities 
+//  Shared types and utilities
 
 /** Matches the Rust `ClipboardEntry` struct (serialised by serde). */
 export interface ClipboardEntry {
@@ -15,7 +15,7 @@ export interface ClipboardEntry {
 export type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";
 export type AppTheme = "dark" | "light";
 
-//  Helpers 
+//  Helpers
 
 export function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -89,5 +89,64 @@ export function classifyFileEntry(content: string): "image" | "video" | "file" {
   if (paths.length === 0) return "file";
   if (paths.every(isImageFile)) return "image";
   if (paths.every(isVideoFile)) return "video";
+  return "file";
+}
+
+export const DOCUMENT_FILE_EXTENSIONS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "odt",
+  "ods",
+  "odp",
+  "rtf",
+  "csv",
+  "md",
+  "txt",
+  "pages",
+  "numbers",
+  "key",
+  "epub",
+]);
+
+export function isDocumentFile(path: string): boolean {
+  return DOCUMENT_FILE_EXTENSIONS.has(fileExtension(path));
+}
+
+export function isUrl(text: string): boolean {
+  const t = text.trim();
+  if (t.includes("\n")) return false;
+  return /^https?:\/\/.{4,}/.test(t);
+}
+
+export type DisplayKind =
+  | "text"
+  | "url"
+  | "image"
+  | "video"
+  | "document"
+  | "folder"
+  | "file";
+
+function isDirectory(path: string): boolean {
+  // No extension after the last path separator component
+  const name = path.split(/[\\/]/).pop() ?? path;
+  return !name.includes(".") || name.endsWith("/") || name.endsWith("\\");
+}
+
+export function deriveDisplayKind(entry: ClipboardEntry): DisplayKind {
+  if (entry.type === "text") return isUrl(entry.content) ? "url" : "text";
+  if (entry.type === "image") return "image";
+  // file entry — classify by extension of paths
+  const paths = filePaths(entry.content);
+  if (paths.length === 0) return "file";
+  if (paths.every(isDirectory)) return "folder";
+  if (paths.every(isImageFile)) return "image";
+  if (paths.every(isVideoFile)) return "video";
+  if (paths.length === 1 && isDocumentFile(paths[0])) return "document";
   return "file";
 }

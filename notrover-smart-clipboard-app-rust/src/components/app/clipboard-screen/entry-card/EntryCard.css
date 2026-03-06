@@ -81,9 +81,49 @@
   color: #8b5cf6;
 }
 
+.card-type-chip--video {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.card-type-chip--url {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.card-type-chip--document {
+  background: rgba(249, 115, 22, 0.12);
+  color: #f97316;
+}
+
+.card-type-chip--folder {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
 .card-type-chip--pinned {
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+[data-theme="light"] .card-type-chip--video {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+[data-theme="light"] .card-type-chip--url {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+[data-theme="light"] .card-type-chip--document {
+  background: rgba(249, 115, 22, 0.1);
+  color: #ea6a0a;
+}
+
+[data-theme="light"] .card-type-chip--folder {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0284c7;
 }
 
 [data-theme="light"] .card-type-chip--image {

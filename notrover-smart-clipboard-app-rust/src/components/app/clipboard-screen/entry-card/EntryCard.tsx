@@ -7,7 +7,14 @@ import {
   isVideoFile,
   truncateText,
   timeAgo,
+  deriveDisplayKind,
 } from "../../../../types";
+import {
+  ImageIcon,
+  FileIcon,
+  PinIcon,
+  EntryTypePill,
+} from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
 import VideoPlayer from "./VideoPlayer";
 import "./EntryCard.css";
@@ -18,73 +25,6 @@ const REL_TIME_REFRESH_MS = 15_000;
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
-
-/* Reusable tiny icons */
-
-const ImageIcon = (
-  <svg
-    width="9"
-    height="9"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-    <circle cx="8.5" cy="8.5" r="1.5" />
-    <polyline points="21 15 16 10 5 21" />
-  </svg>
-);
-
-const FileIcon = (
-  <svg
-    width="9"
-    height="9"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-    <polyline points="13 2 13 9 20 9" />
-  </svg>
-);
-
-const TextIcon = (
-  <svg
-    width="9"
-    height="9"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-    <polyline points="14 2 14 8 20 8" />
-  </svg>
-);
-
-const PinIcon = (
-  <svg
-    width="9"
-    height="9"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M12 17v5" />
-    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-  </svg>
-);
 
 interface EntryCardProps {
   entry: ClipboardEntry;
@@ -127,12 +67,6 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const firstFileUrl = firstFile ? convertFileSrc(firstFile) : "";
   const imageFiles = files.filter(isImageFile);
   const isMulti = files.length > 1;
-  // A single-file entry whose file is an image should display an "Image" chip.
-  const singleFileIsImage =
-    entry.type === "file" &&
-    !isMulti &&
-    firstFile != null &&
-    isImageFile(firstFile);
 
   // Load image previews for file entries (single or multi)
   useEffect(() => {
@@ -201,7 +135,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         e.stopPropagation();
         setMenuPos({ x: e.clientX, y: e.clientY });
       }}
-      data-tooltip="Click to copy · Right-click for options"
+      // data-tooltip="Click to copy · Right-click for options"
     >
       {/*  Media preview (image/video)  */}
       {entry.type === "image" && (
@@ -355,22 +289,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 </svg>
               </button>
             ) : (
-              <span
-                className={`card-type-chip card-type-chip--${singleFileIsImage ? "image" : entry.type}`}
-              >
-                {entry.type === "text"
-                  ? TextIcon
-                  : entry.type === "image" || singleFileIsImage
-                    ? ImageIcon
-                    : FileIcon}
-                <span className="card-type-label">
-                  {entry.type === "text"
-                    ? "Text"
-                    : entry.type === "image" || singleFileIsImage
-                      ? "Image"
-                      : "File"}
-                </span>
-              </span>
+              <EntryTypePill kind={deriveDisplayKind(entry)} />
             )}
             {entry.pinned && (
               <span className="card-type-chip card-type-chip--pinned">

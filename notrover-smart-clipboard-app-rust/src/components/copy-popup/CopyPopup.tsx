@@ -81,27 +81,25 @@ const CopyPopup: React.FC = () => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<{ kind: "text" | "image" | "file"; content: string }>(
+    listen<{ id: string; kind: "text" | "image" | "file"; content: string }>(
       "clipboard:copied",
       async (event) => {
         if (cancelled) return;
         setDeleted(false);
         setKind(event.payload.kind);
         setContent(event.payload.content);
+        setEntryId(event.payload.id);
         setPinned(false);
-        setEntryId(null);
         setVisible(false);
         requestAnimationFrame(() => setVisible(true));
 
-        // Resolve entry ID from history so we can pin/delete
+        // Fetch pinned state for the entry
         try {
           const history = await invoke<HistoryEntry[]>("get_history");
-          if (history.length > 0 && !cancelled) {
-            setEntryId(history[0].id);
-            setPinned(history[0].pinned);
-          }
+          const match = history.find((h) => h.id === event.payload.id);
+          if (match && !cancelled) setPinned(match.pinned);
         } catch {
-          /* entry actions will be disabled */
+          /* pinned state unavailable, default false is fine */
         }
       },
     ).then((fn) => {

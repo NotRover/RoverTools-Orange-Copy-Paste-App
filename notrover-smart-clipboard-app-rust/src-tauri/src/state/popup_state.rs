@@ -16,6 +16,8 @@ pub(crate) const PASTE_POPUP_H: f64 = 460.0;
 /// window so it can render an appropriate preview (text or image).
 #[derive(serde::Serialize, Clone)]
 pub(crate) struct CopyPopupPayload {
+    /// The history entry ID so the popup can pin/delete without a separate `get_history` call.
+    pub id: String,
     /// `"text"` or `"image"`
     pub kind: String,
     /// For text: the plain-text content. For images: the `data:image/png;base64,…` URL.
