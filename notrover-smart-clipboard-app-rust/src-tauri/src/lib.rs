@@ -130,6 +130,7 @@ pub fn run() {
             crate::clipboard::commands::get_video_file_preview,
             crate::runtime::commands::close_cursor_popup,
             crate::runtime::commands::close_paste_popup,
+            crate::runtime::commands::resize_paste_popup,
         ])
         .on_window_event(|window, event| {
             // When the main window is destroyed, exit the entire process.

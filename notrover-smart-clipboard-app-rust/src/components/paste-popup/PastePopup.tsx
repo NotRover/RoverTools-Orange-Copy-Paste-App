@@ -8,6 +8,13 @@ import "./pastePopup.css";
 type AppTheme = "dark" | "light";
 type Tab = "recent" | "pinned";
 
+// Layout constants (must match Rust PASTE_POPUP_W)
+const HEADER_H = 48; // header + divider + padding
+const ITEM_H = 44; // item height + gap
+const BOTTOM_PAD = 10;
+const BODY_PAD = 12; // body padding (6px * 2)
+const MIN_EMPTY_H = 100;
+
 function readTheme(): AppTheme {
   return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
 }
@@ -30,7 +37,7 @@ interface PastePayload {
   pinned: PopupEntry[];
 }
 
-function textPreview(content: string, max = 48): string {
+function textPreview(content: string, max = 60): string {
   const line = content.replace(/[\r\n]+/g, " ").trim();
   return line.length > max ? line.slice(0, max) + "…" : line;
 }
@@ -57,6 +64,13 @@ function badgeLabel(index: number): string {
   return index === 9 ? "0" : String(index + 1);
 }
 
+/** Request Rust to resize the popup window to fit content */
+function resizePopup(entryCount: number) {
+  const listH = entryCount > 0 ? entryCount * ITEM_H : MIN_EMPTY_H;
+  const total = HEADER_H + listH + BOTTOM_PAD + BODY_PAD;
+  invoke("resize_paste_popup", { height: total }).catch(console.error);
+}
+
 const PastePopup: React.FC = () => {
   const [recentAll, setRecentAll] = useState<PopupEntry[]>([]);
   const [pinnedAll, setPinnedAll] = useState<PopupEntry[]>([]);
@@ -66,11 +80,15 @@ const PastePopup: React.FC = () => {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [slots, setSlots] = useState(readSlots);
 
-  // Active entries for the current tab, sliced to slot count
   const entries = useMemo(() => {
     const src = tab === "pinned" ? pinnedAll : recentAll;
     return src.slice(0, slots);
   }, [tab, recentAll, pinnedAll, slots]);
+
+  // Resize popup whenever entry count changes
+  useEffect(() => {
+    if (visible) resizePopup(entries.length);
+  }, [entries.length, visible]);
 
   // Sync theme
   useEffect(() => {
@@ -149,7 +167,6 @@ const PastePopup: React.FC = () => {
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
-      // Number keys: 1-9 → index 0-8, 0 → index 9
       const num = e.key === "0" ? 10 : parseInt(e.key);
       if (num >= 1 && num <= entries.length) {
         e.preventDefault();
@@ -186,6 +203,9 @@ const PastePopup: React.FC = () => {
     return () => window.removeEventListener("keydown", handler);
   }, [visible, entries, selectedIdx, tab, handlePaste, handleClose, switchTab]);
 
+  const recentCount = recentAll.length;
+  const pinnedCount = pinnedAll.length;
+
   return (
     <div
       className={`paste-container${visible ? " visible" : ""}`}
@@ -193,7 +213,10 @@ const PastePopup: React.FC = () => {
     >
       {/* Header */}
       <div className="paste-header">
-        <span className="paste-title">Quick Paste</span>
+        <div className="paste-header-left">
+          <span className="paste-title">Quick Paste</span>
+          <span className="paste-count">{entries.length}</span>
+        </div>
         <div className="paste-tabs">
           <button
             className={`paste-tab${tab === "recent" ? " paste-tab--active" : ""}`}
@@ -203,6 +226,9 @@ const PastePopup: React.FC = () => {
             }}
           >
             Recent
+            {recentCount > 0 && (
+              <span className="paste-tab-count">{recentCount}</span>
+            )}
           </button>
           <button
             className={`paste-tab${tab === "pinned" ? " paste-tab--active" : ""}`}
@@ -212,6 +238,9 @@ const PastePopup: React.FC = () => {
             }}
           >
             Pinned
+            {pinnedCount > 0 && (
+              <span className="paste-tab-count">{pinnedCount}</span>
+            )}
           </button>
         </div>
         <button
@@ -239,7 +268,31 @@ const PastePopup: React.FC = () => {
 
       {entries.length === 0 ? (
         <div className="paste-empty">
-          {tab === "pinned" ? "No pinned items" : "No recent items"}
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            {tab === "pinned" ? (
+              <>
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </>
+            ) : (
+              <>
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </>
+            )}
+          </svg>
+          <span>
+            {tab === "pinned" ? "No pinned items" : "No recent items"}
+          </span>
         </div>
       ) : (
         <div className="paste-list">
@@ -255,17 +308,20 @@ const PastePopup: React.FC = () => {
             >
               <span className="paste-key-badge">{badgeLabel(index)}</span>
 
-              {/* Preview: thumbnail for images, icon+text for others */}
+              {/* Type-specific preview */}
               {entry.type === "image" ? (
-                <img
-                  className="paste-thumb"
-                  src={entry.content}
-                  alt=""
-                  draggable={false}
-                />
-              ) : (
-                <span className="paste-item-icon">
-                  {entry.type === "file" ? (
+                <div className="paste-preview-wrap">
+                  <img
+                    className="paste-thumb"
+                    src={entry.content}
+                    alt=""
+                    draggable={false}
+                  />
+                  <span className="paste-item-label">Image</span>
+                </div>
+              ) : entry.type === "file" ? (
+                <div className="paste-preview-wrap">
+                  <span className="paste-item-icon">
                     <svg
                       width="13"
                       height="13"
@@ -279,33 +335,18 @@ const PastePopup: React.FC = () => {
                       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                       <polyline points="14 2 14 8 20 8" />
                     </svg>
-                  ) : (
-                    <svg
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="17" y1="10" x2="3" y2="10" />
-                      <line x1="21" y1="6" x2="3" y2="6" />
-                      <line x1="21" y1="14" x2="3" y2="14" />
-                      <line x1="17" y1="18" x2="3" y2="18" />
-                    </svg>
-                  )}
-                </span>
+                  </span>
+                  <span className="paste-item-label">
+                    {filePreview(entry.content)}
+                  </span>
+                </div>
+              ) : (
+                <div className="paste-preview-wrap">
+                  <span className="paste-text-snippet">
+                    {textPreview(entry.content)}
+                  </span>
+                </div>
               )}
-
-              <span className="paste-item-text">
-                {entry.type === "image"
-                  ? "Image"
-                  : entry.type === "file"
-                    ? filePreview(entry.content)
-                    : textPreview(entry.content)}
-              </span>
 
               <span className="paste-item-meta">
                 {entry.pinned && (

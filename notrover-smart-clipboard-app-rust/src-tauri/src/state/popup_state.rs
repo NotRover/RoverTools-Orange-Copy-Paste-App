@@ -8,7 +8,7 @@ pub(crate) const CURSOR_POPUP_W: f64 = 340.0;
 pub(crate) const CURSOR_POPUP_H: f64 = 260.0;
 
 pub(crate) const PASTE_POPUP_W: f64 = 340.0;
-pub(crate) const PASTE_POPUP_H: f64 = 380.0;
+pub(crate) const PASTE_POPUP_H: f64 = 460.0;
 
 //  Event payloads
 

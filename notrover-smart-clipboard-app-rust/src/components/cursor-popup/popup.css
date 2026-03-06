@@ -78,7 +78,7 @@ body {
   height: 100%;
 }
 
-/* Container */
+/* ── Container ── */
 
 .popup-container {
   background: var(--bg);
@@ -112,7 +112,7 @@ body {
   }
 }
 
-/* Header */
+/* ── Header ── */
 
 .popup-header {
   display: flex;
@@ -128,13 +128,13 @@ body {
 }
 
 .popup-title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text);
 }
 
 .popup-type-badge {
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 600;
   color: var(--text-muted);
   background: var(--surface);
@@ -166,7 +166,7 @@ body {
   color: #fff;
 }
 
-/* Divider */
+/* ── Divider ── */
 
 .popup-divider {
   height: 1px;
@@ -174,12 +174,12 @@ body {
   margin: 0 2px;
 }
 
-/* Preview */
+/* ── Preview ── */
 
 .popup-preview {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   padding: 8px 10px;
   flex: 1;
   min-height: 0;
@@ -191,6 +191,10 @@ body {
 .popup-preview::-webkit-scrollbar {
   width: 3px;
 }
+.popup-preview::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
 .popup-preview::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 2px;
@@ -201,21 +205,23 @@ body {
   width: 100%;
   max-height: 100px;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: 5px;
   margin-bottom: 6px;
-  background: #141424;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
 }
 
 .popup-preview-text {
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
   word-break: break-word;
   white-space: pre-wrap;
   margin: 0;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
 }
 
-/* Actions */
+/* ── Actions ── */
 
 .popup-actions {
   display: flex;
@@ -228,10 +234,10 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 0;
-  border: none;
+  padding: 7px 0;
+  border: 1px solid var(--border);
   border-radius: var(--radius-xs);
-  background: var(--surface-hover);
+  background: var(--surface);
   color: var(--text);
   font-size: 11.5px;
   font-weight: 500;
@@ -246,21 +252,24 @@ body {
 }
 
 .popup-action-btn:not(:disabled):hover {
-  background: var(--accent-dim-strong);
+  border-color: var(--accent);
+  background: var(--accent-dim);
   color: var(--accent);
 }
 
 .popup-action-btn--active {
   color: var(--accent);
-  background: var(--accent-dim-strong);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .popup-action-btn--danger:not(:disabled):hover {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
 }
 
-/* Deleted state */
+/* ── Deleted state ── */
 
 .popup-deleted-state {
   display: flex;
