@@ -128,7 +128,7 @@ pub fn run() {
             crate::clipboard::commands::paste_entry,
             crate::clipboard::commands::get_image_file_preview,
             crate::clipboard::commands::get_video_file_preview,
-            crate::runtime::commands::close_cursor_popup,
+            crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,
         ])

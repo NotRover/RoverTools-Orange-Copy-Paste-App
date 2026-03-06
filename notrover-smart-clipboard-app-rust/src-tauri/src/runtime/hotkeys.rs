@@ -9,7 +9,7 @@ use crate::{
     clipboard::history::{ClipboardEntry, ClipboardHistory, EntryKind},
     runtime::platform,
     state::{
-        CursorPopupPayload, PastePopupPayload, CURSOR_POPUP_H, CURSOR_POPUP_W, PASTE_POPUP_H,
+        CopyPopupPayload, PastePopupPayload, COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H,
         PASTE_POPUP_W,
     },
 };
@@ -47,12 +47,12 @@ fn entry_kind_label(kind: &EntryKind) -> &'static str {
     }
 }
 
-fn show_cursor_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
-    let (px, py) = platform::popup_position(CURSOR_POPUP_W as i32, CURSOR_POPUP_H as i32);
+fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
+    let (px, py) = platform::popup_position(COPY_POPUP_W as i32, COPY_POPUP_H as i32);
 
-    if let Some(win) = app.get_webview_window("cursor-popup") {
+    if let Some(win) = app.get_webview_window("copy-popup") {
         let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
-        let payload = CursorPopupPayload {
+        let payload = CopyPopupPayload {
             kind: entry_kind_label(&entry.kind).to_string(),
             content: entry.content.clone(),
         };
@@ -117,7 +117,7 @@ pub(crate) fn register_global_shortcuts(
 }
 
 fn handle_copy_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHistory>>) {
-    if toggle_popup_if_visible(&app, "cursor-popup") {
+    if toggle_popup_if_visible(&app, "copy-popup") {
         return;
     }
 
@@ -142,7 +142,7 @@ fn handle_copy_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHisto
         if inserted {
             let _ = app.emit("clipboard:new-entry", &entry);
         }
-        show_cursor_popup(&app, &entry);
+        show_copy_popup(&app, &entry);
     });
 }
 

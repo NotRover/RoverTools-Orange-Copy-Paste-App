@@ -4,8 +4,8 @@ use crate::runtime::popup_windows::hide_popup;
 use tauri::Manager;
 
 #[tauri::command]
-pub fn close_cursor_popup(app: tauri::AppHandle) {
-    hide_popup(&app, "cursor-popup");
+pub fn close_copy_popup(app: tauri::AppHandle) {
+    hide_popup(&app, "copy-popup");
 }
 
 #[tauri::command]
