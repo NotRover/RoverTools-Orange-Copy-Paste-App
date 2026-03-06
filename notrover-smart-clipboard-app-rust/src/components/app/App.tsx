@@ -431,6 +431,8 @@ const App: React.FC = () => {
       setEntries([...DEMO_CLIPBOARD_ENTRIES, ...realEntriesWithoutDemoIds]);
     });
 
+    let unlistenDeleted: (() => void) | undefined;
+
     listen<ClipboardEntry>("clipboard:new-entry", (event) => {
       if (cancelled) return;
       setEntries((prev) => {
@@ -442,9 +444,18 @@ const App: React.FC = () => {
       else unlisten = fn;
     });
 
+    listen<string>("clipboard:entry-deleted", (event) => {
+      if (cancelled) return;
+      setEntries((prev) => prev.filter((e) => e.id !== event.payload));
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenDeleted = fn;
+    });
+
     return () => {
       cancelled = true;
       unlisten?.();
+      unlistenDeleted?.();
     };
   }, []);
 

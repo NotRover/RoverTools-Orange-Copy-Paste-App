@@ -71,8 +71,13 @@ pub fn get_history(state: State<'_, AppState>) -> Vec<ClipboardEntry> {
 }
 
 #[tauri::command]
-pub fn delete_entry(id: String, state: State<'_, AppState>) -> bool {
-    state.history.lock().remove(&id)
+pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    use tauri::Emitter;
+    let removed = state.history.lock().remove(&id);
+    if removed {
+        let _ = app.emit("clipboard:entry-deleted", &id);
+    }
+    removed
 }
 
 #[tauri::command]
