@@ -360,7 +360,10 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         <div className="sort-dropdown" ref={sortRef}>
           <button
             className={`sort-dropdown-trigger${sortOpen ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() => setSortOpen((v) => !v)}
+            onClick={() => {
+              if (!sortOpen) document.dispatchEvent(new Event("tooltip:hide"));
+              setSortOpen((v) => !v);
+            }}
             data-tooltip="Sort order"
             data-tooltip-pos="below"
           >

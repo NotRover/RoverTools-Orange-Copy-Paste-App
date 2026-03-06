@@ -159,7 +159,6 @@ body {
   height: 100%;
   overflow: hidden;
   position: relative;
-  padding-right: 6px;
 }
 
 /*  Top bar  */
@@ -168,7 +167,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 8px 8px 14px;
+  padding: 8px 14px 8px 14px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }

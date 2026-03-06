@@ -33,6 +33,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       </svg>
     </div>
 
+    <hr className="sidebar-divider" />
+
     {/* Top nav */}
     <nav className="sidebar-nav">
       <button

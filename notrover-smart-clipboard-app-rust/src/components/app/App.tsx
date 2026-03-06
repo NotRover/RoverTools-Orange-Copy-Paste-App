@@ -291,8 +291,7 @@ const WindowControls: React.FC = () => {
       <button
         className="win-btn win-btn--min"
         onClick={() => win.minimize()}
-        data-tooltip="Minimise"
-        data-tooltip-pos="below"
+        title="Minimise"
       >
         <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
           <rect
@@ -308,8 +307,7 @@ const WindowControls: React.FC = () => {
       <button
         className="win-btn win-btn--max"
         onClick={() => (maximized ? win.unmaximize() : win.maximize())}
-        data-tooltip={maximized ? "Restore" : "Maximise"}
-        data-tooltip-pos="below"
+        title={maximized ? "Restore" : "Maximise"}
       >
         {maximized ? (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
@@ -350,8 +348,7 @@ const WindowControls: React.FC = () => {
       <button
         className="win-btn win-btn--close"
         onClick={() => win.close()}
-        data-tooltip="Close"
-        data-tooltip-pos="below"
+        title="Close"
       >
         <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
           <line

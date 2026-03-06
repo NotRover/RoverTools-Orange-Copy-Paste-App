@@ -135,11 +135,18 @@ export default function TooltipPortal() {
       }
     };
 
+    const onHide = () => {
+      setTip(null);
+      lastEl = null;
+    };
+
     document.addEventListener("mouseover", onOver, true);
     document.addEventListener("mouseout", onOut, true);
+    document.addEventListener("tooltip:hide", onHide);
     return () => {
       document.removeEventListener("mouseover", onOver, true);
       document.removeEventListener("mouseout", onOut, true);
+      document.removeEventListener("tooltip:hide", onHide);
       lastEl = null;
     };
   }, []);
