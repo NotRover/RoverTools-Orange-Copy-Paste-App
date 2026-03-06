@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import type { ClipboardEntry } from "../../../types";
 import { filePaths } from "../../../types";
-import { EntryCard } from "../clipboard-screen/ClipboardScreen";
+import { EntryCard } from "../clipboard-screen/entry-card/EntryCard";
 import "./SearchScreen.css";
 
 // Type filter
