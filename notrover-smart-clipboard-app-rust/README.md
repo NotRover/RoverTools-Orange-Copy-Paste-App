@@ -20,17 +20,26 @@ It captures copied text/images/files into history, shows quick popups near the c
   - Image entries (stored as data URLs)
   - File entries (single and multiple files)
   - Multiple image files (with thumbnail previews)
+  - Video files (with custom in-card player — play/pause, seek, mute only)
 - **Clipboard screen:**
-  - Masonry-style card grid (Pinterest-like layout)
+  - **Day-grouped timeline** — entries grouped by date with collapsible day sections and dot-rail navigation
+  - Masonry-style card grid (Pinterest-like layout) and list layout — toggle persisted to `localStorage`
+  - **Sort controls** — sort dropdown with: Newest, Oldest, A → Z, Z → A, Type (text/file/image); sort persisted to `localStorage`
   - Click any card to copy it back to clipboard
+  - **Pin entries** — pin important entries so they survive clear-all; visual "Pinned" chip on pinned cards
   - Type chip (Text / Image / File / Files / Images) acts as expand toggle for multi-file entries
   - Compact preview of multi-file entries (first 3 names + count)
   - Full expanded file list with per-file thumbnails
-  - Relative timestamp shown in card footer
-  - Subtle "Copied" feedback on card click
-  - Search/filter bar to filter text entries by content
-  - Delete individual entries
+  - Relative timestamp shown in card footer, refreshed every 15 s
+  - Subtle "Copied" and "Pinned" feedback animations on cards
+  - Right-click context menu (CardMenu) per entry: copy, pin/unpin, delete
+  - Search/filter screen to filter text entries by content
+  - **Clear all** button with 5-second undo toast — pinned entries are preserved
   - Duplicate suppression — copying from history does not re-add the entry
+- **Video player (custom):**
+  - Replaces native browser controls to remove unwanted menu items (Download, PiP, Playback speed)
+  - Controls overlay (play/pause, seek bar, mute) appears on hover
+  - Right-click context menu suppressed on the video element
 - **Paste popup** (`Ctrl + Shift + V`):
   - Shows 5 most recent entries
   - Closes on focus loss (blur) or close button
@@ -43,7 +52,7 @@ It captures copied text/images/files into history, shows quick popups near the c
 - **Settings screen** (placeholder, to be filled)
 - **Shortcuts screen** — documents all app shortcuts and interactions
 - **Status pill** — bottom-right Obsidian-style bar showing text / image / file / total counts
-- **Dark & Light mode** — toggle persisted to `localStorage`, shared across main window and popups
+- **Dark & Light mode** — toggle persisted to `localStorage`, shared across main window and popups; follows OS preference automatically when no manual override is set
 - **IPC command surface** exposed to frontend via Tauri `invoke`
 
 ---
@@ -124,7 +133,7 @@ The backend is organized by **feature/domain**, not by technical layer alone.
 - `history.rs`: in-memory clipboard history model and operations
 - `image.rs`: image clipboard format handling + data URL conversion
 - `files.rs`: Windows `CF_HDROP` read/write for single and multiple file paths
-- `commands.rs`: Tauri IPC commands for clipboard actions (get/delete/clear/copy/paste) and clipboard read/write helpers
+- `commands.rs`: Tauri IPC commands for clipboard actions (get/delete/clear/copy/paste/pin/unpin) and clipboard read/write helpers
 
 ### 2) `runtime` module (OS/runtime integrations)
 
@@ -156,8 +165,15 @@ src/components/
 │  ├─ App.tsx                    ← root state, layout, screen routing, theme
 │  ├─ App.css                    ← global CSS variables (dark/light), layout
 │  ├─ clipboard-screen/
-│  │  ├─ ClipboardScreen.tsx     ← entry grid, EntryCard, search
-│  │  └─ ClipboardScreen.css
+│  │  ├─ ClipboardScreen.tsx     ← day-grouped timeline, sort controls, layout toggle, clear-all
+│  │  ├─ ClipboardScreen.css
+│  │  └─ entry-card/
+│  │     ├─ EntryCard.tsx        ← per-entry card (text/image/file/video previews, chips, footer)
+│  │     ├─ EntryCard.css
+│  │     └─ VideoPlayer.tsx      ← custom video player (play/pause, seek, mute; no native controls)
+│  ├─ search-screen/
+│  │  ├─ SearchScreen.tsx        ← full-text search/filter across history
+│  │  └─ SearchScreen.css
 │  ├─ settings-screen/
 │  │  ├─ SettingsScreen.tsx      ← placeholder
 │  │  └─ SettingsScreen.css
@@ -167,9 +183,14 @@ src/components/
 │  ├─ sidebar/
 │  │  ├─ Sidebar.tsx             ← nav, theme toggle, settings button
 │  │  └─ Sidebar.css
-│  └─ status-pill/
-│     ├─ StatusPill.tsx          ← entry type counts bar
-│     └─ StatusPill.css
+│  ├─ status-pill/
+│  │  ├─ StatusPill.tsx          ← entry type counts bar
+│  │  └─ StatusPill.css
+│  ├─ card-menu/
+│  │  ├─ CardMenu.tsx            ← right-click context menu (copy/pin/delete)
+│  │  └─ CardMenu.css
+│  └─ toast/
+│     └─ ToastNotification.tsx   ← undo toast for clear-all
 ├─ cursor-popup/                 ← standalone OS window
 │  ├─ CursorPopup.tsx
 │  ├─ cursor-popup.html
@@ -246,9 +267,20 @@ notrover-smart-clipboard-app-rust/
 
 ---
 
+## localStorage Keys
+
+| Key         | Values                                                     | Purpose                      |
+| ----------- | ---------------------------------------------------------- | ---------------------------- |
+| `sc-theme`  | `"dark"` \| `"light"`                                      | User's manual theme override |
+| `sc-layout` | `"masonry"` \| `"list"`                                    | Clipboard screen layout mode |
+| `sc-sort`   | `"newest"` \| `"oldest"` \| `"a-z"` \| `"z-a"` \| `"type"` | Active sort order            |
+
+---
+
 ## Notes
 
 - The app is Windows-first; clipboard file support (`CF_HDROP`), cursor position, and monitor work area all use `windows-sys` directly.
 - Popup windows use `transparent: true` + `decorations: false` + `shadow: false` with a CSS-padded body to achieve clean rounded corners without OS border artifacts.
-- Theme (`dark`/`light`) is stored in `localStorage` under the key `sc-theme` and read by both popup windows on focus.
+- Theme (`dark`/`light`) is stored in `localStorage` under `sc-theme` and read by both popup windows on focus; falls back to the OS `prefers-color-scheme` media query when no manual override is set.
 - Release profile in `src-tauri/Cargo.toml` is optimized for smaller binaries (`opt-level = "z"`, `lto`, `strip`).
+- The custom `VideoPlayer` component deliberately suppresses the native browser context menu on `<video>` to avoid exposing Download, Picture-in-Picture, and Playback speed controls that don't belong in a clipboard manager.
