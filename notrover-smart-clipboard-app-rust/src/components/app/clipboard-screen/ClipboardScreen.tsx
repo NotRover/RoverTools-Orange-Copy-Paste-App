@@ -685,13 +685,18 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
       >
         <div className="timeline-wrap">
-          {/* Orange vertical rail */}
-          <div className="timeline-rail" />
-
-          {/* Day groups */}
           <div className="timeline-groups">
-            {dayGroups.map((group) => (
-              <div key={group.key} className="timeline-group">
+            {dayGroups.map((group, idx) => (
+              <div
+                key={group.key}
+                className={`timeline-group${
+                  dayGroups.length === 1
+                    ? " timeline-group--only"
+                    : idx === dayGroups.length - 1
+                      ? " timeline-group--last"
+                      : ""
+                }`}
+              >
                 {/* Day marker */}
                 <div className="timeline-day-row">
                   <div className="timeline-day-dot" />
