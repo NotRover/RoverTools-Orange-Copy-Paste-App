@@ -236,7 +236,7 @@ const CursorPopup: React.FC = () => {
             </button>
           </div>
 
-          <div className="popup-divider" />
+          {/* <div className="popup-divider" /> */}
 
           {/* Preview */}
           <div className="popup-preview">
@@ -272,7 +272,7 @@ const CursorPopup: React.FC = () => {
             )}
           </div>
 
-          <div className="popup-divider" />
+          {/* <div className="popup-divider" /> */}
 
           {/* Actions */}
           <div className="popup-actions">

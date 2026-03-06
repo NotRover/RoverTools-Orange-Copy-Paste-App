@@ -130,14 +130,14 @@ body {
 }
 
 .paste-count {
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-muted);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0 5px;
-  line-height: 16px;
+  border-radius: 6px;
+  padding: 3px 8px;
+  line-height: 1;
   letter-spacing: 0.2px;
 }
 
@@ -156,7 +156,7 @@ body {
 
 .paste-tab {
   font-size: 10px;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
   color: var(--text-muted);
   background: transparent;
@@ -280,7 +280,7 @@ body {
 .paste-item:hover,
 .paste-item--selected {
   border-color: var(--accent);
-  background: var(--accent-dim);
+  /* background: var(--accent-dim); */
 }
 
 .paste-item:active {
@@ -308,8 +308,8 @@ body {
 
 .paste-item:hover .paste-key-badge,
 .paste-item--selected .paste-key-badge {
-  border-color: var(--accent);
-  background: var(--accent-dim-strong);
+  /* border-color: var(--accent); */
+  /* background: var(--accent-dim-strong); */
   color: var(--accent);
 }
 
@@ -331,8 +331,8 @@ body {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 5px;
   background: var(--surface-hover);
   border: 1px solid var(--border);
@@ -341,8 +341,8 @@ body {
 
 .paste-item:hover .paste-item-icon,
 .paste-item--selected .paste-item-icon {
-  border-color: transparent;
-  background: var(--accent-dim-strong);
+  /* border-color: transparent; */
+  /* background: var(--accent-dim-strong); */
   color: var(--accent);
 }
 
@@ -452,8 +452,8 @@ body {
 /* ── Image thumbnail ── */
 
 .paste-thumb {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 5px;
   object-fit: cover;
   flex-shrink: 0;

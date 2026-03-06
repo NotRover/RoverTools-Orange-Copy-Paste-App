@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./pastePopup.css";
@@ -40,6 +40,32 @@ interface PastePayload {
 function textPreview(content: string, max = 60): string {
   const line = content.replace(/[\r\n]+/g, " ").trim();
   return line.length > max ? line.slice(0, max) + "…" : line;
+}
+
+const IMAGE_EXTS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "svg",
+  "ico",
+  "tiff",
+  "tif",
+  "avif",
+  "heic",
+  "heif",
+]);
+
+function fileExt(path: string): string {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
+function isImagePath(path: string): boolean {
+  return IMAGE_EXTS.has(fileExt(path));
 }
 
 function fileNameFromPath(path: string): string {
@@ -82,6 +108,9 @@ const PastePopup: React.FC = () => {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [slots, setSlots] = useState(readSlots);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [filePreviews, setFilePreviews] = useState<
+    Record<string, string | null>
+  >({});
 
   const entries = useMemo(() => {
     const src = tab === "pinned" ? pinnedAll : recentAll;
@@ -92,6 +121,34 @@ const PastePopup: React.FC = () => {
   useEffect(() => {
     if (visible) resizePopup(entries.length);
   }, [entries.length, visible]);
+
+  // Load image previews for file entries that are images
+  useEffect(() => {
+    let active = true;
+    const toLoad = entries.filter((e) => {
+      if (e.type !== "file") return false;
+      const paths = getFilePaths(e.content);
+      return paths.length === 1 && isImagePath(paths[0]);
+    });
+    if (toLoad.length === 0) return;
+    Promise.all(
+      toLoad.map((e) => {
+        const path = getFilePaths(e.content)[0];
+        return invoke<string | null>("get_image_file_preview", { path })
+          .then((p) => [e.id, p ?? convertFileSrc(path)] as const)
+          .catch(() => [e.id, convertFileSrc(path)] as const);
+      }),
+    ).then((results) => {
+      if (active)
+        setFilePreviews((prev) => ({
+          ...prev,
+          ...Object.fromEntries(results),
+        }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [entries]);
 
   // Sync theme
   useEffect(() => {
@@ -267,7 +324,7 @@ const PastePopup: React.FC = () => {
         </button>
       </div>
 
-      <div className="paste-divider" />
+      {/* <div className="paste-divider" /> */}
 
       {entries.length === 0 ? (
         <div className="paste-empty">
@@ -327,24 +384,38 @@ const PastePopup: React.FC = () => {
                     const paths = getFilePaths(entry.content);
                     const isMulti = paths.length > 1;
                     const isExpanded = expandedIds.has(entry.id);
+                    const singleIsImage =
+                      !isMulti && paths[0] && isImagePath(paths[0]);
+                    const thumbSrc = singleIsImage
+                      ? (filePreviews[entry.id] ?? null)
+                      : null;
                     return (
                       <>
                         <div className="paste-preview-wrap">
-                          <span className="paste-item-icon">
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                              <polyline points="14 2 14 8 20 8" />
-                            </svg>
-                          </span>
+                          {singleIsImage && thumbSrc ? (
+                            <img
+                              className="paste-thumb"
+                              src={thumbSrc}
+                              alt=""
+                              draggable={false}
+                            />
+                          ) : (
+                            <span className="paste-item-icon">
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                <polyline points="14 2 14 8 20 8" />
+                              </svg>
+                            </span>
+                          )}
                           <span className="paste-filename">
                             {isMulti
                               ? `${paths.length} files`
