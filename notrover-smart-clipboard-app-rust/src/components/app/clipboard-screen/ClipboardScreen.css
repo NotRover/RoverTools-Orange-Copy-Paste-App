@@ -235,6 +235,8 @@
 
 .timeline-group-body--collapsed > div {
   visibility: hidden;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
 /* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
