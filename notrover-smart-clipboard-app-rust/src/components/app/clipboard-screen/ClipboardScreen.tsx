@@ -470,6 +470,131 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
 
 type ClipboardLayout = "masonry" | "list";
 
+// Smart masonry helpers 
+
+/** Estimate the rendered height of a card (in px) based on its content. */
+function estimateCardHeight(entry: ClipboardEntry): number {
+  const CARD_GAP = 10;
+  const FOOTER_HEIGHT = 30;
+  const BODY_PADDING = 18; // top + bottom card-body padding
+  const LINE_HEIGHT = 19; // ~12.5px font * 1.55 line-height
+
+  let h = BODY_PADDING + FOOTER_HEIGHT + CARD_GAP;
+
+  if (entry.type === "image") {
+    // Image preview media block
+    h += 160;
+  } else if (entry.type === "text") {
+    const textLen = entry.content.length;
+    // Roughly 25 chars per line at typical column width
+    const lines = Math.min(Math.ceil(Math.min(textLen, 160) / 25), 8);
+    h += lines * LINE_HEIGHT;
+  } else if (entry.type === "file") {
+    const paths = entry.content.split("\n").filter(Boolean);
+    const imageCount = paths.filter(isImageFile).length;
+    if (paths.length > 1 && imageCount > 0) {
+      // Multi-image thumbnail strip
+      h += 80;
+    } else if (paths.length === 1 && paths[0] && isImageFile(paths[0])) {
+      // Single image file preview
+      h += 160;
+    } else if (paths.length === 1 && paths[0] && isVideoFile(paths[0])) {
+      // Single video file
+      h += 140;
+    }
+    // File preview lines (up to 3 filenames shown)
+    if (paths.length > 1) {
+      h += Math.min(paths.length, 3) * 18 + (paths.length > 3 ? 16 : 0);
+    } else {
+      h += 18; // single filename
+    }
+  }
+
+  if (entry.pinned) h += 4; // pinned chip adds a small amount
+
+  return h;
+}
+
+/**
+ * Distribute entries into `numCols` balanced columns while preserving
+ * temporal order top-to-bottom (newer items stay near the top).
+ *
+ * Items are processed in row-sized batches. Within each batch the tallest
+ * card is placed in the currently shortest column, keeping columns balanced
+ * without pushing newer items below older ones.
+ */
+function distributeMasonry(
+  entries: ClipboardEntry[],
+  numCols: number,
+): ClipboardEntry[][] {
+  const cols: ClipboardEntry[][] = Array.from({ length: numCols }, () => []);
+  const heights = new Array<number>(numCols).fill(0);
+
+  for (let i = 0; i < entries.length; i += numCols) {
+    const batch = entries.slice(i, i + numCols);
+
+    // Sort batch by estimated height descending (tallest first)
+    const ranked = batch
+      .map((entry) => ({ entry, h: estimateCardHeight(entry) }))
+      .sort((a, b) => b.h - a.h);
+
+    // Column indices sorted by current height ascending (shortest first)
+    const colOrder = Array.from({ length: numCols }, (_, ci) => ci)
+      .sort((a, b) => heights[a] - heights[b]);
+
+    // Assign tallest card → shortest column
+    for (let j = 0; j < ranked.length; j++) {
+      const col = colOrder[j];
+      cols[col].push(ranked[j].entry);
+      heights[col] += ranked[j].h;
+    }
+  }
+
+  return cols;
+}
+
+/** Responsive MasonryGrid that distributes cards into balanced columns. */
+const MasonryGrid: React.FC<{
+  entries: ClipboardEntry[];
+  onCopy: (id: string) => void;
+  onDelete: (id: string) => void;
+  onPin: (id: string, shouldPin: boolean) => void;
+}> = ({ entries, onCopy, onDelete, onPin }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [numCols, setNumCols] = useState(2);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => {
+      const w = e.contentRect.width;
+      setNumCols(w >= 620 ? 3 : 2);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const columns = distributeMasonry(entries, numCols);
+
+  return (
+    <div className="entry-grid" ref={containerRef}>
+      {columns.map((col, i) => (
+        <div className="entry-grid__col" key={i}>
+          {col.map((entry) => (
+            <EntryCard
+              key={entry.id}
+              entry={entry}
+              onCopy={onCopy}
+              onDelete={onDelete}
+              onPin={onPin}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 // Day grouping helpers 
 
 function toLocalDateKey(ts: number): string {
@@ -740,19 +865,21 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                 {/* Cards for this day — collapses via grid-template-rows */}
                 <div className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}>
                   <div className="timeline-group-body__inner">
-                    <div
-                      className={layout === "masonry" ? "entry-grid" : "entry-list"}
-                    >
-                      {group.entries.map((entry) => (
-                        <EntryCard
-                          key={entry.id}
-                          entry={entry}
-                          onCopy={onCopy}
-                          onDelete={onDelete}
-                          onPin={onPin}
-                        />
-                      ))}
-                    </div>
+                    {layout === "masonry" ? (
+                      <MasonryGrid entries={group.entries} onCopy={onCopy} onDelete={onDelete} onPin={onPin} />
+                    ) : (
+                      <div className="entry-list">
+                        {group.entries.map((entry) => (
+                          <EntryCard
+                            key={entry.id}
+                            entry={entry}
+                            onCopy={onCopy}
+                            onDelete={onDelete}
+                            onPin={onPin}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
