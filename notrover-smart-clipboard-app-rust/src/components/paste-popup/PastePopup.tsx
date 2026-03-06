@@ -68,6 +68,47 @@ function isImagePath(path: string): boolean {
   return IMAGE_EXTS.has(fileExt(path));
 }
 
+const VIDEO_EXTS = new Set([
+  "mp4",
+  "webm",
+  "mov",
+  "mkv",
+  "avi",
+  "wmv",
+  "m4v",
+  "mpeg",
+  "mpg",
+]);
+function isVideoPath(path: string): boolean {
+  return VIDEO_EXTS.has(fileExt(path));
+}
+
+const DOC_EXTS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "odt",
+  "ods",
+  "odp",
+  "rtf",
+  "csv",
+  "md",
+  "txt",
+  "epub",
+]);
+function isDocPath(path: string): boolean {
+  return DOC_EXTS.has(fileExt(path));
+}
+
+function isUrl(text: string): boolean {
+  const t = text.trim();
+  return !t.includes("\n") && /^https?:\/\/.{4,}/.test(t);
+}
+
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
@@ -379,6 +420,47 @@ const PastePopup: React.FC = () => {
                     />
                     <span className="paste-filename">Image</span>
                   </div>
+                ) : entry.type === "text" ? (
+                  <div className="paste-preview-wrap">
+                    <span className="paste-item-icon">
+                      {isUrl(entry.content) ? (
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                        </svg>
+                      ) : (
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" y1="13" x2="8" y2="13" />
+                          <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="paste-filename">
+                      {isUrl(entry.content)
+                        ? "URL"
+                        : textPreview(entry.content)}
+                    </span>
+                  </div>
                 ) : entry.type === "file" ? (
                   (() => {
                     const paths = getFilePaths(entry.content);
@@ -401,19 +483,78 @@ const PastePopup: React.FC = () => {
                             />
                           ) : (
                             <span className="paste-item-icon">
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                                <polyline points="14 2 14 8 20 8" />
-                              </svg>
+                              {paths.every((p) => {
+                                const n = p.split(/[\\/]/).pop() ?? p;
+                                return (
+                                  !n.includes(".") ||
+                                  p.endsWith("/") ||
+                                  p.endsWith("\\")
+                                );
+                              }) ? (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                </svg>
+                              ) : paths.every(isVideoPath) ? (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polygon points="23 7 16 12 23 17 23 7" />
+                                  <rect
+                                    x="1"
+                                    y="5"
+                                    width="15"
+                                    height="14"
+                                    rx="2"
+                                    ry="2"
+                                  />
+                                </svg>
+                              ) : paths.length === 1 && isDocPath(paths[0]) ? (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <polyline points="14 2 14 8 20 8" />
+                                  <line x1="16" y1="13" x2="8" y2="13" />
+                                  <line x1="16" y1="17" x2="8" y2="17" />
+                                </svg>
+                              ) : (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                  <polyline points="14 2 14 8 20 8" />
+                                </svg>
+                              )}
                             </span>
                           )}
                           <span className="paste-filename">
