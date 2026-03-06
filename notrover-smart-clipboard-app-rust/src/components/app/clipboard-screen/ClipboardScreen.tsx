@@ -447,7 +447,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onCopy, onDelete, o
           ) : (
             <span className="card-time">{relTime}</span>
           )}
-        </div>
+                    </div>
       </div>
 
       {/* Right-click context menu */}
@@ -739,18 +739,20 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
                 {/* Cards for this day — collapses via grid-template-rows */}
                 <div className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}>
-                  <div
-                    className={layout === "masonry" ? "entry-grid" : "entry-list"}
-                  >
-                    {group.entries.map((entry) => (
-                      <EntryCard
-                        key={entry.id}
-                        entry={entry}
-                        onCopy={onCopy}
-                        onDelete={onDelete}
-                        onPin={onPin}
-                      />
-                    ))}
+                  <div className="timeline-group-body__inner">
+                    <div
+                      className={layout === "masonry" ? "entry-grid" : "entry-list"}
+                    >
+                      {group.entries.map((entry) => (
+                        <EntryCard
+                          key={entry.id}
+                          entry={entry}
+                          onCopy={onCopy}
+                          onDelete={onDelete}
+                          onPin={onPin}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
