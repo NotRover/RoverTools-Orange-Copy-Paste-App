@@ -22,6 +22,14 @@ pub fn resize_paste_popup(app: tauri::AppHandle, height: f64) {
 }
 
 #[tauri::command]
+pub fn resize_copy_popup(app: tauri::AppHandle, height: f64) {
+    if let Some(win) = app.get_webview_window("copy-popup") {
+        let w = crate::state::COPY_POPUP_W;
+        let _ = win.set_size(tauri::LogicalSize::new(w, height));
+    }
+}
+
+#[tauri::command]
 pub fn open_data_folder(app: tauri::AppHandle) -> bool {
     let Some(dir) = app.path().app_data_dir().ok() else {
         return false;

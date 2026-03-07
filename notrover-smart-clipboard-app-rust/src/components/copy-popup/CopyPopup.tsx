@@ -54,16 +54,37 @@ interface HistoryEntry {
   pinned: boolean;
 }
 
+// Layout constants (must match Rust COPY_POPUP_W)
+const BODY_PAD = 12; // body padding (6px * 2)
+const HEADER_H = 30; // header row
+const ACTIONS_H = 38; // action buttons row
+const CHROME_H = HEADER_H + ACTIONS_H + BODY_PAD + 24; // +gaps+padding
+const MIN_PREVIEW_H = 36;
+const MAX_PREVIEW_H = 140;
+
+function estimatePreviewHeight(kind: string, content: string, hasMedia: boolean): number {
+  if (hasMedia) return MAX_PREVIEW_H;
+  if (kind === "file") {
+    const count = content.split("\n").filter((l) => l.trim()).length;
+    return Math.min(Math.max(count * 18, MIN_PREVIEW_H), MAX_PREVIEW_H);
+  }
+  // text: estimate based on length
+  const lines = Math.ceil(content.length / 45); // rough chars per line
+  return Math.min(Math.max(lines * 18, MIN_PREVIEW_H), MAX_PREVIEW_H);
+}
+
 const CopyPopup: React.FC = () => {
   const [kind, setKind] = useState<"text" | "image" | "file">("text");
   const [content, setContent] = useState("");
   const [entryId, setEntryId] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  const [justPinned, setJustPinned] = useState<boolean | null>(null);
   const [visible, setVisible] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync theme
   useEffect(() => {
@@ -123,8 +144,12 @@ const CopyPopup: React.FC = () => {
     win
       .listen("tauri://blur", () => {
         if (cancelled) return;
-        setVisible(false);
-        invoke("close_copy_popup").catch(console.error);
+        // Delay so button clicks inside the popup can process first;
+        // transparent frameless windows on Windows can fire blur on click.
+        blurTimer.current = setTimeout(() => {
+          setVisible(false);
+          invoke("close_copy_popup").catch(console.error);
+        }, 200);
       })
       .then((fn) => {
         if (cancelled) fn();
@@ -156,26 +181,52 @@ const CopyPopup: React.FC = () => {
       .catch(() => setImagePreview(null));
   }, [kind, firstFile]);
 
+  // Dynamic resize based on content
+  useEffect(() => {
+    if (!visible) return;
+    const hasMedia =
+      kind === "image" ||
+      (kind === "file" && !!firstFile && (IMAGE_EXTS.has(fileExt(firstFile)) || VIDEO_EXTS.has(fileExt(firstFile))));
+    const previewH = estimatePreviewHeight(kind, content, hasMedia);
+    const totalH = CHROME_H + previewH;
+    invoke("resize_copy_popup", { height: totalH }).catch(console.error);
+  }, [visible, kind, content, firstFile]);
+
+  const cancelBlur = useCallback(() => {
+    if (blurTimer.current) {
+      clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+  }, []);
+
   const handleClose = useCallback(() => {
+    cancelBlur();
     setVisible(false);
     invoke("close_copy_popup").catch(console.error);
-  }, []);
+  }, [cancelBlur]);
 
   const handlePin = useCallback(async () => {
     if (!entryId) return;
+    cancelBlur();
     const cmd = pinned ? "unpin_entry" : "pin_entry";
     const ok = await invoke<boolean>(cmd, { id: entryId });
-    if (ok) setPinned(!pinned);
-  }, [entryId, pinned]);
+    if (ok) {
+      const newPinned = !pinned;
+      setPinned(newPinned);
+      setJustPinned(newPinned);
+      setTimeout(() => setJustPinned(null), 800);
+    }
+  }, [entryId, pinned, cancelBlur]);
 
   const handleDelete = useCallback(async () => {
     if (!entryId) return;
+    cancelBlur();
     await invoke("delete_entry", { id: entryId });
     setDeleted(true);
     setTimeout(() => {
       invoke("close_copy_popup").catch(console.error);
     }, 800);
-  }, [entryId]);
+  }, [entryId, cancelBlur]);
 
   // Preview
   const previewText =
@@ -212,6 +263,23 @@ const CopyPopup: React.FC = () => {
           </svg>
           <span>Removed from history</span>
         </div>
+      ) : justPinned !== null ? (
+        <div className={`popup-pinned-state${justPinned ? "" : " popup-pinned-state--off"}`}>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill={justPinned ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 17v5" />
+            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+          </svg>
+          <span>{justPinned ? "Pinned!" : "Unpinned"}</span>
+        </div>
       ) : (
         <>
           {/* Header */}
@@ -219,6 +287,9 @@ const CopyPopup: React.FC = () => {
             <div className="popup-header-left">
               <span className="popup-title">Copied</span>
               <EntryTypePill kind={displayKind} />
+              {kind === "file" && files.length > 1 && (
+                <span className="popup-file-count">{files.length} files</span>
+              )}
             </div>
             <button className="popup-close" onClick={handleClose}>
               <svg
@@ -319,6 +390,7 @@ const CopyPopup: React.FC = () => {
               <span>Delete</span>
             </button>
           </div>
+
         </>
       )}
     </div>
