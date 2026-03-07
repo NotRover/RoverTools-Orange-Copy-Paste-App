@@ -155,6 +155,27 @@ fn setup_runtime(
         .persist_history
         .store(persist_enabled, Ordering::Relaxed);
 
+    // Seed the close_to_tray flag from disk.
+    let close_to_tray_enabled = settings_file
+        .as_deref()
+        .map(|p| read_bool_setting(p, "close_to_tray"))
+        .unwrap_or(false);
+    app.state::<AppState>()
+        .close_to_tray
+        .store(close_to_tray_enabled, Ordering::Relaxed);
+
+    // Seed the start_minimized flag from disk.
+    let start_minimized_enabled = settings_file
+        .as_deref()
+        .map(|p| read_bool_setting(p, "start_minimized"))
+        .unwrap_or(false);
+    app.state::<AppState>()
+        .start_minimized
+        .store(start_minimized_enabled, Ordering::Relaxed);
+
+    // Set up system tray icon and menu.
+    crate::runtime::tray::setup_tray(app)?;
+
     // Background flush thread: coalesces rapid mutations into a single disk write.
     {
         let hist = Arc::clone(history);
@@ -207,11 +228,17 @@ pub fn run() {
         suppress_next_capture: Arc::clone(&suppress),
         persist_history: Arc::new(AtomicBool::new(false)),
         history_dirty: Arc::new(AtomicBool::new(false)),
+        close_to_tray: Arc::new(AtomicBool::new(false)),
+        start_minimized: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,
@@ -230,10 +257,29 @@ pub fn run() {
             crate::runtime::commands::resize_paste_popup,
             crate::runtime::commands::resize_copy_popup,
             crate::runtime::commands::open_data_folder,
+            crate::runtime::commands::get_autostart,
+            crate::runtime::commands::set_autostart,
         ])
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
-                window.app_handle().exit(0);
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let close_to_tray = window
+                        .app_handle()
+                        .state::<AppState>()
+                        .close_to_tray
+                        .load(Ordering::Relaxed);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    window.app_handle().exit(0);
+                }
+                _ => {}
             }
         })
         .setup(move |app| setup_runtime(app, &history, &suppress))

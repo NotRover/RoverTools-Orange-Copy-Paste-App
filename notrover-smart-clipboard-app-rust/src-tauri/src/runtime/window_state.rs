@@ -2,6 +2,7 @@
 //! on every move/resize so a hard kill still preserves the latest state.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use tauri::Manager;
 
 /// Minimum dimensions (physical pixels) below which we refuse to save or
@@ -69,6 +70,12 @@ pub fn restore(app: &tauri::App) {
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
+
+    let start_minimized = app
+        .state::<crate::AppState>()
+        .start_minimized
+        .load(Ordering::Relaxed);
+
     if let Some(geo) = load(app.handle()) {
         // Reject saved geometry that is suspiciously small (e.g. from a
         // minimised window state that slipped past the old guard).
@@ -78,20 +85,24 @@ pub fn restore(app: &tauri::App) {
         let _ = win.set_size(tauri::PhysicalSize::new(width, height));
         if is_position_on_any_monitor(&win, geo.x, geo.y, width, height) {
             let _ = win.set_position(tauri::PhysicalPosition::new(geo.x, geo.y));
-            let _ = win.show();
-            let _ = win.set_focus();
+            if !start_minimized {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
             // Re-apply after show — Windows may reset position during ShowWindow.
             let _ = win.set_position(tauri::PhysicalPosition::new(geo.x, geo.y));
         } else {
             // Saved position is off-screen; center on the primary monitor instead.
-            let _ = win.show();
-            let _ = win.center();
-            let _ = win.set_focus();
+            if !start_minimized {
+                let _ = win.show();
+                let _ = win.center();
+                let _ = win.set_focus();
+            }
         }
-        if geo.maximized {
+        if geo.maximized && !start_minimized {
             let _ = win.maximize();
         }
-    } else {
+    } else if !start_minimized {
         let _ = win.show();
         let _ = win.center();
         let _ = win.set_focus();
