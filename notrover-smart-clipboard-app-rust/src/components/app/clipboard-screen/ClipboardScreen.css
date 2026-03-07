@@ -631,6 +631,23 @@
   overflow: hidden;
 }
 
+/* When a card is expanded (file list toggled), remove fixed height constraints */
+.entry-list .entry-card.entry-card--expanded {
+  height: auto;
+  min-height: 76px;
+  max-height: none;
+  flex-direction: column;
+}
+
+.entry-list .entry-card.entry-card--expanded .card-body {
+  overflow: visible;
+}
+
+.entry-list .entry-card.entry-card--expanded .card-file-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
 /* Footer always pinned to the bottom of the card body */
 .entry-list .card-footer {
   margin-top: auto;
