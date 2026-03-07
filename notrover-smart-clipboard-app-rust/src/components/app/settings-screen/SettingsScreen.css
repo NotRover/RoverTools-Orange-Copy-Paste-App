@@ -9,6 +9,27 @@
   overflow-y: auto;
 }
 
+.settings-screen::-webkit-scrollbar {
+  width: 10px;
+}
+
+.settings-screen::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-screen::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
+.settings-screen::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
 .settings-header {
   display: flex;
   flex-direction: column;

@@ -138,7 +138,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
         <span>Delete</span>
       </button>
     </div>,
-    document.body
+    document.body,
   );
 };
 
