@@ -158,7 +158,7 @@ const SettingsScreen: React.FC = () => {
       <div className="settings-header">
         <h2 className="settings-title">Settings</h2>
         <p className="settings-subtitle">
-          Manage your Smart Clipboard preferences.
+          Manage your Orange Copy Paste preferences.
         </p>
       </div>
 
@@ -188,7 +188,8 @@ const SettingsScreen: React.FC = () => {
           <div className="settings-row-info">
             <span className="settings-row-label">Run on startup</span>
             <span className="settings-row-desc">
-              Automatically launch Smart Clipboard when you sign in to Windows.
+              Automatically launch Orange Copy Paste when you sign in to
+              Windows.
             </span>
           </div>
           <button

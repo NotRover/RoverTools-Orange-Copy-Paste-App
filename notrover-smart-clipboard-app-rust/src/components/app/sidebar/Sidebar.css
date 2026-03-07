@@ -16,8 +16,6 @@
   width: 36px;
   height: 36px;
   border-radius: var(--radius-sm);
-  background: var(--accent-dim);
-  color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;

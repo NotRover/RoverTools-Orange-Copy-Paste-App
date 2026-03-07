@@ -5,7 +5,7 @@ use tauri::{
 };
 
 pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let show_item = MenuItemBuilder::with_id("show", "Show Smart Clipboard").build(app)?;
+    let show_item = MenuItemBuilder::with_id("show", "Show Orange Copy Paste").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&show_item)
@@ -22,7 +22,7 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Smart Clipboard")
+        .tooltip("Orange Copy Paste")
         .on_menu_event(|app_handle, event| match event.id().as_ref() {
             "show" => {
                 if let Some(win) = app_handle.get_webview_window("main") {
