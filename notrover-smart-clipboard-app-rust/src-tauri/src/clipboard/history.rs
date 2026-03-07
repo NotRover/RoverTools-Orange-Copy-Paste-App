@@ -216,12 +216,21 @@ impl ClipboardHistory {
 
     /// Load pinned entries from a file and merge them into history.
     /// Any existing entries with matching IDs are replaced.
+    /// Advances the global ID counter past the highest loaded ID.
     pub fn load_pinned_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
         if !path.exists() {
             return Ok(());
         }
         let data = std::fs::read_to_string(path)?;
         let pinned: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
+
+        // Advance global ID counter past any loaded IDs to avoid collisions.
+        let max_id = pinned
+            .iter()
+            .filter_map(|e| e.id.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        let _ = NEXT_ID.fetch_max(max_id + 1, Ordering::Relaxed);
 
         // Remove entries with IDs that match loaded pinned entries
         let pinned_ids: std::collections::HashSet<_> = pinned.iter().map(|e| &e.id).collect();
@@ -243,6 +252,37 @@ impl ClipboardHistory {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(path, data)?;
+        Ok(())
+    }
+
+    /// Save the entire history (all entries) to a file.
+    pub fn save_all_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        let data = serde_json::to_string_pretty(&self.entries)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, data)?;
+        Ok(())
+    }
+
+    /// Load the full history from a file, replacing all current entries.
+    /// Advances the global ID counter past the highest loaded ID.
+    pub fn load_all_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let data = std::fs::read_to_string(path)?;
+        let loaded: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
+
+        // Advance global ID counter past any loaded IDs to avoid collisions.
+        let max_id = loaded
+            .iter()
+            .filter_map(|e| e.id.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        let _ = NEXT_ID.fetch_max(max_id + 1, Ordering::Relaxed);
+
+        self.entries = loaded;
         Ok(())
     }
 }

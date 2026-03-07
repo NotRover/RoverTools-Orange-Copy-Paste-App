@@ -12,6 +12,39 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::Manager;
 
+/// Return the system boot timestamp (seconds since UNIX epoch) so we can
+/// detect whether the OS was restarted between two app launches.
+#[cfg(windows)]
+fn system_boot_epoch_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // GetTickCount64 returns milliseconds since the last boot.
+    let uptime_secs =
+        unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000;
+    now_secs.saturating_sub(uptime_secs)
+}
+
+#[cfg(not(windows))]
+fn system_boot_epoch_secs() -> u64 {
+    0
+}
+
+/// Read a bool setting from the on-disk `settings.json`.
+fn read_bool_setting(settings_path: &std::path::Path, key: &str) -> bool {
+    if !settings_path.exists() {
+        return false;
+    }
+    let Ok(data) = std::fs::read_to_string(settings_path) else {
+        return false;
+    };
+    let map: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&data).unwrap_or_default();
+    map.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
 type SharedHistory = Arc<Mutex<ClipboardHistory>>;
 type SuppressFlag = Arc<AtomicBool>;
 
@@ -89,10 +122,41 @@ fn setup_runtime(
     history: &SharedHistory,
     suppress: &SuppressFlag,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Load pinned entries from disk before starting clipboard monitoring
     if let Ok(app_data) = app.path().app_data_dir() {
         let pinned_file: std::path::PathBuf = app_data.join("pinned_entries.json");
-        let _ = history.lock().load_pinned_from_file(&pinned_file);
+        let history_file: std::path::PathBuf = app_data.join("history.json");
+        let settings_file: std::path::PathBuf = app_data.join("settings.json");
+        let boot_file: std::path::PathBuf = app_data.join("boot_id.txt");
+
+        let persist_enabled = read_bool_setting(&settings_file, "persist_history");
+
+        if persist_enabled {
+            // Detect whether this is the same boot session.
+            let current_boot = system_boot_epoch_secs();
+            let previous_boot: u64 = std::fs::read_to_string(&boot_file)
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+
+            // Allow a small tolerance (±5 s) because GetTickCount64 has
+            // limited precision and the timestamp is computed at different times.
+            let same_boot = current_boot.abs_diff(previous_boot) < 5;
+
+            if same_boot && history_file.exists() {
+                // App restart within the same boot → restore full history.
+                let _ = history.lock().load_all_from_file(&history_file);
+            } else {
+                // System was rebooted → only load pinned entries.
+                let _ = history.lock().load_pinned_from_file(&pinned_file);
+            }
+
+            // Persist current boot timestamp for next launch.
+            let _ = std::fs::create_dir_all(&app_data);
+            let _ = std::fs::write(&boot_file, current_boot.to_string());
+        } else {
+            // Feature disabled → only load pinned entries (previous behaviour).
+            let _ = history.lock().load_pinned_from_file(&pinned_file);
+        }
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
@@ -132,6 +196,9 @@ pub fn run() {
             crate::clipboard::commands::paste_entry,
             crate::clipboard::commands::get_image_file_preview,
             crate::clipboard::commands::get_video_file_preview,
+            crate::clipboard::commands::get_setting,
+            crate::clipboard::commands::set_setting,
+            crate::clipboard::commands::save_history,
             crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,

@@ -76,13 +76,15 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
+        auto_save_history(&app, &state.history);
     }
     removed
 }
 
 #[tauri::command]
-pub fn clear_history(state: State<'_, AppState>) -> bool {
+pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     state.history.lock().clear();
+    auto_save_history(&app, &state.history);
     true
 }
 
@@ -90,10 +92,10 @@ pub fn clear_history(state: State<'_, AppState>) -> bool {
 pub fn pin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     let success = state.history.lock().pin(&id);
     if success {
-        // Auto-save pinned entries
         if let Some(path) = get_pinned_file_path(&app) {
             let _ = state.history.lock().save_pinned_to_file(&path);
         }
+        auto_save_history(&app, &state.history);
     }
     success
 }
@@ -102,10 +104,10 @@ pub fn pin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) 
 pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     let success = state.history.lock().unpin(&id);
     if success {
-        // Auto-save pinned entries
         if let Some(path) = get_pinned_file_path(&app) {
             let _ = state.history.lock().save_pinned_to_file(&path);
         }
+        auto_save_history(&app, &state.history);
     }
     success
 }
@@ -113,6 +115,79 @@ pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
 fn get_pinned_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     let app_data = app.path().app_data_dir().ok()?;
     Some(app_data.join("pinned_entries.json"))
+}
+
+pub(crate) fn get_history_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let app_data = app.path().app_data_dir().ok()?;
+    Some(app_data.join("history.json"))
+}
+
+pub(crate) fn get_settings_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let app_data = app.path().app_data_dir().ok()?;
+    Some(app_data.join("settings.json"))
+}
+
+/// Read a user setting from `settings.json`.  Returns `null` if missing.
+#[tauri::command]
+pub fn get_setting(key: String, app: tauri::AppHandle) -> Option<serde_json::Value> {
+    let path = get_settings_file_path(&app)?;
+    if !path.exists() {
+        return None;
+    }
+    let data = std::fs::read_to_string(&path).ok()?;
+    let map: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&data).unwrap_or_default();
+    map.get(&key).cloned()
+}
+
+/// Write a user setting to `settings.json`.
+#[tauri::command]
+pub fn set_setting(key: String, value: serde_json::Value, app: tauri::AppHandle) -> bool {
+    let Some(path) = get_settings_file_path(&app) else {
+        return false;
+    };
+    let mut map: serde_json::Map<String, serde_json::Value> = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|d| serde_json::from_str(&d).ok())
+            .unwrap_or_default()
+    } else {
+        serde_json::Map::new()
+    };
+    map.insert(key, value);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&map).unwrap_or_default(),
+    )
+    .is_ok()
+}
+
+/// Save the full history to disk (called from frontend on changes).
+#[tauri::command]
+pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    if let Some(path) = get_history_file_path(&app) {
+        state.history.lock().save_all_to_file(&path).is_ok()
+    } else {
+        false
+    }
+}
+
+/// Persist the full history to disk if the `persist_history` setting is
+/// enabled.  Called internally after every mutation (push / delete / clear /
+/// pin / unpin) so the on-disk file stays up-to-date.
+pub(crate) fn auto_save_history(app: &tauri::AppHandle, history: &crate::SharedHistory) {
+    let Some(settings_path) = get_settings_file_path(app) else {
+        return;
+    };
+    if !crate::read_bool_setting(&settings_path, "persist_history") {
+        return;
+    }
+    if let Some(path) = get_history_file_path(app) {
+        let _ = history.lock().save_all_to_file(&path);
+    }
 }
 
 #[tauri::command]
