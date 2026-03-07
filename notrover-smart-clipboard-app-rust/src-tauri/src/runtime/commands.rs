@@ -20,3 +20,27 @@ pub fn resize_paste_popup(app: tauri::AppHandle, height: f64) {
         let _ = win.set_size(tauri::LogicalSize::new(w, height));
     }
 }
+
+#[tauri::command]
+pub fn open_data_folder(app: tauri::AppHandle) -> bool {
+    let Some(dir) = app.path().app_data_dir().ok() else {
+        return false;
+    };
+    if !dir.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(&dir)
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&dir)
+            .spawn()
+            .is_ok()
+    }
+}

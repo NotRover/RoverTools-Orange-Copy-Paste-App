@@ -18,9 +18,23 @@ pub const MAX_HISTORY: usize = 100;
 /// Global monotonically increasing ID counter for clipboard entries.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-// Types
+/// Advance the global ID counter past any loaded IDs to avoid collisions.
+fn advance_id_past(entries: &[ClipboardEntry]) {
+    let max_id = entries
+        .iter()
+        .filter_map(|e| e.id.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0);
+    let _ = NEXT_ID.fetch_max(max_id + 1, Ordering::Relaxed);
+}
 
-/// The content kind of a clipboard entry.
+fn write_json_file(path: &std::path::Path, data: &str) -> Result<(), std::io::Error> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, data)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
@@ -48,50 +62,30 @@ pub struct ClipboardEntry {
 }
 
 impl ClipboardEntry {
-    fn next_id() -> String {
-        NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string()
-    }
-
-    fn now_ms() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-
-    /// Create a new **text** entry.
-    pub fn new_text(content: String) -> Self {
+    fn new(kind: EntryKind, content: String) -> Self {
         Self {
-            id: Self::next_id(),
-            kind: EntryKind::Text,
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string(),
+            kind,
             content,
-            timestamp: Self::now_ms(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
             pinned: false,
         }
     }
 
-    /// Create a new **image** entry from a PNG data-URL.
+    pub fn new_text(content: String) -> Self {
+        Self::new(EntryKind::Text, content)
+    }
+
     pub fn new_image(data_url: String) -> Self {
-        Self {
-            id: Self::next_id(),
-            kind: EntryKind::Image,
-            content: data_url,
-            timestamp: Self::now_ms(),
-            pinned: false,
-        }
+        Self::new(EntryKind::Image, data_url)
     }
 
-    /// Create a new **file-list** entry.
-    ///
     /// `content` stores newline-delimited absolute file paths.
     pub fn new_file(content: String) -> Self {
-        Self {
-            id: Self::next_id(),
-            kind: EntryKind::File,
-            content,
-            timestamp: Self::now_ms(),
-            pinned: false,
-        }
+        Self::new(EntryKind::File, content)
     }
 }
 
@@ -191,22 +185,11 @@ impl ClipboardHistory {
 
     /// Pin an entry by ID. Returns `true` if found and pinned.
     pub fn pin(&mut self, id: &str) -> bool {
-        if let Some(entry) = self.find_mut(id) {
-            entry.pinned = true;
-            true
-        } else {
-            false
-        }
+        self.find_mut(id).map(|e| e.pinned = true).is_some()
     }
 
-    /// Unpin an entry by ID. Returns `true` if found and unpinned.
     pub fn unpin(&mut self, id: &str) -> bool {
-        if let Some(entry) = self.find_mut(id) {
-            entry.pinned = false;
-            true
-        } else {
-            false
-        }
+        self.find_mut(id).map(|e| e.pinned = false).is_some()
     }
 
     /// Get all pinned entries.
@@ -216,6 +199,7 @@ impl ClipboardHistory {
 
     /// Load pinned entries from a file and merge them into history.
     /// Any existing entries with matching IDs are replaced.
+    /// Advances the global ID counter past the highest loaded ID.
     pub fn load_pinned_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
         if !path.exists() {
             return Ok(());
@@ -223,7 +207,8 @@ impl ClipboardHistory {
         let data = std::fs::read_to_string(path)?;
         let pinned: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
 
-        // Remove entries with IDs that match loaded pinned entries
+        advance_id_past(&pinned);
+
         let pinned_ids: std::collections::HashSet<_> = pinned.iter().map(|e| &e.id).collect();
         self.entries.retain(|e| !pinned_ids.contains(&e.id));
 
@@ -237,12 +222,24 @@ impl ClipboardHistory {
 
     /// Save all pinned entries to a file.
     pub fn save_pinned_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        let pinned = self.pinned_entries();
-        let data = serde_json::to_string_pretty(&pinned)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+        write_json_file(path, &serde_json::to_string_pretty(&self.pinned_entries())?)
+    }
+
+    /// Save the entire history (all entries) to a file.
+    pub fn save_all_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        write_json_file(path, &serde_json::to_string_pretty(&self.entries)?)
+    }
+
+    /// Load the full history from a file, replacing all current entries.
+    /// Advances the global ID counter past the highest loaded ID.
+    pub fn load_all_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        if !path.exists() {
+            return Ok(());
         }
-        std::fs::write(path, data)?;
+        let data = std::fs::read_to_string(path)?;
+        let loaded: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
+        advance_id_past(&loaded);
+        self.entries = loaded;
         Ok(())
     }
 }
