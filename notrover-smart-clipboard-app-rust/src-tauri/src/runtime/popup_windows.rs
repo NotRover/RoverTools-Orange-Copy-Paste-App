@@ -44,7 +44,7 @@ pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
     hide_popup(app, "paste-popup");
 }
 
-    /// Create the copy-popup and paste-popup windows eagerly but hidden.
+/// Create the copy-popup and paste-popup windows eagerly but hidden.
 /// Both are frameless, transparent, always-on-top, and non-focusable —
 /// matching the Electron configuration.
 pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {

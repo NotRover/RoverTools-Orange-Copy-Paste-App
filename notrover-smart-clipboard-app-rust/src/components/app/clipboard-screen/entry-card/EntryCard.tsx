@@ -201,7 +201,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         e.stopPropagation();
         setMenuPos({ x: e.clientX, y: e.clientY });
       }}
-      data-tooltip="Click to copy · Right-click for options"
+      // data-tooltip="Click to copy · Right-click for options"
     >
       {/*  Media preview (image/video)  */}
       {entry.type === "image" && (

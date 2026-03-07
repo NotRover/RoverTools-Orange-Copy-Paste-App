@@ -144,9 +144,7 @@ fn handle_copy_shortcut(
 
         std::thread::sleep(std::time::Duration::from_millis(120));
 
-        let entry = read_clipboard_entry();
-
-        let Some(entry) = entry else {
+        let Some(entry) = read_clipboard_entry() else {
             return;
         };
 

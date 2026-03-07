@@ -8,23 +8,25 @@ pub use state::AppState;
 
 use crate::clipboard::history::ClipboardHistory;
 use parking_lot::Mutex;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::Manager;
 
-/// Return the system boot timestamp (seconds since UNIX epoch) so we can
-/// detect whether the OS was restarted between two app launches.
+pub type SharedHistory = Arc<Mutex<ClipboardHistory>>;
+type SuppressFlag = Arc<AtomicBool>;
+
+const FLUSH_INTERVAL_MS: u64 = 2000;
+
+/// System boot timestamp (seconds since UNIX epoch) for detecting reboots.
 #[cfg(windows)]
 fn system_boot_epoch_secs() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let now_secs = SystemTime::now()
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // GetTickCount64 returns milliseconds since the last boot.
-    let uptime_secs =
-        unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000;
-    now_secs.saturating_sub(uptime_secs)
+    let uptime = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000;
+    now.saturating_sub(uptime)
 }
 
 #[cfg(not(windows))]
@@ -32,21 +34,15 @@ fn system_boot_epoch_secs() -> u64 {
     0
 }
 
-/// Read a bool setting from the on-disk `settings.json`.
-fn read_bool_setting(settings_path: &std::path::Path, key: &str) -> bool {
-    if !settings_path.exists() {
-        return false;
-    }
-    let Ok(data) = std::fs::read_to_string(settings_path) else {
-        return false;
-    };
-    let map: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(&data).unwrap_or_default();
-    map.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+fn read_bool_setting(path: &std::path::Path, key: &str) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|data| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data).ok()
+        })
+        .and_then(|map| map.get(key)?.as_bool())
+        .unwrap_or(false)
 }
-
-type SharedHistory = Arc<Mutex<ClipboardHistory>>;
-type SuppressFlag = Arc<AtomicBool>;
 
 /// Kill any other running instance of this executable before we start.
 /// This releases OS-level global hotkeys held by the old process, preventing
@@ -110,9 +106,6 @@ fn create_shared_history() -> SharedHistory {
     Arc::new(Mutex::new(ClipboardHistory::new()))
 }
 
-/// How often the background thread checks the dirty flag and flushes to disk.
-const FLUSH_INTERVAL_MS: u64 = 2000;
-
 fn setup_runtime(
     app: &mut tauri::App,
     history: &SharedHistory,
@@ -120,14 +113,12 @@ fn setup_runtime(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Resolve paths once, reuse everywhere.
     let app_data = app.path().app_data_dir().ok();
+    let path = |name: &str| app_data.as_ref().map(|d| d.join(name));
 
-    let history_file: Option<std::path::PathBuf> =
-        app_data.as_ref().map(|d| d.join("history.json"));
-    let pinned_file: Option<std::path::PathBuf> =
-        app_data.as_ref().map(|d| d.join("pinned_entries.json"));
-    let settings_file: Option<std::path::PathBuf> =
-        app_data.as_ref().map(|d| d.join("settings.json"));
-    let boot_file: Option<std::path::PathBuf> = app_data.as_ref().map(|d| d.join("boot_id.txt"));
+    let history_file = path("history.json");
+    let pinned_file = path("pinned_entries.json");
+    let settings_file = path("settings.json");
+    let boot_file = path("boot_id.txt");
 
     // Seed the cached persist_history flag from disk (one-time read at boot).
     let persist_enabled = settings_file
@@ -135,7 +126,7 @@ fn setup_runtime(
         .map(|p| read_bool_setting(p, "persist_history"))
         .unwrap_or(false);
 
-    // --- history loading -------------------------------------------------
+    // Load history: full restore if same boot + persist enabled, pinned-only otherwise.
     if persist_enabled {
         if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
             (&history_file, &pinned_file, &boot_file, &app_data)
@@ -146,9 +137,7 @@ fn setup_runtime(
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(0);
 
-            let same_boot = current_boot.abs_diff(previous_boot) < 5;
-
-            if same_boot && hf.exists() {
+            if current_boot.abs_diff(previous_boot) < 5 && hf.exists() {
                 let _ = history.lock().load_all_from_file(hf);
             } else {
                 let _ = history.lock().load_pinned_from_file(pf);
@@ -161,19 +150,12 @@ fn setup_runtime(
         let _ = history.lock().load_pinned_from_file(pf);
     }
 
-    // --- wire AppState fields that need runtime info ---------------------
-    {
-        let state: tauri::State<'_, AppState> = app.state();
-        state
-            .persist_history
-            .store(persist_enabled, std::sync::atomic::Ordering::Relaxed);
+    // Seed the in-memory persist flag.
+    app.state::<AppState>()
+        .persist_history
+        .store(persist_enabled, Ordering::Relaxed);
 
-        // Store the resolved path so the flush thread doesn't recompute it.
-        // AppState.history_file is Arc<Option<PathBuf>> set at construction,
-        // but we initialised it with the correct path already in run().
-    }
-
-    // --- background flush thread -----------------------------------------
+    // Background flush thread: coalesces rapid mutations into a single disk write.
     {
         let hist = Arc::clone(history);
         let state: tauri::State<'_, AppState> = app.state();
@@ -184,12 +166,10 @@ fn setup_runtime(
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
 
-            if !persist.load(std::sync::atomic::Ordering::Relaxed) {
+            if !persist.load(Ordering::Relaxed) {
                 continue;
             }
-            // swap(false) so concurrent mutations don't get lost — we'll
-            // catch them on the next tick.
-            if !dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            if !dirty.swap(false, Ordering::Relaxed) {
                 continue;
             }
             if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
