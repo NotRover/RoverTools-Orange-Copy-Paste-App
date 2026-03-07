@@ -259,6 +259,14 @@ const PastePopup: React.FC = () => {
           e.preventDefault();
           switchTab(tab === "recent" ? "pinned" : "recent");
           break;
+        case "ArrowLeft":
+          e.preventDefault();
+          switchTab("recent");
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          switchTab("pinned");
+          break;
         case "ArrowDown":
           e.preventDefault();
           if (entries.length > 0)
@@ -283,8 +291,8 @@ const PastePopup: React.FC = () => {
     return () => window.removeEventListener("keydown", handler);
   }, [visible, entries, selectedIdx, tab, handlePaste, handleClose, switchTab]);
 
-  const recentCount = recentAll.length;
-  const pinnedCount = pinnedAll.length;
+  const recentCount = Math.min(recentAll.length, slots);
+  const pinnedCount = Math.min(pinnedAll.length, slots);
 
   return (
     <div
