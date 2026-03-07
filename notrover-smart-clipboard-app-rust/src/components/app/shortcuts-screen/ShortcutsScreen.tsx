@@ -35,10 +35,42 @@ const SECTIONS: ShortcutSection[] = [
     ),
     entries: [
       {
+        keys: ["Ctrl", "C"],
+        description:
+          "Capture (copy) selection to clipboard history without popup",
+      },
+      {
         keys: ["Ctrl", "Shift", "C"],
-        description: "Capture current clipboard to history",
+        description: "Capture (copy) selection to clipboard history",
       },
       { keys: ["Ctrl", "Shift", "V"], description: "Open quick-paste popup" },
+    ],
+  },
+  {
+    title: "Paste Popup",
+    icon: (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        <polyline points="16 12 12 16 8 12" />
+      </svg>
+    ),
+    entries: [
+      { keys: ["1–9, 0"], description: "Paste entry by slot number" },
+      { keys: ["↑", "↓"], description: "Navigate entries" },
+      { keys: ["Enter"], description: "Paste selected entry" },
+      { keys: ["←", "→"], description: "Switch between Recent / Pinned" },
+      { keys: ["Tab"], description: "Toggle Recent / Pinned" },
+      { keys: ["Esc"], description: "Close popup" },
     ],
   },
   {
@@ -61,13 +93,15 @@ const SECTIONS: ShortcutSection[] = [
     entries: [
       { keys: ["Click"], description: "Copy entry to clipboard" },
       {
-        keys: ["Type chip"],
+        keys: ["Type chip dropdown"],
         description: "Expand / collapse multiple-file list",
       },
-      { keys: ["Copy btn"], description: "Copy entry (hover to reveal)" },
+      { keys: ["Pin btn"], description: "Pin entry (right-click to reveal)" },
+
+      { keys: ["Copy btn"], description: "Copy entry (right-click to reveal)" },
       {
         keys: ["Delete btn"],
-        description: "Remove entry from history (hover to reveal)",
+        description: "Remove entry from history (right-click to reveal)",
       },
     ],
   },
