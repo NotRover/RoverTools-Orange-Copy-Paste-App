@@ -27,19 +27,29 @@ fn is_duplicate_top(history: &ClipboardHistory, entry: &ClipboardEntry) -> bool 
         .unwrap_or(false)
 }
 
+/// Attempt to capture the current clipboard content into history.
+///
+/// Returns `true` when the change was handled (pushed, deduplicated, or
+/// intentionally suppressed) and the caller should advance `last_token`.
+/// Returns `false` when the clipboard could not be read (e.g. locked by
+/// another application) so the caller should **not** advance the token and
+/// retry on the next poll.
 fn capture_clipboard_change(
     app: &tauri::AppHandle,
     history: &Arc<Mutex<ClipboardHistory>>,
     suppress: &Arc<AtomicBool>,
-) {
-    // If a copy_entry / paste_entry just wrote to the clipboard, skip this
-    // capture so we don't re-add the entry as a duplicate.
+) -> bool {
+    // If a copy_entry / paste_entry / copy-shortcut just wrote to the
+    // clipboard, skip this capture so we don't re-add the entry as a
+    // duplicate.  This counts as "handled".
     if suppress.swap(false, Ordering::Relaxed) {
-        return;
+        return true;
     }
 
     let Some(entry) = read_clipboard_entry() else {
-        return;
+        // Could not read the clipboard (locked by another app, etc.).
+        // Signal the caller to keep the old token so we retry next cycle.
+        return false;
     };
 
     let maybe_new_entry = {
@@ -53,7 +63,9 @@ fn capture_clipboard_change(
 
     if let Some(new_entry) = maybe_new_entry {
         let _ = app.emit("clipboard:new-entry", &new_entry);
+        crate::clipboard::commands::auto_save_history(app, history);
     }
+    true
 }
 
 pub(crate) fn start_clipboard_watcher(
@@ -77,8 +89,12 @@ pub(crate) fn start_clipboard_watcher(
                     continue;
                 }
 
-                last_token = token;
-                capture_clipboard_change(&app, &history, &suppress);
+                // Only advance the token when capture succeeded.  If the
+                // clipboard was locked (read returned None) we keep the old
+                // token so the next poll will retry this change.
+                if capture_clipboard_change(&app, &history, &suppress) {
+                    last_token = token;
+                }
             }
 
             #[cfg(not(windows))]

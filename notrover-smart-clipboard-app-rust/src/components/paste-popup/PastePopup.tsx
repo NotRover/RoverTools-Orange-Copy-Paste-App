@@ -100,8 +100,8 @@ function badgeLabel(index: number): string {
 }
 
 /** Request Rust to resize the popup window to fit content */
-function resizePopup(entryCount: number) {
-  const listH = entryCount > 0 ? entryCount * ITEM_H : MIN_EMPTY_H;
+function resizePopup(entryCount: number, extraH = 0) {
+  const listH = entryCount > 0 ? entryCount * ITEM_H + extraH : MIN_EMPTY_H;
   const total = HEADER_H + listH + BOTTOM_PAD + BODY_PAD;
   invoke("resize_paste_popup", { height: total }).catch(console.error);
 }
@@ -124,10 +124,23 @@ const PastePopup: React.FC = () => {
     return src.slice(0, slots);
   }, [tab, recentAll, pinnedAll, slots]);
 
-  // Resize popup whenever entry count changes
+  // Resize popup whenever entry count or expanded state changes
   useEffect(() => {
-    if (visible) resizePopup(entries.length);
-  }, [entries.length, visible]);
+    if (!visible) return;
+    let extraH = 0;
+    for (const entry of entries) {
+      if (entry.type === "file" && expandedIds.has(entry.id)) {
+        const paths = getFilePaths(entry.content);
+        if (paths.length > 1) {
+          // Each file row ≈ 18px (icon+padding) + 2px gap; capped at CSS max-height 120px
+          // plus 6px vertical padding on the container
+          const listH = paths.length * 20 - 2; // subtract last gap
+          extraH += Math.min(listH, 120) + 6;
+        }
+      }
+    }
+    resizePopup(entries.length, extraH);
+  }, [entries, visible, expandedIds]);
 
   // Load image previews for file entries that are images
   useEffect(() => {

@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
@@ -76,77 +77,139 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
+        auto_save_history(&app, &state.history);
     }
     removed
 }
 
 #[tauri::command]
-pub fn clear_history(state: State<'_, AppState>) -> bool {
+pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     state.history.lock().clear();
+    auto_save_history(&app, &state.history);
     true
+}
+
+fn app_data_file(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBuf> {
+    Some(app.path().app_data_dir().ok()?.join(name))
+}
+
+fn get_pinned_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app_data_file(app, "pinned_entries.json")
+}
+
+pub(crate) fn get_history_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app_data_file(app, "history.json")
+}
+
+fn get_settings_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app_data_file(app, "settings.json")
 }
 
 #[tauri::command]
 pub fn pin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    let success = state.history.lock().pin(&id);
-    if success {
-        // Auto-save pinned entries
-        if let Some(path) = get_pinned_file_path(&app) {
-            let _ = state.history.lock().save_pinned_to_file(&path);
-        }
-    }
-    success
+    toggle_pin(&state, &app, &id, true)
 }
 
 #[tauri::command]
 pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    let success = state.history.lock().unpin(&id);
+    toggle_pin(&state, &app, &id, false)
+}
+
+fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin: bool) -> bool {
+    let success = if pin {
+        state.history.lock().pin(id)
+    } else {
+        state.history.lock().unpin(id)
+    };
     if success {
-        // Auto-save pinned entries
-        if let Some(path) = get_pinned_file_path(&app) {
+        if let Some(path) = get_pinned_file_path(app) {
             let _ = state.history.lock().save_pinned_to_file(&path);
         }
+        auto_save_history(app, &state.history);
     }
     success
 }
 
-fn get_pinned_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    let app_data = app.path().app_data_dir().ok()?;
-    Some(app_data.join("pinned_entries.json"))
+#[tauri::command]
+pub fn get_setting(key: String, app: tauri::AppHandle) -> Option<serde_json::Value> {
+    let path = get_settings_file_path(&app)?;
+    let data = std::fs::read_to_string(&path).ok()?;
+    let map: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&data).ok()?;
+    map.get(&key).cloned()
+}
+
+/// Write a user setting to `settings.json`.
+#[tauri::command]
+pub fn set_setting(
+    key: String,
+    value: serde_json::Value,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> bool {
+    // Keep the in-memory cache in sync when the persist_history flag changes.
+    if key == "persist_history" {
+        state
+            .persist_history
+            .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
+    }
+
+    let Some(path) = get_settings_file_path(&app) else {
+        return false;
+    };
+    let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+        .unwrap_or_default();
+    map.insert(key, value);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&map).unwrap_or_default()).is_ok()
+}
+
+/// Trigger an immediate flush of the full history to disk.
+/// Called from the frontend when the user first enables persist_history.
+#[tauri::command]
+pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    get_history_file_path(&app)
+        .map(|p| state.history.lock().save_all_to_file(&p).is_ok())
+        .unwrap_or(false)
+}
+
+/// Mark the history as needing a flush to disk.  The actual I/O happens on
+/// a background timer (~2 s) so rapid clipboard changes are coalesced into a
+/// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
+pub(crate) fn auto_save_history(app: &tauri::AppHandle, _history: &crate::SharedHistory) {
+    let state: tauri::State<'_, AppState> = app.state();
+    if state.persist_history.load(Ordering::Relaxed) {
+        state.history_dirty.store(true, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]
 pub fn copy_entry(id: String, state: State<'_, AppState>) -> bool {
-    let entry = find_entry_by_id(&state, &id);
-
-    let Some(entry) = entry else { return false };
-
+    let Some(entry) = find_entry_by_id(&state, &id) else {
+        return false;
+    };
     let ok = write_entry_to_clipboard(&entry).is_ok();
     if ok {
-        state
-            .suppress_next_capture
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        state.suppress_next_capture.store(true, Ordering::Relaxed);
     }
     ok
 }
 
 #[tauri::command]
 pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    let entry = find_entry_by_id(&state, &id);
-
-    let Some(entry) = entry else { return false };
-
+    let Some(entry) = find_entry_by_id(&state, &id) else {
+        return false;
+    };
     if write_entry_to_clipboard(&entry).is_err() {
         return false;
     }
-
-    state
-        .suppress_next_capture
-        .store(true, std::sync::atomic::Ordering::Relaxed);
-
+    state.suppress_next_capture.store(true, Ordering::Relaxed);
     hide_popup(&app, "paste-popup");
     schedule_paste();
-
     true
 }
 
@@ -205,14 +268,12 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
 }
 
 pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
-    let mut cb = match Clipboard::new() {
-        Ok(cb) => cb,
-        Err(_) => return None,
-    };
+    let mut cb = Clipboard::new().ok()?;
 
-    match cb.get_text() {
-        Ok(text) if !text.trim().is_empty() => return Some(ClipboardEntry::new_text(text)),
-        _ => {}
+    if let Ok(text) = cb.get_text() {
+        if !text.trim().is_empty() {
+            return Some(ClipboardEntry::new_text(text));
+        }
     }
 
     // Handle CF_HDROP (files copied in Explorer).
@@ -236,7 +297,6 @@ pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
         if let Some(data_url) = crate::clipboard::image::read_image_from_clipboard() {
             return Some(ClipboardEntry::new_image(data_url));
         }
-
         if attempt + 1 < IMAGE_READ_RETRY_COUNT {
             std::thread::sleep(std::time::Duration::from_millis(IMAGE_READ_RETRY_DELAY_MS));
         }

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -91,10 +92,31 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
 
 const SettingsScreen: React.FC = () => {
   const [pasteSlots, setPasteSlots] = useState(readSlots);
+  const [persistHistory, setPersistHistory] = useState(false);
+
+  // Load persist_history setting from backend on mount
+  useEffect(() => {
+    invoke<boolean | null>("get_setting", { key: "persist_history" }).then(
+      (val) => {
+        if (val === true) setPersistHistory(true);
+      },
+    );
+  }, []);
 
   const handleSlotsChange = (val: number) => {
     setPasteSlots(val);
     localStorage.setItem("sc-paste-slots", String(val));
+  };
+
+  const handlePersistToggle = () => {
+    const next = !persistHistory;
+    setPersistHistory(next);
+    invoke("set_setting", { key: "persist_history", value: next });
+    // When enabling, do an initial full-history save so data is persisted
+    // immediately without waiting for the next clipboard change.
+    if (next) {
+      invoke("save_history");
+    }
   };
 
   return (
@@ -121,6 +143,63 @@ const SettingsScreen: React.FC = () => {
             options={SLOT_OPTIONS}
             onChange={handleSlotsChange}
           />
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h3 className="settings-section-title">History</h3>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">
+              Keep history across app restarts
+            </span>
+            <span className="settings-row-desc">
+              When enabled, your clipboard history is preserved when the app
+              restarts. History is always cleared after a system reboot.
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`settings-toggle${persistHistory ? " active" : ""}`}
+            onClick={handlePersistToggle}
+            aria-pressed={persistHistory}
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h3 className="settings-section-title">Data</h3>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Open data folder</span>
+            <span className="settings-row-desc">
+              Open the folder where your clipboard history, pinned entries, and
+              settings are stored.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="settings-action-btn"
+            onClick={() => invoke("open_data_folder")}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            Open
+          </button>
         </div>
       </div>
     </div>

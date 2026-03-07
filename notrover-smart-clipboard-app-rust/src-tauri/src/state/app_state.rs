@@ -14,4 +14,10 @@ pub struct AppState {
     /// (used to suppress re-adding an entry that was written back to the
     /// clipboard by `copy_entry` / `paste_entry`).
     pub suppress_next_capture: Arc<AtomicBool>,
+    /// Cached mirror of the `persist_history` setting.  Checked on every
+    /// clipboard mutation — an atomic load is ~1 ns vs ~0.5 ms for a disk read.
+    pub persist_history: Arc<AtomicBool>,
+    /// Set to `true` whenever the in-memory history diverges from the on-disk
+    /// `history.json`.  A background thread periodically flushes when dirty.
+    pub history_dirty: Arc<AtomicBool>,
 }
