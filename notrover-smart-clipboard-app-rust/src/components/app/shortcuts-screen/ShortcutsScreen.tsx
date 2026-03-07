@@ -35,8 +35,13 @@ const SECTIONS: ShortcutSection[] = [
     ),
     entries: [
       {
+        keys: ["Ctrl", "C"],
+        description:
+          "Capture (copy) selection to clipboard history without popup",
+      },
+      {
         keys: ["Ctrl", "Shift", "C"],
-        description: "Capture current clipboard to history",
+        description: "Capture (copy) selection to clipboard history",
       },
       { keys: ["Ctrl", "Shift", "V"], description: "Open quick-paste popup" },
     ],
@@ -88,13 +93,15 @@ const SECTIONS: ShortcutSection[] = [
     entries: [
       { keys: ["Click"], description: "Copy entry to clipboard" },
       {
-        keys: ["Type chip"],
+        keys: ["Type chip dropdown"],
         description: "Expand / collapse multiple-file list",
       },
-      { keys: ["Copy btn"], description: "Copy entry (hover to reveal)" },
+      { keys: ["Pin btn"], description: "Pin entry (right-click to reveal)" },
+
+      { keys: ["Copy btn"], description: "Copy entry (right-click to reveal)" },
       {
         keys: ["Delete btn"],
-        description: "Remove entry from history (hover to reveal)",
+        description: "Remove entry from history (right-click to reveal)",
       },
     ],
   },
