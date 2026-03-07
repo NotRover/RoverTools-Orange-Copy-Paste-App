@@ -193,10 +193,24 @@ const App: React.FC = () => {
       else unlistenDeleted = fn;
     });
 
+    let unlistenPinned: (() => void) | undefined;
+
+    listen<{ id: string; pinned: boolean }>("clipboard:entry-pinned", (event) => {
+      if (cancelled) return;
+      const { id, pinned: pin } = event.payload;
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, pinned: pin } : e)),
+      );
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenPinned = fn;
+    });
+
     return () => {
       cancelled = true;
       unlisten?.();
       unlistenDeleted?.();
+      unlistenPinned?.();
     };
   }, []);
 
@@ -212,15 +226,7 @@ const App: React.FC = () => {
         if (cancelled) return;
         invoke<ClipboardEntry[]>("get_history").then((history) => {
           if (cancelled) return;
-          setEntries((prev) => {
-            // Fast-path: nothing changed.
-            if (
-              prev.length === history.length &&
-              prev[0]?.id === history[0]?.id
-            )
-              return prev;
-            return history;
-          });
+          setEntries(history);
         });
       })
       .then((fn) => {

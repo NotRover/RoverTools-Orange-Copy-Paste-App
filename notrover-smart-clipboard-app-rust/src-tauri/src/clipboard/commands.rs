@@ -116,6 +116,8 @@ pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
 }
 
 fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin: bool) -> bool {
+    use tauri::Emitter;
+
     let success = if pin {
         state.history.lock().pin(id)
     } else {
@@ -126,6 +128,10 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
             let _ = state.history.lock().save_pinned_to_file(&path);
         }
         auto_save_history(app, &state.history);
+        let _ = app.emit(
+            "clipboard:entry-pinned",
+            serde_json::json!({ "id": id, "pinned": pin }),
+        );
     }
     success
 }
@@ -134,8 +140,7 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
 pub fn get_setting(key: String, app: tauri::AppHandle) -> Option<serde_json::Value> {
     let path = get_settings_file_path(&app)?;
     let data = std::fs::read_to_string(&path).ok()?;
-    let map: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(&data).ok()?;
+    let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&data).ok()?;
     map.get(&key).cloned()
 }
 
@@ -165,7 +170,11 @@ pub fn set_setting(
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&map).unwrap_or_default()).is_ok()
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&map).unwrap_or_default(),
+    )
+    .is_ok()
 }
 
 /// Trigger an immediate flush of the full history to disk.

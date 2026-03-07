@@ -283,3 +283,18 @@ body {
   font-size: 12px;
   animation: popupFadeIn 0.15s ease forwards;
 }
+
+/* ── File count badge ── */
+
+.popup-file-count {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  letter-spacing: 0.2px;
+}
+
+
