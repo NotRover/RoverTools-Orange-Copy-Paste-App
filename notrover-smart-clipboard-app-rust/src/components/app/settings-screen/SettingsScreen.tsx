@@ -94,6 +94,8 @@ const SettingsScreen: React.FC = () => {
   const [pasteSlots, setPasteSlots] = useState(readSlots);
   const [persistHistory, setPersistHistory] = useState(false);
   const [closeToTray, setCloseToTray] = useState(false);
+  const [runOnStartup, setRunOnStartup] = useState(false);
+  const [startMinimized, setStartMinimized] = useState(false);
 
   // Load settings from backend on mount
   useEffect(() => {
@@ -105,6 +107,14 @@ const SettingsScreen: React.FC = () => {
     invoke<boolean | null>("get_setting", { key: "close_to_tray" }).then(
       (val) => {
         if (val === true) setCloseToTray(true);
+      },
+    );
+    invoke<boolean>("get_autostart").then((val) => {
+      setRunOnStartup(val);
+    });
+    invoke<boolean | null>("get_setting", { key: "start_minimized" }).then(
+      (val) => {
+        if (val === true) setStartMinimized(true);
       },
     );
   }, []);
@@ -129,6 +139,18 @@ const SettingsScreen: React.FC = () => {
     const next = !closeToTray;
     setCloseToTray(next);
     invoke("set_setting", { key: "close_to_tray", value: next });
+  };
+
+  const handleRunOnStartupToggle = () => {
+    const next = !runOnStartup;
+    setRunOnStartup(next);
+    invoke("set_autostart", { enabled: next });
+  };
+
+  const handleStartMinimizedToggle = () => {
+    const next = !startMinimized;
+    setStartMinimized(next);
+    invoke("set_setting", { key: "start_minimized", value: next });
   };
 
   return (
@@ -157,6 +179,41 @@ const SettingsScreen: React.FC = () => {
             className={`settings-toggle${closeToTray ? " active" : ""}`}
             onClick={handleCloseToTrayToggle}
             aria-pressed={closeToTray}
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Run on startup</span>
+            <span className="settings-row-desc">
+              Automatically launch Smart Clipboard when you sign in to Windows.
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`settings-toggle${runOnStartup ? " active" : ""}`}
+            onClick={handleRunOnStartupToggle}
+            aria-pressed={runOnStartup}
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Start minimized</span>
+            <span className="settings-row-desc">
+              When enabled, the app starts hidden in the system tray instead of
+              showing the main window.
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`settings-toggle${startMinimized ? " active" : ""}`}
+            onClick={handleStartMinimizedToggle}
+            aria-pressed={startMinimized}
           >
             <span className="settings-toggle-knob" />
           </button>

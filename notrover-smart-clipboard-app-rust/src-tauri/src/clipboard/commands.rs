@@ -166,6 +166,13 @@ pub fn set_setting(
             .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
     }
 
+    // Keep the in-memory cache in sync when the start_minimized flag changes.
+    if key == "start_minimized" {
+        state
+            .start_minimized
+            .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
+    }
+
     let Some(path) = get_settings_file_path(&app) else {
         return false;
     };

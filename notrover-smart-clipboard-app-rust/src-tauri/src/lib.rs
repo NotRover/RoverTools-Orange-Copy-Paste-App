@@ -164,6 +164,15 @@ fn setup_runtime(
         .close_to_tray
         .store(close_to_tray_enabled, Ordering::Relaxed);
 
+    // Seed the start_minimized flag from disk.
+    let start_minimized_enabled = settings_file
+        .as_deref()
+        .map(|p| read_bool_setting(p, "start_minimized"))
+        .unwrap_or(false);
+    app.state::<AppState>()
+        .start_minimized
+        .store(start_minimized_enabled, Ordering::Relaxed);
+
     // Set up system tray icon and menu.
     crate::runtime::tray::setup_tray(app)?;
 
@@ -220,11 +229,16 @@ pub fn run() {
         persist_history: Arc::new(AtomicBool::new(false)),
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
+        start_minimized: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
         .manage(app_state)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,
@@ -243,6 +257,8 @@ pub fn run() {
             crate::runtime::commands::resize_paste_popup,
             crate::runtime::commands::resize_copy_popup,
             crate::runtime::commands::open_data_folder,
+            crate::runtime::commands::get_autostart,
+            crate::runtime::commands::set_autostart,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {

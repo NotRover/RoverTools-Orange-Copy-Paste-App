@@ -2,6 +2,7 @@
 
 use crate::runtime::popup_windows::hide_popup;
 use tauri::Manager;
+use tauri_plugin_autostart::ManagerExt;
 
 #[tauri::command]
 pub fn close_copy_popup(app: tauri::AppHandle) {
@@ -50,5 +51,20 @@ pub fn open_data_folder(app: tauri::AppHandle) -> bool {
             .arg(&dir)
             .spawn()
             .is_ok()
+    }
+}
+
+#[tauri::command]
+pub fn get_autostart(app: tauri::AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> bool {
+    let mgr = app.autolaunch();
+    if enabled {
+        mgr.enable().is_ok()
+    } else {
+        mgr.disable().is_ok()
     }
 }

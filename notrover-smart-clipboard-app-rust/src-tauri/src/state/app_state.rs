@@ -23,4 +23,6 @@ pub struct AppState {
     /// When `true`, closing the main window hides it to the system tray
     /// instead of quitting the app.
     pub close_to_tray: Arc<AtomicBool>,
+    /// When `true`, the app starts hidden (minimized to tray).
+    pub start_minimized: Arc<AtomicBool>,
 }
