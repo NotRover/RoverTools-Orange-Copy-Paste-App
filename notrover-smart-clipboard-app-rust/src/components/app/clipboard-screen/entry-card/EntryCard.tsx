@@ -128,7 +128,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
   return (
     <div
-      className={`entry-card${copied ? " entry-card--copied" : ""}`}
+      className={`entry-card${copied ? " entry-card--copied" : ""}${showFileList ? " entry-card--expanded" : ""}`}
       onClick={handleCopy}
       onContextMenu={(e) => {
         e.preventDefault();
