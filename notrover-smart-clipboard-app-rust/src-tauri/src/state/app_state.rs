@@ -20,4 +20,7 @@ pub struct AppState {
     /// Set to `true` whenever the in-memory history diverges from the on-disk
     /// `history.json`.  A background thread periodically flushes when dirty.
     pub history_dirty: Arc<AtomicBool>,
+    /// When `true`, closing the main window hides it to the system tray
+    /// instead of quitting the app.
+    pub close_to_tray: Arc<AtomicBool>,
 }

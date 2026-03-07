@@ -93,12 +93,18 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
 const SettingsScreen: React.FC = () => {
   const [pasteSlots, setPasteSlots] = useState(readSlots);
   const [persistHistory, setPersistHistory] = useState(false);
+  const [closeToTray, setCloseToTray] = useState(false);
 
-  // Load persist_history setting from backend on mount
+  // Load settings from backend on mount
   useEffect(() => {
     invoke<boolean | null>("get_setting", { key: "persist_history" }).then(
       (val) => {
         if (val === true) setPersistHistory(true);
+      },
+    );
+    invoke<boolean | null>("get_setting", { key: "close_to_tray" }).then(
+      (val) => {
+        if (val === true) setCloseToTray(true);
       },
     );
   }, []);
@@ -119,6 +125,12 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
+  const handleCloseToTrayToggle = () => {
+    const next = !closeToTray;
+    setCloseToTray(next);
+    invoke("set_setting", { key: "close_to_tray", value: next });
+  };
+
   return (
     <div className="settings-screen">
       <div className="settings-header">
@@ -126,6 +138,29 @@ const SettingsScreen: React.FC = () => {
         <p className="settings-subtitle">
           Manage your Smart Clipboard preferences.
         </p>
+      </div>
+
+      <div className="settings-section">
+        <h3 className="settings-section-title">General</h3>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Close to system tray</span>
+            <span className="settings-row-desc">
+              When enabled, closing the window minimizes the app to the system
+              tray instead of quitting. The clipboard watcher keeps running in
+              the background.
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`settings-toggle${closeToTray ? " active" : ""}`}
+            onClick={handleCloseToTrayToggle}
+            aria-pressed={closeToTray}
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
       </div>
 
       <div className="settings-section">

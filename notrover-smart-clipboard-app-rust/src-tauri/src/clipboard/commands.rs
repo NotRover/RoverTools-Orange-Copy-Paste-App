@@ -159,6 +159,13 @@ pub fn set_setting(
             .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
     }
 
+    // Keep the in-memory cache in sync when the close_to_tray flag changes.
+    if key == "close_to_tray" {
+        state
+            .close_to_tray
+            .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
+    }
+
     let Some(path) = get_settings_file_path(&app) else {
         return false;
     };
