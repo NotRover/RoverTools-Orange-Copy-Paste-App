@@ -195,13 +195,16 @@ const App: React.FC = () => {
 
     let unlistenPinned: (() => void) | undefined;
 
-    listen<{ id: string; pinned: boolean }>("clipboard:entry-pinned", (event) => {
-      if (cancelled) return;
-      const { id, pinned: pin } = event.payload;
-      setEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, pinned: pin } : e)),
-      );
-    }).then((fn) => {
+    listen<{ id: string; pinned: boolean }>(
+      "clipboard:entry-pinned",
+      (event) => {
+        if (cancelled) return;
+        const { id, pinned: pin } = event.payload;
+        setEntries((prev) =>
+          prev.map((e) => (e.id === id ? { ...e, pinned: pin } : e)),
+        );
+      },
+    ).then((fn) => {
       if (cancelled) fn();
       else unlistenPinned = fn;
     });
@@ -302,7 +305,7 @@ const App: React.FC = () => {
 
       <div className="main-frame">
         <div className="titlebar" data-tauri-drag-region>
-          <span className="titlebar-title">Smart Clipboard</span>
+          <span className="titlebar-title">Orange Copy Paste</span>
           <WindowControls />
         </div>
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Smart Clipboard",
+  "productName": "Orange Copy Paste",
   "version": "0.1.0",
-  "identifier": "com.spect.notrover-smart-clipboard",
+  "identifier": "com.spect.orange-copy-paste",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
       {
         "label": "main",
         "url": "src/components/app/",
-        "title": "Smart Clipboard",
+        "title": "Orange Copy Paste",
         "width": 920,
         "height": 560,
         "minWidth": 640,
