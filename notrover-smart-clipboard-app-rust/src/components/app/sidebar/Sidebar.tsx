@@ -19,7 +19,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     {/* Logo */}
     <div className="sidebar-logo">
       <img
-        src="/Smart Clipboard Logo.svg"
+        src={
+          theme === "dark"
+            ? "/Smart Clipboard Logo Dark.svg"
+            : "/Smart Clipboard Logo.svg"
+        }
         width="30"
         height="30"
         alt="Orange Copy Paste"
