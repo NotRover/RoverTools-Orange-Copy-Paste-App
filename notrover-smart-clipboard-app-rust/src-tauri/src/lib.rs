@@ -110,53 +110,92 @@ fn create_shared_history() -> SharedHistory {
     Arc::new(Mutex::new(ClipboardHistory::new()))
 }
 
-fn app_state_from_history(history: &SharedHistory, suppress: &SuppressFlag) -> AppState {
-    AppState {
-        history: Arc::clone(history),
-        suppress_next_capture: Arc::clone(suppress),
-    }
-}
+/// How often the background thread checks the dirty flag and flushes to disk.
+const FLUSH_INTERVAL_MS: u64 = 2000;
 
 fn setup_runtime(
     app: &mut tauri::App,
     history: &SharedHistory,
     suppress: &SuppressFlag,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if let Ok(app_data) = app.path().app_data_dir() {
-        let pinned_file: std::path::PathBuf = app_data.join("pinned_entries.json");
-        let history_file: std::path::PathBuf = app_data.join("history.json");
-        let settings_file: std::path::PathBuf = app_data.join("settings.json");
-        let boot_file: std::path::PathBuf = app_data.join("boot_id.txt");
+    // Resolve paths once, reuse everywhere.
+    let app_data = app.path().app_data_dir().ok();
 
-        let persist_enabled = read_bool_setting(&settings_file, "persist_history");
+    let history_file: Option<std::path::PathBuf> =
+        app_data.as_ref().map(|d| d.join("history.json"));
+    let pinned_file: Option<std::path::PathBuf> =
+        app_data.as_ref().map(|d| d.join("pinned_entries.json"));
+    let settings_file: Option<std::path::PathBuf> =
+        app_data.as_ref().map(|d| d.join("settings.json"));
+    let boot_file: Option<std::path::PathBuf> = app_data.as_ref().map(|d| d.join("boot_id.txt"));
 
-        if persist_enabled {
-            // Detect whether this is the same boot session.
+    // Seed the cached persist_history flag from disk (one-time read at boot).
+    let persist_enabled = settings_file
+        .as_deref()
+        .map(|p| read_bool_setting(p, "persist_history"))
+        .unwrap_or(false);
+
+    // --- history loading -------------------------------------------------
+    if persist_enabled {
+        if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
+            (&history_file, &pinned_file, &boot_file, &app_data)
+        {
             let current_boot = system_boot_epoch_secs();
-            let previous_boot: u64 = std::fs::read_to_string(&boot_file)
+            let previous_boot: u64 = std::fs::read_to_string(bf)
                 .ok()
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(0);
 
-            // Allow a small tolerance (±5 s) because GetTickCount64 has
-            // limited precision and the timestamp is computed at different times.
             let same_boot = current_boot.abs_diff(previous_boot) < 5;
 
-            if same_boot && history_file.exists() {
-                // App restart within the same boot → restore full history.
-                let _ = history.lock().load_all_from_file(&history_file);
+            if same_boot && hf.exists() {
+                let _ = history.lock().load_all_from_file(hf);
             } else {
-                // System was rebooted → only load pinned entries.
-                let _ = history.lock().load_pinned_from_file(&pinned_file);
+                let _ = history.lock().load_pinned_from_file(pf);
             }
 
-            // Persist current boot timestamp for next launch.
-            let _ = std::fs::create_dir_all(&app_data);
-            let _ = std::fs::write(&boot_file, current_boot.to_string());
-        } else {
-            // Feature disabled → only load pinned entries (previous behaviour).
-            let _ = history.lock().load_pinned_from_file(&pinned_file);
+            let _ = std::fs::create_dir_all(ad);
+            let _ = std::fs::write(bf, current_boot.to_string());
         }
+    } else if let Some(pf) = &pinned_file {
+        let _ = history.lock().load_pinned_from_file(pf);
+    }
+
+    // --- wire AppState fields that need runtime info ---------------------
+    {
+        let state: tauri::State<'_, AppState> = app.state();
+        state
+            .persist_history
+            .store(persist_enabled, std::sync::atomic::Ordering::Relaxed);
+
+        // Store the resolved path so the flush thread doesn't recompute it.
+        // AppState.history_file is Arc<Option<PathBuf>> set at construction,
+        // but we initialised it with the correct path already in run().
+    }
+
+    // --- background flush thread -----------------------------------------
+    {
+        let hist = Arc::clone(history);
+        let state: tauri::State<'_, AppState> = app.state();
+        let dirty = Arc::clone(&state.history_dirty);
+        let persist = Arc::clone(&state.persist_history);
+        let app_handle = app.handle().clone();
+
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
+
+            if !persist.load(std::sync::atomic::Ordering::Relaxed) {
+                continue;
+            }
+            // swap(false) so concurrent mutations don't get lost — we'll
+            // catch them on the next tick.
+            if !dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                continue;
+            }
+            if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
+                let _ = hist.lock().save_all_to_file(&path);
+            }
+        });
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
@@ -183,8 +222,15 @@ pub fn run() {
     let history = create_shared_history();
     let suppress: SuppressFlag = Arc::new(AtomicBool::new(false));
 
+    let app_state = AppState {
+        history: Arc::clone(&history),
+        suppress_next_capture: Arc::clone(&suppress),
+        persist_history: Arc::new(AtomicBool::new(false)),
+        history_dirty: Arc::new(AtomicBool::new(false)),
+    };
+
     tauri::Builder::default()
-        .manage(app_state_from_history(&history, &suppress))
+        .manage(app_state)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             crate::clipboard::commands::get_history,
@@ -204,9 +250,6 @@ pub fn run() {
             crate::runtime::commands::resize_paste_popup,
         ])
         .on_window_event(|window, event| {
-            // When the main window is destroyed, exit the entire process.
-            // Without this, hidden popup windows and the clipboard-watcher
-            // thread keep the process alive after the user closes the app.
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
                 window.app_handle().exit(0);
             }

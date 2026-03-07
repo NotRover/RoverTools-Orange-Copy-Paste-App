@@ -142,7 +142,20 @@ pub fn get_setting(key: String, app: tauri::AppHandle) -> Option<serde_json::Val
 
 /// Write a user setting to `settings.json`.
 #[tauri::command]
-pub fn set_setting(key: String, value: serde_json::Value, app: tauri::AppHandle) -> bool {
+pub fn set_setting(
+    key: String,
+    value: serde_json::Value,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> bool {
+    // Keep the in-memory cache in sync when the persist_history flag changes.
+    if key == "persist_history" {
+        let enabled = value.as_bool().unwrap_or(false);
+        state
+            .persist_history
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
     let Some(path) = get_settings_file_path(&app) else {
         return false;
     };
@@ -165,7 +178,8 @@ pub fn set_setting(key: String, value: serde_json::Value, app: tauri::AppHandle)
     .is_ok()
 }
 
-/// Save the full history to disk (called from frontend on changes).
+/// Trigger an immediate flush of the full history to disk.
+/// Called from the frontend when the user first enables persist_history.
 #[tauri::command]
 pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     if let Some(path) = get_history_file_path(&app) {
@@ -175,19 +189,20 @@ pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     }
 }
 
-/// Persist the full history to disk if the `persist_history` setting is
-/// enabled.  Called internally after every mutation (push / delete / clear /
-/// pin / unpin) so the on-disk file stays up-to-date.
-pub(crate) fn auto_save_history(app: &tauri::AppHandle, history: &crate::SharedHistory) {
-    let Some(settings_path) = get_settings_file_path(app) else {
-        return;
-    };
-    if !crate::read_bool_setting(&settings_path, "persist_history") {
+/// Mark the history as needing a flush to disk.  The actual I/O happens on
+/// a background timer (~2 s) so rapid clipboard changes are coalesced into a
+/// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
+pub(crate) fn auto_save_history(app: &tauri::AppHandle, _history: &crate::SharedHistory) {
+    let state: tauri::State<'_, AppState> = app.state();
+    if !state
+        .persist_history
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
         return;
     }
-    if let Some(path) = get_history_file_path(app) {
-        let _ = history.lock().save_all_to_file(&path);
-    }
+    state
+        .history_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[tauri::command]
