@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -66,9 +67,11 @@ fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
 fn register_copy_shortcut(
     app_handle: &tauri::AppHandle,
     history: Arc<Mutex<ClipboardHistory>>,
+    suppress: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ah_copy = app_handle.clone();
     let hist_copy = Arc::clone(&history);
+    let suppress_copy = Arc::clone(&suppress);
     let sc_copy = copy_shortcut();
 
     let _ = app_handle.global_shortcut().unregister(sc_copy);
@@ -77,7 +80,11 @@ fn register_copy_shortcut(
         .global_shortcut()
         .on_shortcut(sc_copy, move |_app, _sc, event| {
             if event.state() == ShortcutState::Pressed {
-                handle_copy_shortcut(ah_copy.clone(), Arc::clone(&hist_copy));
+                handle_copy_shortcut(
+                    ah_copy.clone(),
+                    Arc::clone(&hist_copy),
+                    Arc::clone(&suppress_copy),
+                );
             }
         })?;
 
@@ -108,16 +115,21 @@ fn register_paste_shortcut(
 pub(crate) fn register_global_shortcuts(
     app: &tauri::App,
     history: Arc<Mutex<ClipboardHistory>>,
+    suppress: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle().clone();
 
-    register_copy_shortcut(&app_handle, Arc::clone(&history))?;
+    register_copy_shortcut(&app_handle, Arc::clone(&history), suppress)?;
     register_paste_shortcut(&app_handle, history)?;
 
     Ok(())
 }
 
-fn handle_copy_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHistory>>) {
+fn handle_copy_shortcut(
+    app: tauri::AppHandle,
+    history: Arc<Mutex<ClipboardHistory>>,
+    suppress: Arc<AtomicBool>,
+) {
     if toggle_popup_if_visible(&app, "copy-popup") {
         return;
     }
@@ -125,6 +137,9 @@ fn handle_copy_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHisto
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(120));
 
+        // Tell the clipboard watcher to skip the next detected change so it
+        // doesn't race with us to push the same entry.
+        suppress.store(true, Ordering::Relaxed);
         platform::simulate_copy();
 
         std::thread::sleep(std::time::Duration::from_millis(120));

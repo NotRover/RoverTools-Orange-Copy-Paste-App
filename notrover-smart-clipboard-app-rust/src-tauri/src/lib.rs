@@ -96,7 +96,11 @@ fn setup_runtime(
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
-    crate::runtime::hotkeys::register_global_shortcuts(app, Arc::clone(history))?;
+    crate::runtime::hotkeys::register_global_shortcuts(
+        app,
+        Arc::clone(history),
+        Arc::clone(suppress),
+    )?;
     crate::runtime::clipboard_watcher::start_clipboard_watcher(
         &app.handle().clone(),
         Arc::clone(history),

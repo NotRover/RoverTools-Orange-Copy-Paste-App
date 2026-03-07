@@ -422,7 +422,15 @@ const App: React.FC = () => {
     invoke<ClipboardEntry[]>("get_history").then((history) => {
       if (cancelled) return;
       if (!SHOW_DEMO_CLIPBOARD_ENTRIES) {
-        setEntries(history);
+        // Merge: keep any entries already received via events that aren't
+        // in the Rust response (avoids overwriting entries added during the
+        // async gap between listener registration and history fetch).
+        setEntries((prev) => {
+          if (prev.length === 0) return history;
+          const ids = new Set(history.map((e) => e.id));
+          const extra = prev.filter((e) => !ids.has(e.id));
+          return [...extra, ...history];
+        });
         return;
       }
       const realEntriesWithoutDemoIds = history.filter(
@@ -456,6 +464,39 @@ const App: React.FC = () => {
       cancelled = true;
       unlisten?.();
       unlistenDeleted?.();
+    };
+  }, []);
+
+  // Re-sync with the Rust history whenever the main window regains focus.
+  // This is a safety-net: if an event was missed for any reason, the
+  // clipboard screen catches up as soon as the user switches back to it.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const win = getCurrentWindow();
+    win
+      .listen("tauri://focus", () => {
+        if (cancelled) return;
+        invoke<ClipboardEntry[]>("get_history").then((history) => {
+          if (cancelled) return;
+          setEntries((prev) => {
+            // Fast-path: nothing changed.
+            if (
+              prev.length === history.length &&
+              prev[0]?.id === history[0]?.id
+            )
+              return prev;
+            return history;
+          });
+        });
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
