@@ -228,6 +228,7 @@ pub fn run() {
             crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,
+            crate::runtime::commands::open_data_folder,
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
