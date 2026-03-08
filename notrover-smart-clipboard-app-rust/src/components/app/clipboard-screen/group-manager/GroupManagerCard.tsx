@@ -25,6 +25,25 @@ const TagIcon = (
   </svg>
 );
 
+// Persist icon (small shield/save)
+const PersistIcon = (
+  <svg
+    width="11"
+    height="11"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <polyline points="17 21 17 13 7 13 7 21" />
+    <polyline points="7 3 7 8 15 8" />
+  </svg>
+);
+
+const SYSTEM_GROUPS = ["pinned", "persistent"];
 const MIN_GROUP_LENGTH = 4;
 const MAX_GROUP_LENGTH = 14;
 
@@ -46,12 +65,12 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renameError, setRenameError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const groupListRef = useRef<HTMLDivElement>(null);
   const prevGroupCountRef = useRef(groups.length);
+
+  const isRenaming = selectedGroup !== null;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -76,6 +95,8 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
   useEffect(() => {
     if (selectedGroup && !groups.includes(selectedGroup)) {
       setSelectedGroup(null);
+      setInputValue("");
+      setError("");
     }
   }, [groups, selectedGroup]);
 
@@ -90,36 +111,54 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
 
+  const validate = (
+    trimmed: string,
+    excludeFromDuplicateCheck?: string,
+  ): string | null => {
+    const trimmedLower = trimmed.toLowerCase();
+    if (!trimmed) return isRenaming ? "Name required" : null;
+    if (trimmed.includes(" ")) return "One word only";
+    if (trimmed.length < MIN_GROUP_LENGTH)
+      return `Min ${MIN_GROUP_LENGTH} characters`;
+    if (trimmed.length > MAX_GROUP_LENGTH)
+      return `Max ${MAX_GROUP_LENGTH} characters`;
+    if (SYSTEM_GROUPS.includes(trimmedLower)) return "Reserved name";
+    if (
+      groups.some(
+        (g) =>
+          g !== excludeFromDuplicateCheck && g.toLowerCase() === trimmedLower,
+      )
+    )
+      return "Already exists";
+    return null;
+  };
+
   const handleSubmit = () => {
     const trimmed = inputValue.trim();
-    const trimmedLower = trimmed.toLowerCase();
-    if (!trimmed) return;
+    if (!trimmed && !isRenaming) return;
 
-    // Validate: single word, 4–14 chars, no duplicates
-    if (trimmed.includes(" ")) {
-      setError("One word only");
-      return;
+    if (isRenaming && selectedGroup) {
+      // Same name — no-op
+      if (trimmed === selectedGroup) return;
+      const err = validate(trimmed, selectedGroup);
+      if (err) {
+        setError(err);
+        return;
+      }
+      onRenameGroup(selectedGroup, trimmed);
+      setSelectedGroup(trimmed);
+      setInputValue(trimmed);
+      setError("");
+    } else {
+      const err = validate(trimmed);
+      if (err) {
+        setError(err);
+        return;
+      }
+      onAddGroup(trimmed);
+      setInputValue("");
+      setError("");
     }
-    if (trimmed.length < MIN_GROUP_LENGTH) {
-      setError(`Min ${MIN_GROUP_LENGTH} characters`);
-      return;
-    }
-    if (trimmed.length > MAX_GROUP_LENGTH) {
-      setError(`Max ${MAX_GROUP_LENGTH} characters`);
-      return;
-    }
-    if (trimmedLower === "pinned") {
-      setError("Reserved name");
-      return;
-    }
-    if (groups.some((g) => g.toLowerCase() === trimmedLower)) {
-      setError("Already exists");
-      return;
-    }
-
-    onAddGroup(trimmed);
-    setInputValue("");
-    setError("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -128,71 +167,27 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
       handleSubmit();
     }
     if (e.key === "Escape") {
-      onClose();
+      if (isRenaming) {
+        setSelectedGroup(null);
+        setInputValue("");
+        setError("");
+      } else {
+        onClose();
+      }
     }
   };
 
   const handleSelectGroup = (name: string) => {
     if (selectedGroup === name) {
       setSelectedGroup(null);
+      setInputValue("");
+      setError("");
     } else {
       setSelectedGroup(name);
-      setRenameValue(name);
-      setRenameError("");
+      setInputValue(name);
+      setError("");
     }
-  };
-
-  const handleRenameSubmit = () => {
-    if (!selectedGroup) return;
-    const trimmed = renameValue.trim();
-    const trimmedLower = trimmed.toLowerCase();
-
-    if (!trimmed) {
-      setRenameError("Name required");
-      return;
-    }
-    if (trimmed.includes(" ")) {
-      setRenameError("One word only");
-      return;
-    }
-    if (trimmed.length < MIN_GROUP_LENGTH) {
-      setRenameError(`Min ${MIN_GROUP_LENGTH} chars`);
-      return;
-    }
-    if (trimmed.length > MAX_GROUP_LENGTH) {
-      setRenameError(`Max ${MAX_GROUP_LENGTH} chars`);
-      return;
-    }
-    if (trimmedLower === "pinned") {
-      setRenameError("Reserved name");
-      return;
-    }
-    // Same name — no-op
-    if (trimmed === selectedGroup) return;
-    // Duplicate check (case-insensitive, excluding current)
-    if (
-      groups.some(
-        (g) => g !== selectedGroup && g.toLowerCase() === trimmedLower,
-      )
-    ) {
-      setRenameError("Already exists");
-      return;
-    }
-
-    onRenameGroup(selectedGroup, trimmed);
-    setSelectedGroup(trimmed);
-    setRenameValue(trimmed);
-    setRenameError("");
-  };
-
-  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleRenameSubmit();
-    }
-    if (e.key === "Escape") {
-      setSelectedGroup(null);
-    }
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const selectedGc = selectedGroup ? groupColor(selectedGroup) : null;
@@ -212,6 +207,15 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         <div className="gm-group-row gm-group-row--system">
           <span className="gm-group-icon gm-group-icon--pinned">{PinIcon}</span>
           <span className="gm-row-name">Pinned</span>
+          <span className="gm-group-badge">System</span>
+        </div>
+
+        {/* System group: Persistent */}
+        <div className="gm-group-row gm-group-row--system">
+          <span className="gm-group-icon gm-group-icon--persistent">
+            {PersistIcon}
+          </span>
+          <span className="gm-row-name">Persistent</span>
           <span className="gm-group-badge">System</span>
         </div>
 
@@ -240,7 +244,7 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         )}
       </div>
 
-      {/* Detail panel for selected group */}
+      {/* Detail panel for selected group (color picker + delete only) */}
       {selectedGroup && selectedGc && (
         <>
           <div className="gm-divider" />
@@ -250,24 +254,14 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
                 className="gm-detail-dot"
                 style={{ background: selectedGc.fg }}
               />
-              <input
-                type="text"
-                className={`gm-detail-input${renameError ? " gm-detail-input--error" : ""}`}
-                value={renameValue}
-                onChange={(e) => {
-                  setRenameValue(e.target.value);
-                  if (renameError) setRenameError("");
-                }}
-                onKeyDown={handleRenameKeyDown}
-                onBlur={handleRenameSubmit}
-                maxLength={MAX_GROUP_LENGTH}
-                placeholder="Group name…"
-              />
+              <span className="gm-detail-label">{selectedGroup}</span>
               <button
                 className="gm-detail-delete"
                 onClick={() => {
                   onDeleteGroup(selectedGroup);
                   setSelectedGroup(null);
+                  setInputValue("");
+                  setError("");
                 }}
                 title="Delete group"
               >
@@ -288,7 +282,6 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
                 </svg>
               </button>
             </div>
-            {renameError && <span className="gm-error">{renameError}</span>}
 
             {/* Color picker */}
             <div className="gm-detail-colors">
@@ -314,13 +307,13 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
 
       <div className="gm-divider" />
 
-      {/* Add group input */}
+      {/* Unified input: Add or Rename */}
       <div className="gm-add-row">
         <input
           ref={inputRef}
           type="text"
           className={`gm-add-input${error ? " gm-add-input--error" : ""}`}
-          placeholder="New group name…"
+          placeholder={isRenaming ? "Rename group…" : "New group name…"}
           value={inputValue}
           onChange={(e) => {
             setInputValue(e.target.value);
@@ -334,19 +327,7 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
           onClick={handleSubmit}
           disabled={!inputValue.trim()}
         >
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
+          {isRenaming ? "Save" : "Add"}
         </button>
       </div>
       {error && <span className="gm-error">{error}</span>}

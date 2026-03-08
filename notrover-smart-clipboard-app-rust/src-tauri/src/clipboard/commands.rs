@@ -93,7 +93,7 @@ fn app_data_file(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBu
     Some(app.path().app_data_dir().ok()?.join(name))
 }
 
-fn get_pinned_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+fn get_persistent_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     app_data_file(app, "pinned_entries.json")
 }
 
@@ -115,8 +115,19 @@ pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
     toggle_pin(&state, &app, &id, false)
 }
 
+const MAX_PINNED: usize = 10;
+
 fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin: bool) -> bool {
     use tauri::Emitter;
+
+    // Enforce pin limit — pinning is now paste-popup only.
+    if pin {
+        let hist = state.history.lock();
+        if hist.pinned_entries().len() >= MAX_PINNED {
+            return false;
+        }
+        drop(hist);
+    }
 
     let success = if pin {
         state.history.lock().pin(id)
@@ -124,9 +135,6 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
         state.history.lock().unpin(id)
     };
     if success {
-        if let Some(path) = get_pinned_file_path(app) {
-            let _ = state.history.lock().save_pinned_to_file(&path);
-        }
         auto_save_history(app, &state.history);
         let _ = app.emit(
             "clipboard:entry-pinned",
@@ -212,8 +220,8 @@ pub fn set_entry_groups(
 
     let success = state.history.lock().set_groups(&id, groups.clone());
     if success {
-        if let Some(path) = get_pinned_file_path(&app) {
-            let _ = state.history.lock().save_pinned_to_file(&path);
+        if let Some(path) = get_persistent_file_path(&app) {
+            let _ = state.history.lock().save_persistent_to_file(&path);
         }
         auto_save_history(&app, &state.history);
         let _ = app.emit(
@@ -232,8 +240,8 @@ pub fn purge_group_from_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().purge_group(&group);
-    if let Some(path) = get_pinned_file_path(&app) {
-        let _ = state.history.lock().save_pinned_to_file(&path);
+    if let Some(path) = get_persistent_file_path(&app) {
+        let _ = state.history.lock().save_persistent_to_file(&path);
     }
     auto_save_history(&app, &state.history);
     true
@@ -248,8 +256,8 @@ pub fn rename_group_in_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().rename_group(&old_name, &new_name);
-    if let Some(path) = get_pinned_file_path(&app) {
-        let _ = state.history.lock().save_pinned_to_file(&path);
+    if let Some(path) = get_persistent_file_path(&app) {
+        let _ = state.history.lock().save_persistent_to_file(&path);
     }
     auto_save_history(&app, &state.history);
     true

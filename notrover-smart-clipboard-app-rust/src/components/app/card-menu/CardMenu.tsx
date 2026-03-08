@@ -70,7 +70,8 @@ const CardMenu: React.FC<CardMenuProps> = ({
 
   if (!open) return null;
 
-  const hasGroups = availableGroups.length > 0;
+  const allGroups = ["Persistent", ...availableGroups];
+  const hasGroups = allGroups.length > 0;
 
   return createPortal(
     <div
@@ -178,7 +179,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
                   <span>Groups</span>
                 </div>
                 <div className="card-menu-groups-flyout-body">
-                  {availableGroups.map((group) => {
+                  {allGroups.map((group) => {
                     const active = entryGroups.includes(group);
                     const gc = groupColor(group);
                     return (

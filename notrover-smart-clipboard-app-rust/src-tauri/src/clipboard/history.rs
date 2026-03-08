@@ -56,7 +56,7 @@ pub struct ClipboardEntry {
     pub content: String,
     /// Unix epoch in milliseconds, matching `Date.now()` on the JS side.
     pub timestamp: u64,
-    /// Whether this entry is pinned and persists across restarts.
+    /// Whether this entry is pinned (shown in paste popup's pinned section).
     #[serde(default)]
     pub pinned: bool,
     /// User-defined group tags assigned to this entry.
@@ -91,6 +91,11 @@ impl ClipboardEntry {
     pub fn new_file(content: String) -> Self {
         Self::new(EntryKind::File, content)
     }
+
+    /// Whether this entry has the "Persistent" group tag (survives restarts).
+    pub fn is_persistent(&self) -> bool {
+        self.groups.iter().any(|g| g == "Persistent")
+    }
 }
 
 // History
@@ -109,21 +114,21 @@ impl ClipboardHistory {
         Self::default()
     }
 
-    /// Prepend an entry and trim to [`MAX_HISTORY`] (excluding pinned entries).
+    /// Prepend an entry and trim to [`MAX_HISTORY`] (excluding persistent entries).
     /// Returns a clone of the newly inserted entry.
     pub fn push(&mut self, entry: ClipboardEntry) -> ClipboardEntry {
         self.entries.insert(0, entry.clone());
-        // Keep pinned entries + up to MAX_HISTORY unpinned entries
+        // Keep persistent entries + up to MAX_HISTORY non-persistent entries
         if self.entries.len() > MAX_HISTORY {
-            let pinned_count = self.entries.iter().filter(|e| e.pinned).count();
-            if pinned_count < self.entries.len() {
-                // Remove oldest unpinned entries beyond MAX_HISTORY limit
+            let persistent_count = self.entries.iter().filter(|e| e.is_persistent()).count();
+            if persistent_count < self.entries.len() {
+                // Remove oldest non-persistent entries beyond MAX_HISTORY limit
                 let mut kept = Vec::new();
-                let mut unpinned_count = 0;
+                let mut normal_count = 0;
                 for e in self.entries.drain(..) {
-                    if e.pinned || unpinned_count < MAX_HISTORY {
-                        if !e.pinned {
-                            unpinned_count += 1;
+                    if e.is_persistent() || normal_count < MAX_HISTORY {
+                        if !e.is_persistent() {
+                            normal_count += 1;
                         }
                         kept.push(e);
                     }
@@ -172,9 +177,9 @@ impl ClipboardHistory {
         }
     }
 
-    /// Clear all unpinned entries. Pinned entries are retained.
+    /// Clear all non-persistent entries. Persistent entries are retained.
     pub fn clear(&mut self) {
-        self.entries.retain(|e| e.pinned);
+        self.entries.retain(|e| e.is_persistent());
     }
 
     /// Look up an entry by `id`.
@@ -196,9 +201,18 @@ impl ClipboardHistory {
         self.find_mut(id).map(|e| e.pinned = false).is_some()
     }
 
-    /// Get all pinned entries.
+    /// Get all pinned entries (for paste popup).
     pub fn pinned_entries(&self) -> Vec<ClipboardEntry> {
         self.entries.iter().filter(|e| e.pinned).cloned().collect()
+    }
+
+    /// Get all persistent entries (entries with the "Persistent" group tag).
+    pub fn persistent_entries(&self) -> Vec<ClipboardEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.is_persistent())
+            .cloned()
+            .collect()
     }
 
     /// Replace the groups list for an entry. Returns `true` if found.
@@ -246,32 +260,46 @@ impl ClipboardHistory {
         }
     }
 
-    /// Load pinned entries from a file and merge them into history.
+    /// Load persistent entries from a file and merge them into history.
     /// Any existing entries with matching IDs are replaced.
     /// Advances the global ID counter past the highest loaded ID.
-    pub fn load_pinned_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
+    pub fn load_persistent_from_file(
+        &mut self,
+        path: &std::path::Path,
+    ) -> Result<(), std::io::Error> {
         if !path.exists() {
             return Ok(());
         }
         let data = std::fs::read_to_string(path)?;
-        let pinned: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
+        let mut loaded: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
 
-        advance_id_past(&pinned);
+        advance_id_past(&loaded);
 
-        let pinned_ids: std::collections::HashSet<_> = pinned.iter().map(|e| &e.id).collect();
-        self.entries.retain(|e| !pinned_ids.contains(&e.id));
+        // Migrate: entries loaded from the old pinned file that don't have
+        // "Persistent" in their groups get it added automatically.
+        for e in &mut loaded {
+            if !e.groups.iter().any(|g| g == "Persistent") {
+                e.groups.push("Persistent".to_string());
+            }
+        }
 
-        // Prepend all pinned entries
-        for entry in pinned.into_iter().rev() {
+        let loaded_ids: std::collections::HashSet<_> = loaded.iter().map(|e| &e.id).collect();
+        self.entries.retain(|e| !loaded_ids.contains(&e.id));
+
+        // Prepend all persistent entries
+        for entry in loaded.into_iter().rev() {
             self.entries.insert(0, entry);
         }
 
         Ok(())
     }
 
-    /// Save all pinned entries to a file.
-    pub fn save_pinned_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        write_json_file(path, &serde_json::to_string_pretty(&self.pinned_entries())?)
+    /// Save all persistent entries to a file.
+    pub fn save_persistent_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        write_json_file(
+            path,
+            &serde_json::to_string_pretty(&self.persistent_entries())?,
+        )
     }
 
     /// Save the entire history (all entries) to a file.

@@ -116,7 +116,7 @@ fn setup_runtime(
     let path = |name: &str| app_data.as_ref().map(|d| d.join(name));
 
     let history_file = path("history.json");
-    let pinned_file = path("pinned_entries.json");
+    let persistent_file = path("pinned_entries.json");
     let settings_file = path("settings.json");
     let boot_file = path("boot_id.txt");
 
@@ -129,7 +129,7 @@ fn setup_runtime(
     // Load history: full restore if same boot + persist enabled, pinned-only otherwise.
     if persist_enabled {
         if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
-            (&history_file, &pinned_file, &boot_file, &app_data)
+            (&history_file, &persistent_file, &boot_file, &app_data)
         {
             let current_boot = system_boot_epoch_secs();
             let previous_boot: u64 = std::fs::read_to_string(bf)
@@ -140,14 +140,14 @@ fn setup_runtime(
             if current_boot.abs_diff(previous_boot) < 5 && hf.exists() {
                 let _ = history.lock().load_all_from_file(hf);
             } else {
-                let _ = history.lock().load_pinned_from_file(pf);
+                let _ = history.lock().load_persistent_from_file(pf);
             }
 
             let _ = std::fs::create_dir_all(ad);
             let _ = std::fs::write(bf, current_boot.to_string());
         }
-    } else if let Some(pf) = &pinned_file {
-        let _ = history.lock().load_pinned_from_file(pf);
+    } else if let Some(pf) = &persistent_file {
+        let _ = history.lock().load_persistent_from_file(pf);
     }
 
     // Seed the in-memory persist flag.
@@ -195,6 +195,15 @@ fn setup_runtime(
             }
             if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
                 let _ = hist.lock().save_all_to_file(&path);
+            }
+            // Also keep the persistent entries file up-to-date.
+            if let Some(pf) = app_handle
+                .path()
+                .app_data_dir()
+                .ok()
+                .map(|d| d.join("pinned_entries.json"))
+            {
+                let _ = hist.lock().save_persistent_to_file(&pf);
             }
         });
     }
