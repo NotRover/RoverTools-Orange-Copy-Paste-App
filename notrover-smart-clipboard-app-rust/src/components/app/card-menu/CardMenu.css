@@ -194,43 +194,46 @@
   border-radius: 999px;
 }
 
-/* Group chip */
+/* Group chip (matches entry-card chip style) */
 
 .card-menu-group-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px 3px 6px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-xs);
-  background: transparent;
-  font-size: 11px;
+  padding: 3px 7px 3px 5px;
+  border: none;
+  border-radius: 5px;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
-  transition:
-    background 0.1s ease,
-    border-color 0.1s ease,
-    color 0.1s ease;
+  user-select: none;
+  transition: filter 0.1s ease;
 }
 
 .card-menu-group-chip:hover {
-  filter: brightness(1.1);
+  filter: brightness(1.08);
 }
 
-.card-menu-group-chip--active {
-  font-weight: 600;
-}
+/* Dot (mirrors entry-card .card-group-dot) */
 
-.card-menu-group-chip-dot {
+.card-menu-group-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  background: currentColor;
   flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .card-menu-group-chip-name {
   max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
 }

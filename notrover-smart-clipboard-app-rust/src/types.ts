@@ -103,6 +103,19 @@ export function removeGroupColor(name: string): void {
   }
 }
 
+export function renameGroupColor(oldName: string, newName: string): void {
+  try {
+    const map = readGroupColorMap();
+    if (Object.prototype.hasOwnProperty.call(map, oldName)) {
+      map[newName] = map[oldName];
+      delete map[oldName];
+      localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    // Ignore storage failures so the UI does not crash.
+  }
+}
+
 //  Helpers
 
 export function timeAgo(ts: number): string {

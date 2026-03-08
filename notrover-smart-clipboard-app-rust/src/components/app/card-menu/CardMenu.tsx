@@ -185,15 +185,15 @@ const CardMenu: React.FC<CardMenuProps> = ({
                       <button
                         key={group}
                         className={`card-menu-group-chip${active ? " card-menu-group-chip--active" : ""}`}
-                        style={{
-                          background: active ? gc.bg : "transparent",
-                          borderColor: active ? gc.fg : "var(--border-light)",
-                          color: active ? gc.fg : "var(--text-secondary)",
-                        }}
+                        style={
+                          active
+                            ? { background: gc.bg, color: gc.fg }
+                            : undefined
+                        }
                         onClick={() => onToggleGroup(group)}
                       >
                         <span
-                          className="card-menu-group-chip-dot"
+                          className="card-menu-group-dot"
                           style={{ background: gc.fg }}
                         />
                         <span className="card-menu-group-chip-name">

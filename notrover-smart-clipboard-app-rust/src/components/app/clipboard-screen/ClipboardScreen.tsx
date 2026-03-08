@@ -217,6 +217,7 @@ interface ClipboardScreenProps {
   availableGroups: string[];
   onAddGroup: (name: string) => void;
   onDeleteGroup: (name: string) => void;
+  onRenameGroup: (oldName: string, newName: string) => void;
   onSetGroups: (id: string, groups: string[]) => void;
 }
 
@@ -229,6 +230,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   availableGroups,
   onAddGroup,
   onDeleteGroup,
+  onRenameGroup,
   onSetGroups,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
@@ -461,6 +463,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
               groups={availableGroups}
               onAddGroup={onAddGroup}
               onDeleteGroup={onDeleteGroup}
+              onRenameGroup={onRenameGroup}
               onClose={() => setGroupsOpen(false)}
             />
           )}
