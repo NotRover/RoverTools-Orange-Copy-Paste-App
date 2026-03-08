@@ -222,6 +222,15 @@
   border-color: var(--border-light);
 }
 
+.settings-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-toggle:disabled:hover {
+  border-color: var(--border);
+}
+
 .settings-toggle.active {
   background: var(--accent);
   border-color: var(--accent);

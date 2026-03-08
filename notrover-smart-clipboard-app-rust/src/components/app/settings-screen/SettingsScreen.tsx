@@ -96,6 +96,7 @@ const SettingsScreen: React.FC = () => {
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
+  const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
   // Load settings from backend on mount
   useEffect(() => {
@@ -141,10 +142,21 @@ const SettingsScreen: React.FC = () => {
     invoke("set_setting", { key: "close_to_tray", value: next });
   };
 
-  const handleRunOnStartupToggle = () => {
-    const next = !runOnStartup;
+  const handleRunOnStartupToggle = async () => {
+    const previous = runOnStartup;
+    const next = !previous;
     setRunOnStartup(next);
-    invoke("set_autostart", { enabled: next });
+
+    try {
+      const ok = await invoke<boolean>("set_autostart", { enabled: next });
+      if (!ok) {
+        // Backend can refuse enabling autostart in debug/dev builds.
+        setRunOnStartup(previous);
+      }
+    } catch (error) {
+      setRunOnStartup(previous);
+      console.error("Failed to toggle autostart:", error);
+    }
   };
 
   const handleStartMinimizedToggle = () => {
@@ -190,6 +202,9 @@ const SettingsScreen: React.FC = () => {
             <span className="settings-row-desc">
               Automatically launch Orange Copy Paste when you sign in to
               Windows.
+              {import.meta.env.DEV
+                ? " Disabled in dev builds to prevent broken startup entries."
+                : ""}
             </span>
           </div>
           <button
@@ -197,6 +212,7 @@ const SettingsScreen: React.FC = () => {
             className={`settings-toggle${runOnStartup ? " active" : ""}`}
             onClick={handleRunOnStartupToggle}
             aria-pressed={runOnStartup}
+            disabled={autostartEnableBlocked}
           >
             <span className="settings-toggle-knob" />
           </button>
