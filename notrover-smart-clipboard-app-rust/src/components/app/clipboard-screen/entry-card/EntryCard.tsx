@@ -78,8 +78,14 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const isMulti = files.length > 1;
   const entryGroups = entry.groups ?? [];
   const displayGroups = entryGroups.filter((g) => g !== "Persistent");
-  const visibleGroups = displayGroups.slice(0, MAX_VISIBLE_GROUP_CHIPS);
-  const hiddenGroups = displayGroups.slice(MAX_VISIBLE_GROUP_CHIPS);
+  const systemChipCount =
+    (entry.pinned ? 1 : 0) + (entryGroups.includes("Persistent") ? 1 : 0);
+  const maxGroupChips = Math.max(
+    0,
+    MAX_VISIBLE_GROUP_CHIPS - Math.max(0, systemChipCount - 1),
+  );
+  const visibleGroups = displayGroups.slice(0, maxGroupChips);
+  const hiddenGroups = displayGroups.slice(maxGroupChips);
   const hiddenGroupCount = hiddenGroups.length;
 
   // Load image previews for file entries (single or multi)

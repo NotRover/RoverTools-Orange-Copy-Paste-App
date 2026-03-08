@@ -20,11 +20,11 @@ export type AppTheme = "dark" | "light";
 // ── Group tag colors ────────────────────────────────────────────────
 
 export const GROUP_COLORS: { bg: string; fg: string }[] = [
-  { bg: "var(--accent-dim)", fg: "var(--accent)" }, // pinned accent
+  { bg: "rgba(245, 158, 11, 0.12)", fg: "#f59e0b" }, // amber
   { bg: "rgba(239, 68, 68, 0.12)", fg: "#ef4444" }, // red
-  { bg: "rgba(249, 115, 22, 0.12)", fg: "#f97316" }, // orange
-  { bg: "rgba(234, 179, 8, 0.12)", fg: "#eab308" }, // yellow
-  { bg: "rgba(34, 197, 94, 0.12)", fg: "#22c55e" }, // green
+  { bg: "rgba(244, 63, 94, 0.12)", fg: "#f43f5e" }, // rose
+  { bg: "rgba(16, 185, 129, 0.12)", fg: "#10b981" }, // emerald
+  { bg: "rgba(132, 204, 22, 0.12)", fg: "#84cc16" }, // lime
   { bg: "rgba(20, 184, 166, 0.12)", fg: "#14b8a6" }, // teal
   { bg: "rgba(6, 182, 212, 0.12)", fg: "#06b6d4" }, // cyan
   { bg: "rgba(59, 130, 246, 0.12)", fg: "#3b82f6" }, // blue
