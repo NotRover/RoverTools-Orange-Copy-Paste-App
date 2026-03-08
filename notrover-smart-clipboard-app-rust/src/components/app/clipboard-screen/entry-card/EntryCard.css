@@ -363,12 +363,64 @@ button.card-type-chip.open .card-type-chevron {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .card-time {
   font-size: 10.5px;
   color: var(--text-muted);
   flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.card-type-chip--group {
+  min-width: 0;
+}
+
+.card-type-chip--group .card-type-label {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-type-chip--group-overflow {
+  background: var(--surface-hover, rgba(148, 163, 184, 0.15));
+  color: var(--text-muted);
+}
+
+.card-type-chip--group-overflow-btn {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.card-type-chip--group-overflow-btn:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.card-type-chip--group-overflow-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.card-hidden-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.card-hidden-groups .card-type-chip--group .card-type-label {
+  max-width: 90px;
 }
 
 .card-time--copied {

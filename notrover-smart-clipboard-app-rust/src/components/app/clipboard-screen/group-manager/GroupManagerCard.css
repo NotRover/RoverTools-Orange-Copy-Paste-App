@@ -51,12 +51,12 @@
   justify-content: center;
   min-width: 14px;
   height: 14px;
-  padding: 0 3px;
+  padding: 2px 4px;
   font-size: 9px;
   font-weight: 700;
   border-radius: 99px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--bg);
+  color: var(--text-secondary);
   line-height: 1;
   margin-left: auto;
 }
@@ -199,8 +199,8 @@
   font-weight: 600;
   letter-spacing: 0.3px;
   text-transform: uppercase;
-  color: var(--text-muted);
-  background: var(--border);
+  color: var(--text-secondary);
+  background: var(--bg);
   border-radius: 4px;
   padding: 1px 5px;
   flex-shrink: 0;

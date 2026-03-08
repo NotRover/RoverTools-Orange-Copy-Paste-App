@@ -179,7 +179,7 @@ const GroupItemRow: React.FC<{
   const [currentColor, setCurrentColor] = useState(gc);
 
   return (
-    <div className="gm-group-item">
+    <div className="gm-group-item gm-group-item--editable">
       <button
         className="gm-group-dot-btn"
         style={{ background: currentColor.fg }}

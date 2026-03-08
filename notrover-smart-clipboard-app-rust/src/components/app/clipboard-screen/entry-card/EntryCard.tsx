@@ -22,6 +22,7 @@ import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
 const REL_TIME_REFRESH_MS = 15_000;
+const MAX_VISIBLE_GROUP_CHIPS = 3;
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -66,12 +67,17 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     Record<string, string | null>
   >({});
   const [showFileList, setShowFileList] = useState(false);
+  const [showHiddenGroups, setShowHiddenGroups] = useState(false);
 
   const files = entry.type === "file" ? filePaths(entry.content) : [];
   const firstFile = files[0] ?? null;
   const firstFileUrl = firstFile ? convertFileSrc(firstFile) : "";
   const imageFiles = files.filter(isImageFile);
   const isMulti = files.length > 1;
+  const entryGroups = entry.groups ?? [];
+  const visibleGroups = entryGroups.slice(0, MAX_VISIBLE_GROUP_CHIPS);
+  const hiddenGroups = entryGroups.slice(MAX_VISIBLE_GROUP_CHIPS);
+  const hiddenGroupCount = hiddenGroups.length;
 
   // Load image previews for file entries (single or multi)
   useEffect(() => {
@@ -117,6 +123,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       if (pinTimeoutRef.current) clearTimeout(pinTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    setShowHiddenGroups(false);
+  }, [entry.id, hiddenGroupCount]);
 
   const handleCopy = () => {
     onCopy(entry.id);
@@ -302,9 +312,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 <span className="card-type-label">Pinned</span>
               </span>
             )}
-            {entry.groups &&
-              entry.groups.length > 0 &&
-              entry.groups.map((g) => {
+            {visibleGroups.length > 0 &&
+              visibleGroups.map((g) => {
                 const gc = groupColor(g);
                 return (
                   <span
@@ -317,6 +326,24 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                   </span>
                 );
               })}
+            {hiddenGroupCount > 0 && (
+              <button
+                type="button"
+                className={`card-type-chip card-type-chip--group-overflow card-type-chip--group-overflow-btn${showHiddenGroups ? " active" : ""}`}
+                data-tooltip={
+                  showHiddenGroups
+                    ? "Hide extra groups"
+                    : `${hiddenGroupCount} more group${hiddenGroupCount > 1 ? "s" : ""}`
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHiddenGroups((v) => !v);
+                }}
+                aria-expanded={showHiddenGroups}
+              >
+                +{hiddenGroupCount}
+              </button>
+            )}
           </div>
           {justPinned ? (
             <span className="card-time card-time--pinned">
@@ -343,6 +370,26 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             <span className="card-time">{relTime}</span>
           )}
         </div>
+        {showHiddenGroups && hiddenGroups.length > 0 && (
+          <div
+            className="card-hidden-groups"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {hiddenGroups.map((g) => {
+              const gc = groupColor(g);
+              return (
+                <span
+                  key={g}
+                  className="card-type-chip card-type-chip--group"
+                  style={{ background: gc.bg, color: gc.fg }}
+                >
+                  <span className="card-group-dot" />
+                  <span className="card-type-label">{g}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Right-click context menu */}
@@ -357,10 +404,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         onDelete={() => onDelete(entry.id)}
         onPin={handlePin}
         availableGroups={availableGroups}
-        entryGroups={entry.groups ?? []}
+        entryGroups={entryGroups}
         onToggleGroup={(group) => {
           if (!onSetGroups) return;
-          const current = entry.groups ?? [];
+          const current = entryGroups;
           const newGroups = current.includes(group)
             ? current.filter((g) => g !== group)
             : [...current, group];
