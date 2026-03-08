@@ -14,6 +14,7 @@ import {
   ImageIcon,
   FileIcon,
   PinIcon,
+  PersistIcon,
   EntryTypePill,
 } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
@@ -76,8 +77,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const imageFiles = files.filter(isImageFile);
   const isMulti = files.length > 1;
   const entryGroups = entry.groups ?? [];
-  const visibleGroups = entryGroups.slice(0, MAX_VISIBLE_GROUP_CHIPS);
-  const hiddenGroups = entryGroups.slice(MAX_VISIBLE_GROUP_CHIPS);
+  const displayGroups = entryGroups.filter((g) => g !== "Persistent");
+  const visibleGroups = displayGroups.slice(0, MAX_VISIBLE_GROUP_CHIPS);
+  const hiddenGroups = displayGroups.slice(MAX_VISIBLE_GROUP_CHIPS);
   const hiddenGroupCount = hiddenGroups.length;
 
   // Load image previews for file entries (single or multi)
@@ -325,6 +327,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 <span className="card-type-label">Pinned</span>
               </span>
             )}
+            {entryGroups.includes("Persistent") && (
+              <span className="card-type-chip card-type-chip--persistent">
+                {PersistIcon}
+                <span className="card-type-label">Saved</span>
+              </span>
+            )}
             {visibleGroups.length > 0 &&
               visibleGroups.map((g) => {
                 const gc = groupColor(g);
@@ -412,10 +420,19 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         anchorY={menuPos?.y ?? 0}
         onClose={() => setMenuPos(null)}
         isPinned={entry.pinned}
+        isPersistent={entryGroups.includes("Persistent")}
         copied={copied}
         onCopy={handleCopy}
         onDelete={() => onDelete(entry.id)}
         onPin={handlePin}
+        onTogglePersistent={() => {
+          if (!onSetGroups) return;
+          const has = entryGroups.includes("Persistent");
+          const newGroups = has
+            ? entryGroups.filter((g) => g !== "Persistent")
+            : [...entryGroups, "Persistent"];
+          onSetGroups(entry.id, newGroups);
+        }}
         availableGroups={availableGroups}
         entryGroups={entryGroups}
         onToggleGroup={(group) => {

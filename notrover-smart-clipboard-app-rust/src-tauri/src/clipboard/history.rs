@@ -192,9 +192,17 @@ impl ClipboardHistory {
         self.entries.iter_mut().find(|e| e.id == id)
     }
 
-    /// Pin an entry by ID. Returns `true` if found and pinned.
+    /// Pin an entry by ID. Also adds "Persistent" group tag.
+    /// Returns `true` if found and pinned.
     pub fn pin(&mut self, id: &str) -> bool {
-        self.find_mut(id).map(|e| e.pinned = true).is_some()
+        self.find_mut(id)
+            .map(|e| {
+                e.pinned = true;
+                if !e.groups.iter().any(|g| g == "Persistent") {
+                    e.groups.push("Persistent".to_string());
+                }
+            })
+            .is_some()
     }
 
     pub fn unpin(&mut self, id: &str) -> bool {
