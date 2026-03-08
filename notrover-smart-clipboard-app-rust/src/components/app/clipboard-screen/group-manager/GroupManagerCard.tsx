@@ -25,7 +25,8 @@ const TagIcon = (
   </svg>
 );
 
-const MAX_GROUP_LENGTH = 12;
+const MIN_GROUP_LENGTH = 4;
+const MAX_GROUP_LENGTH = 14;
 
 interface GroupManagerCardProps {
   groups: string[];
@@ -94,9 +95,13 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
     const trimmedLower = trimmed.toLowerCase();
     if (!trimmed) return;
 
-    // Validate: single word, max 12 chars, no duplicates
+    // Validate: single word, 4–14 chars, no duplicates
     if (trimmed.includes(" ")) {
       setError("One word only");
+      return;
+    }
+    if (trimmed.length < MIN_GROUP_LENGTH) {
+      setError(`Min ${MIN_GROUP_LENGTH} characters`);
       return;
     }
     if (trimmed.length > MAX_GROUP_LENGTH) {
@@ -148,6 +153,10 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
     }
     if (trimmed.includes(" ")) {
       setRenameError("One word only");
+      return;
+    }
+    if (trimmed.length < MIN_GROUP_LENGTH) {
+      setRenameError(`Min ${MIN_GROUP_LENGTH} chars`);
       return;
     }
     if (trimmed.length > MAX_GROUP_LENGTH) {
