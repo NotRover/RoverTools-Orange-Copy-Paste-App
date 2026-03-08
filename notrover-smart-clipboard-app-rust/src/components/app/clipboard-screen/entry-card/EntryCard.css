@@ -410,15 +410,15 @@ button.card-type-chip.open .card-type-chevron {
 
 .card-type-chip--group-overflow-btn.active {
   background: var(--surface-hover);
-  color: var(--accent);
+  color: var(--text);
 }
 
 .card-hidden-groups {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 4px;
-  padding-top: 6px;
+  margin-top: 2px;
+  padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
 

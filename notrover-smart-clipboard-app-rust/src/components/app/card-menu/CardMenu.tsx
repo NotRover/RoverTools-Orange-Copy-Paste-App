@@ -44,6 +44,10 @@ const CardMenu: React.FC<CardMenuProps> = ({
   };
 
   useEffect(() => {
+    if (!open) setGroupsOpen(false);
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (
