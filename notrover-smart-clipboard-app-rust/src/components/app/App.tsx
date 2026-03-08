@@ -4,7 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ClipboardEntry, AppScreen, AppTheme } from "../../types";
-import { classifyFileEntry, removeGroupColor } from "../../types";
+import {
+  classifyFileEntry,
+  removeGroupColor,
+  renameGroupColor,
+} from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
@@ -14,6 +18,55 @@ import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import "./App.css";
+
+const GROUPS_STORAGE_KEY = "sc-groups";
+
+function sanitizeGroups(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const value of input) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+
+  return out;
+}
+
+function readStoredGroups(): string[] {
+  try {
+    return sanitizeGroups(
+      JSON.parse(localStorage.getItem(GROUPS_STORAGE_KEY) ?? "[]"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function groupsFromEntries(entries: ClipboardEntry[]): string[] {
+  const groups: string[] = [];
+  for (const entry of entries) {
+    groups.push(...sanitizeGroups(entry.groups));
+  }
+  return sanitizeGroups(groups);
+}
+
+function mergeGroups(primary: string[], secondary: string[]): string[] {
+  return sanitizeGroups([...primary, ...secondary]);
+}
+
+function sameGroups(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
 // Floating window controls
 
@@ -125,14 +178,11 @@ const App: React.FC = () => {
     null,
   );
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didRecoverGroupsRef = useRef(false);
 
   // Groups state — persisted to localStorage
   const [availableGroups, setAvailableGroups] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("sc-groups") ?? "[]") as string[];
-    } catch {
-      return [];
-    }
+    return readStoredGroups();
   });
 
   const systemPrefersDark = () =>
@@ -180,6 +230,18 @@ const App: React.FC = () => {
         const extra = prev.filter((e) => !ids.has(e.id));
         return [...extra, ...history];
       });
+
+      // Startup-only recovery: restore missing dropdown groups from entry tags.
+      // Keeping this one-shot avoids re-adding a group while deletion is in-flight.
+      if (!didRecoverGroupsRef.current) {
+        didRecoverGroupsRef.current = true;
+        setAvailableGroups((prev) => {
+          const recovered = mergeGroups(prev, groupsFromEntries(history));
+          if (sameGroups(recovered, prev)) return prev;
+          localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(recovered));
+          return recovered;
+        });
+      }
     });
 
     let unlistenDeleted: (() => void) | undefined;
@@ -277,8 +339,8 @@ const App: React.FC = () => {
 
   const handleAddGroup = useCallback((name: string) => {
     setAvailableGroups((prev) => {
-      const next = [...prev, name];
-      localStorage.setItem("sc-groups", JSON.stringify(next));
+      const next = mergeGroups(prev, [name]);
+      localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
@@ -286,7 +348,7 @@ const App: React.FC = () => {
   const handleDeleteGroup = useCallback(async (name: string) => {
     setAvailableGroups((prev) => {
       const next = prev.filter((g) => g !== name);
-      localStorage.setItem("sc-groups", JSON.stringify(next));
+      localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
     removeGroupColor(name);
@@ -296,6 +358,21 @@ const App: React.FC = () => {
     const history = await invoke<ClipboardEntry[]>("get_history");
     setEntries(history);
   }, []);
+
+  const handleRenameGroup = useCallback(
+    async (oldName: string, newName: string) => {
+      setAvailableGroups((prev) => {
+        const next = prev.map((g) => (g === oldName ? newName : g));
+        localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+      renameGroupColor(oldName, newName);
+      await invoke("rename_group_in_entries", { oldName, newName });
+      const history = await invoke<ClipboardEntry[]>("get_history");
+      setEntries(history);
+    },
+    [],
+  );
 
   const handleSetGroups = useCallback(async (id: string, groups: string[]) => {
     // Optimistic update
@@ -372,6 +449,7 @@ const App: React.FC = () => {
             availableGroups={availableGroups}
             onAddGroup={handleAddGroup}
             onDeleteGroup={handleDeleteGroup}
+            onRenameGroup={handleRenameGroup}
             onSetGroups={handleSetGroups}
           />
         )}

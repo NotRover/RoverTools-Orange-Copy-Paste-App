@@ -235,6 +235,17 @@ impl ClipboardHistory {
         }
     }
 
+    /// Rename a group across all entries that have it.
+    pub fn rename_group(&mut self, old_name: &str, new_name: &str) {
+        for e in &mut self.entries {
+            for g in &mut e.groups {
+                if g == old_name {
+                    *g = new_name.to_string();
+                }
+            }
+        }
+    }
+
     /// Load pinned entries from a file and merge them into history.
     /// Any existing entries with matching IDs are replaced.
     /// Advances the global ID counter past the highest loaded ID.

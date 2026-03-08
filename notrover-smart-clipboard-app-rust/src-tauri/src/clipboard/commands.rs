@@ -239,6 +239,22 @@ pub fn purge_group_from_entries(
     true
 }
 
+/// Rename a group across all entries that have it.
+#[tauri::command]
+pub fn rename_group_in_entries(
+    old_name: String,
+    new_name: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> bool {
+    state.history.lock().rename_group(&old_name, &new_name);
+    if let Some(path) = get_pinned_file_path(&app) {
+        let _ = state.history.lock().save_pinned_to_file(&path);
+    }
+    auto_save_history(&app, &state.history);
+    true
+}
+
 /// Mark the history as needing a flush to disk.  The actual I/O happens on
 /// a background timer (~2 s) so rapid clipboard changes are coalesced into a
 /// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
