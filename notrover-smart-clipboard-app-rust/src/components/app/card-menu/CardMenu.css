@@ -118,73 +118,119 @@
   user-select: none;
 }
 
-/* Group item checkmark */
+/* Groups toggle button */
 
-.card-menu-group-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  border: 1.5px solid var(--border-light);
-  background: transparent;
-  flex-shrink: 0;
-  transition:
-    background 0.1s ease,
-    border-color 0.1s ease;
+.card-menu-groups-wrapper {
+  position: relative;
 }
 
-.card-menu-group-check--on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+.card-menu-item--groups-toggle {
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
-/* Group item hover */
-
-.card-menu-item--group:hover {
-  background: var(--accent-dim);
+.card-menu-item--groups-toggle:hover,
+.card-menu-item--groups-toggle-active {
+  background: var(--surface-hover);
   color: var(--text);
 }
 
-.card-menu-item--group-active {
-  color: var(--accent);
+.card-menu-chevron {
+  transition: transform 0.15s ease;
+  opacity: 0.5;
 }
 
-.card-menu-item--group-active:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
+.card-menu-chevron--open {
+  transform: rotate(180deg);
 }
 
-/* Scrollable group list */
+/* Groups flyout sub-card */
 
-.card-menu-group-list {
+.card-menu-groups-flyout {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: -4px;
+  min-width: 140px;
+  max-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 0;
+  z-index: 1001;
+  animation: card-menu-pop 0.11s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top left;
+}
+
+.card-menu-groups-flyout-header {
+  padding: 6px 10px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.card-menu-groups-flyout-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 4px 8px 8px;
   max-height: 150px;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
 }
 
-.card-menu-group-list::-webkit-scrollbar {
-  width: 5px;
+.card-menu-groups-flyout-body::-webkit-scrollbar {
+  width: 4px;
 }
 
-.card-menu-group-list::-webkit-scrollbar-track {
+.card-menu-groups-flyout-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.card-menu-group-list::-webkit-scrollbar-thumb {
+.card-menu-groups-flyout-body::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 999px;
 }
 
-/* Group color dot in menu */
+/* Group chip */
 
-.card-menu-group-dot {
+.card-menu-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.card-menu-group-chip:hover {
+  filter: brightness(1.1);
+}
+
+.card-menu-group-chip--active {
+  font-weight: 600;
+}
+
+.card-menu-group-chip-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.card-menu-group-chip-name {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

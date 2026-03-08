@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { groupColor } from "../../../types";
 import "./CardMenu.css";
@@ -36,6 +36,8 @@ const CardMenu: React.FC<CardMenuProps> = ({
   onToggleGroup,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const groupsRowRef = useRef<HTMLButtonElement>(null);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const closeAfter = (fn: () => void) => () => {
     fn();
     onClose();
@@ -131,64 +133,74 @@ const CardMenu: React.FC<CardMenuProps> = ({
       {/* Groups submenu */}
       {hasGroups && (
         <>
-          <div className="card-menu-separator" />
-          <div className="card-menu-group-label">
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {/* <div className="card-menu-separator" /> */}
+          <div className="card-menu-groups-wrapper">
+            <button
+              ref={groupsRowRef}
+              className={`card-menu-item card-menu-item--groups-toggle${groupsOpen ? " card-menu-item--groups-toggle-active" : ""}`}
+              onClick={() => setGroupsOpen((v) => !v)}
             >
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-              <line x1="7" y1="7" x2="7.01" y2="7" />
-            </svg>
-            <span>Groups</span>
-          </div>
-          <div className="card-menu-group-list">
-            {availableGroups.map((group) => {
-              const active = entryGroups.includes(group);
-              const gc = groupColor(group);
-              return (
-                <button
-                  key={group}
-                  className={`card-menu-item card-menu-item--group${active ? " card-menu-item--group-active" : ""}`}
-                  onClick={() => onToggleGroup(group)}
-                >
-                  <span
-                    className={`card-menu-group-check${active ? " card-menu-group-check--on" : ""}`}
-                    style={
-                      active
-                        ? { background: gc.fg, borderColor: gc.fg }
-                        : undefined
-                    }
-                  >
-                    {active && (
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                <line x1="7" y1="7" x2="7.01" y2="7" />
+              </svg>
+              <span style={{ flex: 1 }}>Groups</span>
+              <svg
+                className={`card-menu-chevron${groupsOpen ? " card-menu-chevron--open" : ""}`}
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="9 6 15 12 9 18" />
+              </svg>
+            </button>
+            {groupsOpen && (
+              <div className="card-menu-groups-flyout">
+                <div className="card-menu-groups-flyout-header">
+                  <span>Groups</span>
+                </div>
+                <div className="card-menu-groups-flyout-body">
+                  {availableGroups.map((group) => {
+                    const active = entryGroups.includes(group);
+                    const gc = groupColor(group);
+                    return (
+                      <button
+                        key={group}
+                        className={`card-menu-group-chip${active ? " card-menu-group-chip--active" : ""}`}
+                        style={{
+                          background: active ? gc.bg : "transparent",
+                          borderColor: active ? gc.fg : "var(--border-light)",
+                          color: active ? gc.fg : "var(--text-secondary)",
+                        }}
+                        onClick={() => onToggleGroup(group)}
                       >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    )}
-                  </span>
-                  <span
-                    className="card-menu-group-dot"
-                    style={{ background: gc.fg }}
-                  />
-                  <span>{group}</span>
-                </button>
-              );
-            })}
+                        <span
+                          className="card-menu-group-chip-dot"
+                          style={{ background: gc.fg }}
+                        />
+                        <span className="card-menu-group-chip-name">
+                          {group}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
