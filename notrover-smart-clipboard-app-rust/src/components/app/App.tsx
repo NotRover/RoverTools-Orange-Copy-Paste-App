@@ -193,6 +193,10 @@ const App: React.FC = () => {
     null,
   );
 
+  // Toast: max pins reached
+  const [pinLimitReached, setPinLimitReached] = useState(false);
+  const pinLimitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Groups state — persisted to localStorage
   const [availableGroups, setAvailableGroups] = useState<string[]>(() => {
     return readStoredGroups();
@@ -336,25 +340,38 @@ const App: React.FC = () => {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
-  const handlePin = useCallback(async (id: string, shouldPin: boolean) => {
-    const success = await invoke<boolean>(
-      shouldPin ? "pin_entry" : "unpin_entry",
-      { id },
-    );
-    if (success) {
-      setEntries((prev) =>
-        prev.map((e) => {
-          if (e.id !== id) return e;
-          const updated = { ...e, pinned: shouldPin };
-          // Pinning automatically makes the entry persistent
-          if (shouldPin && !e.groups.includes("Persistent")) {
-            updated.groups = [...e.groups, "Persistent"];
-          }
-          return updated;
-        }),
+  const handlePin = useCallback(
+    async (id: string, shouldPin: boolean): Promise<boolean> => {
+      const success = await invoke<boolean>(
+        shouldPin ? "pin_entry" : "unpin_entry",
+        { id },
       );
-    }
-  }, []);
+      if (success) {
+        setEntries((prev) =>
+          prev.map((e) => {
+            if (e.id !== id) return e;
+            const updated = { ...e, pinned: shouldPin };
+            // Pinning automatically makes the entry persistent
+            if (shouldPin && !e.groups.includes("Persistent")) {
+              updated.groups = [...e.groups, "Persistent"];
+            }
+            return updated;
+          }),
+        );
+      } else if (shouldPin) {
+        // Backend rejected — max pins reached
+        if (pinLimitTimerRef.current !== null)
+          clearTimeout(pinLimitTimerRef.current);
+        setPinLimitReached(true);
+        pinLimitTimerRef.current = setTimeout(() => {
+          setPinLimitReached(false);
+          pinLimitTimerRef.current = null;
+        }, 3000);
+      }
+      return success;
+    },
+    [],
+  );
 
   // Groups handlers
 
@@ -536,6 +553,29 @@ const App: React.FC = () => {
             imageCount={imageCount}
             fileCount={fileCount}
             total={entries.length}
+          />
+        )}
+
+        {pinLimitReached && (
+          <ToastNotification
+            message="Max pins reached (10)"
+            icon={
+              <svg
+                width="13"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            }
+            duration={3000}
+            onDismiss={() => setPinLimitReached(false)}
           />
         )}
 

@@ -199,7 +199,7 @@ interface SearchScreenProps {
   entries: ClipboardEntry[];
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
-  onPin: (id: string, shouldPin: boolean) => void;
+  onPin: (id: string, shouldPin: boolean) => Promise<boolean>;
   availableGroups: string[];
   onSetGroups: (id: string, groups: string[]) => void;
 }

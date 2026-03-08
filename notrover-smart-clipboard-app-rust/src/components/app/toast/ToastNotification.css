@@ -2,7 +2,7 @@
 
 .toast {
   position: absolute;
-  bottom: 14px;
+  bottom: 44px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -98,6 +98,10 @@
 
 /* animationDuration is injected inline; this handles the keyframe */
 @keyframes toast-bar-drain {
-  from { transform: scaleX(1); }
-  to   { transform: scaleX(0); }
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
