@@ -31,6 +31,8 @@ interface EntryCardProps {
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
   onPin: (id: string, shouldPin: boolean) => void;
+  availableGroups?: string[];
+  onSetGroups?: (id: string, groups: string[]) => void;
 }
 
 export const EntryCard: React.FC<EntryCardProps> = ({
@@ -38,6 +40,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   onCopy,
   onDelete,
   onPin,
+  availableGroups = [],
+  onSetGroups,
 }) => {
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
@@ -297,6 +301,14 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 <span className="card-type-label">Pinned</span>
               </span>
             )}
+            {entry.groups &&
+              entry.groups.length > 0 &&
+              entry.groups.map((g) => (
+                <span key={g} className="card-type-chip card-type-chip--group">
+                  <span className="card-group-dot" />
+                  <span className="card-type-label">{g}</span>
+                </span>
+              ))}
           </div>
           {justPinned ? (
             <span className="card-time card-time--pinned">
@@ -336,6 +348,16 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         onCopy={handleCopy}
         onDelete={() => onDelete(entry.id)}
         onPin={handlePin}
+        availableGroups={availableGroups}
+        entryGroups={entry.groups ?? []}
+        onToggleGroup={(group) => {
+          if (!onSetGroups) return;
+          const current = entry.groups ?? [];
+          const newGroups = current.includes(group)
+            ? current.filter((g) => g !== group)
+            : [...current, group];
+          onSetGroups(entry.id, newGroups);
+        }}
       />
     </div>
   );

@@ -158,7 +158,7 @@ const SettingsScreen: React.FC = () => {
       console.error("Failed to toggle autostart:", error);
     }
   };
-
+  123456789111;
   const handleStartMinimizedToggle = () => {
     const next = !startMinimized;
     setStartMinimized(next);

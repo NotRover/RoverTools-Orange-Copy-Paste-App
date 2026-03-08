@@ -1,0 +1,255 @@
+/* ── Group Manager Card ──────────────────────────────────────────────── */
+
+.gm-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 230px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.15));
+  z-index: 100;
+  animation: gm-slide-down 0.12s ease-out;
+}
+
+@keyframes gm-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Header */
+
+.gm-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px 6px;
+  color: var(--text-muted);
+}
+
+.gm-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.gm-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  line-height: 1;
+  margin-left: auto;
+}
+
+/* Group list */
+
+.gm-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.gm-group-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.gm-group-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.gm-group-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+
+/* Group item */
+
+.gm-group-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  transition: background 0.1s ease;
+  user-select: none;
+}
+
+.gm-group-item:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
+}
+
+.gm-group-item--system {
+  opacity: 0.75;
+  cursor: default;
+}
+
+/* Group dot (color indicator) */
+
+.gm-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.gm-group-icon--pinned {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.gm-group-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-group-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* Delete button */
+
+.gm-group-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.gm-group-item:hover .gm-group-delete {
+  opacity: 1;
+}
+
+.gm-group-delete:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Divider */
+
+.gm-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
+/* Add group row */
+
+.gm-add-row {
+  display: flex;
+  gap: 4px;
+}
+
+.gm-add-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.14s ease;
+}
+
+.gm-add-input::placeholder {
+  color: var(--text-muted);
+}
+
+.gm-add-input:focus {
+  border-color: var(--accent);
+}
+
+.gm-add-input--error {
+  border-color: var(--danger);
+}
+
+.gm-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.gm-add-btn:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.gm-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Error text */
+
+.gm-error {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--danger);
+  padding: 2px 4px 0;
+}

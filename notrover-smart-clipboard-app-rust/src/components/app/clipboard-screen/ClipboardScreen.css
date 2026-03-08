@@ -278,6 +278,10 @@
   margin-right: auto;
 }
 
+.groups-dropdown {
+  position: relative;
+}
+
 .sort-dropdown-trigger {
   display: inline-flex;
   align-items: center;

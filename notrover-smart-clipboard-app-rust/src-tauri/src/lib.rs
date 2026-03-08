@@ -252,6 +252,8 @@ pub fn run() {
             crate::clipboard::commands::get_setting,
             crate::clipboard::commands::set_setting,
             crate::clipboard::commands::save_history,
+            crate::clipboard::commands::set_entry_groups,
+            crate::clipboard::commands::purge_group_from_entries,
             crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,

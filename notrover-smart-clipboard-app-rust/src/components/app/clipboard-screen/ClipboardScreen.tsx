@@ -3,6 +3,7 @@ import type { ClipboardEntry } from "../../../types";
 import { filePaths } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 export { EntryCard };
+import GroupManagerCard from "./group-manager/GroupManagerCard";
 import "./ClipboardScreen.css";
 
 // Layout & sort types
@@ -212,6 +213,11 @@ interface ClipboardScreenProps {
   onDelete: (id: string) => void;
   onPin: (id: string, shouldPin: boolean) => void;
   onClearAll?: () => void;
+  /** User-defined group names. */
+  availableGroups: string[];
+  onAddGroup: (name: string) => void;
+  onDeleteGroup: (name: string) => void;
+  onSetGroups: (id: string, groups: string[]) => void;
 }
 
 const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
@@ -220,6 +226,10 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onDelete,
   onPin,
   onClearAll,
+  availableGroups,
+  onAddGroup,
+  onDeleteGroup,
+  onSetGroups,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
@@ -232,6 +242,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const [fading, setFading] = useState(false);
   const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const groupsRef = useRef<HTMLDivElement>(null);
 
   // Close sort dropdown on outside click
   useEffect(() => {
@@ -405,6 +417,55 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           )}
         </div>
 
+        {/* Groups manager */}
+        <div className="groups-dropdown" ref={groupsRef}>
+          <button
+            className={`sort-dropdown-trigger${groupsOpen ? " sort-dropdown-trigger--open" : ""}`}
+            onClick={() => setGroupsOpen((v) => !v)}
+            data-tooltip="Manage groups"
+            data-tooltip-pos="below"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+              <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+            <span className="layout-pill-label">
+              Groups
+              {availableGroups.length > 0 ? ` (${availableGroups.length})` : ""}
+            </span>
+            <svg
+              className="sort-chevron"
+              width="8"
+              height="8"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {groupsOpen && (
+            <GroupManagerCard
+              groups={availableGroups}
+              onAddGroup={onAddGroup}
+              onDeleteGroup={onDeleteGroup}
+              onClose={() => setGroupsOpen(false)}
+            />
+          )}
+        </div>
+
         <div className="layout-switch" role="group" aria-label="Layout">
           {layouts.map((l) => (
             <button
@@ -420,6 +481,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             </button>
           ))}
         </div>
+
         {onClearAll && (
           <div className="layout-switch" role="group">
             <button
@@ -512,6 +574,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onCopy={onCopy}
                           onDelete={onDelete}
                           onPin={onPin}
+                          availableGroups={availableGroups}
+                          onSetGroups={onSetGroups}
                         />
                       ))}
                     </div>

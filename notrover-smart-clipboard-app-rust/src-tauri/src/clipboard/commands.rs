@@ -200,6 +200,45 @@ pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// Set the groups for a clipboard entry.
+#[tauri::command]
+pub fn set_entry_groups(
+    id: String,
+    groups: Vec<String>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> bool {
+    use tauri::Emitter;
+
+    let success = state.history.lock().set_groups(&id, groups.clone());
+    if success {
+        if let Some(path) = get_pinned_file_path(&app) {
+            let _ = state.history.lock().save_pinned_to_file(&path);
+        }
+        auto_save_history(&app, &state.history);
+        let _ = app.emit(
+            "clipboard:entry-groups-changed",
+            serde_json::json!({ "id": id, "groups": groups }),
+        );
+    }
+    success
+}
+
+/// Remove a group tag from every entry that has it.
+#[tauri::command]
+pub fn purge_group_from_entries(
+    group: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> bool {
+    state.history.lock().purge_group(&group);
+    if let Some(path) = get_pinned_file_path(&app) {
+        let _ = state.history.lock().save_pinned_to_file(&path);
+    }
+    auto_save_history(&app, &state.history);
+    true
+}
+
 /// Mark the history as needing a flush to disk.  The actual I/O happens on
 /// a background timer (~2 s) so rapid clipboard changes are coalesced into a
 /// single write.  Cost: one atomic load + one atomic store (≈2 ns total).

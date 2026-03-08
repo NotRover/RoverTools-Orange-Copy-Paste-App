@@ -125,6 +125,16 @@ const App: React.FC = () => {
     null,
   );
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Groups state — persisted to localStorage
+  const [availableGroups, setAvailableGroups] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("sc-groups") ?? "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
+
   const systemPrefersDark = () =>
     window.matchMedia("(prefers-color-scheme: dark)").matches;
 
@@ -263,6 +273,35 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Groups handlers
+
+  const handleAddGroup = useCallback((name: string) => {
+    setAvailableGroups((prev) => {
+      const next = [...prev, name];
+      localStorage.setItem("sc-groups", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const handleDeleteGroup = useCallback(async (name: string) => {
+    setAvailableGroups((prev) => {
+      const next = prev.filter((g) => g !== name);
+      localStorage.setItem("sc-groups", JSON.stringify(next));
+      return next;
+    });
+    // Remove the group tag from all entries in the backend
+    await invoke("purge_group_from_entries", { group: name });
+    // Re-fetch to sync
+    const history = await invoke<ClipboardEntry[]>("get_history");
+    setEntries(history);
+  }, []);
+
+  const handleSetGroups = useCallback(async (id: string, groups: string[]) => {
+    // Optimistic update
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, groups } : e)));
+    await invoke("set_entry_groups", { id, groups });
+  }, []);
+
   const handleClearAll = useCallback(() => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
@@ -319,6 +358,8 @@ const App: React.FC = () => {
             onCopy={handleCopy}
             onDelete={handleDelete}
             onPin={handlePin}
+            availableGroups={availableGroups}
+            onSetGroups={handleSetGroups}
           />
         ) : (
           <ClipboardScreen
@@ -327,6 +368,10 @@ const App: React.FC = () => {
             onDelete={handleDelete}
             onPin={handlePin}
             onClearAll={entries.length > 0 ? handleClearAll : undefined}
+            availableGroups={availableGroups}
+            onAddGroup={handleAddGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onSetGroups={handleSetGroups}
           />
         )}
 

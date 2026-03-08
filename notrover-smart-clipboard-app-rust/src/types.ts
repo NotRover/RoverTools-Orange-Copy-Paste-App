@@ -10,6 +10,8 @@ export interface ClipboardEntry {
   timestamp: number;
   /** Whether this entry is pinned and persists across restarts. */
   pinned: boolean;
+  /** User-defined group tags assigned to this entry. */
+  groups: string[];
 }
 
 export type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";
