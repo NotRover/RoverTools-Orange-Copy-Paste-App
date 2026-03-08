@@ -62,7 +62,11 @@ const CHROME_H = HEADER_H + ACTIONS_H + BODY_PAD + 24; // +gaps+padding
 const MIN_PREVIEW_H = 36;
 const MAX_PREVIEW_H = 140;
 
-function estimatePreviewHeight(kind: string, content: string, hasMedia: boolean): number {
+function estimatePreviewHeight(
+  kind: string,
+  content: string,
+  hasMedia: boolean,
+): number {
   if (hasMedia) return MAX_PREVIEW_H;
   if (kind === "file") {
     const count = content.split("\n").filter((l) => l.trim()).length;
@@ -186,7 +190,10 @@ const CopyPopup: React.FC = () => {
     if (!visible) return;
     const hasMedia =
       kind === "image" ||
-      (kind === "file" && !!firstFile && (IMAGE_EXTS.has(fileExt(firstFile)) || VIDEO_EXTS.has(fileExt(firstFile))));
+      (kind === "file" &&
+        !!firstFile &&
+        (IMAGE_EXTS.has(fileExt(firstFile)) ||
+          VIDEO_EXTS.has(fileExt(firstFile))));
     const previewH = estimatePreviewHeight(kind, content, hasMedia);
     const totalH = CHROME_H + previewH;
     invoke("resize_copy_popup", { height: totalH }).catch(console.error);
@@ -238,6 +245,7 @@ const CopyPopup: React.FC = () => {
     content,
     timestamp: 0,
     pinned,
+    groups: [],
   });
 
   return (
@@ -264,7 +272,9 @@ const CopyPopup: React.FC = () => {
           <span>Removed from history</span>
         </div>
       ) : justPinned !== null ? (
-        <div className={`popup-pinned-state${justPinned ? "" : " popup-pinned-state--off"}`}>
+        <div
+          className={`popup-pinned-state${justPinned ? "" : " popup-pinned-state--off"}`}
+        >
           <svg
             width="20"
             height="20"
@@ -390,7 +400,6 @@ const CopyPopup: React.FC = () => {
               <span>Delete</span>
             </button>
           </div>
-
         </>
       )}
     </div>

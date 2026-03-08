@@ -17,6 +17,92 @@ export interface ClipboardEntry {
 export type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";
 export type AppTheme = "dark" | "light";
 
+// ── Group tag colors ────────────────────────────────────────────────
+
+export const GROUP_COLORS: { bg: string; fg: string }[] = [
+  { bg: "var(--accent-dim)", fg: "var(--accent)" }, // pinned accent
+  { bg: "rgba(239, 68, 68, 0.12)", fg: "#ef4444" }, // red
+  { bg: "rgba(249, 115, 22, 0.12)", fg: "#f97316" }, // orange
+  { bg: "rgba(234, 179, 8, 0.12)", fg: "#eab308" }, // yellow
+  { bg: "rgba(34, 197, 94, 0.12)", fg: "#22c55e" }, // green
+  { bg: "rgba(20, 184, 166, 0.12)", fg: "#14b8a6" }, // teal
+  { bg: "rgba(6, 182, 212, 0.12)", fg: "#06b6d4" }, // cyan
+  { bg: "rgba(59, 130, 246, 0.12)", fg: "#3b82f6" }, // blue
+  { bg: "rgba(99, 102, 241, 0.12)", fg: "#6366f1" }, // indigo
+  { bg: "rgba(168, 85, 247, 0.12)", fg: "#a855f7" }, // purple
+  { bg: "rgba(236, 72, 153, 0.12)", fg: "#ec4899" }, // pink
+];
+
+const GROUP_COLORS_STORAGE_KEY = "sc-group-colors";
+
+function readGroupColorMap(): Record<string, number> {
+  try {
+    const raw = JSON.parse(
+      localStorage.getItem(GROUP_COLORS_STORAGE_KEY) ?? "{}",
+    ) as unknown;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return {};
+    }
+
+    const parsed: Record<string, number> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue;
+      parsed[key] = value;
+    }
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function normalizeColorIndex(index: number): number {
+  const paletteSize = GROUP_COLORS.length;
+  if (paletteSize <= 0) return 0;
+  const rounded = Math.trunc(index);
+  return ((rounded % paletteSize) + paletteSize) % paletteSize;
+}
+
+export function groupColorIndex(name: string): number {
+  const map = readGroupColorMap();
+  if (Object.prototype.hasOwnProperty.call(map, name)) {
+    return normalizeColorIndex(map[name]);
+  }
+
+  const paletteSize = GROUP_COLORS.length;
+  if (paletteSize <= 0) return 0;
+
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % paletteSize;
+}
+
+export function groupColor(name: string): { bg: string; fg: string } {
+  const fallback = { bg: "rgba(59, 130, 246, 0.12)", fg: "#3b82f6" };
+  return GROUP_COLORS[groupColorIndex(name)] ?? fallback;
+}
+
+export function setGroupColorIndex(name: string, index: number): void {
+  try {
+    const map = readGroupColorMap();
+    map[name] = normalizeColorIndex(index);
+    localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage failures so the UI does not crash.
+  }
+}
+
+export function removeGroupColor(name: string): void {
+  try {
+    const map = readGroupColorMap();
+    delete map[name];
+    localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage failures so the UI does not crash.
+  }
+}
+
 //  Helpers
 
 export function timeAgo(ts: number): string {
