@@ -86,6 +86,21 @@
   color: var(--accent);
 }
 
+/* Persist button */
+.card-menu-item--persist:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.card-menu-item--persisted {
+  color: var(--accent);
+}
+
+.card-menu-item--persisted:hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
 .card-menu-item--danger {
   color: var(--text);
 }

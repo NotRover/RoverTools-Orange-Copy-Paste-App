@@ -9,10 +9,12 @@ export interface CardMenuProps {
   anchorY: number;
   onClose: () => void;
   isPinned: boolean;
+  isPersistent: boolean;
   copied: boolean;
   onCopy: () => void;
   onDelete: () => void;
   onPin: (shouldPin: boolean) => void;
+  onTogglePersistent: () => void;
   /** Available user-defined groups. */
   availableGroups: string[];
   /** Groups currently assigned to this entry. */
@@ -27,10 +29,12 @@ const CardMenu: React.FC<CardMenuProps> = ({
   anchorY,
   onClose,
   isPinned,
+  isPersistent,
   copied,
   onCopy,
   onDelete,
   onPin,
+  onTogglePersistent,
   availableGroups,
   entryGroups,
   onToggleGroup,
@@ -70,8 +74,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
 
   if (!open) return null;
 
-  const allGroups = ["Persistent", ...availableGroups];
-  const hasGroups = allGroups.length > 0;
+  const hasGroups = availableGroups.length > 0;
 
   return createPortal(
     <div
@@ -135,6 +138,27 @@ const CardMenu: React.FC<CardMenuProps> = ({
         <span>{isPinned ? "Unpin" : "Pin"}</span>
       </button>
 
+      <button
+        className={`card-menu-item card-menu-item--persist${isPersistent ? " card-menu-item--persisted" : ""}`}
+        onClick={closeAfter(onTogglePersistent)}
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill={isPersistent ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+          <polyline points="17 21 17 13 7 13 7 21" />
+          <polyline points="7 3 7 8 15 8" />
+        </svg>
+        <span>{isPersistent ? "Unsave" : "Save"}</span>
+      </button>
+
       {/* Groups submenu */}
       {hasGroups && (
         <>
@@ -179,7 +203,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
                   <span>Groups</span>
                 </div>
                 <div className="card-menu-groups-flyout-body">
-                  {allGroups.map((group) => {
+                  {availableGroups.map((group) => {
                     const active = entryGroups.includes(group);
                     const gc = groupColor(group);
                     return (
