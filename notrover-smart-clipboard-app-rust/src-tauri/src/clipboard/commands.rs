@@ -287,15 +287,29 @@ pub fn copy_entry(id: String, state: State<'_, AppState>) -> bool {
 
 #[tauri::command]
 pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    // Hide the OS window immediately before any heavy image decoding blocks the thread
+    hide_popup(&app, "paste-popup");
+
     let Some(entry) = find_entry_by_id(&state, &id) else {
         return false;
     };
-    if write_entry_to_clipboard(&entry).is_err() {
-        return false;
-    }
-    state.suppress_next_capture.store(true, Ordering::Relaxed);
-    hide_popup(&app, "paste-popup");
-    schedule_paste();
+
+    let suppress_next_capture = state.suppress_next_capture.clone();
+
+    // Spawn a background thread so we don't block the Tauri event loop
+    // during heavy image decoding/clipboard writing.
+    std::thread::spawn(move || {
+        // Set the suppress flag BEFORE the clipboard watcher processes the change
+        suppress_next_capture.store(true, Ordering::Relaxed);
+        
+        if write_entry_to_clipboard(&entry).is_ok() {
+            schedule_paste();
+        } else {
+            // Revert suppress flag if clipboard write failed to avoid suppressing legitimate next copies
+            suppress_next_capture.store(false, Ordering::Relaxed);
+        }
+    });
+
     true
 }
 

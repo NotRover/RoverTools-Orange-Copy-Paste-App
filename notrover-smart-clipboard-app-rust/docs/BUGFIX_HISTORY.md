@@ -37,3 +37,32 @@ The watcher updated `last_token = token` _before_ calling `capture_clipboard_cha
 On startup, `get_history` replaced the entire React state. If a `clipboard:new-entry` event arrived before the async response, that entry was overwritten and lost. There was also no mechanism to recover from missed events later.
 
 **Fix**: The `get_history` handler now _merges_ with existing state (preserves event-received entries not in the response). Added a `tauri://focus` listener that re-fetches history whenever the main window regains focus as a safety net against any future desync.
+
+## #2 — Paste popup window intercepts clicks when visually hiding during slow image pastes
+
+**Date**: 2026-03-09  
+**Severity**: High  
+**Symptoms**:
+
+- Pasting a copied image sporadically caused a completely different text entry from the bottom of the list to be pasted instead.
+- This only happened when clicking on screen right after hitting enter or clicking to paste an image.
+
+**Root Causes** (2 related issues):
+
+### 2a. Image decoding blocks thread while the popup is still visually hiding
+
+**File**: `src-tauri/src/clipboard/commands.rs`  
+The `paste_entry` Tauri command called `write_entry_to_clipboard` before calling `hide_popup`. For large images, `write_entry_to_clipboard` takes a long time to decode the base64 string to pixels and send it to the OS clipboard, blocking the Rust thread. The Tauri window stayed physically open for this entire duration.
+**Fix**: Moved `hide_popup(&app, "paste-popup");` to the exact beginning of the `paste_entry` function before `write_entry_to_clipboard` is called.
+
+### 2b. React container intercepts pointer events while opacity is 0
+
+**File**: `src/components/paste-popup/pastePopup.css`  
+The React frontend instantly sets the main container to `opacity: 0` during the delay, but the OS window is still open. Since there was no `pointer-events: none` on the transparent container, clicking on the screen behind the popup would accidentally hit an invisible entry item in the React DOM, firing a second conflicting `paste_entry` event.
+**Fix**: Added `pointer-events: none` to the `.paste-container` class and restored `pointer-events: auto` to the `.paste-container.visible` class.
+
+### 2c. Main thread blocked by synchronous clipboard interaction
+
+**File**: `src-tauri/src/clipboard/commands.rs`  
+The `paste_entry` command was executing synchronous calls to write data to the clipboard (`write_entry_to_clipboard`) on the main Tauri thread. When a large image payload was written to the clipboard, the entire event loop paused, preventing further keyboard inputs or interactions. Additionally, because the `suppress_next_capture` atomic boolean was evaluated _after_ the write operation, the OS clipboard event was detected by the background clipboard watcher concurrently and processed before the flag was raised.
+**Fix**: Wrapped the clipboard writing and `schedule_paste` call in a `std::thread::spawn()` block. Elevated the `suppress_next_capture` boolean change above the actual `write_entry_to_clipboard` logic so the watcher successfully ignores the clipboard modification event triggered by the OS.

@@ -88,12 +88,14 @@ body {
   display: flex;
   flex-direction: column;
   opacity: 0;
+  pointer-events: none;
   transform: scale(0.93) translateY(5px);
   will-change: transform, opacity;
   box-sizing: border-box;
 }
 
 .paste-container.visible {
+  pointer-events: auto;
   animation: pasteFadeIn 0.12s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
