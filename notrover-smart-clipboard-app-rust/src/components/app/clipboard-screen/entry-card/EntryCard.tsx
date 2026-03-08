@@ -33,7 +33,7 @@ interface EntryCardProps {
   entry: ClipboardEntry;
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
-  onPin: (id: string, shouldPin: boolean) => void;
+  onPin: (id: string, shouldPin: boolean) => Promise<boolean>;
   availableGroups?: string[];
   onSetGroups?: (id: string, groups: string[]) => void;
 }
@@ -53,9 +53,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const pinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const handlePin = (shouldPin: boolean) => {
-    onPin(entry.id, shouldPin);
-    if (shouldPin) {
+  const handlePin = async (shouldPin: boolean) => {
+    const success = await onPin(entry.id, shouldPin);
+    if (shouldPin && success) {
       setJustPinned(true);
       if (pinTimeoutRef.current) clearTimeout(pinTimeoutRef.current);
       pinTimeoutRef.current = setTimeout(

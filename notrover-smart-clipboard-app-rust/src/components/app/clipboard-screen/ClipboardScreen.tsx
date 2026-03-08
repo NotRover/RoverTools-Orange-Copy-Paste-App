@@ -211,7 +211,7 @@ interface ClipboardScreenProps {
   entries: ClipboardEntry[];
   onCopy: (id: string) => void;
   onDelete: (id: string) => void;
-  onPin: (id: string, shouldPin: boolean) => void;
+  onPin: (id: string, shouldPin: boolean) => Promise<boolean>;
   onClearAll?: () => void;
   /** User-defined group names. */
   availableGroups: string[];
