@@ -14,6 +14,7 @@ import {
   ImageIcon,
   FileIcon,
   PinIcon,
+  PersistIcon,
   EntryTypePill,
 } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
@@ -324,6 +325,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               <span className="card-type-chip card-type-chip--pinned">
                 {PinIcon}
                 <span className="card-type-label">Pinned</span>
+              </span>
+            )}
+            {entryGroups.includes("Persistent") && (
+              <span className="card-type-chip card-type-chip--persistent">
+                {PersistIcon}
+                <span className="card-type-label">Saved</span>
               </span>
             )}
             {visibleGroups.length > 0 &&

@@ -184,6 +184,15 @@ const App: React.FC = () => {
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didRecoverGroupsRef = useRef(false);
 
+  // Undo state for group deletion
+  const [deletedGroup, setDeletedGroup] = useState<{
+    name: string;
+    entries: ClipboardEntry[];
+  } | null>(null);
+  const deleteGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
   // Groups state — persisted to localStorage
   const [availableGroups, setAvailableGroups] = useState<string[]>(() => {
     return readStoredGroups();
@@ -334,7 +343,15 @@ const App: React.FC = () => {
     );
     if (success) {
       setEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, pinned: shouldPin } : e)),
+        prev.map((e) => {
+          if (e.id !== id) return e;
+          const updated = { ...e, pinned: shouldPin };
+          // Pinning automatically makes the entry persistent
+          if (shouldPin && !e.groups.includes("Persistent")) {
+            updated.groups = [...e.groups, "Persistent"];
+          }
+          return updated;
+        }),
       );
     }
   }, []);
@@ -349,19 +366,72 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleDeleteGroup = useCallback(async (name: string) => {
+  const handleDeleteGroup = useCallback(
+    (name: string) => {
+      // Cancel any pending group delete
+      if (deleteGroupTimerRef.current !== null) {
+        clearTimeout(deleteGroupTimerRef.current);
+        deleteGroupTimerRef.current = null;
+      }
+
+      // Snapshot entries that have this group (for undo)
+      const affectedEntries = entries.filter((e) => e.groups.includes(name));
+
+      // Optimistic UI removal
+      setAvailableGroups((prev) => {
+        const next = prev.filter((g) => g !== name);
+        localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.groups.includes(name)
+            ? { ...e, groups: e.groups.filter((g) => g !== name) }
+            : e,
+        ),
+      );
+
+      setDeletedGroup({ name, entries: affectedEntries });
+
+      // After timeout, commit the delete to backend
+      deleteGroupTimerRef.current = setTimeout(async () => {
+        deleteGroupTimerRef.current = null;
+        setDeletedGroup(null);
+        removeGroupColor(name);
+        await invoke("purge_group_from_entries", { group: name });
+        const history = await invoke<ClipboardEntry[]>("get_history");
+        setEntries(history);
+      }, 5000);
+    },
+    [entries],
+  );
+
+  const handleUndoDeleteGroup = useCallback(() => {
+    if (deleteGroupTimerRef.current !== null) {
+      clearTimeout(deleteGroupTimerRef.current);
+      deleteGroupTimerRef.current = null;
+    }
+    if (!deletedGroup) return;
+
+    // Restore the group
     setAvailableGroups((prev) => {
-      const next = prev.filter((g) => g !== name);
+      const next = mergeGroups(prev, [deletedGroup.name]);
       localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
-    removeGroupColor(name);
-    // Remove the group tag from all entries in the backend
-    await invoke("purge_group_from_entries", { group: name });
-    // Re-fetch to sync
-    const history = await invoke<ClipboardEntry[]>("get_history");
-    setEntries(history);
-  }, []);
+
+    // Restore group tag on affected entries
+    const affectedIds = new Set(deletedGroup.entries.map((e) => e.id));
+    setEntries((prev) =>
+      prev.map((e) =>
+        affectedIds.has(e.id) && !e.groups.includes(deletedGroup.name)
+          ? { ...e, groups: [...e.groups, deletedGroup.name] }
+          : e,
+      ),
+    );
+
+    setDeletedGroup(null);
+  }, [deletedGroup]);
 
   const handleRenameGroup = useCallback(
     async (oldName: string, newName: string) => {
@@ -508,6 +578,48 @@ const App: React.FC = () => {
             }}
             duration={5000}
             onDismiss={() => setUndoSnapshot(null)}
+          />
+        )}
+
+        {deletedGroup !== null && (
+          <ToastNotification
+            message={`Group "${deletedGroup.name}" deleted`}
+            icon={
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            }
+            action={{
+              label: "Undo",
+              icon: (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 7v6h6" />
+                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
+                </svg>
+              ),
+              onClick: handleUndoDeleteGroup,
+            }}
+            duration={5000}
+            onDismiss={() => setDeletedGroup(null)}
           />
         )}
       </div>

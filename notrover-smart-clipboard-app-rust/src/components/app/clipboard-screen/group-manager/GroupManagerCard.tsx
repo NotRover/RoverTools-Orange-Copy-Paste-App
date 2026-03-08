@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { ClipboardEntry } from "../../../../types";
 import { PinIcon } from "../../../entry-types/EntryTypePill";
 import {
   GROUP_COLORS,
@@ -25,21 +26,18 @@ const TagIcon = (
   </svg>
 );
 
-// Persist icon (small floppy/save)
+// Persist icon (star)
 const PersistIcon = (
   <svg
     width="11"
     height="11"
     viewBox="0 0 24 24"
-    fill="none"
+    fill="currentColor"
     stroke="currentColor"
-    strokeWidth="2.2"
-    strokeLinecap="round"
+    strokeWidth="1.5"
     strokeLinejoin="round"
   >
-    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-    <polyline points="17 21 17 13 7 13 7 21" />
-    <polyline points="7 3 7 8 15 8" />
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
   </svg>
 );
 
@@ -49,6 +47,7 @@ const MAX_GROUP_LENGTH = 14;
 
 interface GroupManagerCardProps {
   groups: string[];
+  entries: ClipboardEntry[];
   onAddGroup: (name: string) => void;
   onDeleteGroup: (name: string) => void;
   onRenameGroup: (oldName: string, newName: string) => void;
@@ -57,6 +56,7 @@ interface GroupManagerCardProps {
 
 const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
   groups,
+  entries,
   onAddGroup,
   onDeleteGroup,
   onRenameGroup,
@@ -65,7 +65,6 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const groupListRef = useRef<HTMLDivElement>(null);
@@ -188,7 +187,6 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
       setInputValue(name);
       setError("");
     }
-    setConfirmDelete(null);
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -216,7 +214,6 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
             setSelectedGroup(null);
             setInputValue("");
             setError("");
-            setConfirmDelete(null);
           }
         }}
       >
@@ -225,38 +222,53 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
           <span className="gm-group-icon gm-group-icon--pinned">{PinIcon}</span>
           <span className="gm-row-name">Pinned</span>
           <span className="gm-group-badge">System</span>
+          <span className="gm-row-count">
+            {entries.filter((e) => e.pinned).length}
+          </span>
         </div>
 
-        {/* System group: Persistent */}
+        {/* System group: Saved */}
         <div className="gm-group-row gm-group-row--system">
-          <span className="gm-group-icon gm-group-icon--persistent">
+          <span className="gm-group-icon gm-group-icon--saved">
             {PersistIcon}
           </span>
-          <span className="gm-row-name">Persistent</span>
+          <span className="gm-row-name">Saved</span>
           <span className="gm-group-badge">System</span>
+          <span className="gm-row-count">
+            {entries.filter((e) => e.groups.includes("Persistent")).length}
+          </span>
         </div>
 
-        {/* User groups as chips */}
+        {/* User groups as chips (sorted alphabetically) */}
         {groups.length > 0 && (
           <div className="gm-chip-list">
-            {groups.map((group) => {
-              const gc = groupColor(group);
-              const isSelected = selectedGroup === group;
-              return (
-                <button
-                  key={group}
-                  className={`gm-chip${isSelected ? " gm-chip--selected" : ""}`}
-                  style={{
-                    background: isSelected ? gc.bg : undefined,
-                    color: gc.fg,
-                  }}
-                  onClick={() => handleSelectGroup(group)}
-                >
-                  <span className="gm-chip-dot" style={{ background: gc.fg }} />
-                  <span className="gm-chip-name">{group}</span>
-                </button>
-              );
-            })}
+            {[...groups]
+              .sort((a, b) => a.localeCompare(b))
+              .map((group) => {
+                const count = entries.filter((e) =>
+                  e.groups.includes(group),
+                ).length;
+                const gc = groupColor(group);
+                const isSelected = selectedGroup === group;
+                return (
+                  <button
+                    key={group}
+                    className={`gm-chip${isSelected ? " gm-chip--selected" : ""}`}
+                    style={{
+                      background: isSelected ? gc.bg : undefined,
+                      color: gc.fg,
+                    }}
+                    onClick={() => handleSelectGroup(group)}
+                  >
+                    <span
+                      className="gm-chip-dot"
+                      style={{ background: gc.fg }}
+                    />
+                    <span className="gm-chip-name">{group}</span>
+                    <span className="gm-chip-count">{count}</span>
+                  </button>
+                );
+              })}
           </div>
         )}
       </div>
@@ -266,58 +278,37 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         <>
           <div className="gm-divider" />
           <div className="gm-detail-panel">
-            {confirmDelete === selectedGroup ? (
-              <div className="gm-confirm-row">
-                <span className="gm-confirm-text">
-                  Delete "{selectedGroup}"?
-                </span>
-                <button
-                  className="gm-confirm-yes"
-                  onClick={() => {
-                    onDeleteGroup(selectedGroup);
-                    setSelectedGroup(null);
-                    setInputValue("");
-                    setError("");
-                    setConfirmDelete(null);
-                  }}
+            <div className="gm-detail-row">
+              <span
+                className="gm-detail-dot"
+                style={{ background: selectedGc.fg }}
+              />
+              <span className="gm-detail-label">{selectedGroup}</span>
+              <button
+                className="gm-detail-delete"
+                onClick={() => {
+                  onDeleteGroup(selectedGroup);
+                  setSelectedGroup(null);
+                  setInputValue("");
+                  setError("");
+                }}
+                title="Delete group"
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 >
-                  Yes
-                </button>
-                <button
-                  className="gm-confirm-no"
-                  onClick={() => setConfirmDelete(null)}
-                >
-                  No
-                </button>
-              </div>
-            ) : (
-              <div className="gm-detail-row">
-                <span
-                  className="gm-detail-dot"
-                  style={{ background: selectedGc.fg }}
-                />
-                <span className="gm-detail-label">{selectedGroup}</span>
-                <button
-                  className="gm-detail-delete"
-                  onClick={() => setConfirmDelete(selectedGroup)}
-                  title="Delete group"
-                >
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            )}
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
 
             {/* Color picker */}
             <div className="gm-detail-colors">

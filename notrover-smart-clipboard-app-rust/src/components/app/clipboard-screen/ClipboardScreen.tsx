@@ -461,6 +461,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           {groupsOpen && (
             <GroupManagerCard
               groups={availableGroups}
+              entries={entries}
               onAddGroup={onAddGroup}
               onDeleteGroup={onDeleteGroup}
               onRenameGroup={onRenameGroup}

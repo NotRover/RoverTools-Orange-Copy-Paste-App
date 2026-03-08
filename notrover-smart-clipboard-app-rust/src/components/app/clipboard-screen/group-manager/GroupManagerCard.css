@@ -216,10 +216,10 @@
   flex-shrink: 0;
 }
 
-.gm-group-icon--persistent {
+.gm-group-icon--saved {
   display: inline-flex;
   align-items: center;
-  color: var(--accent);
+  color: #22c55e;
   flex-shrink: 0;
 }
 
@@ -233,6 +233,22 @@
   border-radius: 4px;
   padding: 1px 5px;
   flex-shrink: 0;
+}
+
+.gm-row-count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.gm-chip-count {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  opacity: 0.65;
+  margin-left: 1px;
 }
 
 /* ── Detail panel (selected group editing) ───────────────────────── */

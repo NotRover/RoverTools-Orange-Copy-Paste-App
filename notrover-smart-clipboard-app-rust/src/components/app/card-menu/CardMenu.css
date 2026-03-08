@@ -86,19 +86,19 @@
   color: var(--accent);
 }
 
-/* Persist button */
+/* Persist (Save) button */
 .card-menu-item--persist:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
 }
 
 .card-menu-item--persisted {
-  color: var(--accent);
+  color: #22c55e;
 }
 
 .card-menu-item--persisted:hover {
-  background: var(--accent-dim-strong);
-  color: var(--accent);
+  background: rgba(34, 197, 94, 0.18);
+  color: #22c55e;
 }
 
 .card-menu-item--danger {
