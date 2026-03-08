@@ -12,6 +12,12 @@ export interface CardMenuProps {
   onCopy: () => void;
   onDelete: () => void;
   onPin: (shouldPin: boolean) => void;
+  /** Available user-defined groups. */
+  availableGroups: string[];
+  /** Groups currently assigned to this entry. */
+  entryGroups: string[];
+  /** Toggle a group on/off for this entry. */
+  onToggleGroup: (group: string) => void;
 }
 
 const CardMenu: React.FC<CardMenuProps> = ({
@@ -24,6 +30,9 @@ const CardMenu: React.FC<CardMenuProps> = ({
   onCopy,
   onDelete,
   onPin,
+  availableGroups,
+  entryGroups,
+  onToggleGroup,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const closeAfter = (fn: () => void) => () => {
@@ -53,6 +62,8 @@ const CardMenu: React.FC<CardMenuProps> = ({
   }, [open, onClose]);
 
   if (!open) return null;
+
+  const hasGroups = availableGroups.length > 0;
 
   return createPortal(
     <div
@@ -115,6 +126,59 @@ const CardMenu: React.FC<CardMenuProps> = ({
         </svg>
         <span>{isPinned ? "Unpin" : "Pin"}</span>
       </button>
+
+      {/* Groups submenu */}
+      {hasGroups && (
+        <>
+          <div className="card-menu-separator" />
+          <div className="card-menu-group-label">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+              <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+            <span>Groups</span>
+          </div>
+          {availableGroups.map((group) => {
+            const active = entryGroups.includes(group);
+            return (
+              <button
+                key={group}
+                className={`card-menu-item card-menu-item--group${active ? " card-menu-item--group-active" : ""}`}
+                onClick={() => onToggleGroup(group)}
+              >
+                <span
+                  className={`card-menu-group-check${active ? " card-menu-group-check--on" : ""}`}
+                >
+                  {active && (
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </span>
+                <span>{group}</span>
+              </button>
+            );
+          })}
+        </>
+      )}
 
       <div className="card-menu-separator" />
 

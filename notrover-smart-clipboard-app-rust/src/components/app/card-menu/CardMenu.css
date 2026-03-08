@@ -103,4 +103,56 @@
   margin: 3px 4px;
 }
 
+/* Groups section label */
 
+.card-menu-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+/* Group item checkmark */
+
+.card-menu-group-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1.5px solid var(--border-light);
+  background: transparent;
+  flex-shrink: 0;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease;
+}
+
+.card-menu-group-check--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Group item hover */
+
+.card-menu-item--group:hover {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.card-menu-item--group-active {
+  color: var(--accent);
+}
+
+.card-menu-item--group-active:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}

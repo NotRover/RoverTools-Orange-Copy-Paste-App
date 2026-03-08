@@ -4,6 +4,11 @@ use crate::runtime::popup_windows::hide_popup;
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
 
+// Safety guard: never let debug/dev binaries register autostart by default.
+// This prevents Windows startup entries from pointing to `target/debug` builds
+// that depend on `devUrl` (localhost) and fail on boot.
+const ALLOW_AUTOSTART_IN_DEBUG_BUILD: bool = false;
+
 #[tauri::command]
 pub fn close_copy_popup(app: tauri::AppHandle) {
     hide_popup(&app, "copy-popup");
@@ -61,6 +66,13 @@ pub fn get_autostart(app: tauri::AppHandle) -> bool {
 
 #[tauri::command]
 pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> bool {
+    if enabled && cfg!(debug_assertions) && !ALLOW_AUTOSTART_IN_DEBUG_BUILD {
+        eprintln!(
+            "Refusing to enable autostart from a debug build (ALLOW_AUTOSTART_IN_DEBUG_BUILD=false)."
+        );
+        return false;
+    }
+
     let mgr = app.autolaunch();
     if enabled {
         mgr.enable().is_ok()

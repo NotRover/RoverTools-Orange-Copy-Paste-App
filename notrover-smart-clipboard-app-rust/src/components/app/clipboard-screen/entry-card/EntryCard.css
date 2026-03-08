@@ -106,6 +106,21 @@
   color: var(--accent);
 }
 
+.card-type-chip--group {
+  background: var(--accent-dim);
+  color: var(--accent);
+  gap: 4px;
+}
+
+.card-group-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
 [data-theme="light"] .card-type-chip--video {
   background: rgba(239, 68, 68, 0.1);
   color: #dc2626;

@@ -59,6 +59,9 @@ pub struct ClipboardEntry {
     /// Whether this entry is pinned and persists across restarts.
     #[serde(default)]
     pub pinned: bool,
+    /// User-defined group tags assigned to this entry.
+    #[serde(default)]
+    pub groups: Vec<String>,
 }
 
 impl ClipboardEntry {
@@ -72,6 +75,7 @@ impl ClipboardEntry {
                 .unwrap_or_default()
                 .as_millis() as u64,
             pinned: false,
+            groups: Vec::new(),
         }
     }
 
@@ -195,6 +199,40 @@ impl ClipboardHistory {
     /// Get all pinned entries.
     pub fn pinned_entries(&self) -> Vec<ClipboardEntry> {
         self.entries.iter().filter(|e| e.pinned).cloned().collect()
+    }
+
+    /// Replace the groups list for an entry. Returns `true` if found.
+    pub fn set_groups(&mut self, id: &str, groups: Vec<String>) -> bool {
+        self.find_mut(id).map(|e| e.groups = groups).is_some()
+    }
+
+    /// Add a single group to an entry (no duplicates). Returns `true` if found.
+    pub fn add_group(&mut self, id: &str, group: &str) -> bool {
+        if let Some(e) = self.find_mut(id) {
+            if !e.groups.iter().any(|g| g == group) {
+                e.groups.push(group.to_string());
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a single group from an entry. Returns `true` if found.
+    pub fn remove_group(&mut self, id: &str, group: &str) -> bool {
+        if let Some(e) = self.find_mut(id) {
+            e.groups.retain(|g| g != group);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a group name from all entries that have it.
+    pub fn purge_group(&mut self, group: &str) {
+        for e in &mut self.entries {
+            e.groups.retain(|g| g != group);
+        }
     }
 
     /// Load pinned entries from a file and merge them into history.
