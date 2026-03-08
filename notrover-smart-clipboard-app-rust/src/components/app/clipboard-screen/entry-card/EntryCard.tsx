@@ -22,7 +22,7 @@ import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
 const REL_TIME_REFRESH_MS = 15_000;
-const MAX_VISIBLE_GROUP_CHIPS = 3;
+const MAX_VISIBLE_GROUP_CHIPS = 2;
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -50,6 +50,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const handlePin = (shouldPin: boolean) => {
     onPin(entry.id, shouldPin);
@@ -128,6 +129,17 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     setShowHiddenGroups(false);
   }, [entry.id, hiddenGroupCount]);
 
+  useEffect(() => {
+    if (!showHiddenGroups) return;
+    const handler = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        setShowHiddenGroups(false);
+      }
+    };
+    document.addEventListener("mousedown", handler, true);
+    return () => document.removeEventListener("mousedown", handler, true);
+  }, [showHiddenGroups]);
+
   const handleCopy = () => {
     onCopy(entry.id);
     setCopied(true);
@@ -143,6 +155,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
   return (
     <div
+      ref={cardRef}
       className={`entry-card${copied ? " entry-card--copied" : ""}${showFileList ? " entry-card--expanded" : ""}`}
       onClick={handleCopy}
       onContextMenu={(e) => {
@@ -333,7 +346,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 data-tooltip={
                   showHiddenGroups
                     ? "Hide extra groups"
-                    : `${hiddenGroupCount} more group${hiddenGroupCount > 1 ? "s" : ""}`
+                    : `show ${hiddenGroupCount} more group${hiddenGroupCount > 1 ? "s" : ""}`
                 }
                 onClick={(e) => {
                   e.stopPropagation();

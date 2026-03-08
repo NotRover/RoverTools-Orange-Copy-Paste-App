@@ -15,6 +15,7 @@
   box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.15));
   z-index: 100;
   animation: gm-slide-down 0.12s ease-out;
+  overflow-x: hidden;
 }
 
 @keyframes gm-slide-down {
@@ -69,6 +70,7 @@
   gap: 1px;
   max-height: 200px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .gm-group-list::-webkit-scrollbar {
@@ -94,6 +96,7 @@
   border-radius: 6px;
   transition: background 0.1s ease;
   user-select: none;
+  min-width: 0;
 }
 
 .gm-group-item:hover {
@@ -103,6 +106,24 @@
 .gm-group-item--system {
   opacity: 0.75;
   cursor: default;
+}
+
+.gm-group-item--editable {
+  flex-wrap: wrap;
+  row-gap: 5px;
+}
+
+.gm-group-item--editable .gm-group-dot-btn {
+  order: 1;
+}
+
+.gm-group-item--editable .gm-group-name {
+  order: 2;
+  flex: 1;
+}
+
+.gm-group-item--editable .gm-group-delete {
+  order: 3;
 }
 
 /* Group dot (color indicator) */
@@ -143,13 +164,26 @@
 /* Color picker inline */
 
 .gm-color-picker {
-  display: flex;
-  gap: 3px;
-  padding: 3px 4px;
-  background: var(--bg);
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 6px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.06));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.gm-group-item--editable .gm-color-picker {
+  order: 4;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-left: 0;
+  max-width: 100%;
 }
 
 .gm-color-swatch {

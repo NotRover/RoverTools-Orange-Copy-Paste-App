@@ -387,12 +387,15 @@ button.card-type-chip.open .card-type-chevron {
 }
 
 .card-type-chip--group-overflow {
-  background: var(--surface-hover, rgba(148, 163, 184, 0.15));
+  background: transparent;
   color: var(--text-muted);
+  border: 1px dashed var(--border-light);
+  font-weight: 600;
 }
 
 .card-type-chip--group-overflow-btn {
-  border: none;
+  padding-left: 6px;
+  padding-right: 6px;
   font-family: inherit;
   cursor: pointer;
   transition:
@@ -401,12 +404,12 @@ button.card-type-chip.open .card-type-chevron {
 }
 
 .card-type-chip--group-overflow-btn:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
 }
 
 .card-type-chip--group-overflow-btn.active {
-  background: var(--accent-dim);
+  background: var(--surface-hover);
   color: var(--accent);
 }
 
@@ -414,7 +417,7 @@ button.card-type-chip.open .card-type-chevron {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: 4px;
   padding-top: 6px;
   border-top: 1px dashed var(--border);
 }
