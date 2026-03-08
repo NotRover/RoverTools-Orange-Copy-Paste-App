@@ -20,6 +20,7 @@ import TooltipPortal from "./tooltip/TooltipPortal";
 import "./App.css";
 
 const GROUPS_STORAGE_KEY = "sc-groups";
+const SYSTEM_GROUPS = ["pinned", "persistent"];
 
 function sanitizeGroups(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
@@ -53,7 +54,10 @@ function groupsFromEntries(entries: ClipboardEntry[]): string[] {
   for (const entry of entries) {
     groups.push(...sanitizeGroups(entry.groups));
   }
-  return sanitizeGroups(groups);
+  // Filter out system groups — they are managed separately.
+  return sanitizeGroups(groups).filter(
+    (g) => !SYSTEM_GROUPS.includes(g.toLowerCase()),
+  );
 }
 
 function mergeGroups(primary: string[], secondary: string[]): string[] {
@@ -383,7 +387,9 @@ const App: React.FC = () => {
   const handleClearAll = useCallback(() => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
-    setEntries((prev) => prev.filter((e) => e.pinned));
+    setEntries((prev) =>
+      prev.filter((e) => e.pinned || e.groups.includes("Persistent")),
+    );
     undoTimerRef.current = setTimeout(async () => {
       undoTimerRef.current = null;
       setUndoSnapshot(null);
