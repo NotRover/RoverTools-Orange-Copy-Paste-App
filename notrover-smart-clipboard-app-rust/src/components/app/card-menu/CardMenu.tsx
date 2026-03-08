@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { groupColor } from "../../../types";
 import "./CardMenu.css";
 
 export interface CardMenuProps {
@@ -147,36 +148,48 @@ const CardMenu: React.FC<CardMenuProps> = ({
             </svg>
             <span>Groups</span>
           </div>
-          {availableGroups.map((group) => {
-            const active = entryGroups.includes(group);
-            return (
-              <button
-                key={group}
-                className={`card-menu-item card-menu-item--group${active ? " card-menu-item--group-active" : ""}`}
-                onClick={() => onToggleGroup(group)}
-              >
-                <span
-                  className={`card-menu-group-check${active ? " card-menu-group-check--on" : ""}`}
+          <div className="card-menu-group-list">
+            {availableGroups.map((group) => {
+              const active = entryGroups.includes(group);
+              const gc = groupColor(group);
+              return (
+                <button
+                  key={group}
+                  className={`card-menu-item card-menu-item--group${active ? " card-menu-item--group-active" : ""}`}
+                  onClick={() => onToggleGroup(group)}
                 >
-                  {active && (
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </span>
-                <span>{group}</span>
-              </button>
-            );
-          })}
+                  <span
+                    className={`card-menu-group-check${active ? " card-menu-group-check--on" : ""}`}
+                    style={
+                      active
+                        ? { background: gc.fg, borderColor: gc.fg }
+                        : undefined
+                    }
+                  >
+                    {active && (
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </span>
+                  <span
+                    className="card-menu-group-dot"
+                    style={{ background: gc.fg }}
+                  />
+                  <span>{group}</span>
+                </button>
+              );
+            })}
+          </div>
         </>
       )}
 

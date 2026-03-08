@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PinIcon } from "../../../entry-types/EntryTypePill";
+import {
+  GROUP_COLORS,
+  groupColor,
+  setGroupColorIndex,
+} from "../../../../types";
 import "./GroupManagerCard.css";
 
 // Tag icon (small label/tag)
@@ -55,7 +60,8 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
   }, [onClose]);
 
   const handleSubmit = () => {
-    const trimmed = inputValue.trim().toLowerCase();
+    const trimmed = inputValue.trim();
+    const trimmedLower = trimmed.toLowerCase();
     if (!trimmed) return;
 
     // Validate: single word, max 12 chars, no duplicates
@@ -67,11 +73,11 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
       setError(`Max ${MAX_GROUP_LENGTH} characters`);
       return;
     }
-    if (trimmed === "pinned") {
+    if (trimmedLower === "pinned") {
       setError("Reserved name");
       return;
     }
-    if (groups.some((g) => g.toLowerCase() === trimmed)) {
+    if (groups.some((g) => g.toLowerCase() === trimmedLower)) {
       setError("Already exists");
       return;
     }
@@ -108,34 +114,17 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         </div>
 
         {/* User groups */}
-        {groups.map((group) => (
-          <div key={group} className="gm-group-item">
-            <span className="gm-group-dot" />
-            <span className="gm-group-name">{group}</span>
-            <button
-              className="gm-group-delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteGroup(group);
-              }}
-              data-tooltip="Delete group"
-            >
-              <svg
-                width="9"
-                height="9"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
-        ))}
+        {groups.map((group) => {
+          const gc = groupColor(group);
+          return (
+            <GroupItemRow
+              key={group}
+              group={group}
+              gc={gc}
+              onDeleteGroup={onDeleteGroup}
+            />
+          );
+        })}
       </div>
 
       <div className="gm-divider" />
@@ -176,6 +165,69 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         </button>
       </div>
       {error && <span className="gm-error">{error}</span>}
+    </div>
+  );
+};
+
+/** Single group row with inline color picker. */
+const GroupItemRow: React.FC<{
+  group: string;
+  gc: { bg: string; fg: string };
+  onDeleteGroup: (name: string) => void;
+}> = ({ group, gc, onDeleteGroup }) => {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [currentColor, setCurrentColor] = useState(gc);
+
+  return (
+    <div className="gm-group-item">
+      <button
+        className="gm-group-dot-btn"
+        style={{ background: currentColor.fg }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setPickerOpen((v) => !v);
+        }}
+        title="Change color"
+      />
+      {pickerOpen && (
+        <div className="gm-color-picker" onClick={(e) => e.stopPropagation()}>
+          {GROUP_COLORS.map((c, i) => (
+            <button
+              key={i}
+              className={`gm-color-swatch${c.fg === currentColor.fg ? " gm-color-swatch--active" : ""}`}
+              style={{ background: c.fg }}
+              onClick={() => {
+                setGroupColorIndex(group, i);
+                setCurrentColor(c);
+                setPickerOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <span className="gm-group-name">{group}</span>
+      <button
+        className="gm-group-delete"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDeleteGroup(group);
+        }}
+        data-tooltip="Delete group"
+      >
+        <svg
+          width="9"
+          height="9"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
     </div>
   );
 };

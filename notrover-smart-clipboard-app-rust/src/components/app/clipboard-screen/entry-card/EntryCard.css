@@ -107,8 +107,6 @@
 }
 
 .card-type-chip--group {
-  background: var(--accent-dim);
-  color: var(--accent);
   gap: 4px;
 }
 

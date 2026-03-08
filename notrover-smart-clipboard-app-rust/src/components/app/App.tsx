@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ClipboardEntry, AppScreen, AppTheme } from "../../types";
-import { classifyFileEntry } from "../../types";
+import { classifyFileEntry, removeGroupColor } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
@@ -289,6 +289,7 @@ const App: React.FC = () => {
       localStorage.setItem("sc-groups", JSON.stringify(next));
       return next;
     });
+    removeGroupColor(name);
     // Remove the group tag from all entries in the backend
     await invoke("purge_group_from_entries", { group: name });
     // Re-fetch to sync

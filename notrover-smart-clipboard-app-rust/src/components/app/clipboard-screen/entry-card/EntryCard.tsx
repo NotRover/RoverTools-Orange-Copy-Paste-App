@@ -8,6 +8,7 @@ import {
   truncateText,
   timeAgo,
   deriveDisplayKind,
+  groupColor,
 } from "../../../../types";
 import {
   ImageIcon,
@@ -303,12 +304,19 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             )}
             {entry.groups &&
               entry.groups.length > 0 &&
-              entry.groups.map((g) => (
-                <span key={g} className="card-type-chip card-type-chip--group">
-                  <span className="card-group-dot" />
-                  <span className="card-type-label">{g}</span>
-                </span>
-              ))}
+              entry.groups.map((g) => {
+                const gc = groupColor(g);
+                return (
+                  <span
+                    key={g}
+                    className="card-type-chip card-type-chip--group"
+                    style={{ background: gc.bg, color: gc.fg }}
+                  >
+                    <span className="card-group-dot" />
+                    <span className="card-type-label">{g}</span>
+                  </span>
+                );
+              })}
           </div>
           {justPinned ? (
             <span className="card-time card-time--pinned">
