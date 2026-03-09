@@ -595,6 +595,21 @@ const App: React.FC = () => {
     [],
   );
 
+  // Save / Unsave are just group add/remove with the "Saved" group
+  const handleBulkSave = useCallback(
+    async (ids: string[]) => {
+      await handleBulkAddGroup(ids, "Saved");
+    },
+    [handleBulkAddGroup],
+  );
+
+  const handleBulkUnsave = useCallback(
+    async (ids: string[]) => {
+      await handleBulkRemoveGroup(ids, "Saved");
+    },
+    [handleBulkRemoveGroup],
+  );
+
   const handleClearAll = useCallback(() => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
@@ -671,6 +686,8 @@ const App: React.FC = () => {
             onBulkDelete={handleBulkDelete}
             onBulkPin={handleBulkPin}
             onBulkUnpin={handleBulkUnpin}
+            onBulkSave={handleBulkSave}
+            onBulkUnsave={handleBulkUnsave}
             onBulkAddGroup={handleBulkAddGroup}
             onBulkRemoveGroup={handleBulkRemoveGroup}
           />
