@@ -163,20 +163,20 @@ fn setup_runtime(
     let path = |name: &str| app_data.as_ref().map(|d| d.join(name));
 
     let history_file = path("history.json");
-    let persistent_file = path("pinned_entries.json");
+    let saved_file = path("pinned_entries.json");
     let settings_file = path("settings.json");
     let boot_file = path("boot_id.txt");
 
-    // Seed the cached persist_history flag from disk (one-time read at boot).
-    let persist_enabled = settings_file
+    // Seed the cached keep_history flag from disk (one-time read at boot).
+    let keep_enabled = settings_file
         .as_deref()
-        .map(|p| read_bool_setting(p, "persist_history"))
+        .map(|p| read_bool_setting(p, "keep_history"))
         .unwrap_or(false);
 
-    // Load history: full restore if same boot + persist enabled, pinned-only otherwise.
-    if persist_enabled {
+    // Load history: full restore if same boot + keep enabled, saved-only otherwise.
+    if keep_enabled {
         if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
-            (&history_file, &persistent_file, &boot_file, &app_data)
+            (&history_file, &saved_file, &boot_file, &app_data)
         {
             let current_boot = system_boot_epoch_secs();
             let previous_boot: u64 = std::fs::read_to_string(bf)
@@ -184,23 +184,33 @@ fn setup_runtime(
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(0);
 
-            if current_boot.abs_diff(previous_boot) < 5 && hf.exists() {
+            let same_boot = current_boot.abs_diff(previous_boot) < 5;
+
+            if same_boot && hf.exists() {
+                // Same boot session — restore everything.
                 let _ = history.lock().load_all_from_file(hf);
+            } else if hf.exists() {
+                // New boot — load full history then strip unsaved entries.
+                // Using history.json (most up-to-date) instead of the separate
+                // pinned_entries.json which may be stale.
+                let _ = history.lock().load_all_from_file(hf);
+                history.lock().clear();
             } else {
-                let _ = history.lock().load_persistent_from_file(pf);
+                // Fallback: pinned_entries.json (first run with keep enabled).
+                let _ = history.lock().load_saved_from_file(pf);
             }
 
             let _ = std::fs::create_dir_all(ad);
             let _ = std::fs::write(bf, current_boot.to_string());
         }
-    } else if let Some(pf) = &persistent_file {
-        let _ = history.lock().load_persistent_from_file(pf);
+    } else if let Some(pf) = &saved_file {
+        let _ = history.lock().load_saved_from_file(pf);
     }
 
-    // Seed the in-memory persist flag.
+    // Seed the in-memory keep flag.
     app.state::<AppState>()
-        .persist_history
-        .store(persist_enabled, Ordering::Relaxed);
+        .keep_history
+        .store(keep_enabled, Ordering::Relaxed);
 
     // Seed the close_to_tray flag from disk.
     let close_to_tray_enabled = settings_file
@@ -228,7 +238,7 @@ fn setup_runtime(
         let hist = Arc::clone(history);
         let state: tauri::State<'_, AppState> = app.state();
         let dirty = Arc::clone(&state.history_dirty);
-        let persist = Arc::clone(&state.persist_history);
+        let persist = Arc::clone(&state.keep_history);
         let app_handle = app.handle().clone();
 
         std::thread::spawn(move || loop {
@@ -243,14 +253,14 @@ fn setup_runtime(
             if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
                 let _ = hist.lock().save_all_to_file(&path);
             }
-            // Also keep the persistent entries file up-to-date.
+            // Also keep the saved entries file up-to-date.
             if let Some(pf) = app_handle
                 .path()
                 .app_data_dir()
                 .ok()
                 .map(|d| d.join("pinned_entries.json"))
             {
-                let _ = hist.lock().save_persistent_to_file(&pf);
+                let _ = hist.lock().save_saved_to_file(&pf);
             }
         });
     }
@@ -282,7 +292,7 @@ pub fn run() {
     let app_state = AppState {
         history: Arc::clone(&history),
         suppress_next_capture: Arc::clone(&suppress),
-        persist_history: Arc::new(AtomicBool::new(false)),
+        keep_history: Arc::new(AtomicBool::new(false)),
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         start_minimized: Arc::new(AtomicBool::new(false)),

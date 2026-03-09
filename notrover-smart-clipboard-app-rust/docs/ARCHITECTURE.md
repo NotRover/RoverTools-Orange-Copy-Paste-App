@@ -121,7 +121,7 @@ src-tauri/
 │   │   │   ├── mod.rs           # cfg-gated module selection + cross-platform popup_position()
 │   │   │   ├── windows.rs      # Win32: key simulation, cursor, monitors, DPI
 │   │   │   └── linux.rs        # xdotool/wtype: key simulation, cursor, screen info
-│   │   └── window_state.rs     # Persistent window geometry (position, size)
+│   │   └── window_state.rs     # Saved window geometry (position, size)
 │   └── state/
 │       ├── mod.rs              # Re-exports
 │       ├── app_state.rs        # AppState (shared history + flags)
@@ -187,7 +187,7 @@ src/
 AppState
 ├── history: Arc<Mutex<ClipboardHistory>>   ← shared across all threads
 ├── suppress_next_capture: Arc<AtomicBool>  ← prevents watcher re-capturing
-├── persist_history: Arc<AtomicBool>        ← cached mirror of the setting (~1ns check)
+├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting (~1ns check)
 ├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.json
 ├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
 └── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
@@ -197,7 +197,7 @@ AppState
 
 **Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture — preventing duplicate entries.
 
-**History persistence**: When `persist_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.json` every 2 seconds when dirty.
+**History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.json` every 2 seconds when dirty.
 
 ### Clipboard Module
 
@@ -210,7 +210,7 @@ ClipboardEntry {
     content: String      ← plain text / data:image/png;base64,... / newline-delimited paths
     timestamp: u64       ← Unix ms
     pinned: bool
-    groups: Vec<String>  ← user-defined group tags (e.g. "Persistent")
+    groups: Vec<String>  ← user-defined group tags (e.g. "Saved")
 }
 ```
 
@@ -230,9 +230,9 @@ ClipboardEntry {
 | `add_group(id, group)`              | Add a single group tag (no duplicates)                    |
 | `purge_group(group)`                | Remove a group tag from every entry that has it           |
 | `rename_group(old, new)`            | Rename a group tag across all entries                     |
-| `pinned_entries()`                  | All entries with the "Persistent" group tag               |
-| `load_pinned_from_file(path)`       | Restore pinned/persistent entries from JSON on startup    |
-| `save_persistent_to_file(path)`     | Persist pinned/persistent entries to JSON                 |
+| `saved_entries()`                   | All entries that survive restarts (pinned or saved)       |
+| `load_saved_from_file(path)`        | Restore saved entries from JSON on startup                |
+| `save_saved_to_file(path)`          | Save pinned/saved entries to JSON                         |
 | `save_all_to_file(path)`            | Flush full history to disk (for history persistence)      |
 
 #### `commands.rs` — Tauri Command Handlers
@@ -359,7 +359,7 @@ Sets up a system tray icon with a context menu:
 
 Left-clicking the tray icon also shows the main window. Integrates with `close_to_tray` setting: when enabled, closing the main window hides it to the tray instead of quitting.
 
-#### `window_state.rs` — Persistent Window Geometry
+#### `window_state.rs` — Saved Window Geometry
 
 Saves window position, size, and maximized state to `{app_data}/window-state.json` on every move/resize. Restores on startup with guards: minimum 200×200 dimensions, re-center if position is off-screen.
 

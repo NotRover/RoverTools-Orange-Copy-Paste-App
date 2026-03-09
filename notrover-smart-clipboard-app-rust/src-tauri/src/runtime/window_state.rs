@@ -1,4 +1,4 @@
-//! Persistent window geometry — saves to `{app_data_dir}/window-state.json`
+//! Saved window geometry — saves to `{app_data_dir}/window-state.json`
 //! on every move/resize so a hard kill still preserves the latest state.
 
 use serde::{Deserialize, Serialize};

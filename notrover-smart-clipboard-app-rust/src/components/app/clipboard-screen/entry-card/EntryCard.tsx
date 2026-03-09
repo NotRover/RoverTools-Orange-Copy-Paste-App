@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../../types";
 import {
@@ -23,7 +23,7 @@ import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
 const REL_TIME_REFRESH_MS = 15_000;
-const MAX_VISIBLE_GROUP_CHIPS = 2;
+const CHIP_GAP_PX = 4;
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -70,6 +70,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   >({});
   const [showFileList, setShowFileList] = useState(false);
   const [showHiddenGroups, setShowHiddenGroups] = useState(false);
+  const [visibleGroupCount, setVisibleGroupCount] = useState(0);
 
   const files = entry.type === "file" ? filePaths(entry.content) : [];
   const firstFile = files[0] ?? null;
@@ -78,15 +79,80 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const isMulti = files.length > 1;
   const entryGroups = entry.groups ?? [];
   const displayGroups = entryGroups.filter((g) => g !== "Saved");
-  const systemChipCount =
-    (entry.pinned ? 1 : 0) + (entryGroups.includes("Saved") ? 1 : 0);
-  const maxGroupChips = Math.max(
-    0,
-    MAX_VISIBLE_GROUP_CHIPS - Math.max(0, systemChipCount - 1),
-  );
-  const visibleGroups = displayGroups.slice(0, maxGroupChips);
-  const hiddenGroups = displayGroups.slice(maxGroupChips);
+  const footerChipsRef = useRef<HTMLDivElement>(null);
+  const groupMeasureRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const typeMeasureRef = useRef<HTMLElement | null>(null);
+  const pinMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const savedMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const overflowMeasureRef = useRef<HTMLButtonElement | null>(null);
+
+  const visibleGroups = displayGroups.slice(0, visibleGroupCount);
+  const hiddenGroups = displayGroups.slice(visibleGroupCount);
   const hiddenGroupCount = hiddenGroups.length;
+
+  const measureVisibleGroupCount = useCallback(() => {
+    const chipContainer = footerChipsRef.current;
+    if (!chipContainer) {
+      return;
+    }
+
+    const containerWidth = chipContainer.clientWidth;
+    if (containerWidth <= 0) {
+      setVisibleGroupCount(0);
+      return;
+    }
+
+    const widthOf = (node: Element | null): number =>
+      node ? Math.ceil(node.getBoundingClientRect().width) : 0;
+
+    const baseChipWidths: number[] = [];
+    const typeWidth = widthOf(typeMeasureRef.current);
+    if (typeWidth > 0) baseChipWidths.push(typeWidth);
+    if (entry.pinned) {
+      const pinWidth = widthOf(pinMeasureRef.current);
+      if (pinWidth > 0) baseChipWidths.push(pinWidth);
+    }
+    if (entryGroups.includes("Saved")) {
+      const savedWidth = widthOf(savedMeasureRef.current);
+      if (savedWidth > 0) baseChipWidths.push(savedWidth);
+    }
+
+    let usedWidth = 0;
+    let chipCount = 0;
+    for (const width of baseChipWidths) {
+      if (chipCount > 0) usedWidth += CHIP_GAP_PX;
+      usedWidth += width;
+      chipCount += 1;
+    }
+
+    const groupWidths = displayGroups.map((_, i) => widthOf(groupMeasureRefs.current[i]));
+    let fitCount = 0;
+
+    for (const width of groupWidths) {
+      if (width <= 0) continue;
+      const nextWidth = usedWidth + (chipCount > 0 ? CHIP_GAP_PX : 0) + width;
+      if (nextWidth > containerWidth) break;
+      usedWidth = nextWidth;
+      chipCount += 1;
+      fitCount += 1;
+    }
+
+    const remaining = displayGroups.length - fitCount;
+    if (remaining > 0) {
+      const overflowWidth = widthOf(overflowMeasureRef.current);
+      const overflowWithGap = (chipCount > 0 ? CHIP_GAP_PX : 0) + overflowWidth;
+
+      while (fitCount > 0 && usedWidth + overflowWithGap > containerWidth) {
+        const removedWidth = groupWidths[fitCount - 1] ?? 0;
+        usedWidth -= removedWidth;
+        chipCount -= 1;
+        if (chipCount > 0) usedWidth -= CHIP_GAP_PX;
+        fitCount -= 1;
+      }
+    }
+
+    setVisibleGroupCount(Math.max(0, Math.min(fitCount, displayGroups.length)));
+  }, [displayGroups, entry.pinned, entryGroups]);
 
   // Load image previews for file entries (single or multi)
   useEffect(() => {
@@ -137,6 +203,22 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     setShowHiddenGroups(false);
   }, [entry.id, hiddenGroupCount]);
 
+  useLayoutEffect(() => {
+    measureVisibleGroupCount();
+  }, [measureVisibleGroupCount, relTime, entry.id]);
+
+  useEffect(() => {
+    const target = footerChipsRef.current;
+    if (!target || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      measureVisibleGroupCount();
+    });
+    ro.observe(target);
+    return () => ro.disconnect();
+  }, [measureVisibleGroupCount]);
+
   useEffect(() => {
     if (!showHiddenGroups) return;
     const handler = (e: MouseEvent) => {
@@ -160,6 +242,108 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
   const visibleImageThumbs = imageFiles.slice(0, 3);
   const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
+
+  const renderTypeChip = (withMeasureRef = false) => {
+    if (entry.type === "file" && isMulti) {
+      return (
+        <button
+          ref={withMeasureRef ? (typeMeasureRef as React.Ref<HTMLButtonElement>) : undefined}
+          className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
+          onClick={
+            withMeasureRef
+              ? undefined
+              : (e) => {
+                  e.stopPropagation();
+                  setShowFileList((v) => !v);
+                }
+          }
+          data-tooltip={
+            withMeasureRef
+              ? undefined
+              : showFileList
+                ? "Collapse"
+                : `Show ${files.length} ${imageFiles.length === files.length ? "images" : "files"}`
+          }
+        >
+          {imageFiles.length === files.length ? ImageIcon : FileIcon}
+          <span className="card-type-label">
+            {imageFiles.length === files.length ? "Images" : "Files"}
+          </span>
+          {!withMeasureRef && (
+            <svg
+              className="card-type-chevron"
+              width="8"
+              height="8"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          )}
+        </button>
+      );
+    }
+
+    if (withMeasureRef) {
+      return (
+        <span ref={typeMeasureRef as React.Ref<HTMLSpanElement>}>
+          <EntryTypePill kind={deriveDisplayKind(entry)} />
+        </span>
+      );
+    }
+    return <EntryTypePill kind={deriveDisplayKind(entry)} />;
+  };
+
+  const renderPinnedChip = (withMeasureRef = false) =>
+    entry.pinned ? (
+      <span
+        ref={withMeasureRef ? pinMeasureRef : undefined}
+        className="card-type-chip card-type-chip--pinned"
+      >
+        {PinIcon}
+        <span className="card-type-label">Pinned</span>
+      </span>
+    ) : null;
+
+  const renderSavedChip = (withMeasureRef = false) =>
+    entryGroups.includes("Saved") ? (
+      <span
+        ref={withMeasureRef ? savedMeasureRef : undefined}
+        className="card-type-chip card-type-chip--saved"
+      >
+        {SaveIcon}
+        <span className="card-type-label">Saved</span>
+      </span>
+    ) : null;
+
+  const renderGroupChip = (
+    group: string,
+    key: string,
+    measureIndex?: number,
+  ) => {
+    const gc = groupColor(group);
+    return (
+      <span
+        key={key}
+        ref={
+          measureIndex !== undefined
+            ? (node) => {
+                groupMeasureRefs.current[measureIndex] = node;
+              }
+            : undefined
+        }
+        className="card-type-chip card-type-chip--group"
+        style={{ background: gc.bg, color: gc.fg }}
+      >
+        <span className="card-group-dot" />
+        <span className="card-type-label">{group}</span>
+      </span>
+    );
+  };
 
   return (
     <div
@@ -292,67 +476,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         )}
         {/* Footer: type chip + pinned chip + timestamp */}
         <div className="card-footer">
-          <div className="card-chips">
-            {entry.type === "file" && isMulti ? (
-              <button
-                className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowFileList((v) => !v);
-                }}
-                data-tooltip={
-                  showFileList
-                    ? "Collapse"
-                    : `Show ${files.length} ${imageFiles.length === files.length ? "images" : "files"}`
-                }
-              >
-                {imageFiles.length === files.length ? ImageIcon : FileIcon}
-                <span className="card-type-label">
-                  {imageFiles.length === files.length ? "Images" : "Files"}
-                </span>
-                <svg
-                  className="card-type-chevron"
-                  width="8"
-                  height="8"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-            ) : (
-              <EntryTypePill kind={deriveDisplayKind(entry)} />
-            )}
-            {entry.pinned && (
-              <span className="card-type-chip card-type-chip--pinned">
-                {PinIcon}
-                <span className="card-type-label">Pinned</span>
-              </span>
-            )}
-            {entryGroups.includes("Saved") && (
-              <span className="card-type-chip card-type-chip--saved">
-                {SaveIcon}
-                <span className="card-type-label">Saved</span>
-              </span>
-            )}
+          <div className="card-chips" ref={footerChipsRef}>
+            {renderTypeChip()}
+            {renderPinnedChip()}
+            {renderSavedChip()}
             {visibleGroups.length > 0 &&
-              visibleGroups.map((g) => {
-                const gc = groupColor(g);
-                return (
-                  <span
-                    key={g}
-                    className="card-type-chip card-type-chip--group"
-                    style={{ background: gc.bg, color: gc.fg }}
-                  >
-                    <span className="card-group-dot" />
-                    <span className="card-type-label">{g}</span>
-                  </span>
-                );
-              })}
+              visibleGroups.map((g) => renderGroupChip(g, g))}
             {hiddenGroupCount > 0 && (
               <button
                 type="button"
@@ -371,6 +500,23 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 +{hiddenGroupCount}
               </button>
             )}
+
+            {/* Hidden measurer for dynamic chip fitting */}
+            <div className="card-chip-measure" aria-hidden>
+              {renderTypeChip(true)}
+              {renderPinnedChip(true)}
+              {renderSavedChip(true)}
+              {displayGroups.map((g, idx) =>
+                renderGroupChip(g, `measure-${g}-${idx}`, idx),
+              )}
+              <button
+                ref={overflowMeasureRef}
+                type="button"
+                className="card-type-chip card-type-chip--group-overflow card-type-chip--group-overflow-btn"
+              >
+                +99
+              </button>
+            </div>
           </div>
           {justPinned ? (
             <span className="card-time card-time--pinned">

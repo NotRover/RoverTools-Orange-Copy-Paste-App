@@ -92,7 +92,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
 
 const SettingsScreen: React.FC = () => {
   const [pasteSlots, setPasteSlots] = useState(readSlots);
-  const [persistHistory, setPersistHistory] = useState(false);
+  const [keepHistory, setKeepHistory] = useState(false);
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
@@ -100,9 +100,9 @@ const SettingsScreen: React.FC = () => {
 
   // Load settings from backend on mount
   useEffect(() => {
-    invoke<boolean | null>("get_setting", { key: "persist_history" }).then(
+    invoke<boolean | null>("get_setting", { key: "keep_history" }).then(
       (val) => {
-        if (val === true) setPersistHistory(true);
+        if (val === true) setKeepHistory(true);
       },
     );
     invoke<boolean | null>("get_setting", { key: "close_to_tray" }).then(
@@ -125,11 +125,11 @@ const SettingsScreen: React.FC = () => {
     localStorage.setItem("sc-paste-slots", String(val));
   };
 
-  const handlePersistToggle = () => {
-    const next = !persistHistory;
-    setPersistHistory(next);
-    invoke("set_setting", { key: "persist_history", value: next });
-    // When enabling, do an initial full-history save so data is persisted
+  const handleKeepToggle = () => {
+    const next = !keepHistory;
+    setKeepHistory(next);
+    invoke("set_setting", { key: "keep_history", value: next });
+    // When enabling, do an initial full-history save so data is saved
     // immediately without waiting for the next clipboard change.
     if (next) {
       invoke("save_history");
@@ -270,9 +270,9 @@ const SettingsScreen: React.FC = () => {
           </div>
           <button
             type="button"
-            className={`settings-toggle${persistHistory ? " active" : ""}`}
-            onClick={handlePersistToggle}
-            aria-pressed={persistHistory}
+            className={`settings-toggle${keepHistory ? " active" : ""}`}
+            onClick={handleKeepToggle}
+            aria-pressed={keepHistory}
           >
             <span className="settings-toggle-knob" />
           </button>

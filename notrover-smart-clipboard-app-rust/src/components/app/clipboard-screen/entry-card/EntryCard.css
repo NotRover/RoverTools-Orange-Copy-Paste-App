@@ -371,6 +371,19 @@ button.card-type-chip.open .card-type-chevron {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.card-chip-measure {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .card-time {
