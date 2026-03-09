@@ -93,15 +93,133 @@ const SECTIONS: ShortcutSection[] = [
     entries: [
       { keys: ["Click"], description: "Copy entry to clipboard" },
       {
-        keys: ["Type chip dropdown"],
+        keys: ["Right-click"],
+        description: "Open context menu (Copy, Pin, Save, Groups, Delete)",
+      },
+      {
+        keys: ["Type chip"],
         description: "Expand / collapse multiple-file list",
       },
-      { keys: ["Pin btn"], description: "Pin entry (right-click to reveal)" },
-
-      { keys: ["Copy btn"], description: "Copy entry (right-click to reveal)" },
+      { keys: ["+N chip"], description: "Show overflow group tags" },
+    ],
+  },
+  {
+    title: "Pin & Save",
+    icon: (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 17v5" />
+        <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+      </svg>
+    ),
+    entries: [
       {
-        keys: ["Delete btn"],
-        description: "Remove entry from history (right-click to reveal)",
+        keys: ["Pin"],
+        description: "Pin entry — shows in quick-paste popup (max 10)",
+      },
+      { keys: ["Pin"], description: "Pinning an entry automatically saves it" },
+      {
+        keys: ["Save"],
+        description: "Save entry — persists across app restarts",
+      },
+      {
+        keys: ["Unsave"],
+        description: "Remove persistence (entry may be evicted from history)",
+      },
+      {
+        keys: ["Max 10"],
+        description: "Pin limit reached — a toast notification appears",
+      },
+    ],
+  },
+  {
+    title: "Groups",
+    icon: (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+        <line x1="7" y1="7" x2="7.01" y2="7" />
+      </svg>
+    ),
+    entries: [
+      {
+        keys: ["Groups menu"],
+        description: "Assign or remove group tags from an entry (right-click)",
+      },
+      {
+        keys: ["Groups btn"],
+        description: "Open Group Manager to add, rename or delete groups",
+      },
+      {
+        keys: ["Click chip"],
+        description: "Select a group — input switches to rename mode",
+      },
+      {
+        keys: ["Click chip again"],
+        description: "Deselect group / return to add mode",
+      },
+      {
+        keys: ["Click outside"],
+        description: "Deselect group without changes",
+      },
+      { keys: ["Enter"], description: "Confirm add or rename" },
+      {
+        keys: ["Delete × btn"],
+        description: "Delete group — undo available for 5 seconds via toast",
+      },
+      {
+        keys: ["Color swatches"],
+        description: "Change the color of a selected group",
+      },
+    ],
+  },
+  {
+    title: "System Groups",
+    icon: (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
+      </svg>
+    ),
+    entries: [
+      {
+        keys: ["Pinned"],
+        description:
+          "System group — shows entries currently pinned to the popup",
+      },
+      {
+        keys: ["Saved"],
+        description: "System group — shows entries saved to survive restarts",
+      },
+      {
+        keys: ["Reserved"],
+        description:
+          '"pinned" and "saved" cannot be used as custom group names',
       },
     ],
   },
@@ -123,7 +241,7 @@ const SECTIONS: ShortcutSection[] = [
       </svg>
     ),
     entries: [
-      { keys: ["Type"], description: "Filter text entries by content" },
+      { keys: ["Type"], description: "Filter entries by content" },
       { keys: ["Esc / ×"], description: "Clear search" },
     ],
   },

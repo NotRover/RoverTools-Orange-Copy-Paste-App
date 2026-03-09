@@ -35,6 +35,14 @@ fn build_popup_window(
 
 pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
     if let Some(win) = app.get_webview_window(label) {
+        // Move offscreen FIRST so the window cannot intercept clicks during
+        // the brief moment between position change and actual hide.  On some
+        // Windows/WRY configurations `hide()` alone is not sufficient to
+        // prevent hit-testing on transparent always-on-top windows.
+        let _ = win.set_position(tauri::PhysicalPosition::new(
+            OFFSCREEN_POS as i32,
+            OFFSCREEN_POS as i32,
+        ));
         let _ = win.hide();
     }
 }

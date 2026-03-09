@@ -40,8 +40,14 @@ pub fn simulate_copy() {
 }
 
 /// Simulate **Ctrl + V** in the currently focused application.
+///
+/// Releases Shift and Ctrl first (same guard as `simulate_copy`) so that
+/// lingering modifier state from the global shortcut or a concurrent
+/// keystroke does not corrupt the paste.
 pub fn simulate_paste() {
     unsafe {
+        key_event(VK_SHIFT, KEYEVENTF_KEYUP);
+        key_event(VK_CONTROL, KEYEVENTF_KEYUP);
         key_event(VK_CONTROL, 0);
         key_event(0x56, 0); // 'V'
         key_event(0x56, KEYEVENTF_KEYUP);
