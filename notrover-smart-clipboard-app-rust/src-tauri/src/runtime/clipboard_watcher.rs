@@ -2,12 +2,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 use crate::clipboard::commands::read_clipboard_entry;
-use crate::clipboard::history::{ClipboardEntry, ClipboardHistory, EntryKind};
-use crate::runtime::platform::notification_position;
-use crate::state::{CopyNotificationPayload, COPY_NOTIF_H, COPY_NOTIF_W};
+use crate::clipboard::history::{ClipboardEntry, ClipboardHistory};
 
 const WATCH_INTERVAL_MS: u64 = 220;
 
@@ -27,28 +25,6 @@ fn is_duplicate_top(history: &ClipboardHistory, entry: &ClipboardEntry) -> bool 
         .first()
         .map(|top| top.kind == entry.kind && top.content == entry.content)
         .unwrap_or(false)
-}
-
-fn kind_label(kind: &EntryKind) -> &'static str {
-    match kind {
-        EntryKind::Text => "text",
-        EntryKind::Image => "image",
-        EntryKind::File => "file",
-        EntryKind::Html => "html",
-    }
-}
-
-fn show_copy_notification(app: &tauri::AppHandle, entry: &ClipboardEntry) {
-    let (px, py) = notification_position(COPY_NOTIF_W as i32, COPY_NOTIF_H as i32);
-
-    if let Some(win) = app.get_webview_window("copy-notification") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
-        let payload = CopyNotificationPayload {
-            kind: kind_label(&entry.kind).to_string(),
-        };
-        let _ = win.emit("copy-notification:show", &payload);
-        let _ = win.show();
-    }
 }
 
 /// Attempt to capture the current clipboard content into history.
@@ -87,7 +63,7 @@ fn capture_clipboard_change(
 
     if let Some(new_entry) = maybe_new_entry {
         let _ = app.emit("clipboard:new-entry", &new_entry);
-        show_copy_notification(app, &new_entry);
+        crate::runtime::notifications::notify_if_enabled(app, &new_entry);
         crate::clipboard::commands::auto_save_history(app, history);
     }
     true

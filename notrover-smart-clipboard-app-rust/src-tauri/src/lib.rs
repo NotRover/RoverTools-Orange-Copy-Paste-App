@@ -55,6 +55,15 @@ fn read_bool_setting(path: &std::path::Path, key: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn read_optional_bool_setting(path: &std::path::Path, key: &str) -> Option<bool> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|data| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data).ok()
+        })
+        .and_then(|map| map.get(key)?.as_bool())
+}
+
 /// Kill any other running instance of this executable before we start.
 /// This releases OS-level global hotkeys held by the old process, preventing
 /// the "HotKey already registered" panic on rapid restarts during development.
@@ -222,6 +231,18 @@ fn setup_runtime(
             .unwrap_or(false);
         flag.store(val, Ordering::Relaxed);
     }
+    // copy_notification defaults to true when the key is absent from settings.json.
+    // Operation-based notification flags also default to true.
+    for (key, flag) in [
+        ("copy_notification", &state_ref.copy_notification),
+        ("notif_copy", &state_ref.notif_copy),
+    ] {
+        let val = settings_file
+            .as_deref()
+            .and_then(|p| read_optional_bool_setting(p, key))
+            .unwrap_or(true);
+        flag.store(val, Ordering::Relaxed);
+    }
 
     // Set up system tray icon and menu.
     crate::runtime::tray::setup_tray(app)?;
@@ -289,6 +310,8 @@ pub fn run() {
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         start_minimized: Arc::new(AtomicBool::new(false)),
+        copy_notification: Arc::new(AtomicBool::new(true)),
+        notif_copy: Arc::new(AtomicBool::new(true)),
     };
 
     tauri::Builder::default()

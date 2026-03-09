@@ -74,15 +74,20 @@ const SettingsScreen: React.FC = () => {
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
+  const [copyNotification, setCopyNotification] = useState(true);
+  const [notifCopy, setNotifCopy] = useState(true);
+  const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
   // Load settings from backend on mount
   useEffect(() => {
-    const loadBool = (key: string, setter: (v: boolean) => void) =>
-      invoke<boolean | null>("get_setting", { key }).then((v) => { if (v === true) setter(true); });
-    loadBool("keep_history", setKeepHistory);
-    loadBool("close_to_tray", setCloseToTray);
-    loadBool("start_minimized", setStartMinimized);
+    const loadBoolWithDefault = (key: string, setter: (v: boolean) => void, fallback: boolean) =>
+      invoke<boolean | null>("get_setting", { key }).then((v) => { setter(v === true ? true : v === false ? false : fallback); });
+    loadBoolWithDefault("keep_history", setKeepHistory, false);
+    loadBoolWithDefault("close_to_tray", setCloseToTray, false);
+    loadBoolWithDefault("start_minimized", setStartMinimized, false);
+    loadBoolWithDefault("copy_notification", setCopyNotification, true);
+    loadBoolWithDefault("notif_copy", setNotifCopy, true);
     invoke<boolean>("get_autostart").then(setRunOnStartup);
   }, []);
 
@@ -107,6 +112,20 @@ const SettingsScreen: React.FC = () => {
   const handleKeepToggle = () => toggleBoolSetting(keepHistory, setKeepHistory, "keep_history");
   const handleCloseToTrayToggle = () => toggleBoolSetting(closeToTray, setCloseToTray, "close_to_tray");
   const handleStartMinimizedToggle = () => toggleBoolSetting(startMinimized, setStartMinimized, "start_minimized");
+  
+  const handleCopyNotificationToggle = () => {
+    if (copyNotification) {
+      // Turning off - trigger closing animation first
+      setNotifClosing(true);
+      setTimeout(() => {
+        toggleBoolSetting(copyNotification, setCopyNotification, "copy_notification");
+        setNotifClosing(false);
+      }, 180); // Match slideUp animation duration
+    } else {
+      // Turning on - no delay needed
+      toggleBoolSetting(copyNotification, setCopyNotification, "copy_notification");
+    }
+  };
 
   const handleRunOnStartupToggle = async () => {
     const previous = runOnStartup;
@@ -194,6 +213,46 @@ const SettingsScreen: React.FC = () => {
           >
             <span className="settings-toggle-knob" />
           </button>
+        </div>
+
+        <div className="settings-row-with-children">
+          <div className="settings-row-header">
+            <div className="settings-row-info">
+              <span className="settings-row-label">Notifications</span>
+              <span className="settings-row-desc">
+                Show a small popup at the bottom-right of the screen for
+                clipboard operations. Use the checkboxes below to control which
+                operations trigger notifications.
+              </span>
+            </div>
+            <button
+              type="button"
+              className={`settings-toggle${copyNotification ? " active" : ""}`}
+              onClick={handleCopyNotificationToggle}
+              aria-pressed={copyNotification}
+            >
+              <span className="settings-toggle-knob" />
+            </button>
+          </div>
+
+          {(copyNotification || notifClosing) && (
+            <div className={`settings-child-checks${notifClosing ? " closing" : ""}`}>
+              <label className="settings-checkbox-row">
+                <span
+                  className={`settings-checkbox${notifCopy ? " checked" : ""}`}
+                  onClick={() => toggleBoolSetting(notifCopy, setNotifCopy, "notif_copy")}
+                >
+                  {notifCopy && <CheckIcon size={9} strokeWidth={3} />}
+                </span>
+                <div className="settings-checkbox-info">
+                  <span className="settings-checkbox-label">Copy operations</span>
+                  <span className="settings-checkbox-desc">
+                    Show notification when content is copied via Ctrl+C or other methods
+                  </span>
+                </div>
+              </label>
+            </div>
+          )}
         </div>
       </div>
 

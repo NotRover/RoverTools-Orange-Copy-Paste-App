@@ -171,6 +171,8 @@ pub fn set_setting(
         "keep_history" => Some(&state.keep_history),
         "close_to_tray" => Some(&state.close_to_tray),
         "start_minimized" => Some(&state.start_minimized),
+        "copy_notification" => Some(&state.copy_notification),
+        "notif_copy" => Some(&state.notif_copy),
         _ => None,
     };
     if let Some(flag) = flag {

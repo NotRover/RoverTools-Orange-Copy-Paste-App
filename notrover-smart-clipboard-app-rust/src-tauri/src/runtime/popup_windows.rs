@@ -84,7 +84,7 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
         },
         PopupWindowSpec {
             label: "copy-notification",
-            url: "src/components/copy-notification/copy-notification.html",
+            url: "src/components/notifications/copy-notification.html",
             width: COPY_NOTIF_W,
             height: COPY_NOTIF_H,
             focused: false,
