@@ -31,6 +31,17 @@ fn system_boot_epoch_secs() -> u64 {
 
 #[cfg(not(windows))]
 fn system_boot_epoch_secs() -> u64 {
+    // Read /proc/stat for btime (boot time in epoch seconds).
+    // Available on all Linux kernels.  Falls back to 0 on other Unixes.
+    if let Ok(stat) = std::fs::read_to_string("/proc/stat") {
+        for line in stat.lines() {
+            if let Some(rest) = line.strip_prefix("btime ") {
+                if let Ok(v) = rest.trim().parse::<u64>() {
+                    return v;
+                }
+            }
+        }
+    }
     0
 }
 
@@ -100,7 +111,43 @@ fn kill_previous_instance() {
 }
 
 #[cfg(not(windows))]
-fn kill_previous_instance() {}
+fn kill_previous_instance() {
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+
+    if exe.is_empty() {
+        return;
+    }
+
+    let current_pid = std::process::id();
+
+    // Use `pgrep` to find other instances.  Silently ignore failures.
+    let Ok(output) = std::process::Command::new("pgrep")
+        .args(["-x", &exe])
+        .output()
+    else {
+        return;
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut killed = false;
+    for line in stdout.lines() {
+        if let Ok(pid) = line.trim().parse::<u32>() {
+            if pid != current_pid && pid != 0 {
+                let _ = std::process::Command::new("kill")
+                    .args(["-9", &pid.to_string()])
+                    .output();
+                killed = true;
+            }
+        }
+    }
+
+    if killed {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+}
 
 fn create_shared_history() -> SharedHistory {
     Arc::new(Mutex::new(ClipboardHistory::new()))
