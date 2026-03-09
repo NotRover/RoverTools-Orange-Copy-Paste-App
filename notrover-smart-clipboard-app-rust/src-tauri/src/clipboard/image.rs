@@ -294,3 +294,155 @@ pub fn data_url_to_rgba(data_url: &str) -> Result<(usize, usize, Vec<u8>), Strin
     let (w, h) = img.dimensions();
     Ok((w as usize, h as usize, img.into_raw()))
 }
+
+//  Direct Win32 clipboard write for images 
+//
+// `arboard` v3 routes clipboard operations through a background message-loop
+// thread.  When the clipboard watcher (or an external app like Discord) opens
+// the Win32 clipboard between arboard's internal `OpenClipboard` and
+// `SetClipboardData`, the write fails with OS error 1418.  Bypassing arboard
+// and calling the Win32 API directly — with retries around `OpenClipboard` —
+// eliminates this failure mode entirely.
+
+/// Write an image (stored as a `data:image/…;base64,…` URL) to the system
+/// clipboard using direct Win32 API calls.
+///
+/// All expensive work (base64 decode, image decode, pixel conversion) is
+/// performed **before** the clipboard is opened, so the exclusive Win32
+/// clipboard lock is held for < 1 ms.
+#[cfg(windows)]
+pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW,
+        SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+    };
+
+    const CF_DIB: u32 = 8;
+    const OPEN_RETRIES: usize = 10;
+    const OPEN_RETRY_DELAY_MS: u64 = 50;
+
+    //  1. Decode everything BEFORE touching the clipboard 
+    let b64_data = data_url
+        .find(";base64,")
+        .map(|pos| &data_url[pos + 8..])
+        .ok_or_else(|| "Missing ;base64, in data URL".to_string())?;
+
+    let raw_bytes = B64.decode(b64_data).map_err(|e| e.to_string())?;
+
+    let img = image::load_from_memory(&raw_bytes)
+        .map_err(|e| e.to_string())?
+        .into_rgba8();
+    let (w, h) = img.dimensions();
+    let width = w as usize;
+    let height = h as usize;
+    let rgba = img.into_raw();
+
+    //  2. Prepare CF_DIB blob (BITMAPINFOHEADER + BGRA bottom-up) 
+    let header_size = 40usize; // sizeof(BITMAPINFOHEADER)
+    let row_bytes = width * 4;
+    let pixel_bytes = row_bytes * height;
+    let dib_total = header_size + pixel_bytes;
+
+    let mut dib = Vec::with_capacity(dib_total);
+
+    // BITMAPINFOHEADER
+    dib.extend_from_slice(&40u32.to_le_bytes());                  // biSize
+    dib.extend_from_slice(&(width as i32).to_le_bytes());         // biWidth
+    dib.extend_from_slice(&(height as i32).to_le_bytes());        // biHeight (+ve = bottom-up)
+    dib.extend_from_slice(&1u16.to_le_bytes());                   // biPlanes
+    dib.extend_from_slice(&32u16.to_le_bytes());                  // biBitCount
+    dib.extend_from_slice(&0u32.to_le_bytes());                   // biCompression = BI_RGB
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());   // biSizeImage
+    dib.extend_from_slice(&0i32.to_le_bytes());                   // biXPelsPerMeter
+    dib.extend_from_slice(&0i32.to_le_bytes());                   // biYPelsPerMeter
+    dib.extend_from_slice(&0u32.to_le_bytes());                   // biClrUsed
+    dib.extend_from_slice(&0u32.to_le_bytes());                   // biClrImportant
+
+    // Pixel rows:  RGBA top-down → BGRA bottom-up
+    for y in (0..height).rev() {
+        let row_start = y * row_bytes;
+        for x in 0..width {
+            let i = row_start + x * 4;
+            dib.push(rgba[i + 2]); // B
+            dib.push(rgba[i + 1]); // G
+            dib.push(rgba[i]);     // R
+            dib.push(rgba[i + 3]); // A
+        }
+    }
+
+    //  3. Prepare registered "PNG" blob 
+    // If the raw bytes are already PNG, reuse them directly (zero cost).
+    // Otherwise skip the PNG clipboard format — CF_DIB is sufficient for
+    // the vast majority of paste targets.
+    let png_data: Option<Vec<u8>> = if raw_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(raw_bytes)
+    } else {
+        None
+    };
+
+    //  4. Open clipboard with retry, write, close ─
+    unsafe {
+        let mut opened = false;
+        for attempt in 0..OPEN_RETRIES {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                opened = true;
+                break;
+            }
+            if attempt + 1 < OPEN_RETRIES {
+                std::thread::sleep(std::time::Duration::from_millis(OPEN_RETRY_DELAY_MS));
+            }
+        }
+        if !opened {
+            return Err("OpenClipboard failed after retries".into());
+        }
+
+        if EmptyClipboard() == 0 {
+            CloseClipboard();
+            return Err("EmptyClipboard failed".into());
+        }
+
+        //  Write CF_DIB 
+        let hmem_dib = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, dib_total);
+        if hmem_dib.is_null() {
+            CloseClipboard();
+            return Err("GlobalAlloc(CF_DIB) failed".into());
+        }
+        let ptr = GlobalLock(hmem_dib) as *mut u8;
+        if ptr.is_null() {
+            CloseClipboard();
+            return Err("GlobalLock(CF_DIB) failed".into());
+        }
+        std::ptr::copy_nonoverlapping(dib.as_ptr(), ptr, dib_total);
+        GlobalUnlock(hmem_dib);
+
+        if SetClipboardData(CF_DIB, hmem_dib).is_null() {
+            CloseClipboard();
+            return Err("SetClipboardData(CF_DIB) failed".into());
+        }
+
+        //  Write registered "PNG" format (best-effort) 
+        if let Some(png) = &png_data {
+            let wide: Vec<u16> = "PNG\0".encode_utf16().collect();
+            let cf_png = RegisterClipboardFormatW(wide.as_ptr());
+            if cf_png != 0 {
+                let hmem_png = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, png.len());
+                if !hmem_png.is_null() {
+                    let pp = GlobalLock(hmem_png) as *mut u8;
+                    if !pp.is_null() {
+                        std::ptr::copy_nonoverlapping(png.as_ptr(), pp, png.len());
+                        GlobalUnlock(hmem_png);
+                        // Non-critical; CF_DIB is the primary format.
+                        let _ = SetClipboardData(cf_png, hmem_png);
+                    }
+                }
+            }
+        }
+
+        CloseClipboard();
+    }
+
+    Ok(())
+}

@@ -1,7 +1,6 @@
 //! Tauri command handlers for clipboard history operations, plus internal
 //! helpers for reading and writing clipboard content.
 
-use std::borrow::Cow;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
@@ -14,16 +13,25 @@ use crate::clipboard::files::{
     content_to_files, files_to_content, read_files_from_clipboard, write_files_to_clipboard,
 };
 use crate::clipboard::history::ClipboardEntry;
-use crate::clipboard::image::data_url_to_rgba;
 use crate::runtime::platform::simulate_paste;
 use crate::runtime::popup_windows::hide_popup;
 use crate::state::AppState;
+
+#[cfg(not(windows))]
+use crate::clipboard::image::data_url_to_rgba;
+#[cfg(not(windows))]
+use std::borrow::Cow;
 
 const IMAGE_READ_RETRY_COUNT: usize = 5;
 const IMAGE_READ_RETRY_DELAY_MS: u64 = 90;
 const PASTE_DELAY_MS: u64 = 80;
 const MAX_IMAGE_PREVIEW_BYTES: usize = 12 * 1024 * 1024;
 const MAX_VIDEO_PREVIEW_BYTES: usize = 36 * 1024 * 1024;
+
+/// Retries for `Clipboard::new()` — the clipboard can be locked by the
+/// watcher thread or by external applications (e.g. Discord).
+const CLIPBOARD_OPEN_RETRIES: usize = 6;
+const CLIPBOARD_OPEN_RETRY_DELAY_MS: u64 = 50;
 
 fn mime_from_image_ext(path: &Path) -> Option<&'static str> {
     let ext = path.extension()?.to_str()?.to_lowercase();
@@ -287,7 +295,7 @@ pub fn copy_entry(id: String, state: State<'_, AppState>) -> bool {
 
 #[tauri::command]
 pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    // Hide the OS window immediately before any heavy image decoding blocks the thread
+    // Hide the OS window immediately before any heavy image decoding blocks the thread.
     hide_popup(&app, "paste-popup");
 
     let Some(entry) = find_entry_by_id(&state, &id) else {
@@ -299,14 +307,19 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
     // Spawn a background thread so we don't block the Tauri event loop
     // during heavy image decoding/clipboard writing.
     std::thread::spawn(move || {
-        // Set the suppress flag BEFORE the clipboard watcher processes the change
+        // Set the suppress flag BEFORE the clipboard write so the watcher
+        // ignores the clipboard change we are about to make.
         suppress_next_capture.store(true, Ordering::Relaxed);
-        
-        if write_entry_to_clipboard(&entry).is_ok() {
-            schedule_paste();
-        } else {
-            // Revert suppress flag if clipboard write failed to avoid suppressing legitimate next copies
-            suppress_next_capture.store(false, Ordering::Relaxed);
+
+        match write_entry_to_clipboard(&entry) {
+            Ok(()) => {
+                schedule_paste();
+            }
+            Err(e) => {
+                eprintln!("[paste_entry] clipboard write failed: {e}");
+                // Revert suppress so the next legit copy is not swallowed.
+                suppress_next_capture.store(false, Ordering::Relaxed);
+            }
         }
     });
 
@@ -339,24 +352,57 @@ pub fn get_video_file_preview(path: String) -> Option<String> {
     Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
 }
 
+/// Open an arboard clipboard handle, retrying a few times if the clipboard
+/// is temporarily locked by another thread or application.
+fn open_clipboard_with_retry() -> Result<Clipboard, String> {
+    let mut last_err = String::new();
+    for attempt in 0..CLIPBOARD_OPEN_RETRIES {
+        match Clipboard::new() {
+            Ok(cb) => return Ok(cb),
+            Err(e) => {
+                last_err = e.to_string();
+                if attempt + 1 < CLIPBOARD_OPEN_RETRIES {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        CLIPBOARD_OPEN_RETRY_DELAY_MS,
+                    ));
+                }
+            }
+        }
+    }
+    Err(format!(
+        "failed to open clipboard after {CLIPBOARD_OPEN_RETRIES} attempts: {last_err}"
+    ))
+}
+
 pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), String> {
     use crate::clipboard::history::EntryKind;
 
-    let mut cb = Clipboard::new().map_err(|e| e.to_string())?;
-
     match entry.kind {
         EntryKind::Text => {
+            let mut cb = open_clipboard_with_retry()?;
             cb.set_text(entry.content.clone())
                 .map_err(|e| e.to_string())?;
         }
         EntryKind::Image => {
-            let (w, h, bytes) = data_url_to_rgba(&entry.content).map_err(|e| e.to_string())?;
-            cb.set_image(arboard::ImageData {
-                width: w,
-                height: h,
-                bytes: Cow::Owned(bytes),
-            })
-            .map_err(|e| e.to_string())?;
+            // Bypass arboard entirely — its internal proxy-thread architecture
+            // races with the clipboard watcher and external apps, producing
+            // OS error 1418 ("Thread does not have a clipboard open").
+            // Direct Win32 API with retries is fully reliable.
+            #[cfg(windows)]
+            {
+                crate::clipboard::image::write_image_to_clipboard(&entry.content)?;
+            }
+            #[cfg(not(windows))]
+            {
+                let (w, h, bytes) = data_url_to_rgba(&entry.content).map_err(|e| e.to_string())?;
+                let mut cb = open_clipboard_with_retry()?;
+                cb.set_image(arboard::ImageData {
+                    width: w,
+                    height: h,
+                    bytes: Cow::Owned(bytes),
+                })
+                .map_err(|e| e.to_string())?;
+            }
         }
         EntryKind::File => {
             let files = content_to_files(&entry.content);

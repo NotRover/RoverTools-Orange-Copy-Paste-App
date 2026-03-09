@@ -38,31 +38,32 @@ On startup, `get_history` replaced the entire React state. If a `clipboard:new-e
 
 **Fix**: The `get_history` handler now _merges_ with existing state (preserves event-received entries not in the response). Added a `tauri://focus` listener that re-fetches history whenever the main window regains focus as a safety net against any future desync.
 
-## #2 — Paste popup window intercepts clicks when visually hiding during slow image pastes
+## #2 — Paste popup intercepts clicks / images fail to paste / popup unresponsive after paste
 
 **Date**: 2026-03-09  
 **Severity**: High  
 **Symptoms**:
 
-- Pasting a copied image sporadically caused a completely different text entry from the bottom of the list to be pasted instead.
-- This only happened when clicking on screen right after hitting enter or clicking to paste an image.
+- Pasting copied images (especially from Discord without downloading) via the paste popup would fail to paste.
+- Pressing Ctrl+Shift+V would not spawn the popup for several seconds after a failed image paste.
+- Clicking on the area where the popup previously existed would paste the entry that happened to be at that screen position.
 
-**Root Causes** (2 related issues):
+**Root Causes** (3 related issues):
 
-### 2a. Image decoding blocks thread while the popup is still visually hiding
+### 2a. Hidden popup window remains at cursor position — still intercepts clicks
 
-**File**: `src-tauri/src/clipboard/commands.rs`  
-The `paste_entry` Tauri command called `write_entry_to_clipboard` before calling `hide_popup`. For large images, `write_entry_to_clipboard` takes a long time to decode the base64 string to pixels and send it to the OS clipboard, blocking the Rust thread. The Tauri window stayed physically open for this entire duration.
-**Fix**: Moved `hide_popup(&app, "paste-popup");` to the exact beginning of the `paste_entry` function before `write_entry_to_clipboard` is called.
+**File**: `src-tauri/src/runtime/popup_windows.rs`  
+`hide_popup` only called `win.hide()`. On some Windows/WRY configurations, transparent always-on-top windows can still receive hit-test events even when "hidden" — or there is a brief moment between the hide request and the OS actually removing the window from hit-testing. Since the window stayed at its original screen position (near the cursor), clicking in that area could hit the invisible window and fire a stale `paste_entry` event.
+**Fix**: `hide_popup` now moves the window to `(-9999, -9999)` before calling `hide()`, matching the initial offscreen position used during window creation. This guarantees the window cannot intercept clicks regardless of the OS hide timing.
 
-### 2b. React container intercepts pointer events while opacity is 0
-
-**File**: `src/components/paste-popup/pastePopup.css`  
-The React frontend instantly sets the main container to `opacity: 0` during the delay, but the OS window is still open. Since there was no `pointer-events: none` on the transparent container, clicking on the screen behind the popup would accidentally hit an invisible entry item in the React DOM, firing a second conflicting `paste_entry` event.
-**Fix**: Added `pointer-events: none` to the `.paste-container` class and restored `pointer-events: auto` to the `.paste-container.visible` class.
-
-### 2c. Main thread blocked by synchronous clipboard interaction
+### 2b. Clipboard write fails silently due to contention with watcher / other apps
 
 **File**: `src-tauri/src/clipboard/commands.rs`  
-The `paste_entry` command was executing synchronous calls to write data to the clipboard (`write_entry_to_clipboard`) on the main Tauri thread. When a large image payload was written to the clipboard, the entire event loop paused, preventing further keyboard inputs or interactions. Additionally, because the `suppress_next_capture` atomic boolean was evaluated _after_ the write operation, the OS clipboard event was detected by the background clipboard watcher concurrently and processed before the flag was raised.
-**Fix**: Wrapped the clipboard writing and `schedule_paste` call in a `std::thread::spawn()` block. Elevated the `suppress_next_capture` boolean change above the actual `write_entry_to_clipboard` logic so the watcher successfully ignores the clipboard modification event triggered by the OS.
+`write_entry_to_clipboard` called `Clipboard::new()` exactly once. On Windows, `OpenClipboard` fails if any other thread or process already has the clipboard open. The clipboard watcher polls every 220 ms and opens/closes the clipboard multiple times during each `read_clipboard_entry` cycle. Discord itself may also hold the clipboard briefly. A single failed open caused the entire paste to silently fail — no Ctrl+V was ever simulated.
+**Fix**: Introduced `open_clipboard_with_retry()` which retries `Clipboard::new()` up to 6 times with 50 ms delays. This gives the watcher or external app time to release the clipboard.
+
+### 2c. `simulate_paste` corrupts keyboard modifier state
+
+**File**: `src-tauri/src/runtime/platform_windows.rs`  
+`simulate_copy` defensively releases Shift and Ctrl before sending its keystroke sequence, but `simulate_paste` did not. When a delayed paste simulation fired while the user was holding Ctrl+Shift (e.g. pressing Ctrl+Shift+V to reopen the popup), the injected Ctrl-up event released the user's physical Ctrl key in the OS input queue. This caused the global shortcut to fail to register for several seconds.
+**Fix**: `simulate_paste` now mirrors `simulate_copy` by sending Shift-up and Ctrl-up before the Ctrl+V sequence.
