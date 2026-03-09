@@ -2,10 +2,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::clipboard::commands::read_clipboard_entry;
 use crate::clipboard::history::{ClipboardEntry, ClipboardHistory};
+use crate::state::app_state::AppState;
 
 const WATCH_INTERVAL_MS: u64 = 220;
 
@@ -62,6 +63,11 @@ fn capture_clipboard_change(
     };
 
     if let Some(new_entry) = maybe_new_entry {
+        // If autosave is enabled, add the "Saved" group to the new entry.
+        let state: tauri::State<'_, AppState> = app.state();
+        if state.autosave.load(Ordering::Relaxed) {
+            history.lock().add_group(&new_entry.id, "Saved");
+        }
         let _ = app.emit("clipboard:new-entry", &new_entry);
         crate::runtime::notifications::notify_if_enabled(app, &new_entry);
         crate::clipboard::commands::auto_save_history(app, history);

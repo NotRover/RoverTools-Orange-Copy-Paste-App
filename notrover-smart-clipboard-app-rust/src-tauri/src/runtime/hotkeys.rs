@@ -6,6 +6,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 use crate::clipboard::commands::read_clipboard_entry;
+use crate::state::app_state::AppState;
 use crate::{
     clipboard::history::{ClipboardEntry, ClipboardHistory, EntryKind},
     runtime::platform,
@@ -155,6 +156,11 @@ fn handle_copy_shortcut(
         };
 
         if inserted {
+            // If autosave is enabled, add the "Saved" group to the new entry.
+            let state: tauri::State<'_, AppState> = app.state();
+            if state.autosave.load(Ordering::Relaxed) {
+                history.lock().add_group(&entry.id, "Saved");
+            }
             let _ = app.emit("clipboard:new-entry", &entry);
             crate::clipboard::commands::auto_save_history(&app, &history);
         }

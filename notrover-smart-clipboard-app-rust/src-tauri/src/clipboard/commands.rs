@@ -173,6 +173,7 @@ pub fn set_setting(
         "start_minimized" => Some(&state.start_minimized),
         "copy_notification" => Some(&state.copy_notification),
         "notif_copy" => Some(&state.notif_copy),
+        "autosave" => Some(&state.autosave),
         _ => None,
     };
     if let Some(flag) = flag {

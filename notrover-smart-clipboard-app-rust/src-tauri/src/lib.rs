@@ -224,6 +224,7 @@ fn setup_runtime(
     for (key, flag) in [
         ("close_to_tray", &state_ref.close_to_tray),
         ("start_minimized", &state_ref.start_minimized),
+        ("autosave", &state_ref.autosave),
     ] {
         let val = settings_file
             .as_deref()
@@ -312,6 +313,7 @@ pub fn run() {
         start_minimized: Arc::new(AtomicBool::new(false)),
         copy_notification: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
+        autosave: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
