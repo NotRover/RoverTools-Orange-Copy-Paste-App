@@ -76,6 +76,7 @@ const SettingsScreen: React.FC = () => {
   const [startMinimized, setStartMinimized] = useState(false);
   const [copyNotification, setCopyNotification] = useState(true);
   const [notifCopy, setNotifCopy] = useState(true);
+  const [autosave, setAutosave] = useState(false);
   const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
@@ -88,6 +89,7 @@ const SettingsScreen: React.FC = () => {
     loadBoolWithDefault("start_minimized", setStartMinimized, false);
     loadBoolWithDefault("copy_notification", setCopyNotification, true);
     loadBoolWithDefault("notif_copy", setNotifCopy, true);
+    loadBoolWithDefault("autosave", setAutosave, false);
     invoke<boolean>("get_autostart").then(setRunOnStartup);
   }, []);
 
@@ -292,6 +294,25 @@ const SettingsScreen: React.FC = () => {
             className={`settings-toggle${keepHistory ? " active" : ""}`}
             onClick={handleKeepToggle}
             aria-pressed={keepHistory}
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Auto-save copied entries</span>
+            <span className="settings-row-desc">
+              Automatically add every new clipboard entry to the Saved group so
+              it persists across restarts and is never cleaned up. The Save
+              button in the copy popup will be hidden when this is enabled.
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`settings-toggle${autosave ? " active" : ""}`}
+            onClick={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
+            aria-pressed={autosave}
           >
             <span className="settings-toggle-knob" />
           </button>

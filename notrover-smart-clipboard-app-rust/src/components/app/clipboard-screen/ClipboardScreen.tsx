@@ -3,6 +3,8 @@ import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 export { EntryCard };
 import GroupManagerCard from "./group-manager/GroupManagerCard";
+import BulkActionsBar from "./bulk-actions/BulkActionsBar";
+import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { SORT_OPTIONS, sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
 import {
@@ -109,6 +111,12 @@ interface ClipboardScreenProps {
   onDeleteGroup: (name: string) => void;
   onRenameGroup: (oldName: string, newName: string) => void;
   onSetGroups: (id: string, groups: string[]) => void;
+  /** Bulk operations */
+  onBulkDelete?: (ids: string[]) => void;
+  onBulkPin?: (ids: string[]) => void;
+  onBulkUnpin?: (ids: string[]) => void;
+  onBulkAddGroup?: (ids: string[], group: string) => void;
+  onBulkRemoveGroup?: (ids: string[], group: string) => void;
 }
 
 const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
@@ -122,6 +130,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onDeleteGroup,
   onRenameGroup,
   onSetGroups,
+  onBulkDelete,
+  onBulkPin,
+  onBulkUnpin,
+  onBulkAddGroup,
+  onBulkRemoveGroup,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
@@ -136,6 +149,44 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [groupsOpen, setGroupsOpen] = useState(false);
   const groupsRef = useRef<HTMLDivElement>(null);
+
+  // Multi-select state
+  const multiSelect = useMultiSelect();
+
+  // Flat list of all visible entry IDs (respecting sort order) for range selection
+  const dayGroups = groupByDay(entries).map((g) => ({
+    ...g,
+    entries: applySortWithinGroup(g.entries, sort),
+  }));
+  const allVisibleIds = dayGroups.flatMap((g) => g.entries.map((e) => e.id));
+
+  // Prune stale selections when entries change
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    const activeIds = new Set(entries.map((e) => e.id));
+    multiSelect.pruneStaleIds(activeIds);
+  }, [entries, multiSelect.isSelecting]);
+
+  // Exit multi-select on Escape key
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") multiSelect.exitSelectMode();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [multiSelect.isSelecting]);
+
+  // Compute groups common to ALL selected entries (for bulk group toggle UI)
+  const commonGroups = (() => {
+    if (multiSelect.selectedCount === 0) return [] as string[];
+    const selectedEntries = entries.filter((e) => multiSelect.selectedIds.has(e.id));
+    if (selectedEntries.length === 0) return [] as string[];
+    const first = new Set(selectedEntries[0].groups);
+    return [...first].filter((g) =>
+      selectedEntries.every((e) => e.groups.includes(g)),
+    );
+  })();
 
   // Close sort dropdown on outside click
   useEffect(() => {
@@ -203,11 +254,6 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       icon: <ListIcon />,
     },
   ];
-
-  const dayGroups = groupByDay(entries).map((g) => ({
-    ...g,
-    entries: applySortWithinGroup(g.entries, sort),
-  }));
 
   return (
     <div className="clipboard-screen-root">
@@ -363,6 +409,10 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onPin={onPin}
                           availableGroups={availableGroups}
                           onSetGroups={onSetGroups}
+                          isSelecting={multiSelect.isSelecting}
+                          isSelected={multiSelect.selectedIds.has(entry.id)}
+                          onToggleSelect={multiSelect.toggleSelect}
+                          onRangeSelect={(id) => multiSelect.selectRange(id, allVisibleIds)}
                         />
                       ))}
                     </div>
@@ -379,6 +429,47 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Bulk actions bar — shown when entries are selected */}
+      {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
+        <BulkActionsBar
+          selectedCount={multiSelect.selectedCount}
+          totalCount={entries.length}
+          onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
+          onDeselectAll={multiSelect.deselectAll}
+          onExitSelectMode={multiSelect.exitSelectMode}
+          onBulkDelete={() => {
+            if (onBulkDelete) {
+              onBulkDelete([...multiSelect.selectedIds]);
+              multiSelect.exitSelectMode();
+            }
+          }}
+          onBulkPin={() => {
+            if (onBulkPin) {
+              onBulkPin([...multiSelect.selectedIds]);
+              multiSelect.exitSelectMode();
+            }
+          }}
+          onBulkUnpin={() => {
+            if (onBulkUnpin) {
+              onBulkUnpin([...multiSelect.selectedIds]);
+              multiSelect.exitSelectMode();
+            }
+          }}
+          onBulkAddGroup={(group) => {
+            if (onBulkAddGroup) {
+              onBulkAddGroup([...multiSelect.selectedIds], group);
+            }
+          }}
+          onBulkRemoveGroup={(group) => {
+            if (onBulkRemoveGroup) {
+              onBulkRemoveGroup([...multiSelect.selectedIds], group);
+            }
+          }}
+          availableGroups={availableGroups}
+          commonGroups={commonGroups}
+        />
+      )}
     </div>
   );
 };

@@ -130,6 +130,14 @@ interface EntryCardProps {
   onPin: (id: string, shouldPin: boolean) => Promise<boolean>;
   availableGroups?: string[];
   onSetGroups?: (id: string, groups: string[]) => void;
+  /** Multi-select mode: whether any selection is active. */
+  isSelecting?: boolean;
+  /** Whether this specific card is selected. */
+  isSelected?: boolean;
+  /** Toggle this card's selection (Ctrl+click or click in select mode). */
+  onToggleSelect?: (id: string) => void;
+  /** Shift+click range selection. */
+  onRangeSelect?: (id: string) => void;
 }
 
 export const EntryCard: React.FC<EntryCardProps> = ({
@@ -139,6 +147,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   onPin,
   availableGroups = [],
   onSetGroups,
+  isSelecting = false,
+  isSelected = false,
+  onToggleSelect,
+  onRangeSelect,
 }) => {
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
@@ -334,6 +346,28 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     );
   };
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Ctrl/Cmd+click always toggles selection
+    if ((e.ctrlKey || e.metaKey) && onToggleSelect) {
+      e.preventDefault();
+      onToggleSelect(entry.id);
+      return;
+    }
+    // Shift+click for range selection
+    if (e.shiftKey && onRangeSelect) {
+      e.preventDefault();
+      onRangeSelect(entry.id);
+      return;
+    }
+    // In select mode, click toggles selection
+    if (isSelecting && onToggleSelect) {
+      onToggleSelect(entry.id);
+      return;
+    }
+    // Normal click: copy
+    handleCopy();
+  };
+
   const visibleImageThumbs = imageFiles.slice(0, 3);
   const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
 
@@ -427,18 +461,33 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     );
   };
 
+  const cardClasses = [
+    "entry-card",
+    copied && "entry-card--copied",
+    showFileList && "entry-card--expanded",
+    isSelecting && "entry-card--selectable",
+    isSelected && "entry-card--selected",
+  ].filter(Boolean).join(" ");
+
   return (
     <div
       ref={cardRef}
-      className={`entry-card${copied ? " entry-card--copied" : ""}${showFileList ? " entry-card--expanded" : ""}`}
-      onClick={handleCopy}
+      className={cardClasses}
+      onClick={handleCardClick}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        // In multi-select mode, right-click shouldn't open menu
+        if (isSelecting) return;
         setMenuPos({ x: e.clientX, y: e.clientY });
       }}
-      // data-tooltip="Click to copy · Right-click for options"
     >
+      {/* Selection checkbox overlay */}
+      {isSelecting && (
+        <div className="entry-card-checkbox">
+          <CheckIcon size={11} strokeWidth={3} />
+        </div>
+      )}
       {/*  Media preview (image/video)  */}
       {entry.type === "image" && (
         <div className="card-media">

@@ -63,6 +63,7 @@ const CopyPopup: React.FC = () => {
   const [entryId, setEntryId] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [autosave, setAutosave] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [visible, setVisible] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
@@ -103,11 +104,17 @@ const CopyPopup: React.FC = () => {
 
         // Fetch pinned/saved state for the entry
         try {
-          const history = await invoke<HistoryEntry[]>("get_history");
-          const match = history.find((h) => h.id === event.payload.id);
-          if (match && !cancelled) {
-            setPinned(match.pinned);
-            setSaved(match.groups?.includes("Saved") ?? false);
+          const [history, autosaveVal] = await Promise.all([
+            invoke<HistoryEntry[]>("get_history"),
+            invoke<boolean | null>("get_setting", { key: "autosave" }),
+          ]);
+          if (!cancelled) {
+            setAutosave(autosaveVal === true);
+            const match = history.find((h) => h.id === event.payload.id);
+            if (match) {
+              setPinned(match.pinned);
+              setSaved(match.groups?.includes("Saved") ?? false);
+            }
           }
         } catch {
           /* state unavailable, defaults are fine */
@@ -324,15 +331,17 @@ const CopyPopup: React.FC = () => {
               <span>{pinned ? "Unpin" : "Pin"}</span>
             </button>
 
-            <button
-              className={`popup-menu-item popup-menu-item--save${saved ? " popup-menu-item--active" : ""}`}
-              onMouseDown={cancelBlur}
-              onClick={handleSave}
-              disabled={!entryId}
-            >
-              <SaveStarIcon size={13} filled={saved} />
-              <span>{saved ? "Unsave" : "Save"}</span>
-            </button>
+            {!autosave && (
+              <button
+                className={`popup-menu-item popup-menu-item--save${saved ? " popup-menu-item--active" : ""}`}
+                onMouseDown={cancelBlur}
+                onClick={handleSave}
+                disabled={!entryId}
+              >
+                <SaveStarIcon size={13} filled={saved} />
+                <span>{saved ? "Unsave" : "Save"}</span>
+              </button>
+            )}
 
             <div className="popup-menu-separator" />
 

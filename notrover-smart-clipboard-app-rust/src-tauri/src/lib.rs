@@ -224,6 +224,7 @@ fn setup_runtime(
     for (key, flag) in [
         ("close_to_tray", &state_ref.close_to_tray),
         ("start_minimized", &state_ref.start_minimized),
+        ("autosave", &state_ref.autosave),
     ] {
         let val = settings_file
             .as_deref()
@@ -312,6 +313,7 @@ pub fn run() {
         start_minimized: Arc::new(AtomicBool::new(false)),
         copy_notification: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
+        autosave: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
@@ -337,6 +339,11 @@ pub fn run() {
             crate::clipboard::commands::set_entry_groups,
             crate::clipboard::commands::purge_group_from_entries,
             crate::clipboard::commands::rename_group_in_entries,
+            crate::clipboard::commands::bulk_delete_entries,
+            crate::clipboard::commands::bulk_pin_entries,
+            crate::clipboard::commands::bulk_set_groups,
+            crate::clipboard::commands::bulk_add_group,
+            crate::clipboard::commands::bulk_remove_group,
             crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,
