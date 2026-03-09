@@ -22,6 +22,20 @@ import "./App.css";
 const GROUPS_STORAGE_KEY = "sc-groups";
 const SYSTEM_GROUPS = ["pinned", "saved"];
 
+const TRASH_ICON = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
+const UNDO_ICON = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 7v6h6" />
+    <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
+  </svg>
+);
+
 function sanitizeGroups(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   const seen = new Set<string>();
@@ -548,15 +562,15 @@ const App: React.FC = () => {
     setUndoSnapshot(null);
   }, [undoSnapshot]);
 
-  const textCount = entries.filter((e) => e.type === "text").length;
-  const imageCount = entries.filter(
-    (e) =>
-      e.type === "image" ||
-      (e.type === "file" && classifyFileEntry(e.content) === "image"),
-  ).length;
-  const fileCount = entries.filter(
-    (e) => e.type === "file" && classifyFileEntry(e.content) === "file",
-  ).length;
+  const { textCount, imageCount, fileCount } = entries.reduce(
+    (acc, e) => {
+      if (e.type === "text") acc.textCount++;
+      else if (e.type === "image" || (e.type === "file" && classifyFileEntry(e.content) === "image")) acc.imageCount++;
+      else if (e.type === "file" && classifyFileEntry(e.content) === "file") acc.fileCount++;
+      return acc;
+    },
+    { textCount: 0, imageCount: 0, fileCount: 0 },
+  );
 
   return (
     <div className="app" data-theme={theme}>
@@ -637,38 +651,10 @@ const App: React.FC = () => {
         {undoSnapshot !== null && (
           <ToastNotification
             message="History cleared"
-            icon={
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            }
+            icon={TRASH_ICON}
             action={{
               label: "Undo",
-              icon: (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 7v6h6" />
-                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
-                </svg>
-              ),
+              icon: UNDO_ICON,
               onClick: handleUndoClear,
             }}
             duration={5000}
@@ -679,38 +665,10 @@ const App: React.FC = () => {
         {deletedEntry !== null && (
           <ToastNotification
             message="Entry deleted"
-            icon={
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            }
+            icon={TRASH_ICON}
             action={{
               label: "Undo",
-              icon: (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 7v6h6" />
-                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
-                </svg>
-              ),
+              icon: UNDO_ICON,
               onClick: handleUndoDelete,
             }}
             duration={5000}
@@ -738,21 +696,7 @@ const App: React.FC = () => {
             }
             action={{
               label: "Undo",
-              icon: (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 7v6h6" />
-                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
-                </svg>
-              ),
+              icon: UNDO_ICON,
               onClick: handleUndoDeleteGroup,
             }}
             duration={5000}

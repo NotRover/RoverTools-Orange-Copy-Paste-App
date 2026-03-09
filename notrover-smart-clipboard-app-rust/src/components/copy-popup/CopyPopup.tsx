@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind } from "../../types";
+import { deriveDisplayKind, htmlPlainText } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import "./copyPopup.css";
 
@@ -13,42 +13,15 @@ function readTheme(): AppTheme {
   return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
 }
 
-const IMAGE_EXTS = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "gif",
-  "bmp",
-  "webp",
-  "svg",
-  "ico",
-  "tiff",
-  "tif",
-  "avif",
-  "heic",
-  "heif",
-]);
-const VIDEO_EXTS = new Set([
-  "mp4",
-  "webm",
-  "mov",
-  "mkv",
-  "avi",
-  "wmv",
-  "m4v",
-  "mpeg",
-  "mpg",
-]);
-
-function fileExt(path: string): string {
-  const name = path.split(/[\\/]/).pop() ?? path;
-  const dot = name.lastIndexOf(".");
-  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
-}
+import {
+  IMAGE_FILE_EXTENSIONS as IMAGE_EXTS,
+  VIDEO_FILE_EXTENSIONS as VIDEO_EXTS,
+  fileExtension as fileExt,
+} from "../../types";
 
 interface HistoryEntry {
   id: string;
-  type: "text" | "image" | "file";
+  type: "text" | "image" | "file" | "html";
   content: string;
   timestamp: number;
   pinned: boolean;
@@ -79,7 +52,7 @@ function estimatePreviewHeight(
 }
 
 const CopyPopup: React.FC = () => {
-  const [kind, setKind] = useState<"text" | "image" | "file">("text");
+  const [kind, setKind] = useState<"text" | "image" | "file" | "html">("text");
   const [content, setContent] = useState("");
   const [entryId, setEntryId] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
@@ -109,7 +82,7 @@ const CopyPopup: React.FC = () => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<{ id: string; kind: "text" | "image" | "file"; content: string }>(
+    listen<{ id: string; kind: "text" | "image" | "file" | "html"; content: string }>(
       "clipboard:copied",
       async (event) => {
         if (cancelled) return;
@@ -325,6 +298,12 @@ const CopyPopup: React.FC = () => {
                 alt="Copied image"
                 className="popup-preview-media"
               />
+            ) : kind === "html" ? (
+              <p className="popup-preview-text">
+                {htmlPlainText(content).length > 200
+                  ? htmlPlainText(content).slice(0, 200) + "\u2026"
+                  : htmlPlainText(content) || "Rich text copied"}
+              </p>
             ) : kind === "file" ? (
               <>
                 {firstFile && IMAGE_EXTS.has(fileExt(firstFile)) && (

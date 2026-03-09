@@ -19,20 +19,20 @@ pub fn close_paste_popup(app: tauri::AppHandle) {
     hide_popup(&app, "paste-popup");
 }
 
-#[tauri::command]
-pub fn resize_paste_popup(app: tauri::AppHandle, height: f64) {
-    if let Some(win) = app.get_webview_window("paste-popup") {
-        let w = crate::state::PASTE_POPUP_W;
-        let _ = win.set_size(tauri::LogicalSize::new(w, height));
+fn resize_popup(app: &tauri::AppHandle, label: &str, width: f64, height: f64) {
+    if let Some(win) = app.get_webview_window(label) {
+        let _ = win.set_size(tauri::LogicalSize::new(width, height));
     }
 }
 
 #[tauri::command]
+pub fn resize_paste_popup(app: tauri::AppHandle, height: f64) {
+    resize_popup(&app, "paste-popup", crate::state::PASTE_POPUP_W, height);
+}
+
+#[tauri::command]
 pub fn resize_copy_popup(app: tauri::AppHandle, height: f64) {
-    if let Some(win) = app.get_webview_window("copy-popup") {
-        let w = crate::state::COPY_POPUP_W;
-        let _ = win.set_size(tauri::LogicalSize::new(w, height));
-    }
+    resize_popup(&app, "copy-popup", crate::state::COPY_POPUP_W, height);
 }
 
 #[tauri::command]

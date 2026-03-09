@@ -121,6 +121,22 @@ export const FolderIcon = (
   </svg>
 );
 
+export const HtmlIcon = (
+  <svg
+    width="9"
+    height="9"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="16 18 22 12 16 6" />
+    <polyline points="8 6 2 12 8 18" />
+  </svg>
+);
+
 export const PinIcon = (
   <svg
     width="9"
@@ -156,6 +172,7 @@ export const SaveIcon = (
 export const TYPE_ICONS: Record<DisplayKind, React.ReactNode> = {
   text: TextIcon,
   url: LinkIcon,
+  html: HtmlIcon,
   image: ImageIcon,
   video: VideoIcon,
   document: DocumentIcon,
@@ -166,6 +183,7 @@ export const TYPE_ICONS: Record<DisplayKind, React.ReactNode> = {
 export const TYPE_LABELS: Record<DisplayKind, string> = {
   text: "Text",
   url: "URL",
+  html: "Rich Text",
   image: "Image",
   video: "Video",
   document: "Doc",

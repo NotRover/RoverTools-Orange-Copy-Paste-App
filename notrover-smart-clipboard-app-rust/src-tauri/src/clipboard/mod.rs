@@ -3,4 +3,5 @@
 pub mod commands;
 pub mod files;
 pub mod history;
+pub mod html;
 pub mod image;

@@ -207,28 +207,21 @@ fn setup_runtime(
         let _ = history.lock().load_saved_from_file(pf);
     }
 
-    // Seed the in-memory keep flag.
-    app.state::<AppState>()
+    // Seed the in-memory boolean flags from disk.
+    let state_ref: tauri::State<'_, AppState> = app.state();
+    state_ref
         .keep_history
         .store(keep_enabled, Ordering::Relaxed);
-
-    // Seed the close_to_tray flag from disk.
-    let close_to_tray_enabled = settings_file
-        .as_deref()
-        .map(|p| read_bool_setting(p, "close_to_tray"))
-        .unwrap_or(false);
-    app.state::<AppState>()
-        .close_to_tray
-        .store(close_to_tray_enabled, Ordering::Relaxed);
-
-    // Seed the start_minimized flag from disk.
-    let start_minimized_enabled = settings_file
-        .as_deref()
-        .map(|p| read_bool_setting(p, "start_minimized"))
-        .unwrap_or(false);
-    app.state::<AppState>()
-        .start_minimized
-        .store(start_minimized_enabled, Ordering::Relaxed);
+    for (key, flag) in [
+        ("close_to_tray", &state_ref.close_to_tray),
+        ("start_minimized", &state_ref.start_minimized),
+    ] {
+        let val = settings_file
+            .as_deref()
+            .map(|p| read_bool_setting(p, key))
+            .unwrap_or(false);
+        flag.store(val, Ordering::Relaxed);
+    }
 
     // Set up system tray icon and menu.
     crate::runtime::tray::setup_tray(app)?;
