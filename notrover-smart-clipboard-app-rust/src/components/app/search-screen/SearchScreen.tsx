@@ -6,7 +6,7 @@ import React, {
   useState,
 } from "react";
 import type { ClipboardEntry, DisplayKind } from "../../../types";
-import { deriveDisplayKind, htmlPlainText } from "../../../types";
+import { deriveDisplayKind, htmlPlainText, groupColor } from "../../../types";
 import {
   TYPE_ICONS,
   TYPE_LABELS,
@@ -20,9 +20,9 @@ import {
   CloseIcon,
   FilterIcon,
   ChevronDownIcon,
-  TagIcon,
   ClockIcon,
   SearchXIcon,
+  SaveStarIcon,
 } from "../../icons";
 import "./SearchScreen.css";
 
@@ -329,7 +329,62 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
             </button>
             {filtersOpen && (
               <div className="ss-filter-card">
+                {/* System section */}
+                <div className="ss-card-section">
+                  <div className="ss-section-label">
+                    System
+                    {((pinnedOnly ? 1 : 0) + (selectedGroups.has("Saved") ? 1 : 0)) > 0 && (
+                      <span className="ss-count">
+                        {(pinnedOnly ? 1 : 0) + (selectedGroups.has("Saved") ? 1 : 0)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="ss-type-grid">
+                    <label
+                      className={`ss-type-option${pinnedOnly ? " ss-type-option--on" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={pinnedOnly}
+                        onChange={() => setPinnedOnly((v) => !v)}
+                        className="ss-type-cb"
+                      />
+                      <span
+                        className="ss-type-icon type-pill"
+                        style={{
+                          background: "var(--accent-dim)",
+                          color: "var(--accent)",
+                        }}
+                      >
+                        {PinIconElement}
+                      </span>
+                      <span className="ss-type-name">Pinned</span>
+                    </label>
+                    <label
+                      className={`ss-type-option${selectedGroups.has("Saved") ? " ss-type-option--on" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedGroups.has("Saved")}
+                        onChange={() => toggleGroup("Saved")}
+                        className="ss-type-cb"
+                      />
+                      <span
+                        className="ss-type-icon type-pill"
+                        style={{
+                          background: "rgba(34, 197, 94, 0.12)",
+                          color: "#22c55e",
+                        }}
+                      >
+                        <SaveStarIcon size={9} filled />
+                      </span>
+                      <span className="ss-type-name">Saved</span>
+                    </label>
+                  </div>
+                </div>
+
                 {/* Types section */}
+                <div className="ss-card-divider" />
                 <div className="ss-card-section">
                   <div className="ss-section-label">
                     Types
@@ -357,31 +412,11 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                         <span className="ss-type-name">{TYPE_LABELS[k]}</span>
                       </label>
                     ))}
-                    <label
-                      className={`ss-type-option${pinnedOnly ? " ss-type-option--on" : ""}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={pinnedOnly}
-                        onChange={() => setPinnedOnly((v) => !v)}
-                        className="ss-type-cb"
-                      />
-                      <span
-                        className="ss-type-icon type-pill type-pill--text"
-                        style={{
-                          background: "var(--accent-dim)",
-                          color: "var(--accent)",
-                        }}
-                      >
-                        {PinIconElement}
-                      </span>
-                      <span className="ss-type-name">Pinned</span>
-                    </label>
                   </div>
                 </div>
 
                 {/* Groups section */}
-                {availableGroups.length > 0 && (
+                {availableGroups.filter((g) => g !== "Saved").length > 0 && (
                   <>
                     <div className="ss-card-divider" />
                     <div className="ss-card-section">
@@ -394,29 +429,34 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                         )}
                       </div>
                       <div className="ss-type-grid">
-                        {availableGroups.map((g) => (
-                          <label
-                            key={g}
-                            className={`ss-type-option${selectedGroups.has(g) ? " ss-type-option--on" : ""}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedGroups.has(g)}
-                              onChange={() => toggleGroup(g)}
-                              className="ss-type-cb"
-                            />
-                            <span
-                              className="ss-type-icon type-pill type-pill--text"
-                              style={{
-                                background: "var(--accent-dim)",
-                                color: "var(--accent)",
-                              }}
-                            >
-                              <TagIcon size={9} />
-                            </span>
-                            <span className="ss-type-name">{g}</span>
-                          </label>
-                        ))}
+                        {availableGroups
+                          .filter((g) => g !== "Saved")
+                          .map((g) => {
+                            const gc = groupColor(g);
+                            return (
+                              <label
+                                key={g}
+                                className={`ss-type-option${selectedGroups.has(g) ? " ss-type-option--on" : ""}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedGroups.has(g)}
+                                  onChange={() => toggleGroup(g)}
+                                  className="ss-type-cb"
+                                />
+                                <span
+                                  className="ss-type-icon type-pill"
+                                  style={{
+                                    background: gc.bg,
+                                    color: gc.fg,
+                                  }}
+                                >
+                                  <span className="ss-color-dot" style={{ background: gc.fg }} />
+                                </span>
+                                <span className="ss-type-name">{g}</span>
+                              </label>
+                            );
+                          })}
                       </div>
                     </div>
                   </>
@@ -426,7 +466,12 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
 
                 {/* Date section */}
                 <div className="ss-card-section">
-                  <div className="ss-section-label">Date</div>
+                  <div className="ss-section-label">
+                    Date
+                    {(dateAfter || dateBefore) && (
+                      <span className="ss-count">1</span>
+                    )}
+                  </div>
                   <div className="ss-date-row">
                     <input
                       type="date"
