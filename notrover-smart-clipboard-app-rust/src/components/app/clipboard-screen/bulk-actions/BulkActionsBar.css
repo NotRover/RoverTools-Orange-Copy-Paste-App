@@ -1,68 +1,173 @@
-/* ── Bulk actions bar (layout-toggle-wrap style) ── */
+/* ── Bulk Actions Popup – horizontal chip row ── */
 
-.bulk-bar {
+/* Positioned absolutely below the .bulk-select-wrap in ClipboardScreen */
+.bulk-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
   display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 6px 12px 0;
-  flex-shrink: 0;
-  z-index: 10;
-  animation: bulk-bar-in 0.11s cubic-bezier(0.16, 1, 0.3, 1);
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 200;
+  white-space: nowrap;
+  animation: bulk-popup-in 0.13s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes bulk-bar-in {
+@keyframes bulk-popup-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-4px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
-/* Top row: close + count + select all + action pills */
+/* ── Count label ── */
 
-.bulk-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.bulk-bar-count {
+.bulk-popup-count {
   font-size: 11px;
-  font-weight: 700;
-  color: var(--text);
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 0 4px;
   white-space: nowrap;
-  letter-spacing: -0.1px;
 }
 
-.bulk-bar-link {
-  font-size: 10.5px;
+.bulk-popup-count strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: 1px;
+}
+
+/* ── "Select all / Deselect all" ghost link ── */
+
+.bulk-popup-toggle {
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-muted);
   background: none;
   border: none;
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: var(--radius-xs);
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.1s ease, color 0.1s ease;
   white-space: nowrap;
-  margin-right: auto;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 
-.bulk-bar-link:hover {
+.bulk-popup-toggle:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ── Vertical separator ── */
+
+.bulk-popup-vsep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+/* ── Action chips ── */
+
+.bulk-popup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  border-radius: var(--radius-xs);
+  border: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  color: var(--text-muted);
+  background: transparent;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.bulk-popup-chip:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
 
-.bulk-bar-close {
+/* Pin — always hoverable with accent tint (matches card-menu-item--pin:hover) */
+.bulk-popup-chip--pin:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Save — always hoverable with green tint (matches card-menu-item--save:hover) */
+.bulk-popup-chip--save:hover {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+/* Pin — active */
+.bulk-popup-chip--pin-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.bulk-popup-chip--pin-active:hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+/* Save — active */
+.bulk-popup-chip--save-active {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+.bulk-popup-chip--save-active:hover {
+  background: rgba(34, 197, 94, 0.18);
+  color: #22c55e;
+}
+
+/* Groups — open */
+.bulk-popup-chip--groups-active {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+/* Delete: full danger bg + white on hover (matches card-menu-item--danger) */
+.bulk-popup-chip--delete:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Chevron inside Groups chip */
+.bulk-popup-chevron {
+  opacity: 0.55;
+  transition: transform 0.15s ease;
+}
+.bulk-popup-chevron--open {
+  transform: rotate(180deg);
+}
+
+/* ── Close button ── */
+
+.bulk-popup-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: none;
   border-radius: var(--radius-xs);
@@ -70,29 +175,78 @@
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.1s ease, color 0.1s ease;
+  margin-left: 2px;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 
-.bulk-bar-close:hover {
+.bulk-popup-close:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-/* Action chip buttons */
+/* ── Groups flyout dropdown ── */
 
-.bulk-bar-actions {
+.bulk-popup-groups-wrap {
+  position: relative;
+}
+
+.bulk-popup-groups-flyout {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 190px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 300;
+  animation: bulk-popup-in 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bulk-popup-flyout-header {
   display: flex;
   align-items: center;
   gap: 5px;
+  padding: 0 2px 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 5px;
 }
 
-.bulk-bar-chip {
+.bulk-popup-flyout-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.bulk-popup-flyout-chips::-webkit-scrollbar {
+  width: 4px;
+}
+.bulk-popup-flyout-chips::-webkit-scrollbar-track {
+  background: transparent;
+}
+.bulk-popup-flyout-chips::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+
+.bulk-popup-flyout-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 3px 7px 3px 5px;
+  border: 1.5px solid transparent;
   border-radius: 5px;
-  border: none;
+  background: var(--surface-hover);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -100,100 +254,37 @@
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
-  transition: filter 0.1s ease, background 0.1s ease;
+  transition: filter 0.1s ease;
 }
 
-/* Pin chip — accent tint */
-.bulk-bar-chip--pin {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-.bulk-bar-chip--pin:hover {
-  filter: brightness(1.15);
-}
-.bulk-bar-chip--pin.bulk-bar-chip--active {
-  background: var(--accent);
-  color: #fff;
+.bulk-popup-flyout-chip:hover {
+  filter: brightness(1.08);
 }
 
-/* Save chip — green tint */
-.bulk-bar-chip--save {
-  background: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
-}
-.bulk-bar-chip--save:hover {
-  filter: brightness(1.15);
-}
-.bulk-bar-chip--save.bulk-bar-chip--active {
-  background: #22c55e;
-  color: #fff;
-}
-
-/* Groups chip — neutral */
-.bulk-bar-chip--groups {
-  background: var(--surface-hover);
-  color: var(--text-secondary);
-}
-.bulk-bar-chip--groups:hover {
-  filter: brightness(1.1);
-}
-.bulk-bar-chip--groups.bulk-bar-chip--active {
-  background: var(--text-secondary);
-  color: var(--surface);
-}
-
-/* Delete chip — danger */
-.bulk-bar-chip--delete {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-.bulk-bar-chip--delete:hover {
-  filter: brightness(1.15);
-}
-
-/* Chevron inside groups chip */
-.bulk-bar-chevron {
-  margin-left: -1px;
-  opacity: 0.7;
-  transition: transform 0.15s ease;
-}
-.bulk-bar-chevron--open {
-  transform: rotate(180deg);
-}
-
-/* Inline group chips row */
-
-.bulk-bar-groups-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 6px 0 2px;
-  justify-content: center;
-  animation: bulk-bar-in 0.11s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.bulk-bar-chip-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 9px;
-  height: 9px;
+.bulk-popup-flyout-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex-shrink: 0;
+  opacity: 0.7;
 }
 
-/* ── Entry card selection styles ── */
+.bulk-popup-flyout-name {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Entry card selection styles (co-located) ── */
 
 .entry-card--selectable {
   cursor: pointer;
 }
 
-
-
 .entry-card--selected:hover {
   transform: none;
 }
-
-/* Selection checkbox */
 
 .entry-card-checkbox {
   position: absolute;
@@ -208,7 +299,9 @@
   align-items: center;
   justify-content: center;
   z-index: 5;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
   pointer-events: none;
 }
 

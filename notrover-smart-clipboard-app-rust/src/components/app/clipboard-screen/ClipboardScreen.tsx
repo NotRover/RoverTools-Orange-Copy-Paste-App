@@ -15,6 +15,8 @@ import {
   TagIcon,
   TrashIcon,
   MultiSelectIcon,
+  PinIcon,
+  SaveStarIcon,
 } from "../../icons";
 import "./ClipboardScreen.css";
 
@@ -185,7 +187,9 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   // Compute groups common to ALL selected entries (for bulk group toggle UI)
   const commonGroups = (() => {
     if (multiSelect.selectedCount === 0) return [] as string[];
-    const selectedEntries = entries.filter((e) => multiSelect.selectedIds.has(e.id));
+    const selectedEntries = entries.filter((e) =>
+      multiSelect.selectedIds.has(e.id),
+    );
     if (selectedEntries.length === 0) return [] as string[];
     const first = new Set(selectedEntries[0].groups);
     return [...first].filter((g) =>
@@ -277,51 +281,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   return (
     <div className="clipboard-screen-root">
-      {/* When selecting, show bulk actions bar in place of toolbar */}
-      {multiSelect.isSelecting ? (
-        <BulkActionsBar
-          selectedCount={multiSelect.selectedCount}
-          totalCount={entries.length}
-          onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
-          onDeselectAll={multiSelect.deselectAll}
-          onExitSelectMode={multiSelect.exitSelectMode}
-          onBulkDelete={() => {
-            if (onBulkDelete) {
-              onBulkDelete([...multiSelect.selectedIds]);
-              multiSelect.exitSelectMode();
-            }
-          }}
-          allPinned={allPinned}
-          onBulkTogglePin={() => {
-            if (allPinned) {
-              if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
-            } else {
-              if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
-            }
-          }}
-          allSaved={allSaved}
-          onBulkToggleSave={() => {
-            if (allSaved) {
-              if (onBulkUnsave) onBulkUnsave([...multiSelect.selectedIds]);
-            } else {
-              if (onBulkSave) onBulkSave([...multiSelect.selectedIds]);
-            }
-          }}
-          onBulkAddGroup={(group) => {
-            if (onBulkAddGroup) {
-              onBulkAddGroup([...multiSelect.selectedIds], group);
-            }
-          }}
-          onBulkRemoveGroup={(group) => {
-            if (onBulkRemoveGroup) {
-              onBulkRemoveGroup([...multiSelect.selectedIds], group);
-            }
-          }}
-          availableGroups={availableGroups}
-          commonGroups={commonGroups}
-        />
-      ) : (
-      /*  Toolbar: sort + select + groups + layout + clear  */
+      {/*  Toolbar: sort + select (+ bulk popup) + groups + layout + clear  */}
       <div className="layout-toggle-wrap">
         {/* Sort dropdown */}
         <div className="sort-dropdown" ref={sortRef}>
@@ -387,16 +347,97 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           )}
         </div>
 
-        {/* Select mode button */}
-        <button
-          className="sort-dropdown-trigger"
-          onClick={() => multiSelect.enterSelectMode()}
-          data-tooltip="Select entries"
-          data-tooltip-pos="below"
-        >
-          <MultiSelectIcon size={12} />
-          <span className="layout-pill-label">Select</span>
-        </button>
+        {/* Select mode button — bulk actions popup anchors here */}
+        <div className="bulk-select-wrap">
+          <button
+            className={`sort-dropdown-trigger${multiSelect.isSelecting ? " sort-dropdown-trigger--open" : ""}`}
+            onClick={() =>
+              multiSelect.isSelecting
+                ? multiSelect.exitSelectMode()
+                : multiSelect.enterSelectMode()
+            }
+            data-tooltip="Select entries"
+            data-tooltip-pos="below"
+          >
+            <MultiSelectIcon size={12} />
+            <span className="layout-pill-label">
+              {multiSelect.isSelecting
+                ? multiSelect.selectedCount > 0
+                  ? `${multiSelect.selectedCount} selected`
+                  : "Select"
+                : "Select"}
+            </span>
+            {multiSelect.isSelecting && allPinned && (
+              <span
+                style={{
+                  color: "var(--accent)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  marginLeft: 1,
+                }}
+              >
+                <PinIcon size={10} filled={true} />
+              </span>
+            )}
+            {multiSelect.isSelecting && allSaved && (
+              <span
+                style={{
+                  color: "#22c55e",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  marginLeft: 1,
+                }}
+              >
+                <SaveStarIcon size={10} filled={true} />
+              </span>
+            )}
+          </button>
+
+          {/* Bulk actions popup — floats below this wrapper */}
+          {multiSelect.isSelecting && (
+            <BulkActionsBar
+              selectedCount={multiSelect.selectedCount}
+              totalCount={entries.length}
+              onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
+              onDeselectAll={multiSelect.deselectAll}
+              onExitSelectMode={multiSelect.exitSelectMode}
+              onBulkDelete={() => {
+                if (onBulkDelete) {
+                  onBulkDelete([...multiSelect.selectedIds]);
+                  multiSelect.exitSelectMode();
+                }
+              }}
+              allPinned={allPinned}
+              onBulkTogglePin={() => {
+                if (allPinned) {
+                  if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
+                } else {
+                  if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
+                }
+              }}
+              allSaved={allSaved}
+              onBulkToggleSave={() => {
+                if (allSaved) {
+                  if (onBulkUnsave) onBulkUnsave([...multiSelect.selectedIds]);
+                } else {
+                  if (onBulkSave) onBulkSave([...multiSelect.selectedIds]);
+                }
+              }}
+              onBulkAddGroup={(group) => {
+                if (onBulkAddGroup) {
+                  onBulkAddGroup([...multiSelect.selectedIds], group);
+                }
+              }}
+              onBulkRemoveGroup={(group) => {
+                if (onBulkRemoveGroup) {
+                  onBulkRemoveGroup([...multiSelect.selectedIds], group);
+                }
+              }}
+              availableGroups={availableGroups}
+              commonGroups={commonGroups}
+            />
+          )}
+        </div>
 
         <div className="layout-switch" role="group" aria-label="Layout">
           {layouts.map((l) => (
@@ -428,7 +469,6 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           </div>
         )}
       </div>
-      )}
 
       <div
         className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
@@ -463,7 +503,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                       {group.entries.length}
                     </span>
                   )}
-                  <ChevronDownIcon className="timeline-day-chevron" size={10} strokeWidth={2.5} />
+                  <ChevronDownIcon
+                    className="timeline-day-chevron"
+                    size={10}
+                    strokeWidth={2.5}
+                  />
                 </button>
 
                 {/* Cards for this day — collapses via grid-template-rows */}
@@ -488,7 +532,9 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           isSelecting={multiSelect.isSelecting}
                           isSelected={multiSelect.selectedIds.has(entry.id)}
                           onToggleSelect={multiSelect.toggleSelect}
-                          onRangeSelect={(id) => multiSelect.selectRange(id, allVisibleIds)}
+                          onRangeSelect={(id) =>
+                            multiSelect.selectRange(id, allVisibleIds)
+                          }
                         />
                       ))}
                     </div>
