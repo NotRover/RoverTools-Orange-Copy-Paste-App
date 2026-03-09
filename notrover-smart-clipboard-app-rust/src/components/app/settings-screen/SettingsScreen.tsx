@@ -100,24 +100,12 @@ const SettingsScreen: React.FC = () => {
 
   // Load settings from backend on mount
   useEffect(() => {
-    invoke<boolean | null>("get_setting", { key: "keep_history" }).then(
-      (val) => {
-        if (val === true) setKeepHistory(true);
-      },
-    );
-    invoke<boolean | null>("get_setting", { key: "close_to_tray" }).then(
-      (val) => {
-        if (val === true) setCloseToTray(true);
-      },
-    );
-    invoke<boolean>("get_autostart").then((val) => {
-      setRunOnStartup(val);
-    });
-    invoke<boolean | null>("get_setting", { key: "start_minimized" }).then(
-      (val) => {
-        if (val === true) setStartMinimized(true);
-      },
-    );
+    const loadBool = (key: string, setter: (v: boolean) => void) =>
+      invoke<boolean | null>("get_setting", { key }).then((v) => { if (v === true) setter(true); });
+    loadBool("keep_history", setKeepHistory);
+    loadBool("close_to_tray", setCloseToTray);
+    loadBool("start_minimized", setStartMinimized);
+    invoke<boolean>("get_autostart").then(setRunOnStartup);
   }, []);
 
   const handleSlotsChange = (val: number) => {
@@ -125,22 +113,22 @@ const SettingsScreen: React.FC = () => {
     localStorage.setItem("sc-paste-slots", String(val));
   };
 
-  const handleKeepToggle = () => {
-    const next = !keepHistory;
-    setKeepHistory(next);
-    invoke("set_setting", { key: "keep_history", value: next });
-    // When enabling, do an initial full-history save so data is saved
+  const toggleBoolSetting = (
+    current: boolean,
+    setter: (v: boolean) => void,
+    key: string,
+  ) => {
+    const next = !current;
+    setter(next);
+    invoke("set_setting", { key, value: next });
+    // When enabling keep_history, do an initial full-history save so data is saved
     // immediately without waiting for the next clipboard change.
-    if (next) {
-      invoke("save_history");
-    }
+    if (key === "keep_history" && next) invoke("save_history");
   };
 
-  const handleCloseToTrayToggle = () => {
-    const next = !closeToTray;
-    setCloseToTray(next);
-    invoke("set_setting", { key: "close_to_tray", value: next });
-  };
+  const handleKeepToggle = () => toggleBoolSetting(keepHistory, setKeepHistory, "keep_history");
+  const handleCloseToTrayToggle = () => toggleBoolSetting(closeToTray, setCloseToTray, "close_to_tray");
+  const handleStartMinimizedToggle = () => toggleBoolSetting(startMinimized, setStartMinimized, "start_minimized");
 
   const handleRunOnStartupToggle = async () => {
     const previous = runOnStartup;
@@ -157,12 +145,6 @@ const SettingsScreen: React.FC = () => {
       setRunOnStartup(previous);
       console.error("Failed to toggle autostart:", error);
     }
-  };
-
-  const handleStartMinimizedToggle = () => {
-    const next = !startMinimized;
-    setStartMinimized(next);
-    invoke("set_setting", { key: "start_minimized", value: next });
   };
 
   return (

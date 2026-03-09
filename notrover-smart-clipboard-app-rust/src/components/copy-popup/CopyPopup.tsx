@@ -13,38 +13,11 @@ function readTheme(): AppTheme {
   return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
 }
 
-const IMAGE_EXTS = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "gif",
-  "bmp",
-  "webp",
-  "svg",
-  "ico",
-  "tiff",
-  "tif",
-  "avif",
-  "heic",
-  "heif",
-]);
-const VIDEO_EXTS = new Set([
-  "mp4",
-  "webm",
-  "mov",
-  "mkv",
-  "avi",
-  "wmv",
-  "m4v",
-  "mpeg",
-  "mpg",
-]);
-
-function fileExt(path: string): string {
-  const name = path.split(/[\\/]/).pop() ?? path;
-  const dot = name.lastIndexOf(".");
-  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
-}
+import {
+  IMAGE_FILE_EXTENSIONS as IMAGE_EXTS,
+  VIDEO_FILE_EXTENSIONS as VIDEO_EXTS,
+  fileExtension as fileExt,
+} from "../../types";
 
 interface HistoryEntry {
   id: string;

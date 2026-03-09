@@ -3,8 +3,7 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind } from "../../types";
-import { htmlPlainText } from "../../types";
+import { deriveDisplayKind, htmlPlainText } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import "./pastePopup.css";
 
@@ -14,7 +13,7 @@ type Tab = "recent" | "pinned";
 // Layout constants (must match Rust PASTE_POPUP_W)
 const HEADER_H = 48; // header + divider + padding
 const ITEM_H = 44; // item height + gap
-const BOTTOM_PAD = 10;
+const BOTTOM_PAD = 0;
 const BODY_PAD = 12; // body padding (6px * 2)
 const MIN_EMPTY_H = 100;
 
@@ -45,46 +44,14 @@ function textPreview(content: string, max = 60): string {
   return line.length > max ? line.slice(0, max) + "…" : line;
 }
 
-const IMAGE_EXTS = new Set([
-  "jpg",
-  "jpeg",
-  "png",
-  "gif",
-  "bmp",
-  "webp",
-  "svg",
-  "ico",
-  "tiff",
-  "tif",
-  "avif",
-  "heic",
-  "heif",
-]);
-
-function fileExt(path: string): string {
-  const name = path.split(/[\\/]/).pop() ?? path;
-  const dot = name.lastIndexOf(".");
-  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
-}
-
-function isImagePath(path: string): boolean {
-  return IMAGE_EXTS.has(fileExt(path));
-}
-
-function isUrl(text: string): boolean {
-  const t = text.trim();
-  return !t.includes("\n") && /^https?:\/\/.{4,}/.test(t);
-}
+import {
+  isImageFile as isImagePath,
+  isUrl,
+  filePaths as getFilePaths,
+} from "../../types";
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
-}
-
-function getFilePaths(content: string): string[] {
-  return content
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
 }
 
 function relativeTime(ts: number): string {

@@ -259,13 +259,11 @@ pub fn image_data_to_data_url(
     let img = RgbaImage::from_raw(width as u32, height as u32, rgba_bytes)?;
 
     let mut png_buf: Vec<u8> = Vec::new();
-    match img.write_to(
+    img.write_to(
         &mut std::io::Cursor::new(&mut png_buf),
         image::ImageFormat::Png,
-    ) {
-        Ok(_) => {}
-        Err(_) => return None,
-    }
+    )
+    .ok()?;
 
     Some(format!("data:image/png;base64,{}", B64.encode(&png_buf)))
 }
@@ -295,7 +293,7 @@ pub fn data_url_to_rgba(data_url: &str) -> Result<(usize, usize, Vec<u8>), Strin
     Ok((w as usize, h as usize, img.into_raw()))
 }
 
-//  Direct Win32 clipboard write for images 
+//  Direct Win32 clipboard write for images
 //
 // `arboard` v3 routes clipboard operations through a background message-loop
 // thread.  When the clipboard watcher (or an external app like Discord) opens
@@ -313,8 +311,7 @@ pub fn data_url_to_rgba(data_url: &str) -> Result<(usize, usize, Vec<u8>), Strin
 #[cfg(windows)]
 pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW,
-        SetClipboardData,
+        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
     };
     use windows_sys::Win32::System::Memory::{
         GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
@@ -324,7 +321,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     const OPEN_RETRIES: usize = 10;
     const OPEN_RETRY_DELAY_MS: u64 = 50;
 
-    //  1. Decode everything BEFORE touching the clipboard 
+    //  1. Decode everything BEFORE touching the clipboard
     let b64_data = data_url
         .find(";base64,")
         .map(|pos| &data_url[pos + 8..])
@@ -340,7 +337,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     let height = h as usize;
     let rgba = img.into_raw();
 
-    //  2. Prepare CF_DIB blob (BITMAPINFOHEADER + BGRA bottom-up) 
+    //  2. Prepare CF_DIB blob (BITMAPINFOHEADER + BGRA bottom-up)
     let header_size = 40usize; // sizeof(BITMAPINFOHEADER)
     let row_bytes = width * 4;
     let pixel_bytes = row_bytes * height;
@@ -349,17 +346,17 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     let mut dib = Vec::with_capacity(dib_total);
 
     // BITMAPINFOHEADER
-    dib.extend_from_slice(&40u32.to_le_bytes());                  // biSize
-    dib.extend_from_slice(&(width as i32).to_le_bytes());         // biWidth
-    dib.extend_from_slice(&(height as i32).to_le_bytes());        // biHeight (+ve = bottom-up)
-    dib.extend_from_slice(&1u16.to_le_bytes());                   // biPlanes
-    dib.extend_from_slice(&32u16.to_le_bytes());                  // biBitCount
-    dib.extend_from_slice(&0u32.to_le_bytes());                   // biCompression = BI_RGB
-    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes());   // biSizeImage
-    dib.extend_from_slice(&0i32.to_le_bytes());                   // biXPelsPerMeter
-    dib.extend_from_slice(&0i32.to_le_bytes());                   // biYPelsPerMeter
-    dib.extend_from_slice(&0u32.to_le_bytes());                   // biClrUsed
-    dib.extend_from_slice(&0u32.to_le_bytes());                   // biClrImportant
+    dib.extend_from_slice(&40u32.to_le_bytes()); // biSize
+    dib.extend_from_slice(&(width as i32).to_le_bytes()); // biWidth
+    dib.extend_from_slice(&(height as i32).to_le_bytes()); // biHeight (+ve = bottom-up)
+    dib.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
+    dib.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
+    dib.extend_from_slice(&0u32.to_le_bytes()); // biCompression = BI_RGB
+    dib.extend_from_slice(&(pixel_bytes as u32).to_le_bytes()); // biSizeImage
+    dib.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
+    dib.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
+    dib.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
+    dib.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
 
     // Pixel rows:  RGBA top-down → BGRA bottom-up
     for y in (0..height).rev() {
@@ -368,12 +365,12 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
             let i = row_start + x * 4;
             dib.push(rgba[i + 2]); // B
             dib.push(rgba[i + 1]); // G
-            dib.push(rgba[i]);     // R
+            dib.push(rgba[i]); // R
             dib.push(rgba[i + 3]); // A
         }
     }
 
-    //  3. Prepare registered "PNG" blob 
+    //  3. Prepare registered "PNG" blob
     // If the raw bytes are already PNG, reuse them directly (zero cost).
     // Otherwise skip the PNG clipboard format — CF_DIB is sufficient for
     // the vast majority of paste targets.
@@ -404,7 +401,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
             return Err("EmptyClipboard failed".into());
         }
 
-        //  Write CF_DIB 
+        //  Write CF_DIB
         let hmem_dib = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, dib_total);
         if hmem_dib.is_null() {
             CloseClipboard();
@@ -423,7 +420,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
             return Err("SetClipboardData(CF_DIB) failed".into());
         }
 
-        //  Write registered "PNG" format (best-effort) 
+        //  Write registered "PNG" format (best-effort)
         if let Some(png) = &png_data {
             let wide: Vec<u16> = "PNG\0".encode_utf16().collect();
             let cf_png = RegisterClipboardFormatW(wide.as_ptr());

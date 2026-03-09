@@ -128,19 +128,17 @@ const MAX_PINNED: usize = 10;
 fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin: bool) -> bool {
     use tauri::Emitter;
 
-    // Enforce pin limit — pinning is now paste-popup only.
-    if pin {
-        let hist = state.history.lock();
-        if hist.pinned_entries().len() >= MAX_PINNED {
+    let success = {
+        let mut hist = state.history.lock();
+        // Enforce pin limit — pinning is now paste-popup only.
+        if pin && hist.pinned_entries().len() >= MAX_PINNED {
             return false;
         }
-        drop(hist);
-    }
-
-    let success = if pin {
-        state.history.lock().pin(id)
-    } else {
-        state.history.lock().unpin(id)
+        if pin {
+            hist.pin(id)
+        } else {
+            hist.unpin(id)
+        }
     };
     if success {
         auto_save_history(app, &state.history);
@@ -168,25 +166,15 @@ pub fn set_setting(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> bool {
-    // Keep the in-memory cache in sync when the keep_history flag changes.
-    if key == "keep_history" {
-        state
-            .keep_history
-            .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
-    }
-
-    // Keep the in-memory cache in sync when the close_to_tray flag changes.
-    if key == "close_to_tray" {
-        state
-            .close_to_tray
-            .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
-    }
-
-    // Keep the in-memory cache in sync when the start_minimized flag changes.
-    if key == "start_minimized" {
-        state
-            .start_minimized
-            .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
+    // Keep the in-memory cache in sync when boolean flags change.
+    let flag = match key.as_str() {
+        "keep_history" => Some(&state.keep_history),
+        "close_to_tray" => Some(&state.close_to_tray),
+        "start_minimized" => Some(&state.start_minimized),
+        _ => None,
+    };
+    if let Some(flag) = flag {
+        flag.store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
     }
 
     let Some(path) = get_settings_file_path(&app) else {
@@ -228,10 +216,7 @@ pub fn set_entry_groups(
 
     let success = state.history.lock().set_groups(&id, groups.clone());
     if success {
-        if let Some(path) = get_saved_file_path(&app) {
-            let _ = state.history.lock().save_saved_to_file(&path);
-        }
-        auto_save_history(&app, &state.history);
+        save_after_group_change(&app, &state);
         let _ = app.emit(
             "clipboard:entry-groups-changed",
             serde_json::json!({ "id": id, "groups": groups }),
@@ -248,10 +233,7 @@ pub fn purge_group_from_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().purge_group(&group);
-    if let Some(path) = get_saved_file_path(&app) {
-        let _ = state.history.lock().save_saved_to_file(&path);
-    }
-    auto_save_history(&app, &state.history);
+    save_after_group_change(&app, &state);
     true
 }
 
@@ -264,11 +246,15 @@ pub fn rename_group_in_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().rename_group(&old_name, &new_name);
-    if let Some(path) = get_saved_file_path(&app) {
+    save_after_group_change(&app, &state);
+    true
+}
+
+fn save_after_group_change(app: &tauri::AppHandle, state: &State<'_, AppState>) {
+    if let Some(path) = get_saved_file_path(app) {
         let _ = state.history.lock().save_saved_to_file(&path);
     }
-    auto_save_history(&app, &state.history);
-    true
+    auto_save_history(app, &state.history);
 }
 
 /// Mark the history as needing a flush to disk.  The actual I/O happens on
@@ -326,30 +312,28 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
     true
 }
 
-#[tauri::command]
-pub fn get_image_file_preview(path: String) -> Option<String> {
-    let path = Path::new(&path);
-    let mime = mime_from_image_ext(path)?;
-
+fn get_file_preview(
+    path_str: &str,
+    mime_fn: fn(&Path) -> Option<&'static str>,
+    max_bytes: usize,
+) -> Option<String> {
+    let path = Path::new(path_str);
+    let mime = mime_fn(path)?;
     let bytes = std::fs::read(path).ok()?;
-    if bytes.is_empty() || bytes.len() > MAX_IMAGE_PREVIEW_BYTES {
+    if bytes.is_empty() || bytes.len() > max_bytes {
         return None;
     }
-
     Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
 }
 
 #[tauri::command]
+pub fn get_image_file_preview(path: String) -> Option<String> {
+    get_file_preview(&path, mime_from_image_ext, MAX_IMAGE_PREVIEW_BYTES)
+}
+
+#[tauri::command]
 pub fn get_video_file_preview(path: String) -> Option<String> {
-    let path = Path::new(&path);
-    let mime = mime_from_video_ext(path)?;
-
-    let bytes = std::fs::read(path).ok()?;
-    if bytes.is_empty() || bytes.len() > MAX_VIDEO_PREVIEW_BYTES {
-        return None;
-    }
-
-    Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
+    get_file_preview(&path, mime_from_video_ext, MAX_VIDEO_PREVIEW_BYTES)
 }
 
 /// Open an arboard clipboard handle, retrying a few times if the clipboard
