@@ -14,7 +14,7 @@ import {
   ImageIcon,
   FileIcon,
   PinIcon,
-  PersistIcon,
+  SaveIcon,
   EntryTypePill,
 } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
@@ -77,9 +77,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const imageFiles = files.filter(isImageFile);
   const isMulti = files.length > 1;
   const entryGroups = entry.groups ?? [];
-  const displayGroups = entryGroups.filter((g) => g !== "Persistent");
+  const displayGroups = entryGroups.filter((g) => g !== "Saved");
   const systemChipCount =
-    (entry.pinned ? 1 : 0) + (entryGroups.includes("Persistent") ? 1 : 0);
+    (entry.pinned ? 1 : 0) + (entryGroups.includes("Saved") ? 1 : 0);
   const maxGroupChips = Math.max(
     0,
     MAX_VISIBLE_GROUP_CHIPS - Math.max(0, systemChipCount - 1),
@@ -333,9 +333,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                 <span className="card-type-label">Pinned</span>
               </span>
             )}
-            {entryGroups.includes("Persistent") && (
-              <span className="card-type-chip card-type-chip--persistent">
-                {PersistIcon}
+            {entryGroups.includes("Saved") && (
+              <span className="card-type-chip card-type-chip--saved">
+                {SaveIcon}
                 <span className="card-type-label">Saved</span>
               </span>
             )}
@@ -426,17 +426,17 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         anchorY={menuPos?.y ?? 0}
         onClose={() => setMenuPos(null)}
         isPinned={entry.pinned}
-        isPersistent={entryGroups.includes("Persistent")}
+        isSaved={entryGroups.includes("Saved")}
         copied={copied}
         onCopy={handleCopy}
         onDelete={() => onDelete(entry.id)}
         onPin={handlePin}
-        onTogglePersistent={() => {
+        onToggleSave={() => {
           if (!onSetGroups) return;
-          const has = entryGroups.includes("Persistent");
+          const has = entryGroups.includes("Saved");
           const newGroups = has
-            ? entryGroups.filter((g) => g !== "Persistent")
-            : [...entryGroups, "Persistent"];
+            ? entryGroups.filter((g) => g !== "Saved")
+            : [...entryGroups, "Saved"];
           onSetGroups(entry.id, newGroups);
         }}
         availableGroups={availableGroups}

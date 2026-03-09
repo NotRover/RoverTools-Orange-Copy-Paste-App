@@ -20,7 +20,7 @@ import TooltipPortal from "./tooltip/TooltipPortal";
 import "./App.css";
 
 const GROUPS_STORAGE_KEY = "sc-groups";
-const SYSTEM_GROUPS = ["pinned", "persistent"];
+const SYSTEM_GROUPS = ["pinned", "saved"];
 
 function sanitizeGroups(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
@@ -350,12 +350,7 @@ const App: React.FC = () => {
         setEntries((prev) =>
           prev.map((e) => {
             if (e.id !== id) return e;
-            const updated = { ...e, pinned: shouldPin };
-            // Pinning automatically makes the entry persistent
-            if (shouldPin && !e.groups.includes("Persistent")) {
-              updated.groups = [...e.groups, "Persistent"];
-            }
-            return updated;
+            return { ...e, pinned: shouldPin };
           }),
         );
       } else if (shouldPin) {
@@ -475,7 +470,7 @@ const App: React.FC = () => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
     setEntries((prev) =>
-      prev.filter((e) => e.pinned || e.groups.includes("Persistent")),
+      prev.filter((e) => e.pinned || e.groups.includes("Saved")),
     );
     undoTimerRef.current = setTimeout(async () => {
       undoTimerRef.current = null;

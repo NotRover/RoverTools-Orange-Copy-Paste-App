@@ -137,7 +137,7 @@ export const PinIcon = (
   </svg>
 );
 
-export const PersistIcon = (
+export const SaveIcon = (
   <svg
     width="9"
     height="9"

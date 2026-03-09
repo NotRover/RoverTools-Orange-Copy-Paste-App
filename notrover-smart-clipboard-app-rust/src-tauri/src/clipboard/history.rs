@@ -92,9 +92,14 @@ impl ClipboardEntry {
         Self::new(EntryKind::File, content)
     }
 
-    /// Whether this entry has the "Persistent" group tag (survives restarts).
+    /// Whether this entry has the "Saved" group tag.
+    pub fn is_saved(&self) -> bool {
+        self.groups.iter().any(|g| g == "Saved")
+    }
+
+    /// Whether this entry survives restarts (pinned OR saved).
     pub fn is_persistent(&self) -> bool {
-        self.groups.iter().any(|g| g == "Persistent")
+        self.pinned || self.is_saved()
     }
 }
 
@@ -177,7 +182,7 @@ impl ClipboardHistory {
         }
     }
 
-    /// Clear all non-persistent entries. Persistent entries are retained.
+    /// Clear all non-persistent entries. Pinned and saved entries are retained.
     pub fn clear(&mut self) {
         self.entries.retain(|e| e.is_persistent());
     }
@@ -192,15 +197,12 @@ impl ClipboardHistory {
         self.entries.iter_mut().find(|e| e.id == id)
     }
 
-    /// Pin an entry by ID. Also adds "Persistent" group tag.
+    /// Pin an entry by ID.
     /// Returns `true` if found and pinned.
     pub fn pin(&mut self, id: &str) -> bool {
         self.find_mut(id)
             .map(|e| {
                 e.pinned = true;
-                if !e.groups.iter().any(|g| g == "Persistent") {
-                    e.groups.push("Persistent".to_string());
-                }
             })
             .is_some()
     }
@@ -214,7 +216,7 @@ impl ClipboardHistory {
         self.entries.iter().filter(|e| e.pinned).cloned().collect()
     }
 
-    /// Get all persistent entries (entries with the "Persistent" group tag).
+    /// Get all persistent entries (pinned or saved — survive restarts).
     pub fn persistent_entries(&self) -> Vec<ClipboardEntry> {
         self.entries
             .iter()
@@ -284,10 +286,13 @@ impl ClipboardHistory {
         advance_id_past(&loaded);
 
         // Migrate: entries loaded from the old pinned file that don't have
-        // "Persistent" in their groups get it added automatically.
+        // "Saved" in their groups get it added automatically.
         for e in &mut loaded {
-            if !e.groups.iter().any(|g| g == "Persistent") {
-                e.groups.push("Persistent".to_string());
+            // Migrate old "Persistent" tags to "Saved".
+            for g in &mut e.groups {
+                if g == "Persistent" {
+                    *g = "Saved".to_string();
+                }
             }
         }
 

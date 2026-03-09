@@ -121,18 +121,14 @@ const SECTIONS: ShortcutSection[] = [
       </svg>
     ),
     entries: [
-      {
-        keys: ["Pin"],
-        description: "Pin entry — shows in quick-paste popup (max 10)",
-      },
-      { keys: ["Pin"], description: "Pinning an entry automatically saves it" },
+      { keys: ["Pin"], description: "Pin entry — shows in quick-paste popup (max 10)" },
       {
         keys: ["Save"],
-        description: "Save entry — persists across app restarts",
+        description: "Save entry — survives app restarts independently of pin",
       },
       {
         keys: ["Unsave"],
-        description: "Remove persistence (entry may be evicted from history)",
+        description: "Remove save (entry may be evicted from history)",
       },
       {
         keys: ["Max 10"],
