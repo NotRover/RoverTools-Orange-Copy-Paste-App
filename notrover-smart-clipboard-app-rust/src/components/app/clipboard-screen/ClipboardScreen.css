@@ -282,6 +282,11 @@
   position: relative;
 }
 
+/* Wrapper for the select button + floating bulk popup */
+.bulk-select-wrap {
+  position: relative;
+}
+
 .sort-dropdown-trigger {
   display: inline-flex;
   align-items: center;

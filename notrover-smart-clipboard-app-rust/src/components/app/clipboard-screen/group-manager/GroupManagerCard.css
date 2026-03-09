@@ -130,7 +130,7 @@
   flex-wrap: wrap;
   gap: 5px;
   padding: 5px 0 3px;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* Chip pill (matches card-menu-group-chip style) */
