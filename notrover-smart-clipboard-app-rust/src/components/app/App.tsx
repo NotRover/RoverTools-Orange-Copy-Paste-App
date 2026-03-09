@@ -298,11 +298,28 @@ const App: React.FC = () => {
       else unlistenPinned = fn;
     });
 
+    let unlistenGroups: (() => void) | undefined;
+
+    listen<{ id: string; groups: string[] }>(
+      "clipboard:entry-groups-changed",
+      (event) => {
+        if (cancelled) return;
+        const { id, groups } = event.payload;
+        setEntries((prev) =>
+          prev.map((e) => (e.id === id ? { ...e, groups } : e)),
+        );
+      },
+    ).then((fn) => {
+      if (cancelled) fn();
+      else unlistenGroups = fn;
+    });
+
     return () => {
       cancelled = true;
       unlisten?.();
       unlistenDeleted?.();
       unlistenPinned?.();
+      unlistenGroups?.();
     };
   }, []);
 
