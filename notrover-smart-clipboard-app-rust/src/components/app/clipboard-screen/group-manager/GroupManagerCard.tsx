@@ -26,8 +26,8 @@ const TagIcon = (
   </svg>
 );
 
-// Persist icon (star)
-const PersistIcon = (
+// Save icon (star)
+const SaveIcon = (
   <svg
     width="11"
     height="11"
@@ -41,7 +41,7 @@ const PersistIcon = (
   </svg>
 );
 
-const SYSTEM_GROUPS = ["pinned", "persistent"];
+const SYSTEM_GROUPS = ["pinned", "saved"];
 const MIN_GROUP_LENGTH = 4;
 const MAX_GROUP_LENGTH = 14;
 
@@ -230,12 +230,12 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         {/* System group: Saved */}
         <div className="gm-group-row gm-group-row--system">
           <span className="gm-group-icon gm-group-icon--saved">
-            {PersistIcon}
+            {SaveIcon}
           </span>
           <span className="gm-row-name">Saved</span>
           <span className="gm-group-badge">System</span>
           <span className="gm-row-count">
-            {entries.filter((e) => e.groups.includes("Persistent")).length}
+            {entries.filter((e) => e.groups.includes("Saved")).length}
           </span>
         </div>
 

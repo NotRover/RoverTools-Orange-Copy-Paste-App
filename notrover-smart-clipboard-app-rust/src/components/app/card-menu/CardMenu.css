@@ -86,17 +86,17 @@
   color: var(--accent);
 }
 
-/* Persist (Save) button */
-.card-menu-item--persist:hover {
+/* Save button */
+.card-menu-item--save:hover {
   background: rgba(34, 197, 94, 0.12);
   color: #22c55e;
 }
 
-.card-menu-item--persisted {
+.card-menu-item--saved {
   color: #22c55e;
 }
 
-.card-menu-item--persisted:hover {
+.card-menu-item--saved:hover {
   background: rgba(34, 197, 94, 0.18);
   color: #22c55e;
 }
