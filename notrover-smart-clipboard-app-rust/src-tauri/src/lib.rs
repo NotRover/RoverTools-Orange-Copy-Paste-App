@@ -321,6 +321,7 @@ pub fn run() {
             crate::runtime::commands::open_data_folder,
             crate::runtime::commands::get_autostart,
             crate::runtime::commands::set_autostart,
+            crate::runtime::commands::close_copy_notification,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {

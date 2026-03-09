@@ -1,6 +1,8 @@
 use tauri::Manager;
 
-use crate::state::{COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W};
+use crate::state::{
+    COPY_NOTIF_H, COPY_NOTIF_W, COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W,
+};
 
 const OFFSCREEN_POS: f64 = -9999.0;
 
@@ -10,25 +12,31 @@ struct PopupWindowSpec {
     width: f64,
     height: f64,
     focused: bool,
+    ignore_cursor_events: bool,
 }
 
 fn build_popup_window(
     app: &mut tauri::App,
     spec: &PopupWindowSpec,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    tauri::WebviewWindowBuilder::new(app, spec.label, tauri::WebviewUrl::App(spec.url.into()))
-        .title("")
-        .inner_size(spec.width, spec.height)
-        .position(OFFSCREEN_POS, OFFSCREEN_POS)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(spec.focused)
-        .visible(false)
-        .build()?;
+    let win =
+        tauri::WebviewWindowBuilder::new(app, spec.label, tauri::WebviewUrl::App(spec.url.into()))
+            .title("")
+            .inner_size(spec.width, spec.height)
+            .position(OFFSCREEN_POS, OFFSCREEN_POS)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .resizable(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(spec.focused)
+            .visible(false)
+            .build()?;
+
+    if spec.ignore_cursor_events {
+        let _ = win.set_ignore_cursor_events(true);
+    }
 
     Ok(())
 }
@@ -50,6 +58,7 @@ pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
 pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
     hide_popup(app, "copy-popup");
     hide_popup(app, "paste-popup");
+    hide_popup(app, "copy-notification");
 }
 
 /// Create the copy-popup and paste-popup windows eagerly but hidden.
@@ -63,6 +72,7 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             width: COPY_POPUP_W,
             height: COPY_POPUP_H,
             focused: true,
+            ignore_cursor_events: false,
         },
         PopupWindowSpec {
             label: "paste-popup",
@@ -70,6 +80,15 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             width: PASTE_POPUP_W,
             height: PASTE_POPUP_H,
             focused: false,
+            ignore_cursor_events: false,
+        },
+        PopupWindowSpec {
+            label: "copy-notification",
+            url: "src/components/copy-notification/copy-notification.html",
+            width: COPY_NOTIF_W,
+            height: COPY_NOTIF_H,
+            focused: false,
+            ignore_cursor_events: true,
         },
     ];
 

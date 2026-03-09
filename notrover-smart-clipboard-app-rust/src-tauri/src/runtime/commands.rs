@@ -19,6 +19,11 @@ pub fn close_paste_popup(app: tauri::AppHandle) {
     hide_popup(&app, "paste-popup");
 }
 
+#[tauri::command]
+pub fn close_copy_notification(app: tauri::AppHandle) {
+    hide_popup(&app, "copy-notification");
+}
+
 fn resize_popup(app: &tauri::AppHandle, label: &str, width: f64, height: f64) {
     if let Some(win) = app.get_webview_window(label) {
         let _ = win.set_size(tauri::LogicalSize::new(width, height));
