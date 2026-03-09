@@ -193,6 +193,10 @@ const App: React.FC = () => {
     null,
   );
 
+  // Undo state for single-entry deletion
+  const [deletedEntry, setDeletedEntry] = useState<ClipboardEntry | null>(null);
+  const deleteEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Toast: max pins reached
   const [pinLimitReached, setPinLimitReached] = useState(false);
   const pinLimitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -352,10 +356,49 @@ const App: React.FC = () => {
     await invoke("copy_entry", { id });
   }, []);
 
-  const handleDelete = useCallback(async (id: string) => {
-    await invoke("delete_entry", { id });
-    setEntries((prev) => prev.filter((e) => e.id !== id));
-  }, []);
+  const handleDelete = useCallback(
+    (id: string) => {
+      // Commit any pending delete immediately
+      if (deleteEntryTimerRef.current !== null) {
+        clearTimeout(deleteEntryTimerRef.current);
+        deleteEntryTimerRef.current = null;
+        // Fire-and-forget commit for the previous pending delete
+        if (deletedEntry) {
+          invoke("delete_entry", { id: deletedEntry.id }).catch(console.error);
+        }
+      }
+
+      // Snapshot the entry being deleted
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return;
+
+      setDeletedEntry(entry);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+
+      // Defer the actual backend delete
+      deleteEntryTimerRef.current = setTimeout(async () => {
+        deleteEntryTimerRef.current = null;
+        setDeletedEntry(null);
+        await invoke("delete_entry", { id });
+      }, 5000);
+    },
+    [entries, deletedEntry],
+  );
+
+  const handleUndoDelete = useCallback(() => {
+    if (deleteEntryTimerRef.current !== null) {
+      clearTimeout(deleteEntryTimerRef.current);
+      deleteEntryTimerRef.current = null;
+    }
+    if (!deletedEntry) return;
+    setEntries((prev) => {
+      // Re-insert at original position by timestamp
+      const next = [...prev, deletedEntry];
+      next.sort((a, b) => b.timestamp - a.timestamp);
+      return next;
+    });
+    setDeletedEntry(null);
+  }, [deletedEntry]);
 
   const handlePin = useCallback(
     async (id: string, shouldPin: boolean): Promise<boolean> => {
@@ -630,6 +673,48 @@ const App: React.FC = () => {
             }}
             duration={5000}
             onDismiss={() => setUndoSnapshot(null)}
+          />
+        )}
+
+        {deletedEntry !== null && (
+          <ToastNotification
+            message="Entry deleted"
+            icon={
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            }
+            action={{
+              label: "Undo",
+              icon: (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 7v6h6" />
+                  <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
+                </svg>
+              ),
+              onClick: handleUndoDelete,
+            }}
+            duration={5000}
+            onDismiss={() => setDeletedEntry(null)}
           />
         )}
 
