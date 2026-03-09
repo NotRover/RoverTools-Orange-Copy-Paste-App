@@ -383,6 +383,10 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
             cb.set_text(entry.content.clone())
                 .map_err(|e| e.to_string())?;
         }
+        EntryKind::Html => {
+            let (html, plain) = entry.html_parts();
+            crate::clipboard::html::write_html_to_clipboard(html, plain)?;
+        }
         EntryKind::Image => {
             // Bypass arboard entirely — its internal proxy-thread architecture
             // races with the clipboard watcher and external apps, producing
@@ -414,15 +418,7 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
 }
 
 pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
-    let mut cb = Clipboard::new().ok()?;
-
-    if let Ok(text) = cb.get_text() {
-        if !text.trim().is_empty() {
-            return Some(ClipboardEntry::new_text(text));
-        }
-    }
-
-    // Handle CF_HDROP (files copied in Explorer).
+    // Handle CF_HDROP (files copied in Explorer) first.
     // All file drops — including single image files — are stored as File entries
     // so that re-copying writes CF_HDROP back and the files can be pasted in
     // Explorer and other apps that expect file paths.  The frontend handles
@@ -431,6 +427,30 @@ pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
     if crate::clipboard::files::any_file_format_available() {
         if let Some(paths) = read_files_from_clipboard() {
             return Some(ClipboardEntry::new_file(files_to_content(&paths)));
+        }
+    }
+
+    // CF_HTML — rich text with inline images (Word, Teams, etc.).
+    // Only triggers when the HTML contains images mixed with text, or tables.
+    // Pure image copies and plain styled text are intentionally skipped.
+    #[cfg(windows)]
+    if crate::clipboard::html::any_html_format_available() {
+        if let Some(html_fragment) = crate::clipboard::html::read_html_from_clipboard() {
+            // Also grab the plain-text fallback for search/preview
+            let plain = Clipboard::new()
+                .ok()
+                .and_then(|mut cb| cb.get_text().ok())
+                .unwrap_or_default();
+            return Some(ClipboardEntry::new_html(html_fragment, plain));
+        }
+    }
+
+    // Plain text
+    let mut cb = Clipboard::new().ok()?;
+
+    if let Ok(text) = cb.get_text() {
+        if !text.trim().is_empty() {
+            return Some(ClipboardEntry::new_text(text));
         }
     }
 

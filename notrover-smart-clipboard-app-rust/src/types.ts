@@ -4,7 +4,7 @@
 export interface ClipboardEntry {
   id: string;
   /** Serialised as `"type"` from the Rust `#[serde(rename = "type")]` field. */
-  type: "text" | "image" | "file";
+  type: "text" | "image" | "file" | "html";
   content: string;
   /** Unix epoch in milliseconds. */
   timestamp: number;
@@ -137,6 +137,20 @@ export function truncateText(text: string, max = 180): string {
   return text.length <= max ? text : text.slice(0, max) + "…";
 }
 
+const HTML_SEPARATOR = "\n---PLAINTEXT---\n";
+
+/** For html entries, extract the HTML fragment portion. */
+export function htmlFragment(content: string): string {
+  const idx = content.indexOf(HTML_SEPARATOR);
+  return idx >= 0 ? content.slice(0, idx) : content;
+}
+
+/** For html entries, extract the plain-text fallback portion. */
+export function htmlPlainText(content: string): string {
+  const idx = content.indexOf(HTML_SEPARATOR);
+  return idx >= 0 ? content.slice(idx + HTML_SEPARATOR.length) : "";
+}
+
 export function filePaths(content: string): string[] {
   return content
     .split("\n")
@@ -229,6 +243,7 @@ export function isUrl(text: string): boolean {
 export type DisplayKind =
   | "text"
   | "url"
+  | "html"
   | "image"
   | "video"
   | "document"
@@ -244,6 +259,7 @@ function isDirectory(path: string): boolean {
 export function deriveDisplayKind(entry: ClipboardEntry): DisplayKind {
   if (entry.type === "text") return isUrl(entry.content) ? "url" : "text";
   if (entry.type === "image") return "image";
+  if (entry.type === "html") return "html";
   // file entry — classify by extension of paths
   const paths = filePaths(entry.content);
   if (paths.length === 0) return "file";

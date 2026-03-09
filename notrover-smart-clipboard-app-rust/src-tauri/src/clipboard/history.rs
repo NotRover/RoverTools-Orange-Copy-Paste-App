@@ -41,6 +41,7 @@ pub enum EntryKind {
     Text,
     Image,
     File,
+    Html,
 }
 
 /// A single clipboard history entry.
@@ -90,6 +91,22 @@ impl ClipboardEntry {
     /// `content` stores newline-delimited absolute file paths.
     pub fn new_file(content: String) -> Self {
         Self::new(EntryKind::File, content)
+    }
+
+    /// `content` stores the HTML fragment extracted from CF_HTML.
+    /// A plain-text fallback is embedded via `\n---PLAINTEXT---\n`.
+    pub fn new_html(html: String, plain_text: String) -> Self {
+        let content = format!("{html}\n---PLAINTEXT---\n{plain_text}");
+        Self::new(EntryKind::Html, content)
+    }
+
+    /// For Html entries, split content into (html, plain_text).
+    pub fn html_parts(&self) -> (&str, &str) {
+        if let Some(idx) = self.content.find("\n---PLAINTEXT---\n") {
+            (&self.content[..idx], &self.content[idx + 18..])
+        } else {
+            (&self.content, "")
+        }
     }
 
     /// Whether this entry is saved (pinned OR has the "Saved" group tag).

@@ -4,6 +4,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { deriveDisplayKind } from "../../types";
+import { htmlPlainText } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import "./pastePopup.css";
 
@@ -28,7 +29,7 @@ function readSlots(): number {
 
 interface PopupEntry {
   id: string;
-  type: "text" | "image" | "file";
+  type: "text" | "image" | "file" | "html";
   content: string;
   timestamp: number;
   pinned: boolean;
@@ -475,9 +476,11 @@ const PastePopup: React.FC = () => {
                   <div className="paste-preview-wrap">
                     <EntryTypePill kind={deriveDisplayKind(entry as any)} />
                     <span className="paste-filename">
-                      {isUrl(entry.content)
-                        ? entry.content.trim().slice(0, 50)
-                        : textPreview(entry.content)}
+                      {entry.type === "html"
+                        ? textPreview(htmlPlainText(entry.content))
+                        : isUrl(entry.content)
+                          ? entry.content.trim().slice(0, 50)
+                          : textPreview(entry.content)}
                     </span>
                   </div>
                 )}

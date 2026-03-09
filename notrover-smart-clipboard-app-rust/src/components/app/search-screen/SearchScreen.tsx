@@ -6,7 +6,7 @@ import React, {
   useState,
 } from "react";
 import type { ClipboardEntry, DisplayKind } from "../../../types";
-import { deriveDisplayKind, filePaths } from "../../../types";
+import { deriveDisplayKind, filePaths, htmlPlainText } from "../../../types";
 import {
   TYPE_ICONS,
   TYPE_LABELS,
@@ -139,6 +139,7 @@ const TYPE_ORDER: Record<string, number> = {
 
 function sortableText(e: ClipboardEntry): string {
   if (e.type === "text") return e.content.toLowerCase();
+  if (e.type === "html") return htmlPlainText(e.content).toLowerCase();
   if (e.type === "file") {
     const paths = filePaths(e.content);
     return ((paths[0] ?? "").split(/[\\/]/).pop() ?? "").toLowerCase();
@@ -149,6 +150,7 @@ function sortableText(e: ClipboardEntry): string {
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "text",
   "url",
+  "html",
   "image",
   "video",
   "document",
@@ -161,6 +163,7 @@ const ALL_DISPLAY_KINDS: DisplayKind[] = [
 function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   const lower = q.toLowerCase();
   if (entry.type === "text") return entry.content.toLowerCase().includes(lower);
+  if (entry.type === "html") return htmlPlainText(entry.content).toLowerCase().includes(lower);
   if (entry.type === "file") {
     // Search full paths, not just filenames
     return entry.content.toLowerCase().includes(lower);

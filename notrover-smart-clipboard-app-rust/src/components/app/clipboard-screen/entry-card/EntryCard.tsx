@@ -9,6 +9,7 @@ import {
   timeAgo,
   deriveDisplayKind,
   groupColor,
+  htmlFragment,
 } from "../../../../types";
 import {
   ImageIcon,
@@ -24,6 +25,98 @@ import "./EntryCard.css";
 const FEEDBACK_DURATION_MS = 1500;
 const REL_TIME_REFRESH_MS = 15_000;
 const CHIP_GAP_PX = 4;
+
+// Allow-list based HTML sanitiser for safe rendering of rich-text clipboard
+// content.  Strips all tags/attributes except a safe subset.
+const ALLOWED_TAGS = new Set([
+  "p", "br", "b", "i", "u", "em", "strong", "s", "sub", "sup",
+  "span", "div", "a", "img", "ul", "ol", "li", "blockquote",
+  "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody",
+  "tr", "th", "td", "pre", "code", "hr",
+]);
+const ALLOWED_ATTRS: Record<string, Set<string>> = {
+  a: new Set(["href"]),
+  img: new Set(["src", "alt", "width", "height"]),
+  td: new Set(["colspan", "rowspan"]),
+  th: new Set(["colspan", "rowspan"]),
+  span: new Set(["style"]),
+  div: new Set(["style"]),
+  p: new Set(["style"]),
+};
+// Only allow safe CSS properties in inline styles
+const SAFE_STYLE_PROPS = new Set([
+  "color", "background-color", "background", "font-weight",
+  "font-style", "font-size", "text-decoration", "text-align",
+  "margin", "padding", "border", "display",
+]);
+
+function sanitizeStyle(style: string): string {
+  return style
+    .split(";")
+    .map((decl) => decl.trim())
+    .filter((decl) => {
+      const prop = decl.split(":")[0]?.trim().toLowerCase() ?? "";
+      return SAFE_STYLE_PROPS.has(prop);
+    })
+    .join("; ");
+}
+
+function sanitizeHtml(html: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  function walk(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) {
+      // Escape text content
+      const text = node.textContent ?? "";
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const el = node as Element;
+    const tag = el.tagName.toLowerCase();
+
+    // Recurse into children
+    let inner = "";
+    for (const child of Array.from(el.childNodes)) {
+      inner += walk(child);
+    }
+
+    if (!ALLOWED_TAGS.has(tag)) return inner; // strip tag but keep children
+
+    // Build allowed attributes
+    const allowedSet = ALLOWED_ATTRS[tag];
+    let attrs = "";
+    if (allowedSet) {
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (!allowedSet.has(name)) continue;
+        let value = attr.value;
+        // Prevent javascript: URIs
+        if ((name === "href" || name === "src") && /^\s*javascript:/i.test(value)) continue;
+        // img src: only allow http(s) and data URIs
+        if (name === "src" && !/^(https?:|data:image\/)/i.test(value)) continue;
+        if (name === "style") value = sanitizeStyle(value);
+        attrs += ` ${name}="${value.replace(/"/g, "&quot;")}"`;
+      }
+    }
+
+    // Self-closing tags
+    if (tag === "br" || tag === "hr" || tag === "img") {
+      return `<${tag}${attrs} />`;
+    }
+
+    return `<${tag}${attrs}>${inner}</${tag}>`;
+  }
+
+  let result = "";
+  for (const child of Array.from(doc.body.childNodes)) {
+    result += walk(child);
+  }
+  return result;
+}
 
 function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -419,6 +512,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       <div className="card-body">
         {entry.type === "text" && (
           <p className="card-text">{truncateText(entry.content, 160)}</p>
+        )}
+        {entry.type === "html" && (
+          <div
+            className="card-html-preview"
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(htmlFragment(entry.content)) }}
+          />
         )}
         {entry.type === "file" && !isMulti && (
           <p className="card-text card-text--file">

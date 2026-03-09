@@ -54,6 +54,11 @@
   color: #0ea5e9;
 }
 
+.type-pill--html {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
 /* ── Kind colors (light) ── */
 
 [data-theme="light"] .type-pill--image {
@@ -84,4 +89,9 @@
 [data-theme="light"] .type-pill--folder {
   background: rgba(14, 165, 233, 0.1);
   color: #0284c7;
+}
+
+[data-theme="light"] .type-pill--html {
+  background: rgba(168, 85, 247, 0.1);
+  color: #7c3aed;
 }

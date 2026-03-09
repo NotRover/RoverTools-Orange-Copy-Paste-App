@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind } from "../../types";
+import { deriveDisplayKind, htmlPlainText } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import "./copyPopup.css";
 
@@ -48,7 +48,7 @@ function fileExt(path: string): string {
 
 interface HistoryEntry {
   id: string;
-  type: "text" | "image" | "file";
+  type: "text" | "image" | "file" | "html";
   content: string;
   timestamp: number;
   pinned: boolean;
@@ -79,7 +79,7 @@ function estimatePreviewHeight(
 }
 
 const CopyPopup: React.FC = () => {
-  const [kind, setKind] = useState<"text" | "image" | "file">("text");
+  const [kind, setKind] = useState<"text" | "image" | "file" | "html">("text");
   const [content, setContent] = useState("");
   const [entryId, setEntryId] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
@@ -109,7 +109,7 @@ const CopyPopup: React.FC = () => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<{ id: string; kind: "text" | "image" | "file"; content: string }>(
+    listen<{ id: string; kind: "text" | "image" | "file" | "html"; content: string }>(
       "clipboard:copied",
       async (event) => {
         if (cancelled) return;
@@ -325,6 +325,12 @@ const CopyPopup: React.FC = () => {
                 alt="Copied image"
                 className="popup-preview-media"
               />
+            ) : kind === "html" ? (
+              <p className="popup-preview-text">
+                {htmlPlainText(content).length > 200
+                  ? htmlPlainText(content).slice(0, 200) + "\u2026"
+                  : htmlPlainText(content) || "Rich text copied"}
+              </p>
             ) : kind === "file" ? (
               <>
                 {firstFile && IMAGE_EXTS.has(fileExt(firstFile)) && (

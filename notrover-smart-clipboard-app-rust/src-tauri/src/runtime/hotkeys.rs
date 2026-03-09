@@ -45,6 +45,7 @@ fn entry_kind_label(kind: &EntryKind) -> &'static str {
         EntryKind::Text => "text",
         EntryKind::Image => "image",
         EntryKind::File => "file",
+        EntryKind::Html => "html",
     }
 }
 
