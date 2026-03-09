@@ -474,6 +474,127 @@ const App: React.FC = () => {
     await invoke("set_entry_groups", { id, groups });
   }, []);
 
+  // ── Bulk operations ───────────────────────────────────────────────
+
+  // Undo state for bulk deletion
+  const [bulkDeletedEntries, setBulkDeletedEntries] = useState<
+    ClipboardEntry[] | null
+  >(null);
+  const bulkDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleBulkDelete = useCallback(
+    (ids: string[]) => {
+      // Commit any pending single-entry delete
+      if (deleteEntryTimerRef.current !== null) {
+        clearTimeout(deleteEntryTimerRef.current);
+        deleteEntryTimerRef.current = null;
+        if (deletedEntry) {
+          invoke("delete_entry", { id: deletedEntry.id }).catch(console.error);
+          setDeletedEntry(null);
+        }
+      }
+      // Commit any pending bulk delete
+      if (bulkDeleteTimerRef.current !== null) {
+        clearTimeout(bulkDeleteTimerRef.current);
+        bulkDeleteTimerRef.current = null;
+        if (bulkDeletedEntries) {
+          const prevIds = bulkDeletedEntries.map((e) => e.id);
+          invoke("bulk_delete_entries", { ids: prevIds }).catch(console.error);
+        }
+      }
+
+      const idSet = new Set(ids);
+      const snapshot = entries.filter((e) => idSet.has(e.id));
+      if (snapshot.length === 0) return;
+
+      setBulkDeletedEntries(snapshot);
+      setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
+
+      bulkDeleteTimerRef.current = setTimeout(async () => {
+        bulkDeleteTimerRef.current = null;
+        setBulkDeletedEntries(null);
+        await invoke("bulk_delete_entries", { ids });
+      }, 5000);
+    },
+    [entries, deletedEntry, bulkDeletedEntries],
+  );
+
+  const handleUndoBulkDelete = useCallback(() => {
+    if (bulkDeleteTimerRef.current !== null) {
+      clearTimeout(bulkDeleteTimerRef.current);
+      bulkDeleteTimerRef.current = null;
+    }
+    if (!bulkDeletedEntries) return;
+    setEntries((prev) => {
+      const next = [...prev, ...bulkDeletedEntries];
+      next.sort((a, b) => b.timestamp - a.timestamp);
+      return next;
+    });
+    setBulkDeletedEntries(null);
+  }, [bulkDeletedEntries]);
+
+  const handleBulkPin = useCallback(
+    async (ids: string[]) => {
+      // Optimistic update
+      const idSet = new Set(ids);
+      setEntries((prev) =>
+        prev.map((e) => (idSet.has(e.id) ? { ...e, pinned: true } : e)),
+      );
+      const changed = await invoke<number>("bulk_pin_entries", {
+        ids,
+        pin: true,
+      });
+      if (changed < ids.length) {
+        // Some were rejected (pin limit) — re-sync
+        const history = await invoke<ClipboardEntry[]>("get_history");
+        setEntries(history);
+        if (pinLimitTimerRef.current !== null)
+          clearTimeout(pinLimitTimerRef.current);
+        setPinLimitReached(true);
+        pinLimitTimerRef.current = setTimeout(() => {
+          setPinLimitReached(false);
+          pinLimitTimerRef.current = null;
+        }, 3000);
+      }
+    },
+    [],
+  );
+
+  const handleBulkUnpin = useCallback(async (ids: string[]) => {
+    const idSet = new Set(ids);
+    setEntries((prev) =>
+      prev.map((e) => (idSet.has(e.id) ? { ...e, pinned: false } : e)),
+    );
+    await invoke("bulk_pin_entries", { ids, pin: false });
+  }, []);
+
+  const handleBulkAddGroup = useCallback(async (ids: string[], group: string) => {
+    // Optimistic update — add the group to each entry
+    const idSet = new Set(ids);
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (!idSet.has(e.id)) return e;
+        if (e.groups.includes(group)) return e;
+        return { ...e, groups: [...e.groups, group] };
+      }),
+    );
+    await invoke("bulk_add_group", { ids, group });
+  }, []);
+
+  const handleBulkRemoveGroup = useCallback(
+    async (ids: string[], group: string) => {
+      const idSet = new Set(ids);
+      setEntries((prev) =>
+        prev.map((e) => {
+          if (!idSet.has(e.id)) return e;
+          return { ...e, groups: e.groups.filter((g) => g !== group) };
+        }),
+      );
+      await invoke("bulk_remove_group", { ids, group });
+    },
+    [],
+  );
+
   const handleClearAll = useCallback(() => {
     if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
     setUndoSnapshot(entries);
@@ -547,6 +668,11 @@ const App: React.FC = () => {
             onDeleteGroup={handleDeleteGroup}
             onRenameGroup={handleRenameGroup}
             onSetGroups={handleSetGroups}
+            onBulkDelete={handleBulkDelete}
+            onBulkPin={handleBulkPin}
+            onBulkUnpin={handleBulkUnpin}
+            onBulkAddGroup={handleBulkAddGroup}
+            onBulkRemoveGroup={handleBulkRemoveGroup}
           />
         )}
 
@@ -607,6 +733,20 @@ const App: React.FC = () => {
             }}
             duration={5000}
             onDismiss={() => setDeletedGroup(null)}
+          />
+        )}
+
+        {bulkDeletedEntries !== null && (
+          <ToastNotification
+            message={`${bulkDeletedEntries.length} entries deleted`}
+            icon={<TrashIcon />}
+            action={{
+              label: "Undo",
+              icon: <UndoIcon />,
+              onClick: handleUndoBulkDelete,
+            }}
+            duration={5000}
+            onDismiss={() => setBulkDeletedEntries(null)}
           />
         )}
       </div>

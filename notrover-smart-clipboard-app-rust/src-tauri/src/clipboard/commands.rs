@@ -198,6 +198,169 @@ pub fn set_setting(
     .is_ok()
 }
 
+// ── Bulk operations ─────────────────────────────────────────────────
+
+/// Delete multiple entries at once. Returns the number of entries actually removed.
+#[tauri::command]
+pub fn bulk_delete_entries(
+    ids: Vec<String>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> u32 {
+    use tauri::Emitter;
+    let mut hist = state.history.lock();
+    let mut removed = 0u32;
+    for id in &ids {
+        if hist.remove(id) {
+            let _ = app.emit("clipboard:entry-deleted", id);
+            removed += 1;
+        }
+    }
+    drop(hist);
+    if removed > 0 {
+        auto_save_history(&app, &state.history);
+    }
+    removed
+}
+
+/// Pin or unpin multiple entries at once. Returns the number of entries changed.
+/// Respects the MAX_PINNED limit — stops pinning once the limit is reached.
+#[tauri::command]
+pub fn bulk_pin_entries(
+    ids: Vec<String>,
+    pin: bool,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> u32 {
+    use tauri::Emitter;
+    let mut hist = state.history.lock();
+    let mut changed = 0u32;
+
+    for id in &ids {
+        if pin {
+            // Enforce pin limit
+            if hist.pinned_entries().len() >= MAX_PINNED {
+                break;
+            }
+            if hist.pin(id) {
+                let _ = app.emit(
+                    "clipboard:entry-pinned",
+                    serde_json::json!({ "id": id, "pinned": true }),
+                );
+                changed += 1;
+            }
+        } else if hist.unpin(id) {
+            let _ = app.emit(
+                "clipboard:entry-pinned",
+                serde_json::json!({ "id": id, "pinned": false }),
+            );
+            changed += 1;
+        }
+    }
+
+    drop(hist);
+    if changed > 0 {
+        auto_save_history(&app, &state.history);
+    }
+    changed
+}
+
+/// Assign the same set of groups to multiple entries at once.
+/// Returns the number of entries changed.
+#[tauri::command]
+pub fn bulk_set_groups(
+    ids: Vec<String>,
+    groups: Vec<String>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> u32 {
+    use tauri::Emitter;
+    let mut hist = state.history.lock();
+    let mut changed = 0u32;
+
+    for id in &ids {
+        if hist.set_groups(id, groups.clone()) {
+            let _ = app.emit(
+                "clipboard:entry-groups-changed",
+                serde_json::json!({ "id": id, "groups": &groups }),
+            );
+            changed += 1;
+        }
+    }
+
+    drop(hist);
+    if changed > 0 {
+        save_after_group_change(&app, &state);
+    }
+    changed
+}
+
+/// Add a single group to multiple entries (without replacing existing groups).
+/// Returns the number of entries changed.
+#[tauri::command]
+pub fn bulk_add_group(
+    ids: Vec<String>,
+    group: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> u32 {
+    use tauri::Emitter;
+    let mut hist = state.history.lock();
+    let mut changed = 0u32;
+
+    for id in &ids {
+        if hist.add_group(id, &group) {
+            if let Some(e) = hist.find(id) {
+                let groups = e.groups.clone();
+                let _ = app.emit(
+                    "clipboard:entry-groups-changed",
+                    serde_json::json!({ "id": id, "groups": groups }),
+                );
+            }
+            changed += 1;
+        }
+    }
+
+    drop(hist);
+    if changed > 0 {
+        save_after_group_change(&app, &state);
+    }
+    changed
+}
+
+/// Remove a single group from multiple entries.
+/// Returns the number of entries changed.
+#[tauri::command]
+pub fn bulk_remove_group(
+    ids: Vec<String>,
+    group: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> u32 {
+    use tauri::Emitter;
+    let mut hist = state.history.lock();
+    let mut changed = 0u32;
+
+    for id in &ids {
+        if hist.remove_group(id, &group) {
+            if let Some(e) = hist.find(id) {
+                let groups = e.groups.clone();
+                let _ = app.emit(
+                    "clipboard:entry-groups-changed",
+                    serde_json::json!({ "id": id, "groups": groups }),
+                );
+            }
+            changed += 1;
+        }
+    }
+
+    drop(hist);
+    if changed > 0 {
+        save_after_group_change(&app, &state);
+    }
+    changed
+}
+
 /// Trigger an immediate flush of the full history to disk.
 /// Called from the frontend when the user first enables keep_history.
 #[tauri::command]
