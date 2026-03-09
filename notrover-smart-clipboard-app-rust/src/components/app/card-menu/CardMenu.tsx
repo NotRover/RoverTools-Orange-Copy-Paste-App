@@ -1,6 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { groupColor } from "../../../types";
+import {
+  CheckIcon,
+  CopyIcon,
+  PinIcon,
+  SaveStarIcon,
+  TagIcon,
+  ChevronRightIcon,
+  TrashIcon,
+} from "../../icons";
 import "./CardMenu.css";
 
 export interface CardMenuProps {
@@ -88,32 +97,9 @@ const CardMenu: React.FC<CardMenuProps> = ({
         onClick={closeAfter(onCopy)}
       >
         {copied ? (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+          <CheckIcon size={13} />
         ) : (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
+          <CopyIcon />
         )}
         <span>{copied ? "Copied!" : "Copy"}</span>
       </button>
@@ -122,19 +108,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
         className={`card-menu-item card-menu-item--pin${isPinned ? " card-menu-item--pinned" : ""}`}
         onClick={closeAfter(() => onPin(!isPinned))}
       >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill={isPinned ? "currentColor" : "none"}
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 17v5" />
-          <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-        </svg>
+        <PinIcon size={13} filled={isPinned} />
         <span>{isPinned ? "Unpin" : "Pin"}</span>
       </button>
 
@@ -142,17 +116,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
         className={`card-menu-item card-menu-item--save${isSaved ? " card-menu-item--saved" : ""}`}
         onClick={closeAfter(onToggleSave)}
       >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill={isSaved ? "currentColor" : "none"}
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        >
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
+        <SaveStarIcon size={13} filled={isSaved} />
         <span>{isSaved ? "Unsave" : "Save"}</span>
       </button>
 
@@ -166,33 +130,11 @@ const CardMenu: React.FC<CardMenuProps> = ({
               className={`card-menu-item card-menu-item--groups-toggle${groupsOpen ? " card-menu-item--groups-toggle-active" : ""}`}
               onClick={() => setGroupsOpen((v) => !v)}
             >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-                <line x1="7" y1="7" x2="7.01" y2="7" />
-              </svg>
+              <TagIcon />
               <span style={{ flex: 1 }}>Groups</span>
-              <svg
+              <ChevronRightIcon
                 className={`card-menu-chevron${groupsOpen ? " card-menu-chevron--open" : ""}`}
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="9 6 15 12 9 18" />
-              </svg>
+              />
             </button>
             {groupsOpen && (
               <div className="card-menu-groups-flyout">
@@ -237,19 +179,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
         className="card-menu-item card-menu-item--danger"
         onClick={closeAfter(onDelete)}
       >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="3 6 5 6 21 6" />
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-        </svg>
+        <TrashIcon />
         <span>Delete</span>
       </button>
     </div>,

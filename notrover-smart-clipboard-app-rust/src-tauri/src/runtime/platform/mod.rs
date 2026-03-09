@@ -44,3 +44,17 @@ pub fn popup_position(popup_w: i32, popup_h: i32) -> (i32, i32) {
     let py = (cy + 8).max(wa_top).min(wa_bottom - phys_h);
     (px, py)
 }
+
+/// Position for a notification toast: bottom-right corner of the work area
+/// on the monitor containing the cursor, with a small margin above the taskbar.
+pub fn notification_position(popup_w: i32, popup_h: i32) -> (i32, i32) {
+    let (cx, cy) = cursor_pos();
+    let (_wa_left, _wa_top, wa_right, wa_bottom) = work_area_for_point(cx, cy);
+
+    let scale = scale_factor_for_point(cx, cy);
+    let phys_w = (popup_w as f64 * scale).round() as i32;
+    let phys_h = (popup_h as f64 * scale).round() as i32;
+    let margin = (12.0 * scale).round() as i32;
+
+    (wa_right - phys_w - margin, wa_bottom - phys_h - margin)
+}

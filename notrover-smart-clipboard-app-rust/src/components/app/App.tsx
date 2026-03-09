@@ -17,24 +17,20 @@ import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
+import {
+  TrashIcon,
+  UndoIcon,
+  PinIcon,
+  CloseIcon,
+  MinimizeIcon,
+  MaximizeIcon,
+  RestoreIcon,
+  WindowCloseIcon,
+} from "../icons";
 import "./App.css";
 
 const GROUPS_STORAGE_KEY = "sc-groups";
 const SYSTEM_GROUPS = ["pinned", "saved"];
-
-const TRASH_ICON = (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="3 6 5 6 21 6" />
-    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-  </svg>
-);
-
-const UNDO_ICON = (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 7v6h6" />
-    <path d="M3 13C5.5 6.5 14 4 19 8.5a9 9 0 0 1 2 5.5" />
-  </svg>
-);
 
 function sanitizeGroups(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
@@ -107,83 +103,21 @@ const WindowControls: React.FC = () => {
         onClick={() => win.minimize()}
         title="Minimise"
       >
-        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-          <rect
-            x="0"
-            y="4.5"
-            width="10"
-            height="1"
-            rx="0.5"
-            fill="currentColor"
-          />
-        </svg>
+        <MinimizeIcon />
       </button>
       <button
         className="win-btn win-btn--max"
         onClick={() => (maximized ? win.unmaximize() : win.maximize())}
         title={maximized ? "Restore" : "Maximise"}
       >
-        {maximized ? (
-          <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-            <rect
-              x="2"
-              y="0"
-              width="8"
-              height="8"
-              rx="1"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-            <rect
-              x="0"
-              y="2"
-              width="8"
-              height="8"
-              rx="1"
-              fill="var(--bg)"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-          </svg>
-        ) : (
-          <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-            <rect
-              x="0.5"
-              y="0.5"
-              width="9"
-              height="9"
-              rx="1"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-          </svg>
-        )}
+        {maximized ? <RestoreIcon /> : <MaximizeIcon />}
       </button>
       <button
         className="win-btn win-btn--close"
         onClick={() => win.close()}
         title="Close"
       >
-        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-          <line
-            x1="1"
-            y1="1"
-            x2="9"
-            y2="9"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-          <line
-            x1="9"
-            y1="1"
-            x2="1"
-            y2="9"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-        </svg>
+        <WindowCloseIcon />
       </button>
     </div>
   );
@@ -628,21 +562,7 @@ const App: React.FC = () => {
         {pinLimitReached && (
           <ToastNotification
             message="Max pins reached (10)"
-            icon={
-              <svg
-                width="13"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
-            }
+            icon={<PinIcon size={13} />}
             duration={3000}
             onDismiss={() => setPinLimitReached(false)}
           />
@@ -651,10 +571,10 @@ const App: React.FC = () => {
         {undoSnapshot !== null && (
           <ToastNotification
             message="History cleared"
-            icon={TRASH_ICON}
+            icon={<TrashIcon />}
             action={{
               label: "Undo",
-              icon: UNDO_ICON,
+              icon: <UndoIcon />,
               onClick: handleUndoClear,
             }}
             duration={5000}
@@ -665,10 +585,10 @@ const App: React.FC = () => {
         {deletedEntry !== null && (
           <ToastNotification
             message="Entry deleted"
-            icon={TRASH_ICON}
+            icon={<TrashIcon />}
             action={{
               label: "Undo",
-              icon: UNDO_ICON,
+              icon: <UndoIcon />,
               onClick: handleUndoDelete,
             }}
             duration={5000}
@@ -679,24 +599,10 @@ const App: React.FC = () => {
         {deletedGroup !== null && (
           <ToastNotification
             message={`Group "${deletedGroup.name}" deleted`}
-            icon={
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            }
+            icon={<CloseIcon size={13} strokeWidth={2.2} />}
             action={{
               label: "Undo",
-              icon: UNDO_ICON,
+              icon: <UndoIcon />,
               onClick: handleUndoDeleteGroup,
             }}
             duration={5000}

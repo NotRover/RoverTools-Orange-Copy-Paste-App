@@ -25,4 +25,9 @@ pub struct AppState {
     pub close_to_tray: Arc<AtomicBool>,
     /// When `true`, the app starts hidden (minimized to tray).
     pub start_minimized: Arc<AtomicBool>,
+    /// When `true`, a small toast is shown at the bottom-right of the screen
+    /// whenever new clipboard content is captured.
+    pub copy_notification: Arc<AtomicBool>,
+    /// When `true`, show notifications for copy operations.
+    pub notif_copy: Arc<AtomicBool>,
 }

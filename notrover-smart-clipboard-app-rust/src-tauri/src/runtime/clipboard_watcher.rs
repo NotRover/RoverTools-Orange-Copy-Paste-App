@@ -63,6 +63,7 @@ fn capture_clipboard_change(
 
     if let Some(new_entry) = maybe_new_entry {
         let _ = app.emit("clipboard:new-entry", &new_entry);
+        crate::runtime::notifications::notify_if_enabled(app, &new_entry);
         crate::clipboard::commands::auto_save_history(app, history);
     }
     true

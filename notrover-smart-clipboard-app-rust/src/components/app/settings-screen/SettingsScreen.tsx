@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { ChevronDownIcon, CheckIcon, FolderIcon } from "../../icons";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -41,19 +42,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
         type="button"
       >
         <span>{value}</span>
-        <svg
-          className="settings-select-chevron"
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+        <ChevronDownIcon className="settings-select-chevron" size={10} strokeWidth={2.5} />
       </button>
       {open && (
         <div className="settings-select-list">
@@ -69,18 +58,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
             >
               {n}
               {n === value && (
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+                <CheckIcon size={10} strokeWidth={2.8} />
               )}
             </button>
           ))}
@@ -96,15 +74,20 @@ const SettingsScreen: React.FC = () => {
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
+  const [copyNotification, setCopyNotification] = useState(true);
+  const [notifCopy, setNotifCopy] = useState(true);
+  const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
   // Load settings from backend on mount
   useEffect(() => {
-    const loadBool = (key: string, setter: (v: boolean) => void) =>
-      invoke<boolean | null>("get_setting", { key }).then((v) => { if (v === true) setter(true); });
-    loadBool("keep_history", setKeepHistory);
-    loadBool("close_to_tray", setCloseToTray);
-    loadBool("start_minimized", setStartMinimized);
+    const loadBoolWithDefault = (key: string, setter: (v: boolean) => void, fallback: boolean) =>
+      invoke<boolean | null>("get_setting", { key }).then((v) => { setter(v === true ? true : v === false ? false : fallback); });
+    loadBoolWithDefault("keep_history", setKeepHistory, false);
+    loadBoolWithDefault("close_to_tray", setCloseToTray, false);
+    loadBoolWithDefault("start_minimized", setStartMinimized, false);
+    loadBoolWithDefault("copy_notification", setCopyNotification, true);
+    loadBoolWithDefault("notif_copy", setNotifCopy, true);
     invoke<boolean>("get_autostart").then(setRunOnStartup);
   }, []);
 
@@ -129,6 +112,20 @@ const SettingsScreen: React.FC = () => {
   const handleKeepToggle = () => toggleBoolSetting(keepHistory, setKeepHistory, "keep_history");
   const handleCloseToTrayToggle = () => toggleBoolSetting(closeToTray, setCloseToTray, "close_to_tray");
   const handleStartMinimizedToggle = () => toggleBoolSetting(startMinimized, setStartMinimized, "start_minimized");
+  
+  const handleCopyNotificationToggle = () => {
+    if (copyNotification) {
+      // Turning off - trigger closing animation first
+      setNotifClosing(true);
+      setTimeout(() => {
+        toggleBoolSetting(copyNotification, setCopyNotification, "copy_notification");
+        setNotifClosing(false);
+      }, 180); // Match slideUp animation duration
+    } else {
+      // Turning on - no delay needed
+      toggleBoolSetting(copyNotification, setCopyNotification, "copy_notification");
+    }
+  };
 
   const handleRunOnStartupToggle = async () => {
     const previous = runOnStartup;
@@ -217,6 +214,46 @@ const SettingsScreen: React.FC = () => {
             <span className="settings-toggle-knob" />
           </button>
         </div>
+
+        <div className="settings-row-with-children">
+          <div className="settings-row-header">
+            <div className="settings-row-info">
+              <span className="settings-row-label">Notifications</span>
+              <span className="settings-row-desc">
+                Show a small popup at the bottom-right of the screen for
+                clipboard operations. Use the checkboxes below to control which
+                operations trigger notifications.
+              </span>
+            </div>
+            <button
+              type="button"
+              className={`settings-toggle${copyNotification ? " active" : ""}`}
+              onClick={handleCopyNotificationToggle}
+              aria-pressed={copyNotification}
+            >
+              <span className="settings-toggle-knob" />
+            </button>
+          </div>
+
+          {(copyNotification || notifClosing) && (
+            <div className={`settings-child-checks${notifClosing ? " closing" : ""}`}>
+              <label className="settings-checkbox-row">
+                <span
+                  className={`settings-checkbox${notifCopy ? " checked" : ""}`}
+                  onClick={() => toggleBoolSetting(notifCopy, setNotifCopy, "notif_copy")}
+                >
+                  {notifCopy && <CheckIcon size={9} strokeWidth={3} />}
+                </span>
+                <div className="settings-checkbox-info">
+                  <span className="settings-checkbox-label">Copy operations</span>
+                  <span className="settings-checkbox-desc">
+                    Show notification when content is copied via Ctrl+C or other methods
+                  </span>
+                </div>
+              </label>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="settings-section">
@@ -277,18 +314,7 @@ const SettingsScreen: React.FC = () => {
             className="settings-action-btn"
             onClick={() => invoke("open_data_folder")}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
+            <FolderIcon />
             Open
           </button>
         </div>

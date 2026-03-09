@@ -10,11 +10,20 @@ import { deriveDisplayKind, htmlPlainText } from "../../../types";
 import {
   TYPE_ICONS,
   TYPE_LABELS,
-  PinIcon,
+  PinIcon as PinIconElement,
 } from "../../entry-types/EntryTypePill";
 import { EntryCard } from "../clipboard-screen/entry-card/EntryCard";
 import { SORT_OPTIONS, sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
+import {
+  SearchIcon,
+  CloseIcon,
+  FilterIcon,
+  ChevronDownIcon,
+  TagIcon,
+  ClockIcon,
+  SearchXIcon,
+} from "../../icons";
 import "./SearchScreen.css";
 
 // Constants
@@ -280,20 +289,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
       {/* Search input */}
       <div className="ss-searchbar-wrap">
         <div className="ss-searchbar">
-          <svg
-            className="ss-search-icon"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
+          <SearchIcon className="ss-search-icon" />
           <input
             ref={inputRef}
             type="text"
@@ -312,19 +308,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                 inputRef.current?.focus();
               }}
             >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <CloseIcon />
             </button>
           )}
         </div>
@@ -337,34 +321,11 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
               className={`sort-dropdown-trigger${filtersOpen ? " sort-dropdown-trigger--open" : ""}`}
               onClick={() => setFiltersOpen((v) => !v)}
             >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
+              <FilterIcon />
               <span>
                 Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
               </span>
-              <svg
-                className="sort-chevron"
-                width="8"
-                height="8"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              <ChevronDownIcon className="sort-chevron" />
             </button>
             {filtersOpen && (
               <div className="ss-filter-card">
@@ -412,7 +373,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                           color: "var(--accent)",
                         }}
                       >
-                        {PinIcon}
+                        {PinIconElement}
                       </span>
                       <span className="ss-type-name">Pinned</span>
                     </label>
@@ -451,19 +412,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                                 color: "var(--accent)",
                               }}
                             >
-                              <svg
-                                width="9"
-                                height="9"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-                                <line x1="7" y1="7" x2="7.01" y2="7" />
-                              </svg>
+                              <TagIcon size={9} />
                             </span>
                             <span className="ss-type-name">{g}</span>
                           </label>
@@ -505,19 +454,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                       className="ss-card-clear-btn"
                       onClick={clearAllFilters}
                     >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
+                      <CloseIcon size={12} />
                       Clear Filters
                     </button>
                   </>
@@ -534,19 +471,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
             >
               {SORT_OPTIONS.find((s) => s.id === sort)?.icon}
               <span>{SORT_OPTIONS.find((s) => s.id === sort)?.label}</span>
-              <svg
-                className="sort-chevron"
-                width="8"
-                height="8"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              <ChevronDownIcon className="sort-chevron" />
             </button>
             {sortOpen && (
               <div className="sort-dropdown-menu">
@@ -583,19 +508,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
               <div className="ss-recent">
                 <div className="ss-recent-header">
                   <span className="ss-recent-label">
-                    <svg
-                      width="11"
-                      height="11"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="12 8 12 12 14 14" />
-                      <circle cx="12" cy="12" r="10" />
-                    </svg>
+                    <ClockIcon />
                     Recent Searches
                   </span>
                   <button
@@ -613,19 +526,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                         className="ss-recent-term"
                         onClick={() => applyRecent(term)}
                       >
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="11" cy="11" r="8" />
-                          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                        </svg>
+                        <SearchIcon size={11} />
                         <span>{term}</span>
                       </button>
                       <button
@@ -633,19 +534,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
                         onClick={() => removeRecentSearch(term)}
                         data-tooltip="Remove"
                       >
-                        <svg
-                          width="9"
-                          height="9"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <line x1="18" y1="6" x2="6" y2="18" />
-                          <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
+                        <CloseIcon size={9} />
                       </button>
                     </div>
                   ))}
@@ -653,20 +542,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
               </div>
             )}
             <div className="ss-idle">
-              <svg
-                className="ss-idle-icon"
-                width="44"
-                height="44"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
+              <SearchIcon size={44} strokeWidth={1.2} className="ss-idle-icon" />
               <p className="ss-idle-title">Search your clipboard history</p>
               <p className="ss-idle-subtitle">
                 Type to search text &amp; file names, or use the filters above
@@ -677,36 +553,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({
           </div>
         ) : results.length === 0 ? (
           <div className="ss-idle">
-            <svg
-              className="ss-idle-icon"
-              width="44"
-              height="44"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <line
-                x1="8"
-                y1="8"
-                x2="14"
-                y2="14"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              />
-              <line
-                x1="14"
-                y1="8"
-                x2="8"
-                y2="14"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              />
-            </svg>
+            <SearchXIcon className="ss-idle-icon" />
             <p className="ss-idle-title">No results</p>
             <p className="ss-idle-subtitle">
               {hasQuery ? (

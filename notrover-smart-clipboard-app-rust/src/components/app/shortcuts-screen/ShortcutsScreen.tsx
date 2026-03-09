@@ -1,4 +1,13 @@
 import React from "react";
+import {
+  KeyboardIcon,
+  ClipboardPasteIcon,
+  ClipboardIcon,
+  PinIcon,
+  TagIcon,
+  SystemGroupsIcon,
+  SearchIcon,
+} from "../../icons";
 import "./ShortcutsScreen.css";
 
 // Data
@@ -17,22 +26,7 @@ interface ShortcutSection {
 const SECTIONS: ShortcutSection[] = [
   {
     title: "Global Shortcuts",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-        <line x1="8" y1="21" x2="16" y2="21" />
-        <line x1="12" y1="17" x2="12" y2="21" />
-      </svg>
-    ),
+    icon: <KeyboardIcon size={13} />,
     entries: [
       {
         keys: ["Ctrl", "C"],
@@ -48,22 +42,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "Paste Popup",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-        <polyline points="16 12 12 16 8 12" />
-      </svg>
-    ),
+    icon: <ClipboardPasteIcon />,
     entries: [
       { keys: ["1–9, 0"], description: "Paste entry by slot number" },
       { keys: ["↑", "↓"], description: "Navigate entries" },
@@ -75,21 +54,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "Clipboard Cards",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-      </svg>
-    ),
+    icon: <ClipboardIcon size={13} />,
     entries: [
       { keys: ["Click"], description: "Copy entry to clipboard" },
       {
@@ -105,21 +70,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "Pin & Save",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="currentColor"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M12 17v5" />
-        <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-      </svg>
-    ),
+    icon: <PinIcon size={13} filled strokeWidth={1.5} />,
     entries: [
       { keys: ["Pin"], description: "Pin entry — shows in quick-paste popup (max 10)" },
       {
@@ -138,21 +89,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "Groups",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-        <line x1="7" y1="7" x2="7.01" y2="7" />
-      </svg>
-    ),
+    icon: <TagIcon size={13} strokeWidth={2} />,
     entries: [
       {
         keys: ["Groups menu"],
@@ -187,21 +124,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "System Groups",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
-      </svg>
-    ),
+    icon: <SystemGroupsIcon />,
     entries: [
       {
         keys: ["Pinned"],
@@ -221,21 +144,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "Search & Filter",
-    icon: (
-      <svg
-        width="13"
-        height="13"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-      </svg>
-    ),
+    icon: <SearchIcon size={13} />,
     entries: [
       { keys: ["Type"], description: "Filter entries by content" },
       { keys: ["Esc / ×"], description: "Clear search" },
