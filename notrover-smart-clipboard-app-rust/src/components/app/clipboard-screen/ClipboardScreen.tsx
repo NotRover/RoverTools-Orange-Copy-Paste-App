@@ -14,6 +14,7 @@ import {
   ChevronDownIcon,
   TagIcon,
   TrashIcon,
+  MultiSelectIcon,
 } from "../../icons";
 import "./ClipboardScreen.css";
 
@@ -115,6 +116,8 @@ interface ClipboardScreenProps {
   onBulkDelete?: (ids: string[]) => void;
   onBulkPin?: (ids: string[]) => void;
   onBulkUnpin?: (ids: string[]) => void;
+  onBulkSave?: (ids: string[]) => void;
+  onBulkUnsave?: (ids: string[]) => void;
   onBulkAddGroup?: (ids: string[], group: string) => void;
   onBulkRemoveGroup?: (ids: string[], group: string) => void;
 }
@@ -133,6 +136,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onBulkDelete,
   onBulkPin,
   onBulkUnpin,
+  onBulkSave,
+  onBulkUnsave,
   onBulkAddGroup,
   onBulkRemoveGroup,
 }) => {
@@ -186,6 +191,21 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     return [...first].filter((g) =>
       selectedEntries.every((e) => e.groups.includes(g)),
     );
+  })();
+
+  // Compute whether ALL selected entries are pinned / saved
+  const allPinned = (() => {
+    if (multiSelect.selectedCount === 0) return false;
+    return entries
+      .filter((e) => multiSelect.selectedIds.has(e.id))
+      .every((e) => e.pinned);
+  })();
+
+  const allSaved = (() => {
+    if (multiSelect.selectedCount === 0) return false;
+    return entries
+      .filter((e) => multiSelect.selectedIds.has(e.id))
+      .every((e) => e.groups.includes("Saved"));
   })();
 
   // Close sort dropdown on outside click
@@ -257,7 +277,51 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   return (
     <div className="clipboard-screen-root">
-      {/*  Toolbar: sort + layout + clear  */}
+      {/* When selecting, show bulk actions bar in place of toolbar */}
+      {multiSelect.isSelecting ? (
+        <BulkActionsBar
+          selectedCount={multiSelect.selectedCount}
+          totalCount={entries.length}
+          onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
+          onDeselectAll={multiSelect.deselectAll}
+          onExitSelectMode={multiSelect.exitSelectMode}
+          onBulkDelete={() => {
+            if (onBulkDelete) {
+              onBulkDelete([...multiSelect.selectedIds]);
+              multiSelect.exitSelectMode();
+            }
+          }}
+          allPinned={allPinned}
+          onBulkTogglePin={() => {
+            if (allPinned) {
+              if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
+            } else {
+              if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
+            }
+          }}
+          allSaved={allSaved}
+          onBulkToggleSave={() => {
+            if (allSaved) {
+              if (onBulkUnsave) onBulkUnsave([...multiSelect.selectedIds]);
+            } else {
+              if (onBulkSave) onBulkSave([...multiSelect.selectedIds]);
+            }
+          }}
+          onBulkAddGroup={(group) => {
+            if (onBulkAddGroup) {
+              onBulkAddGroup([...multiSelect.selectedIds], group);
+            }
+          }}
+          onBulkRemoveGroup={(group) => {
+            if (onBulkRemoveGroup) {
+              onBulkRemoveGroup([...multiSelect.selectedIds], group);
+            }
+          }}
+          availableGroups={availableGroups}
+          commonGroups={commonGroups}
+        />
+      ) : (
+      /*  Toolbar: sort + select + groups + layout + clear  */
       <div className="layout-toggle-wrap">
         {/* Sort dropdown */}
         <div className="sort-dropdown" ref={sortRef}>
@@ -323,6 +387,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           )}
         </div>
 
+        {/* Select mode button */}
+        <button
+          className="sort-dropdown-trigger"
+          onClick={() => multiSelect.enterSelectMode()}
+          data-tooltip="Select entries"
+          data-tooltip-pos="below"
+        >
+          <MultiSelectIcon size={12} />
+          <span className="layout-pill-label">Select</span>
+        </button>
+
         <div className="layout-switch" role="group" aria-label="Layout">
           {layouts.map((l) => (
             <button
@@ -353,6 +428,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           </div>
         )}
       </div>
+      )}
 
       <div
         className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
@@ -429,47 +505,6 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Bulk actions bar — shown when entries are selected */}
-      {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
-        <BulkActionsBar
-          selectedCount={multiSelect.selectedCount}
-          totalCount={entries.length}
-          onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
-          onDeselectAll={multiSelect.deselectAll}
-          onExitSelectMode={multiSelect.exitSelectMode}
-          onBulkDelete={() => {
-            if (onBulkDelete) {
-              onBulkDelete([...multiSelect.selectedIds]);
-              multiSelect.exitSelectMode();
-            }
-          }}
-          onBulkPin={() => {
-            if (onBulkPin) {
-              onBulkPin([...multiSelect.selectedIds]);
-              multiSelect.exitSelectMode();
-            }
-          }}
-          onBulkUnpin={() => {
-            if (onBulkUnpin) {
-              onBulkUnpin([...multiSelect.selectedIds]);
-              multiSelect.exitSelectMode();
-            }
-          }}
-          onBulkAddGroup={(group) => {
-            if (onBulkAddGroup) {
-              onBulkAddGroup([...multiSelect.selectedIds], group);
-            }
-          }}
-          onBulkRemoveGroup={(group) => {
-            if (onBulkRemoveGroup) {
-              onBulkRemoveGroup([...multiSelect.selectedIds], group);
-            }
-          }}
-          availableGroups={availableGroups}
-          commonGroups={commonGroups}
-        />
-      )}
     </div>
   );
 };

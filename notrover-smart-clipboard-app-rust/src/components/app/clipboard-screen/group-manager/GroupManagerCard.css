@@ -4,8 +4,7 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  min-width: 280px;
-  max-width: 340px;
+  width: 250px;
   display: flex;
   flex-direction: column;
   padding: 10px;
@@ -131,6 +130,7 @@
   flex-wrap: wrap;
   gap: 5px;
   padding: 5px 0 3px;
+  justify-content: center;
 }
 
 /* Chip pill (matches card-menu-group-chip style) */

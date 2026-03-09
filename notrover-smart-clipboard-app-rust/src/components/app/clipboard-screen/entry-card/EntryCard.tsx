@@ -347,14 +347,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   };
 
   const handleCardClick = (e: React.MouseEvent) => {
-    // Ctrl/Cmd+click always toggles selection
-    if ((e.ctrlKey || e.metaKey) && onToggleSelect) {
-      e.preventDefault();
-      onToggleSelect(entry.id);
-      return;
-    }
-    // Shift+click for range selection
-    if (e.shiftKey && onRangeSelect) {
+    // In select mode, Shift+click for range selection
+    if (isSelecting && e.shiftKey && onRangeSelect) {
       e.preventDefault();
       onRangeSelect(entry.id);
       return;
@@ -485,7 +479,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       {/* Selection checkbox overlay */}
       {isSelecting && (
         <div className="entry-card-checkbox">
-          <CheckIcon size={11} strokeWidth={3} />
+          <CheckIcon size={10} strokeWidth={3} />
         </div>
       )}
       {/*  Media preview (image/video)  */}

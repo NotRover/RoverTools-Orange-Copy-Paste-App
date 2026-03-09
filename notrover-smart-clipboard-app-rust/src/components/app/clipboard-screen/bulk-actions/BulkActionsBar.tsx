@@ -3,6 +3,7 @@ import { groupColor } from "../../../../types";
 import {
   TrashIcon,
   PinIcon,
+  SaveStarIcon,
   TagIcon,
   CloseIcon,
   CheckIcon,
@@ -17,12 +18,13 @@ interface BulkActionsBarProps {
   onDeselectAll: () => void;
   onExitSelectMode: () => void;
   onBulkDelete: () => void;
-  onBulkPin: () => void;
-  onBulkUnpin: () => void;
+  allPinned: boolean;
+  onBulkTogglePin: () => void;
+  allSaved: boolean;
+  onBulkToggleSave: () => void;
   onBulkAddGroup: (group: string) => void;
   onBulkRemoveGroup: (group: string) => void;
   availableGroups: string[];
-  /** Groups common to ALL selected entries (for showing active state). */
   commonGroups: string[];
 }
 
@@ -33,8 +35,10 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   onDeselectAll,
   onExitSelectMode,
   onBulkDelete,
-  onBulkPin,
-  onBulkUnpin,
+  allPinned,
+  onBulkTogglePin,
+  allSaved,
+  onBulkToggleSave,
   onBulkAddGroup,
   onBulkRemoveGroup,
   availableGroups,
@@ -43,7 +47,6 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   const [groupsOpen, setGroupsOpen] = useState(false);
   const groupsRef = useRef<HTMLDivElement>(null);
 
-  // Close groups flyout on outside click
   useEffect(() => {
     if (!groupsOpen) return;
     const handler = (e: MouseEvent) => {
@@ -55,7 +58,6 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
     return () => document.removeEventListener("mousedown", handler, true);
   }, [groupsOpen]);
 
-  // Close groups flyout on Escape
   useEffect(() => {
     if (!groupsOpen) return;
     const handler = (e: KeyboardEvent) => {
@@ -66,121 +68,96 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   }, [groupsOpen]);
 
   const allSelected = selectedCount === totalCount && totalCount > 0;
+  const hasGroups = availableGroups.length > 0;
 
   return (
-    <div className="bulk-actions-bar">
-      <div className="bulk-actions-left">
-        <button
-          className="bulk-actions-close"
-          onClick={onExitSelectMode}
-          data-tooltip="Exit selection"
-          data-tooltip-pos="above"
-        >
-          <CloseIcon size={12} strokeWidth={2.5} />
+    <div className="bulk-bar" ref={groupsRef}>
+      {/* Top row: actions */}
+      <div className="bulk-bar-row">
+        {/* Left: close + count + select all */}
+        <button className="bulk-bar-close" onClick={onExitSelectMode}>
+          <CloseIcon size={10} strokeWidth={2.5} />
         </button>
-
-        <span className="bulk-actions-count">
-          {selectedCount} selected
-        </span>
-
+        <span className="bulk-bar-count">{selectedCount} selected</span>
         <button
-          className="bulk-actions-select-toggle"
+          className="bulk-bar-link"
           onClick={allSelected ? onDeselectAll : onSelectAll}
         >
           {allSelected ? "Deselect all" : "Select all"}
         </button>
-      </div>
 
-      <div className="bulk-actions-right">
-        {/* Pin */}
-        <button
-          className="bulk-actions-btn"
-          onClick={onBulkPin}
-          data-tooltip="Pin selected"
-          data-tooltip-pos="above"
-        >
-          <PinIcon size={12} />
-          <span className="bulk-actions-btn-label">Pin</span>
-        </button>
+        {/* Right: action buttons */}
+        <div className="bulk-bar-actions">
+          <button
+            className={`bulk-bar-chip bulk-bar-chip--pin${allPinned ? " bulk-bar-chip--active" : ""}`}
+            onClick={onBulkTogglePin}
+          >
+            <PinIcon size={10} filled={allPinned} />
+            <span>{allPinned ? "Unpin" : "Pin"}</span>
+          </button>
 
-        {/* Unpin */}
-        <button
-          className="bulk-actions-btn"
-          onClick={onBulkUnpin}
-          data-tooltip="Unpin selected"
-          data-tooltip-pos="above"
-        >
-          <PinIcon size={12} filled />
-          <span className="bulk-actions-btn-label">Unpin</span>
-        </button>
+          <button
+            className={`bulk-bar-chip bulk-bar-chip--save${allSaved ? " bulk-bar-chip--active" : ""}`}
+            onClick={onBulkToggleSave}
+          >
+            <SaveStarIcon size={10} filled={allSaved} />
+            <span>{allSaved ? "Unsave" : "Save"}</span>
+          </button>
 
-        {/* Groups */}
-        {availableGroups.length > 0 && (
-          <div className="bulk-actions-groups-wrap" ref={groupsRef}>
+          {hasGroups && (
             <button
-              className={`bulk-actions-btn${groupsOpen ? " bulk-actions-btn--active" : ""}`}
+              className={`bulk-bar-chip bulk-bar-chip--groups${groupsOpen ? " bulk-bar-chip--active" : ""}`}
               onClick={() => setGroupsOpen((v) => !v)}
-              data-tooltip="Assign groups"
-              data-tooltip-pos="above"
             >
-              <TagIcon size={11} strokeWidth={2} />
-              <span className="bulk-actions-btn-label">Groups</span>
-              <ChevronDownIcon
-                size={9}
-                strokeWidth={2.5}
-                className={`bulk-actions-groups-chevron${groupsOpen ? " bulk-actions-groups-chevron--open" : ""}`}
-              />
+              <TagIcon size={10} strokeWidth={2} />
+              <span>Groups</span>
+              <ChevronDownIcon size={9} className={`bulk-bar-chevron${groupsOpen ? " bulk-bar-chevron--open" : ""}`} />
             </button>
-            {groupsOpen && (
-              <div className="bulk-actions-groups-flyout">
-                <div className="bulk-actions-groups-flyout-header">
-                  Assign to group
-                </div>
-                <div className="bulk-actions-groups-flyout-body">
-                  {availableGroups.map((group) => {
-                    const active = commonGroups.includes(group);
-                    const gc = groupColor(group);
-                    return (
-                      <button
-                        key={group}
-                        className={`bulk-actions-group-chip${active ? " bulk-actions-group-chip--active" : ""}`}
-                        style={
-                          active
-                            ? { background: gc.bg, color: gc.fg }
-                            : undefined
-                        }
-                        onClick={() =>
-                          active
-                            ? onBulkRemoveGroup(group)
-                            : onBulkAddGroup(group)
-                        }
-                      >
-                        <span
-                          className="bulk-actions-group-dot"
-                          style={{ background: gc.fg }}
-                        />
-                        <span className="bulk-actions-group-name">{group}</span>
-                        {active && <CheckIcon size={10} strokeWidth={2.8} />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* Delete */}
-        <button
-          className="bulk-actions-btn bulk-actions-btn--danger"
-          onClick={onBulkDelete}
-          data-tooltip="Delete selected"
-          data-tooltip-pos="above"
-        >
-          <TrashIcon size={12} />
-          <span className="bulk-actions-btn-label">Delete</span>
-        </button>
+          <button
+            className="bulk-bar-chip bulk-bar-chip--delete"
+            onClick={onBulkDelete}
+          >
+            <TrashIcon size={10} />
+            <span>Delete</span>
+          </button>
+        </div>
       </div>
+
+      {/* Inline group chips row */}
+      {groupsOpen && (
+        <div className="bulk-bar-groups-row">
+          {availableGroups.map((group) => {
+            const active = commonGroups.includes(group);
+            const gc = groupColor(group);
+            return (
+              <button
+                key={group}
+                className="card-menu-group-chip"
+                style={{
+                  background: active ? gc.bg : undefined,
+                  color: gc.fg,
+                }}
+                onClick={() =>
+                  active
+                    ? onBulkRemoveGroup(group)
+                    : onBulkAddGroup(group)
+                }
+              >
+                <span
+                  className="card-menu-group-dot"
+                  style={{ background: gc.fg }}
+                />
+                <span className="card-menu-group-chip-name">{group}</span>
+                <span className="bulk-bar-chip-check">
+                  {active && <CheckIcon size={9} strokeWidth={2.8} />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
