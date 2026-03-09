@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { ChevronDownIcon, CheckIcon, FolderIcon } from "../../icons";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -41,19 +42,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
         type="button"
       >
         <span>{value}</span>
-        <svg
-          className="settings-select-chevron"
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+        <ChevronDownIcon className="settings-select-chevron" size={10} strokeWidth={2.5} />
       </button>
       {open && (
         <div className="settings-select-list">
@@ -69,18 +58,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
             >
               {n}
               {n === value && (
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+                <CheckIcon size={10} strokeWidth={2.8} />
               )}
             </button>
           ))}
@@ -277,18 +255,7 @@ const SettingsScreen: React.FC = () => {
             className="settings-action-btn"
             onClick={() => invoke("open_data_folder")}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
+            <FolderIcon />
             Open
           </button>
         </div>

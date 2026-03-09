@@ -5,6 +5,14 @@ export { EntryCard };
 import GroupManagerCard from "./group-manager/GroupManagerCard";
 import { SORT_OPTIONS, sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
+import {
+  ClipboardIcon,
+  MasonryIcon,
+  ListIcon,
+  ChevronDownIcon,
+  TagIcon,
+  TrashIcon,
+} from "../../icons";
 import "./ClipboardScreen.css";
 
 // Layout & sort types
@@ -170,20 +178,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   if (entries.length === 0) {
     return (
       <div className="empty-state">
-        <svg
-          className="empty-icon"
-          width="48"
-          height="48"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-        </svg>
+        <ClipboardIcon size={48} strokeWidth={1.2} className="empty-icon" />
         <p className="empty-title">No clipboard history yet</p>
         <p className="empty-subtitle">
           Press <strong>Ctrl+Shift+C</strong> to capture anything here.
@@ -200,46 +195,12 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     {
       id: "masonry",
       label: "Masonry",
-      icon: (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <rect x="3" y="3" width="7" height="9" rx="1" />
-          <rect x="14" y="3" width="7" height="5" rx="1" />
-          <rect x="14" y="12" width="7" height="9" rx="1" />
-          <rect x="3" y="16" width="7" height="5" rx="1" />
-        </svg>
-      ),
+      icon: <MasonryIcon />,
     },
     {
       id: "list",
       label: "List",
-      icon: (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <line x1="8" y1="6" x2="21" y2="6" />
-          <line x1="8" y1="12" x2="21" y2="12" />
-          <line x1="8" y1="18" x2="21" y2="18" />
-          <line x1="3" y1="6" x2="3.01" y2="6" />
-          <line x1="3" y1="12" x2="3.01" y2="12" />
-          <line x1="3" y1="18" x2="3.01" y2="18" />
-        </svg>
-      ),
+      icon: <ListIcon />,
     },
   ];
 
@@ -267,19 +228,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             <span className="layout-pill-label">
               {SORT_OPTIONS.find((s) => s.id === sort)?.label}
             </span>
-            <svg
-              className="sort-chevron"
-              width="8"
-              height="8"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            <ChevronDownIcon className="sort-chevron" />
           </button>
           {sortOpen && (
             <div className="sort-dropdown-menu">
@@ -309,36 +258,12 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             data-tooltip="Manage groups"
             data-tooltip-pos="below"
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-              <line x1="7" y1="7" x2="7.01" y2="7" />
-            </svg>
+            <TagIcon size={12} strokeWidth={2} />
             <span className="layout-pill-label">
               Groups
               {availableGroups.length > 0 ? ` (${availableGroups.length})` : ""}
             </span>
-            <svg
-              className="sort-chevron"
-              width="8"
-              height="8"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            <ChevronDownIcon className="sort-chevron" />
           </button>
           {groupsOpen && (
             <GroupManagerCard
@@ -376,19 +301,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
               data-tooltip="Clear all history"
               data-tooltip-pos="below"
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
+              <TrashIcon size={12} />
               <span className="layout-pill-label">Clear</span>
             </button>
           </div>
@@ -428,19 +341,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                       {group.entries.length}
                     </span>
                   )}
-                  <svg
-                    className="timeline-day-chevron"
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
+                  <ChevronDownIcon className="timeline-day-chevron" size={10} strokeWidth={2.5} />
                 </button>
 
                 {/* Cards for this day — collapses via grid-template-rows */}

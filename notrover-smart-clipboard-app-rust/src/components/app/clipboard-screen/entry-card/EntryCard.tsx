@@ -19,6 +19,7 @@ import {
   EntryTypePill,
 } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
+import { ChevronDownIcon, CheckIcon } from "../../../icons";
 import VideoPlayer from "./VideoPlayer";
 import "./EntryCard.css";
 
@@ -363,19 +364,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             {imageFiles.length === files.length ? "Images" : "Files"}
           </span>
           {!withMeasureRef && (
-            <svg
-              className="card-type-chevron"
-              width="8"
-              height="8"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            <ChevronDownIcon className="card-type-chevron" />
           )}
         </button>
       );
@@ -624,18 +613,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             </span>
           ) : copied ? (
             <span className="card-time card-time--copied">
-              <svg
-                width="9"
-                height="9"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
+              <CheckIcon size={9} strokeWidth={2.8} />
               Copied
             </span>
           ) : (

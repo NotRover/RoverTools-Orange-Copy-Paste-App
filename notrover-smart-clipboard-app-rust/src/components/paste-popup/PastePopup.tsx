@@ -5,6 +5,13 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { deriveDisplayKind, htmlPlainText } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
+import {
+  CloseIcon,
+  PinIcon,
+  CopyIcon,
+  ChevronDownIcon,
+  FilePageIcon,
+} from "../icons";
 import "./pastePopup.css";
 
 type AppTheme = "dark" | "light";
@@ -304,19 +311,7 @@ const PastePopup: React.FC = () => {
           onMouseDown={(e) => e.preventDefault()}
           onClick={handleClose}
         >
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          <CloseIcon size={10} />
         </button>
       </div>
 
@@ -324,28 +319,11 @@ const PastePopup: React.FC = () => {
 
       {entries.length === 0 ? (
         <div className="paste-empty">
-          <svg
-            width="28"
-            height="28"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            {tab === "pinned" ? (
-              <>
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </>
-            ) : (
-              <>
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </>
-            )}
-          </svg>
+          {tab === "pinned" ? (
+            <PinIcon size={28} filled strokeWidth={1.3} />
+          ) : (
+            <CopyIcon size={28} strokeWidth={1.3} />
+          )}
           <span>
             {tab === "pinned" ? "No pinned items" : "No recent items"}
           </span>
@@ -420,19 +398,11 @@ const PastePopup: React.FC = () => {
                                 });
                               }}
                             >
-                              <svg
+                              <ChevronDownIcon
                                 className={`paste-expand-chevron${isExpanded ? " open" : ""}`}
-                                width="10"
-                                height="10"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polyline points="6 9 12 15 18 9" />
-                              </svg>
+                                size={10}
+                                strokeWidth={2.8}
+                              />
                             </span>
                           )}
                         </div>
@@ -454,20 +424,7 @@ const PastePopup: React.FC = () => {
 
                 <span className="paste-item-meta">
                   {entry.pinned && (
-                    <svg
-                      className="paste-pin-icon"
-                      width="9"
-                      height="9"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M12 17v5" />
-                      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-                    </svg>
+                    <PinIcon className="paste-pin-icon" size={9} filled />
                   )}
                   <span className="paste-item-time">
                     {relativeTime(entry.timestamp)}
@@ -483,19 +440,7 @@ const PastePopup: React.FC = () => {
                       {paths.map((f) => (
                         <div key={f} className="paste-file-list-item">
                           <span className="paste-file-icon">
-                            <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                              <polyline points="14 2 14 8 20 8" />
-                            </svg>
+                            <FilePageIcon />
                           </span>
                           <span className="paste-file-name">
                             {fileNameFromPath(f)}

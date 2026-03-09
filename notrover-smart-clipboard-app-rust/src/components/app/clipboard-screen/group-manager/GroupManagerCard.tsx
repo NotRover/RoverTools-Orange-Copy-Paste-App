@@ -7,39 +7,11 @@ import {
   groupColorIndex,
   setGroupColorIndex,
 } from "../../../../types";
+import { TagIcon, SaveStarIcon, CloseIcon } from "../../../icons";
 import "./GroupManagerCard.css";
 
-// Tag icon (small label/tag)
-const TagIcon = (
-  <svg
-    width="11"
-    height="11"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-    <line x1="7" y1="7" x2="7.01" y2="7" />
-  </svg>
-);
-
-// Save icon (star)
-const SaveIcon = (
-  <svg
-    width="11"
-    height="11"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinejoin="round"
-  >
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-  </svg>
-);
+const TagIconEl = <TagIcon />;
+const SaveIconEl = <SaveStarIcon size={11} filled />;
 
 const SYSTEM_GROUPS = ["pinned", "saved"];
 const MIN_GROUP_LENGTH = 4;
@@ -196,7 +168,7 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
   return (
     <div className="gm-card" ref={cardRef}>
       <div className="gm-header">
-        {TagIcon}
+        {TagIconEl}
         <span className="gm-title">Manage Groups</span>
         <span className="gm-count">{groups.length}</span>
       </div>
@@ -230,7 +202,7 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
         {/* System group: Saved */}
         <div className="gm-group-row gm-group-row--system">
           <span className="gm-group-icon gm-group-icon--saved">
-            {SaveIcon}
+            {SaveIconEl}
           </span>
           <span className="gm-row-name">Saved</span>
           <span className="gm-group-badge">System</span>
@@ -294,19 +266,7 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
                 }}
                 title="Delete group"
               >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <CloseIcon size={10} />
               </button>
             </div>
 

@@ -5,6 +5,12 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { deriveDisplayKind, htmlPlainText } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
+import {
+  TrashIcon,
+  CloseIcon,
+  PinIcon,
+  SaveStarIcon,
+} from "../icons";
 import "./copyPopup.css";
 
 type AppTheme = "dark" | "light";
@@ -247,19 +253,7 @@ const CopyPopup: React.FC = () => {
     >
       {deleted ? (
         <div className="popup-deleted-state">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
+          <TrashIcon size={20} />
           <span>Removed from history</span>
         </div>
       ) : (
@@ -274,19 +268,7 @@ const CopyPopup: React.FC = () => {
               )}
             </div>
             <button className="popup-close" onClick={handleClose}>
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <CloseIcon size={10} />
             </button>
           </div>
 
@@ -338,19 +320,7 @@ const CopyPopup: React.FC = () => {
               onClick={handlePin}
               disabled={!entryId}
             >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill={pinned ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
+              <PinIcon size={13} filled={pinned} />
               <span>{pinned ? "Unpin" : "Pin"}</span>
             </button>
 
@@ -360,17 +330,7 @@ const CopyPopup: React.FC = () => {
               onClick={handleSave}
               disabled={!entryId}
             >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill={saved ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-              >
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-              </svg>
+              <SaveStarIcon size={13} filled={saved} />
               <span>{saved ? "Unsave" : "Save"}</span>
             </button>
 
@@ -382,19 +342,7 @@ const CopyPopup: React.FC = () => {
               onClick={handleDelete}
               disabled={!entryId}
             >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
+              <TrashIcon />
               <span>Delete</span>
             </button>
           </div>
