@@ -321,10 +321,21 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         </div>
 
         {/* Groups manager */}
-        <div className="groups-dropdown" ref={groupsRef}>
+        <div
+          className="groups-dropdown"
+          ref={groupsRef}
+          style={
+            multiSelect.isSelecting
+              ? { opacity: 0.35, pointerEvents: "none" }
+              : undefined
+          }
+        >
           <button
             className={`sort-dropdown-trigger${groupsOpen ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() => setGroupsOpen((v) => !v)}
+            onClick={() => {
+              if (multiSelect.isSelecting) return;
+              setGroupsOpen((v) => !v);
+            }}
             data-tooltip="Manage groups"
             data-tooltip-pos="below"
           >
@@ -335,7 +346,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             </span>
             <ChevronDownIcon className="sort-chevron" />
           </button>
-          {groupsOpen && (
+          {groupsOpen && !multiSelect.isSelecting && (
             <GroupManagerCard
               groups={availableGroups}
               entries={entries}
@@ -456,7 +467,15 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         </div>
 
         {onClearAll && (
-          <div className="layout-switch" role="group">
+          <div
+            className="layout-switch"
+            role="group"
+            style={
+              multiSelect.isSelecting
+                ? { opacity: 0.35, pointerEvents: "none" }
+                : undefined
+            }
+          >
             <button
               className="layout-switch-btn layout-switch-btn--danger"
               onClick={onClearAll}
