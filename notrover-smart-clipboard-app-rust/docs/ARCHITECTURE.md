@@ -2,7 +2,7 @@
 
 > **Created by Salman Tariq — DO NOT DELETE**
 
-A Tauri v2 + React desktop clipboard manager for Windows with real-time monitoring, global hotkeys, and multi-window popups.
+A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, and multi-window popups.
 
 ---
 
@@ -36,9 +36,9 @@ A Tauri v2 + React desktop clipboard manager for Windows with real-time monitori
 │                    Tauri Process                         │
 │                                                         │
 │  ┌──────────────┐   ┌──────────────┐   ┌────────────┐  │
-│  │  Clipboard    │   │   Hotkey     │   │  Popup     │  │
-│  │  Watcher      │   │   Handlers   │   │  Windows   │  │
-│  │  (220ms poll) │   │  Ctrl+Shift  │   │  copy/paste│  │
+│  │  Clipboard   │   │   Hotkey     │   │  Popup     │  │
+│  │  Watcher     │   │   Handlers   │   │  Windows   │  │
+│  │  (220ms poll)│   │  Ctrl+Shift  │   │  copy/paste│  │
 │  └──────┬───────┘   └──────┬───────┘   └─────┬──────┘  │
 │         │                  │                  │         │
 │         └──────────┬───────┘                  │         │
@@ -73,16 +73,17 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 
 ### Backend
 
-| Component                    | Version | Purpose                                                  |
-| ---------------------------- | ------- | -------------------------------------------------------- |
-| Tauri                        | 2       | App framework, windowing, IPC                            |
-| tauri-plugin-global-shortcut | 2       | Ctrl+Shift+C / Ctrl+Shift+V                              |
-| arboard                      | 3       | Cross-platform clipboard (text + DIB images)             |
-| windows-sys                  | 0.59    | Win32 APIs (clipboard formats, key simulation, monitors) |
-| image                        | 0.25    | PNG encode/decode for clipboard images                   |
-| base64                       | 0.22    | Data-URL encoding                                        |
-| parking_lot                  | 0.12    | Mutex without poisoning                                  |
-| serde + serde_json           | 1       | Serialization for IPC and disk persistence               |
+| Component                    | Version | Purpose                                                                        |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------ |
+| Tauri                        | 2       | App framework, windowing, IPC                                                  |
+| tauri-plugin-global-shortcut | 2       | Ctrl+Shift+C / Ctrl+Shift+V                                                    |
+| tauri-plugin-autostart       | 2       | Launch on OS startup                                                           |
+| arboard                      | 3       | Cross-platform clipboard (text + images); bypassed on Windows for image writes |
+| windows-sys                  | 0.59    | Win32 APIs (clipboard formats, key simulation, monitors) — Windows only        |
+| image                        | 0.25    | PNG encode/decode for clipboard images                                         |
+| base64                       | 0.22    | Data-URL encoding                                                              |
+| parking_lot                  | 0.12    | Mutex without poisoning                                                        |
+| serde + serde_json           | 1       | Serialization for IPC and disk persistence                                     |
 
 ### Frontend
 
@@ -115,12 +116,15 @@ src-tauri/
 │   │   ├── hotkeys.rs          # Global shortcut handlers (Ctrl+Shift+C/V)
 │   │   ├── popup_windows.rs    # Window creation, show/hide, focus handlers
 │   │   ├── commands.rs         # Window control commands (close/resize popups)
-│   │   ├── platform.rs         # Platform abstraction layer
-│   │   ├── platform_windows.rs # Win32: key simulation, cursor, monitors, DPI
+│   │   ├── tray.rs             # System tray icon and menu
+│   │   ├── platform/
+│   │   │   ├── mod.rs           # cfg-gated module selection + cross-platform popup_position()
+│   │   │   ├── windows.rs      # Win32: key simulation, cursor, monitors, DPI
+│   │   │   └── linux.rs        # xdotool/wtype: key simulation, cursor, screen info
 │   │   └── window_state.rs     # Persistent window geometry (position, size)
 │   └── state/
 │       ├── mod.rs              # Re-exports
-│       ├── app_state.rs        # AppState (shared history + suppress flag)
+│       ├── app_state.rs        # AppState (shared history + flags)
 │       └── popup_state.rs      # Popup dimensions, event payload structs
 ├── Cargo.toml
 ├── tauri.conf.json
@@ -163,7 +167,7 @@ src/
 
 **`lib.rs`** — Orchestrates the entire startup sequence:
 
-1. **`kill_previous_instance()`** — Terminates any existing app process so global hotkeys are released (Windows-only, uses `tasklist`/`taskkill`).
+1. **`kill_previous_instance()`** — Terminates any existing app process so global hotkeys are released. On Windows uses `tasklist`/`taskkill`; on Linux uses `pgrep`/`kill -9`.
 2. **`create_shared_history()`** — Creates `Arc<Mutex<ClipboardHistory>>`.
 3. **`app_state_from_history()`** — Builds `AppState` from the shared history and suppress flag.
 4. **`setup_runtime()`** — Called inside `tauri::Builder::setup`:
@@ -182,12 +186,18 @@ src/
 ```
 AppState
 ├── history: Arc<Mutex<ClipboardHistory>>   ← shared across all threads
-└── suppress_next_capture: Arc<AtomicBool>  ← prevents watcher re-capturing
+├── suppress_next_capture: Arc<AtomicBool>  ← prevents watcher re-capturing
+├── persist_history: Arc<AtomicBool>        ← cached mirror of the setting (~1ns check)
+├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.json
+├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
+└── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
 ```
 
 **`AppState`** is managed by Tauri and injected into every command handler via `State<'_, AppState>`. The same `Arc` references are also held by the clipboard watcher thread and the hotkey handler closures.
 
 **Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture — preventing duplicate entries.
+
+**History persistence**: When `persist_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.json` every 2 seconds when dirty.
 
 ### Clipboard Module
 
@@ -200,6 +210,7 @@ ClipboardEntry {
     content: String      ← plain text / data:image/png;base64,... / newline-delimited paths
     timestamp: u64       ← Unix ms
     pinned: bool
+    groups: Vec<String>  ← user-defined group tags (e.g. "Persistent")
 }
 ```
 
@@ -215,27 +226,40 @@ ClipboardEntry {
 | `pin(id)` / `unpin(id)`             | Toggle pinned flag                                        |
 | `remove(id)`                        | Delete by ID                                              |
 | `clear()`                           | Remove all unpinned entries                               |
-| `load_pinned_from_file(path)`       | Restore pinned entries from JSON on startup               |
-| `save_pinned_to_file(path)`         | Persist pinned entries to JSON on pin/unpin               |
+| `set_groups(id, groups)`            | Replace the groups list for an entry                      |
+| `add_group(id, group)`              | Add a single group tag (no duplicates)                    |
+| `purge_group(group)`                | Remove a group tag from every entry that has it           |
+| `rename_group(old, new)`            | Rename a group tag across all entries                     |
+| `pinned_entries()`                  | All entries with the "Persistent" group tag               |
+| `load_pinned_from_file(path)`       | Restore pinned/persistent entries from JSON on startup    |
+| `save_persistent_to_file(path)`     | Persist pinned/persistent entries to JSON                 |
+| `save_all_to_file(path)`            | Flush full history to disk (for history persistence)      |
 
 #### `commands.rs` — Tauri Command Handlers
 
-| Command                  | Signature                  | Description                                     |
-| ------------------------ | -------------------------- | ----------------------------------------------- |
-| `get_history`            | `() → Vec<ClipboardEntry>` | Return full history (most-recent first)         |
-| `delete_entry`           | `(id) → bool`              | Remove entry, emit `clipboard:entry-deleted`    |
-| `clear_history`          | `() → bool`                | Remove all unpinned entries                     |
-| `pin_entry`              | `(id) → bool`              | Pin entry, auto-save to disk                    |
-| `unpin_entry`            | `(id) → bool`              | Unpin entry, auto-save to disk                  |
-| `copy_entry`             | `(id) → bool`              | Write entry to OS clipboard, set suppress flag  |
-| `paste_entry`            | `(id) → bool`              | Write to clipboard, hide popup, simulate Ctrl+V |
-| `get_image_file_preview` | `(path) → Option<String>`  | Read image file → data-URL (max 12 MB)          |
-| `get_video_file_preview` | `(path) → Option<String>`  | Read video file → data-URL (max 36 MB)          |
+| Command                    | Signature                     | Description                                            |
+| -------------------------- | ----------------------------- | ------------------------------------------------------ |
+| `get_history`              | `() → Vec<ClipboardEntry>`    | Return full history (most-recent first)                |
+| `delete_entry`             | `(id) → bool`                 | Remove entry, emit `clipboard:entry-deleted`           |
+| `clear_history`            | `() → bool`                   | Remove all unpinned entries                            |
+| `pin_entry`                | `(id) → bool`                 | Pin entry (max 10), auto-save to disk                  |
+| `unpin_entry`              | `(id) → bool`                 | Unpin entry, auto-save to disk                         |
+| `copy_entry`               | `(id) → bool`                 | Write entry to OS clipboard, set suppress flag         |
+| `paste_entry`              | `(id) → bool`                 | Write to clipboard, hide popup, simulate Ctrl+V        |
+| `save_history`             | `() → bool`                   | Flush full history to disk (on first enable)           |
+| `set_entry_groups`         | `(id, groups) → bool`         | Set group tags for an entry, auto-save                 |
+| `purge_group_from_entries` | `(group) → bool`              | Remove a group tag from all entries                    |
+| `rename_group_in_entries`  | `(old_name, new_name) → bool` | Rename a group tag across all entries                  |
+| `get_setting`              | `(key) → Option<Value>`       | Read a setting from `settings.json`                    |
+| `set_setting`              | `(key, value) → bool`         | Write a setting; syncs in-memory caches for known keys |
+| `get_image_file_preview`   | `(path) → Option<String>`     | Read image file → data-URL (max 12 MB)                 |
+| `get_video_file_preview`   | `(path) → Option<String>`     | Read video file → data-URL (max 36 MB)                 |
 
 **Internal helpers:**
 
 - `read_clipboard_entry()` — Reads current OS clipboard in priority order: text → files (CF_HDROP) → images (CF_PNG, registered formats, CF_DIB fallback). Returns `Option<ClipboardEntry>`.
-- `write_entry_to_clipboard(entry)` — Writes a `ClipboardEntry` back to the OS clipboard (text via arboard, files via CF_HDROP, images via arboard RGBA).
+- `write_entry_to_clipboard(entry)` — Writes a `ClipboardEntry` back to the OS clipboard. Text via arboard (with retry), files via CF_HDROP. **Images**: on Windows uses direct Win32 API (`write_image_to_clipboard`) bypassing arboard entirely; on Linux/other uses arboard RGBA fallback.
+- `open_clipboard_with_retry()` — Opens an arboard `Clipboard` handle with up to 6 retries (50ms delay between each) to handle contention with the watcher thread or external apps.
 
 #### `files.rs` — Windows File Clipboard (CF_HDROP)
 
@@ -247,25 +271,38 @@ Reads and writes file lists via `CF_HDROP` clipboard format using Win32 APIs:
 
 #### `image.rs` — Multi-Format Image Clipboard
 
-Reads images from the clipboard trying formats in priority order:
+**Reading** — tries formats in priority order:
 
 1. **Registered custom formats**: `"PNG"`, `"image/png"`, `"image/jpeg"`, `"image/webp"`, `"image/bmp"`, `"JFIF"` — covers browsers, Snipping Tool, etc.
 2. **CF_HDROP** — image file exposed as a shell file-drop.
 3. **arboard fallback** — `CF_DIB`/`CF_DIBV5` for screenshots and classic Win32 apps.
 
-Image data is encoded as `data:<mime>;base64,...` URLs for frontend display. Decoding back to RGBA for clipboard writes is handled by the `image` crate.
+Image data is encoded as `data:<mime>;base64,...` URLs for frontend display.
+
+**Writing (Windows)** — `write_image_to_clipboard(data_url)`:
+
+Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal proxy-thread racing with the clipboard watcher. Uses direct Win32 API:
+
+1. Decode base64 → image → RGBA pixels **before** opening the clipboard.
+2. `OpenClipboard` with up to 10 retries (50ms delay).
+3. `EmptyClipboard` → write **CF_DIB** (BITMAPINFOHEADER + BGRA bottom-up pixel data) + registered **"PNG"** format.
+4. `CloseClipboard`.
+
+**Writing (Linux/other)** — uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()` (which works reliably on non-Windows platforms).
 
 ### Runtime Module
 
 #### `clipboard_watcher.rs` — Background Polling Thread
 
 - Dedicated thread with **220ms polling interval**.
-- Uses `GetClipboardSequenceNumber()` (Windows) to detect changes cheaply.
+- **Windows**: Uses `GetClipboardSequenceNumber()` to detect changes cheaply via a change token.
+- **Linux**: No change token available — reads the clipboard every cycle and compares against the last captured content.
 - On change, calls `capture_clipboard_change()`:
   - Checks suppress flag (skips if set by user action).
   - Reads clipboard via `read_clipboard_entry()`.
   - Deduplicates against top history entry.
   - Pushes to history, emits `clipboard:new-entry` to all windows.
+  - If `persist_history` is enabled, marks `history_dirty` for background flush.
 - Only advances the sequence token when capture succeeds — if the clipboard was locked, the next poll retries.
 
 #### `hotkeys.rs` — Global Shortcut Handlers
@@ -292,18 +329,35 @@ Creates two popup windows at startup (hidden, off-screen, frameless, transparent
 - **copy-popup** (340×260) — Copy confirmation with preview.
 - **paste-popup** (340×460) — Quick paste list with keyboard shortcuts.
 
+**Hiding**: `hide_popup()` moves the window to `(-9999, -9999)` **before** calling `hide()`. This prevents the invisible-but-positioned window from intercepting mouse clicks on the content underneath.
+
 Also sets up a handler that hides all popups when the main window gains focus.
 
-#### `platform.rs` / `platform_windows.rs` — OS Abstraction
+#### `platform/` — OS Abstraction
 
-| Function                       | Description                                                        |
-| ------------------------------ | ------------------------------------------------------------------ |
-| `simulate_copy()`              | Sends Ctrl↓ C↓ C↑ Ctrl↑ via `keybd_event`                          |
-| `simulate_paste()`             | Sends Ctrl↓ V↓ V↑ Ctrl↑ via `keybd_event`                          |
-| `popup_position(w, h)`         | Computes screen position near cursor, clamped to monitor work area |
-| `cursor_pos()`                 | `GetCursorPos()` → physical pixel coordinates                      |
-| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW` → work area bounds          |
-| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` → DPI scaling factor                            |
+`platform/mod.rs` selects the correct submodule at compile time via `#[cfg]` gates and re-exports a uniform API. It also contains the cross-platform `popup_position()` function.
+
+| Function                       | Windows (`platform/windows.rs`)                                  | Linux (`platform/linux.rs`)                                  |
+| ------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| `simulate_copy()`              | Releases Shift/Ctrl, sends Ctrl↓ C↓ C↑ Ctrl↑ via `keybd_event`   | `xdotool key ctrl+c` (X11) or `wtype -M ctrl -k c` (Wayland) |
+| `simulate_paste()`             | Releases Shift/Ctrl, sends Ctrl↓ V↓ V↑ Ctrl↑ via `keybd_event`   | `xdotool key ctrl+v` (X11) or `wtype -M ctrl -k v` (Wayland) |
+| `popup_position(w, h)`         | _(cross-platform in mod.rs)_ — near cursor, clamped to work area | _(same)_                                                     |
+| `cursor_pos()`                 | `GetCursorPos()` → physical pixel coordinates                    | `xdotool getmouselocation` → parse x/y                       |
+| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `xdpyinfo` → parse `dimensions:` line                        |
+| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` → DPI scaling factor                          | Returns `1.0` (Wayland compositors handle scaling)           |
+
+**Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function explicitly releases Shift and Ctrl keys to prevent modifier corruption. Without this, if the user held Shift while triggering a paste, the OS would see Ctrl+Shift+V instead of Ctrl+V.
+
+**Note on Linux**: `is_wayland()` checks the `WAYLAND_DISPLAY` environment variable. If set, uses `wtype`; otherwise falls back to `xdotool` (X11).
+
+#### `tray.rs` — System Tray
+
+Sets up a system tray icon with a context menu:
+
+- **Show Orange Copy Paste** — Shows/unminimizes the main window.
+- **Quit** — Exits the app.
+
+Left-clicking the tray icon also shows the main window. Integrates with `close_to_tray` setting: when enabled, closing the main window hides it to the tray instead of quitting.
 
 #### `window_state.rs` — Persistent Window Geometry
 
@@ -405,6 +459,9 @@ Renders a single `ClipboardEntry` with type-specific previews:
 #### Settings Screen (`SettingsScreen.tsx`)
 
 - **Paste slots**: How many entries shown in the paste popup (3–10, default 3). Persisted to `localStorage.sc-paste-slots`.
+- **Persist history**: Save full clipboard history to disk (survives restarts). Stored in `settings.json`.
+- **Close to tray**: Hide to system tray on close instead of quitting. Stored in `settings.json`.
+- **Start minimized**: Launch hidden in tray. Stored in `settings.json`.
 
 #### Shortcuts Screen (`ShortcutsScreen.tsx`)
 
@@ -511,11 +568,16 @@ User presses Ctrl+Shift+V
     invoke("paste_entry", { id })
         │
         ▼
-    write_entry_to_clipboard()
-    suppress = true
-    hide paste-popup
-    wait 80ms
-    simulate Ctrl+V
+    hide paste-popup (move offscreen first)
+    spawn background thread:
+        suppress = true
+        write_entry_to_clipboard()
+          ├─ Text: arboard with retry (6 attempts)
+          ├─ Image (Win): direct Win32 API (CF_DIB + PNG)
+          ├─ Image (Linux): arboard set_image()
+          └─ File: CF_HDROP
+        wait 80ms
+        simulate Ctrl+V (release modifiers first on Windows)
 ```
 
 ### Frontend State Sync
@@ -543,7 +605,10 @@ User presses Ctrl+Shift+V
 
 | What              | Location                          | Format                                                 | When Saved           | When Loaded   |
 | ----------------- | --------------------------------- | ------------------------------------------------------ | -------------------- | ------------- |
-| Pinned entries    | `{app_data}/pinned_entries.json`  | JSON array of `ClipboardEntry`                         | On pin/unpin         | On startup    |
+| Pinned entries    | `{app_data}/pinned_entries.json`  | JSON array of `ClipboardEntry`                         | On pin/unpin/groups  | On startup    |
+| Full history      | `{app_data}/history.json`         | JSON array of `ClipboardEntry`                         | Every 2s when dirty  | On startup    |
+| Settings          | `{app_data}/settings.json`        | JSON object `{ key: value }`                           | On `set_setting`     | On startup    |
+| Boot ID           | `{app_data}/boot_id.txt`          | Plain text (boot epoch seconds)                        | On startup           | On startup    |
 | Window geometry   | `{app_data}/window-state.json`    | `{ x, y, width, height, maximized }`                   | On every move/resize | On startup    |
 | Theme preference  | `localStorage.sc-theme`           | `"dark"` or `"light"`                                  | On toggle            | On mount      |
 | Layout preference | `localStorage.sc-layout`          | `"masonry"` or `"list"`                                | On change            | On mount      |
@@ -551,7 +616,7 @@ User presses Ctrl+Shift+V
 | Paste slot count  | `localStorage.sc-paste-slots`     | `"3"` – `"10"`                                         | On change            | On popup show |
 | Recent searches   | `localStorage.sc-recent-searches` | JSON string array (max 8)                              | On search            | On mount      |
 
-**Note**: Unpinned clipboard history is in-memory only. It is lost on app restart. Only pinned entries survive restarts.
+**Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.json` every 2 seconds.
 
 ---
 
