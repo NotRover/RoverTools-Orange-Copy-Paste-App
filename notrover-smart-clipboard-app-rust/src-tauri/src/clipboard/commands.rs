@@ -101,7 +101,7 @@ fn app_data_file(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBu
     Some(app.path().app_data_dir().ok()?.join(name))
 }
 
-fn get_persistent_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+fn get_saved_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     app_data_file(app, "pinned_entries.json")
 }
 
@@ -168,10 +168,10 @@ pub fn set_setting(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> bool {
-    // Keep the in-memory cache in sync when the persist_history flag changes.
-    if key == "persist_history" {
+    // Keep the in-memory cache in sync when the keep_history flag changes.
+    if key == "keep_history" {
         state
-            .persist_history
+            .keep_history
             .store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
     }
 
@@ -208,7 +208,7 @@ pub fn set_setting(
 }
 
 /// Trigger an immediate flush of the full history to disk.
-/// Called from the frontend when the user first enables persist_history.
+/// Called from the frontend when the user first enables keep_history.
 #[tauri::command]
 pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     get_history_file_path(&app)
@@ -228,8 +228,8 @@ pub fn set_entry_groups(
 
     let success = state.history.lock().set_groups(&id, groups.clone());
     if success {
-        if let Some(path) = get_persistent_file_path(&app) {
-            let _ = state.history.lock().save_persistent_to_file(&path);
+        if let Some(path) = get_saved_file_path(&app) {
+            let _ = state.history.lock().save_saved_to_file(&path);
         }
         auto_save_history(&app, &state.history);
         let _ = app.emit(
@@ -248,8 +248,8 @@ pub fn purge_group_from_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().purge_group(&group);
-    if let Some(path) = get_persistent_file_path(&app) {
-        let _ = state.history.lock().save_persistent_to_file(&path);
+    if let Some(path) = get_saved_file_path(&app) {
+        let _ = state.history.lock().save_saved_to_file(&path);
     }
     auto_save_history(&app, &state.history);
     true
@@ -264,8 +264,8 @@ pub fn rename_group_in_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().rename_group(&old_name, &new_name);
-    if let Some(path) = get_persistent_file_path(&app) {
-        let _ = state.history.lock().save_persistent_to_file(&path);
+    if let Some(path) = get_saved_file_path(&app) {
+        let _ = state.history.lock().save_saved_to_file(&path);
     }
     auto_save_history(&app, &state.history);
     true
@@ -276,7 +276,7 @@ pub fn rename_group_in_entries(
 /// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
 pub(crate) fn auto_save_history(app: &tauri::AppHandle, _history: &crate::SharedHistory) {
     let state: tauri::State<'_, AppState> = app.state();
-    if state.persist_history.load(Ordering::Relaxed) {
+    if state.keep_history.load(Ordering::Relaxed) {
         state.history_dirty.store(true, Ordering::Relaxed);
     }
 }
