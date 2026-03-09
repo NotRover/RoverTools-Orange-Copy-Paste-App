@@ -222,52 +222,85 @@ body {
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
 }
 
-/* ── Actions ── */
+/* ── Actions (CardMenu-style items) ── */
 
 .popup-actions {
   display: flex;
-  gap: 6px;
+  gap: 1px;
 }
 
-.popup-action-btn {
+.popup-menu-item {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 0;
-  border: 1px solid var(--border);
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
   border-radius: var(--radius-xs);
-  background: var(--surface);
+  background: transparent;
   color: var(--text);
-  font-size: 11.5px;
-  font-weight: 500;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.14s ease;
+  text-align: left;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 
-.popup-action-btn:disabled {
+.popup-menu-item:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-.popup-action-btn:not(:disabled):hover {
-  border-color: var(--accent);
+.popup-menu-item:not(:disabled):hover {
+  background: var(--surface-hover);
+}
+
+/* Pin */
+.popup-menu-item--pin:not(:disabled):hover {
   background: var(--accent-dim);
   color: var(--accent);
 }
 
-.popup-action-btn--active {
+.popup-menu-item--pin.popup-menu-item--active {
   color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-dim);
 }
 
-.popup-action-btn--danger:not(:disabled):hover {
-  color: #ef4444;
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.08);
+.popup-menu-item--pin.popup-menu-item--active:not(:disabled):hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+/* Save */
+.popup-menu-item--save:not(:disabled):hover {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+.popup-menu-item--save.popup-menu-item--active {
+  color: #22c55e;
+}
+
+.popup-menu-item--save.popup-menu-item--active:not(:disabled):hover {
+  background: rgba(34, 197, 94, 0.18);
+  color: #22c55e;
+}
+
+/* Delete */
+.popup-menu-item--danger:not(:disabled):hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Separator */
+.popup-menu-separator {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 3px 2px;
 }
 
 /* ── Deleted state ── */
@@ -283,26 +316,6 @@ body {
   font-size: 12px;
   font-weight: 600;
   animation: popupFadeIn 0.15s ease forwards;
-}
-
-/* ── Pinned state ── */
-
-.popup-pinned-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  gap: 10px;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  animation: popupFadeIn 0.15s ease forwards;
-}
-
-.popup-pinned-state--off {
-  color: var(--text-muted);
-  font-weight: 500;
 }
 
 /* ── File count badge ── */
