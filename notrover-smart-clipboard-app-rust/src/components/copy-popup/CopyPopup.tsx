@@ -52,12 +52,13 @@ interface HistoryEntry {
   content: string;
   timestamp: number;
   pinned: boolean;
+  groups?: string[];
 }
 
 // Layout constants (must match Rust COPY_POPUP_W)
 const BODY_PAD = 12; // body padding (6px * 2)
 const HEADER_H = 30; // header row
-const ACTIONS_H = 38; // action buttons row
+const ACTIONS_H = 38; // action menu items (horizontal row)
 const CHROME_H = HEADER_H + ACTIONS_H + BODY_PAD + 24; // +gaps+padding
 const MIN_PREVIEW_H = 36;
 const MAX_PREVIEW_H = 140;
@@ -82,8 +83,8 @@ const CopyPopup: React.FC = () => {
   const [content, setContent] = useState("");
   const [entryId, setEntryId] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [deleted, setDeleted] = useState(false);
-  const [justPinned, setJustPinned] = useState<boolean | null>(null);
   const [visible, setVisible] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -117,16 +118,20 @@ const CopyPopup: React.FC = () => {
         setContent(event.payload.content);
         setEntryId(event.payload.id);
         setPinned(false);
+        setSaved(false);
         setVisible(false);
         requestAnimationFrame(() => setVisible(true));
 
-        // Fetch pinned state for the entry
+        // Fetch pinned/saved state for the entry
         try {
           const history = await invoke<HistoryEntry[]>("get_history");
           const match = history.find((h) => h.id === event.payload.id);
-          if (match && !cancelled) setPinned(match.pinned);
+          if (match && !cancelled) {
+            setPinned(match.pinned);
+            setSaved(match.groups?.includes("Saved") ?? false);
+          }
         } catch {
-          /* pinned state unavailable, default false is fine */
+          /* state unavailable, defaults are fine */
         }
       },
     ).then((fn) => {
@@ -217,13 +222,26 @@ const CopyPopup: React.FC = () => {
     cancelBlur();
     const cmd = pinned ? "unpin_entry" : "pin_entry";
     const ok = await invoke<boolean>(cmd, { id: entryId });
-    if (ok) {
-      const newPinned = !pinned;
-      setPinned(newPinned);
-      setJustPinned(newPinned);
-      setTimeout(() => setJustPinned(null), 800);
-    }
+    if (ok) setPinned(!pinned);
   }, [entryId, pinned, cancelBlur]);
+
+  const handleSave = useCallback(async () => {
+    if (!entryId) return;
+    cancelBlur();
+    try {
+      const history = await invoke<HistoryEntry[]>("get_history");
+      const match = history.find((h) => h.id === entryId);
+      const groups = match?.groups ?? [];
+      const has = groups.includes("Saved");
+      const newGroups = has
+        ? groups.filter((g) => g !== "Saved")
+        : [...groups, "Saved"];
+      await invoke("set_entry_groups", { id: entryId, groups: newGroups });
+      setSaved(!has);
+    } catch {
+      /* best-effort */
+    }
+  }, [entryId, cancelBlur]);
 
   const handleDelete = useCallback(async () => {
     if (!entryId) return;
@@ -271,25 +289,6 @@ const CopyPopup: React.FC = () => {
           </svg>
           <span>Removed from history</span>
         </div>
-      ) : justPinned !== null ? (
-        <div
-          className={`popup-pinned-state${justPinned ? "" : " popup-pinned-state--off"}`}
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill={justPinned ? "currentColor" : "none"}
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 17v5" />
-            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-          </svg>
-          <span>{justPinned ? "Pinned!" : "Unpinned"}</span>
-        </div>
       ) : (
         <>
           {/* Header */}
@@ -317,8 +316,6 @@ const CopyPopup: React.FC = () => {
               </svg>
             </button>
           </div>
-
-          {/* <div className="popup-divider" /> */}
 
           {/* Preview */}
           <div className="popup-preview">
@@ -354,12 +351,11 @@ const CopyPopup: React.FC = () => {
             )}
           </div>
 
-          {/* <div className="popup-divider" /> */}
-
-          {/* Actions */}
+          {/* Actions — styled like CardMenu items */}
           <div className="popup-actions">
             <button
-              className={`popup-action-btn${pinned ? " popup-action-btn--active" : ""}`}
+              className={`popup-menu-item popup-menu-item--pin${pinned ? " popup-menu-item--active" : ""}`}
+              onMouseDown={cancelBlur}
               onClick={handlePin}
               disabled={!entryId}
             >
@@ -376,11 +372,34 @@ const CopyPopup: React.FC = () => {
                 <path d="M12 17v5" />
                 <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
               </svg>
-              <span>{pinned ? "Pinned" : "Pin"}</span>
+              <span>{pinned ? "Unpin" : "Pin"}</span>
             </button>
 
             <button
-              className="popup-action-btn popup-action-btn--danger"
+              className={`popup-menu-item popup-menu-item--save${saved ? " popup-menu-item--active" : ""}`}
+              onMouseDown={cancelBlur}
+              onClick={handleSave}
+              disabled={!entryId}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill={saved ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              <span>{saved ? "Unsave" : "Save"}</span>
+            </button>
+
+            <div className="popup-menu-separator" />
+
+            <button
+              className="popup-menu-item popup-menu-item--danger"
+              onMouseDown={cancelBlur}
               onClick={handleDelete}
               disabled={!entryId}
             >
