@@ -591,3 +591,25 @@ button.card-type-chip.open .card-type-chevron {
   border: none;
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
 }
+
+/*  Missing-files states  */
+
+.card-text--missing,
+.card-file-preview-item--missing .card-file-preview-name,
+.card-file-list-item--missing .card-file-name {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+.card-missing-hint {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--danger);
+  flex-shrink: 0;
+  text-decoration: none;
+  opacity: 1;
+  padding-left: 10px;
+}
