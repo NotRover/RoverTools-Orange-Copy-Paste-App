@@ -83,7 +83,7 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  padding: 10px 10px 6px;
+  padding: 10px 10px 4px;
   width: 100%;
   height: 100%;
   display: flex;
@@ -238,25 +238,14 @@ body {
 .paste-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   padding-right: 2px;
 }
 
-.paste-list::-webkit-scrollbar {
-  width: 3px;
-}
-
-.paste-list::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 2px 0;
-}
-
-.paste-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 2px;
+.paste-list > .paste-item ~ .paste-item {
+  margin-top: 3px;
 }
 
 /* ── Item ── */
@@ -375,6 +364,17 @@ body {
 
 /* ── Expanded file list (multi-file entries) ── */
 
+@keyframes pasteFileListSlideIn {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 120px;
+  }
+}
+
 .paste-file-list {
   display: flex;
   flex-direction: column;
@@ -382,6 +382,8 @@ body {
   padding: 4px 0 2px 28px;
   max-height: 120px;
   overflow-y: auto;
+  min-height: 0;
+  animation: pasteFileListSlideIn 0.18s ease-out;
 }
 
 .paste-file-list::-webkit-scrollbar {
@@ -415,6 +417,25 @@ body {
   min-width: 0;
   flex: 1;
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+.paste-filename--missing {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.paste-file-list-item--missing .paste-file-name {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.paste-missing-hint {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  color: var(--accent);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .paste-file-icon {

@@ -12,7 +12,7 @@ import {
   PinIcon as PinIconComp,
   SaveStarIcon,
 } from "../icons";
-import "./entry-types.css";
+import "./entryTypes.css";
 
 /* ── SVG icons (9×9 for pills, but scalable via viewBox) ── */
 
