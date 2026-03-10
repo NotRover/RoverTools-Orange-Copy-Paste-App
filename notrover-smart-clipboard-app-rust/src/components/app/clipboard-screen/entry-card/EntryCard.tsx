@@ -175,6 +175,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     Record<string, string | null>
   >({});
   const [showFileList, setShowFileList] = useState(false);
+  const [missingFiles, setMissingFiles] = useState<Set<string>>(new Set());
   const [showHiddenGroups, setShowHiddenGroups] = useState(false);
   const [visibleGroupCount, setVisibleGroupCount] = useState(0);
 
@@ -288,6 +289,19 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     return () => {
       active = false;
     };
+  }, [entry.type, entry.content]);
+
+  // Check whether referenced files still exist on disk
+  useEffect(() => {
+    if (entry.type !== "file" || files.length === 0) {
+      setMissingFiles(new Set());
+      return;
+    }
+    let active = true;
+    invoke<string[]>("check_missing_files", { paths: files }).then((missing) => {
+      if (active) setMissingFiles(new Set(missing));
+    }).catch(() => {});
+    return () => { active = false; };
   }, [entry.type, entry.content]);
 
   useEffect(() => {
@@ -552,8 +566,13 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           />
         )}
         {entry.type === "file" && !isMulti && (
-          <p className="card-text card-text--file">
-            {firstFile ? fileNameFromPath(firstFile) : "[File]"}
+          <p className={`card-text card-text--file${firstFile && missingFiles.has(firstFile) ? " card-text--missing" : ""}`}>
+            <span {...(firstFile && missingFiles.has(firstFile) ? { "data-tooltip": "File no longer exists on disk", "data-tooltip-pos": "above" } : {})}>
+              {firstFile ? fileNameFromPath(firstFile) : "[File]"}
+            </span>
+            {firstFile && missingFiles.has(firstFile) && (
+              <span className="card-missing-hint" data-tooltip="File no longer exists on disk">missing</span>
+            )}
           </p>
         )}
         {entry.type === "file" && isMulti && !showFileList && (
@@ -562,9 +581,16 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               const name = fileNameFromPath(f);
               const isImg = isImageFile(f);
               return (
-                <span key={f} className="card-file-preview-item">
+                <span key={f} className={`card-file-preview-item${missingFiles.has(f) ? " card-file-preview-item--missing" : ""}`}>
                   {isImg ? ImageIcon : FileIcon}
-                  <span className="card-file-preview-name">{name}</span>
+                  <span
+                    className="card-file-preview-name"
+                    {...(missingFiles.has(f) ? { "data-tooltip": "File no longer exists on disk", "data-tooltip-pos": "above" } : {})}>
+                    {name}
+                  </span>
+                  {missingFiles.has(f) && (
+                    <span className="card-missing-hint" data-tooltip="File missing">missing</span>
+                  )}
                 </span>
               );
             })}
@@ -585,7 +611,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               const isImg = isImageFile(f);
               const preview = imagePreviews[f];
               return (
-                <div key={f} className="card-file-list-item">
+                <div key={f} className={`card-file-list-item${missingFiles.has(f) ? " card-file-list-item--missing" : ""}`}>
                   {isImg && (
                     <div className="card-file-thumb">
                       {preview ? (
@@ -599,7 +625,14 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                       )}
                     </div>
                   )}
-                  <span className="card-file-name">{name}</span>
+                  <span
+                    className="card-file-name"
+                    {...(missingFiles.has(f) ? { "data-tooltip": "File no longer exists on disk", "data-tooltip-pos": "above" } : {})}>
+                    {name}
+                  </span>
+                  {missingFiles.has(f) && (
+                    <span className="card-missing-hint" data-tooltip="File missing">missing</span>
+                  )}
                 </div>
               );
             })}

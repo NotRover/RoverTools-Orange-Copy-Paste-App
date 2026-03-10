@@ -502,6 +502,15 @@ pub fn get_video_file_preview(path: String) -> Option<String> {
     get_file_preview(&path, mime_from_video_ext, MAX_VIDEO_PREVIEW_BYTES)
 }
 
+/// Given a list of file paths, return those that no longer exist on disk.
+#[tauri::command]
+pub fn check_missing_files(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|p| !Path::new(p).exists())
+        .collect()
+}
+
 /// Open an arboard clipboard handle, retrying a few times if the clipboard
 /// is temporarily locked by another thread or application.
 fn open_clipboard_with_retry() -> Result<Clipboard, String> {

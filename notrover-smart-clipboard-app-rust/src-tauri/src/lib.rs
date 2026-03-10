@@ -333,6 +333,7 @@ pub fn run() {
             crate::clipboard::commands::paste_entry,
             crate::clipboard::commands::get_image_file_preview,
             crate::clipboard::commands::get_video_file_preview,
+            crate::clipboard::commands::check_missing_files,
             crate::clipboard::commands::get_setting,
             crate::clipboard::commands::set_setting,
             crate::clipboard::commands::save_history,
