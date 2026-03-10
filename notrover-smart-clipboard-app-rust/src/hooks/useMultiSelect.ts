@@ -59,7 +59,8 @@ export function useMultiSelect(): MultiSelectState {
       // No anchor — just toggle
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        next.add(id);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
       lastToggledRef.current = id;
@@ -72,7 +73,8 @@ export function useMultiSelect(): MultiSelectState {
       // Fallback: just toggle
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        next.add(id);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
       lastToggledRef.current = id;
@@ -83,8 +85,11 @@ export function useMultiSelect(): MultiSelectState {
     const end = Math.max(lastIdx, currIdx);
     setSelectedIds((prev) => {
       const next = new Set(prev);
+      // If the target is already selected, deselect the range; otherwise select it
+      const deselect = prev.has(id);
       for (let i = start; i <= end; i++) {
-        next.add(allIds[i]);
+        if (deselect) next.delete(allIds[i]);
+        else next.add(allIds[i]);
       }
       return next;
     });
