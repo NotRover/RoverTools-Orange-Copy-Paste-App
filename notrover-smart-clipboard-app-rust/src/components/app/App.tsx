@@ -535,17 +535,12 @@ const App: React.FC = () => {
 
   const handleBulkPin = useCallback(
     async (ids: string[]) => {
-      // Optimistic update
-      const idSet = new Set(ids);
-      setEntries((prev) =>
-        prev.map((e) => (idSet.has(e.id) ? { ...e, pinned: true } : e)),
-      );
       const changed = await invoke<number>("bulk_pin_entries", {
         ids,
         pin: true,
       });
       if (changed < ids.length) {
-        // Some were rejected (pin limit) — re-sync
+        // Some were rejected (pin limit) — re-sync and show toast
         const history = await invoke<ClipboardEntry[]>("get_history");
         setEntries(history);
         if (pinLimitTimerRef.current !== null)
@@ -555,6 +550,12 @@ const App: React.FC = () => {
           setPinLimitReached(false);
           pinLimitTimerRef.current = null;
         }, 3000);
+      } else {
+        // All succeeded — update UI
+        const idSet = new Set(ids);
+        setEntries((prev) =>
+          prev.map((e) => (idSet.has(e.id) ? { ...e, pinned: true } : e)),
+        );
       }
     },
     [],
