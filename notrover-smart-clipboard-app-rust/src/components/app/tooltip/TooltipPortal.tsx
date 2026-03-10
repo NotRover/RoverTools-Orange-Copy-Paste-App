@@ -12,6 +12,7 @@ interface TipState {
 }
 
 const GAP = 8;
+const SHOW_DELAY = 400; // ms before tooltip appears
 // Estimated tooltip dimensions used for boundary checks before the real element is measured
 const EST_H = 24;
 const EST_W = 120;
@@ -95,6 +96,14 @@ export default function TooltipPortal() {
 
   useEffect(() => {
     let lastEl: HTMLElement | null = null;
+    let delayTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearDelay = () => {
+      if (delayTimer !== null) {
+        clearTimeout(delayTimer);
+        delayTimer = null;
+      }
+    };
 
     const onOver = (e: MouseEvent) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>(
@@ -102,6 +111,7 @@ export default function TooltipPortal() {
       );
       if (el === lastEl) return;
       lastEl = el;
+      clearDelay();
       if (!el) {
         setTip(null);
         return;
@@ -113,10 +123,13 @@ export default function TooltipPortal() {
         return;
       }
 
-      const preferred =
-        (el.dataset.tooltipPos as TipPos | undefined) ?? "above";
-      const { x, y, resolved } = anchorCoords(el, preferred);
-      setTip({ text, x, y, pos: resolved });
+      delayTimer = setTimeout(() => {
+        delayTimer = null;
+        const preferred =
+          (el.dataset.tooltipPos as TipPos | undefined) ?? "above";
+        const { x, y, resolved } = anchorCoords(el, preferred);
+        setTip({ text, x, y, pos: resolved });
+      }, SHOW_DELAY);
     };
 
     const onOut = (e: MouseEvent) => {
@@ -130,12 +143,14 @@ export default function TooltipPortal() {
         e.relatedTarget as HTMLElement | null
       )?.closest<HTMLElement>("[data-tooltip]");
       if (into !== el) {
+        clearDelay();
         setTip(null);
         lastEl = null;
       }
     };
 
     const onHide = () => {
+      clearDelay();
       setTip(null);
       lastEl = null;
     };
@@ -147,6 +162,7 @@ export default function TooltipPortal() {
       document.removeEventListener("mouseover", onOver, true);
       document.removeEventListener("mouseout", onOut, true);
       document.removeEventListener("tooltip:hide", onHide);
+      clearDelay();
       lastEl = null;
     };
   }, []);
@@ -160,10 +176,10 @@ export default function TooltipPortal() {
         position: "fixed",
         left: tip.x,
         top: tip.y,
-        transform: TRANSFORMS[tip.pos],
+        "--tt-transform": TRANSFORMS[tip.pos],
         zIndex: 99999,
         pointerEvents: "none",
-      }}
+      } as React.CSSProperties}
     >
       {tip.text}
     </div>,

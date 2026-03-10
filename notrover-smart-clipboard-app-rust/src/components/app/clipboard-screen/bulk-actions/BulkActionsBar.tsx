@@ -94,7 +94,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       <button
         className={`bulk-popup-chip bulk-popup-chip--pin${allPinned ? " bulk-popup-chip--pin-active" : ""}`}
         onClick={onBulkTogglePin}
-        title={allPinned ? "Unpin selected" : "Pin selected"}
+        data-tooltip={allPinned ? "Unpin selected" : "Pin selected"}
+        data-tooltip-pos="below"
       >
         <PinIcon size={10} filled={allPinned} />
         <span>{allPinned ? "Pinned" : "Pin"}</span>
@@ -104,7 +105,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       <button
         className={`bulk-popup-chip bulk-popup-chip--save${allSaved ? " bulk-popup-chip--save-active" : ""}`}
         onClick={onBulkToggleSave}
-        title={allSaved ? "Unsave selected" : "Save selected"}
+        data-tooltip={allSaved ? "Unsave selected" : "Save selected"}
+        data-tooltip-pos="below"
       >
         <SaveStarIcon size={10} filled={allSaved} />
         <span>{allSaved ? "Saved" : "Save"}</span>
@@ -116,7 +118,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
           <button
             className={`bulk-popup-chip${groupsOpen ? " bulk-popup-chip--groups-active" : ""}`}
             onClick={() => setGroupsOpen((v) => !v)}
-            title="Assign groups"
+            data-tooltip="Assign groups"
+            data-tooltip-pos="below"
           >
             <TagIcon size={10} strokeWidth={2} />
             <span>Groups</span>
@@ -171,7 +174,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       <button
         className="bulk-popup-chip bulk-popup-chip--delete"
         onClick={onBulkDelete}
-        title="Delete selected"
+        data-tooltip="Delete selected"
+        data-tooltip-pos="below"
       >
         <TrashIcon size={10} />
         <span>Delete</span>
@@ -181,7 +185,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       <button
         className="bulk-popup-close"
         onClick={onExitSelectMode}
-        title="Exit selection mode"
+        data-tooltip="Exit selection mode"
+        data-tooltip-pos="below"
       >
         <CloseIcon size={9} strokeWidth={2.5} />
       </button>
