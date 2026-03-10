@@ -48,6 +48,11 @@ export default defineConfig(async () => ({
           __dirname,
           "src/components/paste-popup/paste-popup.html",
         ),
+        // Copy notification popup (toast)
+        "copy-notification": path.resolve(
+          __dirname,
+          "src/components/notifications/copy-notification.html",
+        ),
       },
     },
   },
