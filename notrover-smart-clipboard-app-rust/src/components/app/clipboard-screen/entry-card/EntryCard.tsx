@@ -469,6 +469,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     );
   };
 
+  const displayKind = deriveDisplayKind(entry);
   const cardClasses = [
     "entry-card",
     copied && "entry-card--copied",
@@ -481,6 +482,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     <div
       ref={cardRef}
       className={cardClasses}
+      data-kind={displayKind}
       onClick={handleCardClick}
       onContextMenu={(e) => {
         e.preventDefault();

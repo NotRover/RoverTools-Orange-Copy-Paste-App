@@ -19,9 +19,9 @@ type Tab = "recent" | "pinned";
 
 // Layout constants (must match Rust PASTE_POPUP_W)
 const HEADER_H = 48; // header + divider + padding
-const ITEM_H = 44; // item height + gap
+const ITEM_H = 45; // item min-height (40) + border (2) + gap (3)
 const BOTTOM_PAD = 0;
-const BODY_PAD = 12; // body padding (6px * 2)
+const BODY_PAD = 10; // body padding (6px top + 4px container bottom)
 const MIN_EMPTY_H = 100;
 
 function readTheme(): AppTheme {
@@ -93,6 +93,7 @@ const PastePopup: React.FC = () => {
   const [filePreviews, setFilePreviews] = useState<
     Record<string, string | null>
   >({});
+  const [missingFiles, setMissingFiles] = useState<Set<string>>(new Set());
 
   const entries = useMemo(() => {
     const src = tab === "pinned" ? pinnedAll : recentAll;
@@ -140,6 +141,25 @@ const PastePopup: React.FC = () => {
           ...Object.fromEntries(results),
         }));
     });
+    return () => {
+      active = false;
+    };
+  }, [entries]);
+
+  // Check for missing files in file entries
+  useEffect(() => {
+    const fileEntries = entries.filter((e) => e.type === "file");
+    if (fileEntries.length === 0) {
+      setMissingFiles(new Set());
+      return;
+    }
+    let active = true;
+    const allPaths = fileEntries.flatMap((e) => getFilePaths(e.content));
+    invoke<string[]>("check_missing_files", { paths: allPaths })
+      .then((missing) => {
+        if (active) setMissingFiles(new Set(missing));
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
@@ -363,6 +383,9 @@ const PastePopup: React.FC = () => {
                     const thumbSrc = singleIsImage
                       ? (filePreviews[entry.id] ?? null)
                       : null;
+                    const missingCount = isMulti
+                      ? paths.filter((p) => missingFiles.has(p)).length
+                      : 0;
                     return (
                       <>
                         <div className="paste-preview-wrap">
@@ -378,11 +401,19 @@ const PastePopup: React.FC = () => {
                               kind={deriveDisplayKind(entry as any)}
                             />
                           )}
-                          <span className="paste-filename">
+                          <span className={`paste-filename${!isMulti && paths[0] && missingFiles.has(paths[0]) ? " paste-filename--missing" : ""}`}>
                             {isMulti
                               ? `${paths.length} files`
                               : fileNameFromPath(paths[0])}
                           </span>
+                          {!isMulti && paths[0] && missingFiles.has(paths[0]) && (
+                            <span className="paste-missing-hint">missing</span>
+                          )}
+                          {isMulti && missingCount > 0 && !isExpanded && (
+                            <span className="paste-missing-hint">
+                              {missingCount} missing
+                            </span>
+                          )}
                           {isMulti && (
                             <span
                               className="paste-item-icon"
@@ -435,20 +466,24 @@ const PastePopup: React.FC = () => {
               {entry.type === "file" &&
                 (() => {
                   const paths = getFilePaths(entry.content);
-                  return paths.length > 1 && expandedIds.has(entry.id) ? (
+                  if (paths.length <= 1 || !expandedIds.has(entry.id)) return null;
+                  return (
                     <div className="paste-file-list">
                       {paths.map((f) => (
-                        <div key={f} className="paste-file-list-item">
+                        <div key={f} className={`paste-file-list-item${missingFiles.has(f) ? " paste-file-list-item--missing" : ""}`}>
                           <span className="paste-file-icon">
                             <FilePageIcon />
                           </span>
                           <span className="paste-file-name">
                             {fileNameFromPath(f)}
                           </span>
+                          {missingFiles.has(f) && (
+                            <span className="paste-missing-hint">missing</span>
+                          )}
                         </div>
                       ))}
                     </div>
-                  ) : null;
+                  );
                 })()}
             </React.Fragment>
           ))}
