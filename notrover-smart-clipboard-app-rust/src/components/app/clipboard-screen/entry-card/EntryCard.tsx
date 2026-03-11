@@ -377,7 +377,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   };
 
   const visibleImageThumbs = imageFiles.slice(0, 3);
-  const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
+  // const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
 
   const renderTypeChip = (withMeasureRef = false) => {
     if (entry.type === "file" && isMulti) {
@@ -509,11 +509,11 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         </div>
       )}
       {/* Multi-image file strip */}
-      {entry.type === "file" && isMulti && imageFiles.length > 0 && (
+      {entry.type === "file" && isMulti && imageFiles.filter((f) => !missingFiles.has(f)).length > 0 && (
         <div className="card-media card-media--multi">
-          {visibleImageThumbs.map((f, i) => {
-            const isLast =
-              i === visibleImageThumbs.length - 1 && remainingImageThumbs > 0;
+          {visibleImageThumbs.filter((f) => !missingFiles.has(f)).map((f, i, arr) => {
+            const nonMissingRemaining = imageFiles.filter((ff) => !missingFiles.has(ff)).length - arr.length;
+            const isLast = i === arr.length - 1 && nonMissingRemaining > 0;
             return (
               <div key={f} className="card-media-thumb">
                 {imagePreviews[f] ? (
@@ -526,7 +526,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                   <div className="card-thumb-placeholder" />
                 )}
                 {isLast && (
-                  <div className="card-thumb-more">+{remainingImageThumbs}</div>
+                  <div className="card-thumb-more">+{nonMissingRemaining}</div>
                 )}
               </div>
             );
@@ -537,7 +537,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       {entry.type === "file" &&
         !isMulti &&
         firstFile &&
-        isImageFile(firstFile) && (
+        isImageFile(firstFile) &&
+        !missingFiles.has(firstFile) && (
           <div className="card-media">
             <img
               src={imagePreviews[firstFile] ?? firstFileUrl}
@@ -550,7 +551,8 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       {entry.type === "file" &&
         !isMulti &&
         firstFile &&
-        isVideoFile(firstFile) && (
+        isVideoFile(firstFile) &&
+        !missingFiles.has(firstFile) && (
           <div className="card-media">
             <VideoPlayer src={firstFileUrl} className="card-media-img" />
           </div>
@@ -606,15 +608,16 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         {/* Expanded file list — sits above footer so button stays anchored at bottom */}
         {entry.type === "file" && isMulti && showFileList && (
           <div
-            className={`card-file-list${imageFiles.length > 0 ? " card-file-list--bordered" : ""}`}
+            className={`card-file-list${imageFiles.some((f) => !missingFiles.has(f)) ? " card-file-list--bordered" : ""}`}
           >
             {files.map((f) => {
               const name = fileNameFromPath(f);
               const isImg = isImageFile(f);
+              const isMissing = missingFiles.has(f);
               const preview = imagePreviews[f];
               return (
-                <div key={f} className={`card-file-list-item${missingFiles.has(f) ? " card-file-list-item--missing" : ""}`}>
-                  {isImg && (
+                <div key={f} className={`card-file-list-item${isMissing ? " card-file-list-item--missing" : ""}`}>
+                  {isImg && !isMissing && (
                     <div className="card-file-thumb">
                       {preview ? (
                         <img
