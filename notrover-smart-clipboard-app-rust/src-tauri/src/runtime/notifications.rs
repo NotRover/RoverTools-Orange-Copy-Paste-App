@@ -24,6 +24,7 @@ fn show_copy_notification(app: &tauri::AppHandle, entry: &ClipboardEntry) {
             kind: kind_label(&entry.kind).to_string(),
         };
         let _ = win.emit("copy-notification:show", &payload);
+        let _ = win.set_always_on_top(true);
         let _ = win.show();
     }
 }
