@@ -66,6 +66,40 @@ function sanitizeStyle(style: string): string {
     .join("; ");
 }
 
+function normalizeImageSrc(src: string): string | null {
+  const value = src.trim();
+  if (!value) return null;
+
+  // Safe URI schemes that the webview can render directly.
+  if (/^(https?:|data:|blob:|asset:)/i.test(value)) {
+    return value;
+  }
+
+  // Convert file:// URLs (common in clipboard HTML fragments) to Tauri asset URLs.
+  if (/^file:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (url.protocol.toLowerCase() !== "file:") return null;
+      const pathname = decodeURIComponent(url.pathname || "");
+      if (!pathname) return null;
+      const windowsPath = /^[A-Za-z]:/.test(pathname.slice(1))
+        ? pathname.slice(1)
+        : pathname;
+      const normalizedPath = windowsPath.replace(/\//g, "\\");
+      return convertFileSrc(normalizedPath);
+    } catch {
+      return null;
+    }
+  }
+
+  // Absolute Windows paths pasted directly into src.
+  if (/^[A-Za-z]:[\\/]/.test(value)) {
+    return convertFileSrc(value.replace(/\//g, "\\"));
+  }
+
+  return null;
+}
+
 function sanitizeHtml(html: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
@@ -101,8 +135,14 @@ function sanitizeHtml(html: string): string {
         let value = attr.value;
         // Prevent javascript: URIs
         if ((name === "href" || name === "src") && /^\s*javascript:/i.test(value)) continue;
-        // img src: allow http(s), data URIs, and blob URIs
-        if (name === "src" && !/^(https?:|data:|blob:)/i.test(value)) continue;
+        // img src: normalize local file paths and keep only renderable schemes
+        if (tag === "img" && name === "src") {
+          const normalized = normalizeImageSrc(value);
+          if (!normalized) continue;
+          value = normalized;
+        } else if (name === "src" && !/^(https?:|data:|blob:|asset:)/i.test(value)) {
+          continue;
+        }
         if (name === "style") value = sanitizeStyle(value);
         attrs += ` ${name}="${value.replace(/"/g, "&quot;")}"`;
       }
@@ -343,6 +383,34 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
+  }, [entry.type, entry.content, contentExpanded]);
+
+  // Replace broken images in HTML preview with a styled placeholder
+  useEffect(() => {
+    const container = htmlPreviewRef.current;
+    if (!container || entry.type !== "html") return;
+    const imgs = container.querySelectorAll("img");
+    const handlers: Array<[HTMLImageElement, () => void]> = [];
+    for (const img of imgs) {
+      const onError = () => {
+        const placeholder = document.createElement("span");
+        placeholder.className = "card-html-img-placeholder";
+        placeholder.textContent = "Preview not available";
+        img.replaceWith(placeholder);
+      };
+      // If the image already failed (cached failure), replace immediately
+      if (img.complete && img.naturalWidth === 0 && img.src) {
+        onError();
+      } else {
+        img.addEventListener("error", onError, { once: true });
+        handlers.push([img, onError]);
+      }
+    }
+    return () => {
+      for (const [img, handler] of handlers) {
+        img.removeEventListener("error", handler);
+      }
+    };
   }, [entry.type, entry.content, contentExpanded]);
 
   // Reset expand state when entry changes

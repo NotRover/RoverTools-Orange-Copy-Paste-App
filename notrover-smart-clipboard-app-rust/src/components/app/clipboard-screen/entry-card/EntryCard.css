@@ -216,6 +216,23 @@
   overflow: hidden;
   max-height: 120px;
   position: relative;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+/* Reset margins/padding on block elements to avoid huge gaps */
+.card-html-preview p,
+.card-html-preview div,
+.card-html-preview h1,
+.card-html-preview h2,
+.card-html-preview h3,
+.card-html-preview h4,
+.card-html-preview h5,
+.card-html-preview h6,
+.card-html-preview ul,
+.card-html-preview ol,
+.card-html-preview li {
+  margin: 2px 0;
+  padding: 0;
 }
 
 .card-html-preview--expanded {
@@ -233,10 +250,26 @@
   border-radius: 3px;
   vertical-align: middle;
   object-fit: contain;
+  display: inline-block;
+  margin: 2px 0;
 }
 
 .card-html-preview--expanded img {
   max-height: none;
+}
+
+.card-html-img-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+  vertical-align: middle;
+  min-height: 24px;
 }
 
 .card-html-preview a {
