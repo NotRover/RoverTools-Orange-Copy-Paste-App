@@ -83,7 +83,9 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | image                        | 0.25    | PNG encode/decode for clipboard images                                         |
 | base64                       | 0.22    | Data-URL encoding                                                              |
 | parking_lot                  | 0.12    | Mutex without poisoning                                                        |
-| serde + serde_json           | 1       | Serialization for IPC and disk persistence                                     |
+| serde + serde_json           | 1       | Serialization for IPC and settings persistence                                 |
+| rmp-serde                    | 1       | MessagePack binary serialization for history persistence                       |
+| zstd                         | 0.13    | Zstandard compression for history files on disk                                |
 
 ### Frontend
 
@@ -107,8 +109,9 @@ src-tauri/
 │   ├── clipboard/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_history, copy, paste, etc.)
-│   │   ├── history.rs          # ClipboardEntry, ClipboardHistory ring buffer
+│   │   ├── history.rs          # ClipboardEntry, ClipboardHistory, binary persistence (blob store + msgpack/zstd)
 │   │   ├── files.rs            # CF_HDROP read/write (Windows file clipboard)
+│   │   ├── html.rs             # CF_HTML read/write (rich text clipboard)
 │   │   └── image.rs            # Multi-format image clipboard read/write
 │   ├── runtime/
 │   │   ├── mod.rs              # Module re-exports
@@ -171,10 +174,12 @@ src/
 2. **`create_shared_history()`** — Creates `Arc<Mutex<ClipboardHistory>>`.
 3. **`app_state_from_history()`** — Builds `AppState` from the shared history and suppress flag.
 4. **`setup_runtime()`** — Called inside `tauri::Builder::setup`:
-   - Loads pinned entries from `{app_data}/pinned_entries.json`
+   - Loads history from `{app_data}/history.bin` + `{app_data}/blobs/` (compressed binary format)
+   - Loads pinned entries from `{app_data}/pinned_entries.bin` (fallback on first run)
    - Creates popup windows (hidden, off-screen)
    - Registers global shortcuts (Ctrl+Shift+C, Ctrl+Shift+V)
    - Starts clipboard watcher thread
+   - Starts background flush thread (saves dirty history every 2s)
    - Sets up main-window focus handler (auto-hides popups)
    - Restores saved window geometry
    - Starts window move/resize tracking
@@ -188,16 +193,19 @@ AppState
 ├── history: Arc<Mutex<ClipboardHistory>>   ← shared across all threads
 ├── suppress_next_capture: Arc<AtomicBool>  ← prevents watcher re-capturing
 ├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting (~1ns check)
-├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.json
+├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.bin
 ├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
-└── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
+├── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
+├── copy_notification: Arc<AtomicBool>      ← show notification on clipboard capture
+├── notif_copy: Arc<AtomicBool>             ← show notification on copy action
+└── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries
 ```
 
 **`AppState`** is managed by Tauri and injected into every command handler via `State<'_, AppState>`. The same `Arc` references are also held by the clipboard watcher thread and the hotkey handler closures.
 
 **Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture — preventing duplicate entries.
 
-**History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.json` every 2 seconds when dirty.
+**History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.bin` (compressed binary) every 2 seconds when dirty. Image data is externalised to `blobs/{id}.blob` files.
 
 ### Clipboard Module
 
@@ -206,34 +214,36 @@ AppState
 ```
 ClipboardEntry {
     id: String           ← monotonic counter (AtomicU64)
-    kind: EntryKind      ← Text | Image | File
-    content: String      ← plain text / data:image/png;base64,... / newline-delimited paths
+    kind: EntryKind      ← Text | Image | File | Html
+    content: String      ← plain text / data:image/…;base64,… / newline-delimited paths / html---PLAINTEXT---text
     timestamp: u64       ← Unix ms
     pinned: bool
     groups: Vec<String>  ← user-defined group tags (e.g. "Saved")
+    label: Option<String> ← display name (e.g. "Image Mar 17, 2:45 PM" for images)
 }
 ```
 
 **`ClipboardHistory`** is a `Vec<ClipboardEntry>` with most-recent-first ordering:
 
-| Method                              | Behavior                                                  |
-| ----------------------------------- | --------------------------------------------------------- |
-| `push(entry)`                       | Prepend, trim unpinned entries beyond `MAX_HISTORY` (100) |
-| `push_if_distinct(entry)`           | Skip if top entry matches (kind + content)                |
-| `push_if_distinct_with_flag(entry)` | Same, also returns whether insertion happened             |
-| `top(n)`                            | First N entries                                           |
-| `find(id)` / `find_mut(id)`         | Lookup by ID                                              |
-| `pin(id)` / `unpin(id)`             | Toggle pinned flag                                        |
-| `remove(id)`                        | Delete by ID                                              |
-| `clear()`                           | Remove all unpinned entries                               |
-| `set_groups(id, groups)`            | Replace the groups list for an entry                      |
-| `add_group(id, group)`              | Add a single group tag (no duplicates)                    |
-| `purge_group(group)`                | Remove a group tag from every entry that has it           |
-| `rename_group(old, new)`            | Rename a group tag across all entries                     |
-| `saved_entries()`                   | All entries that survive restarts (pinned or saved)       |
-| `load_saved_from_file(path)`        | Restore saved entries from JSON on startup                |
-| `save_saved_to_file(path)`          | Save pinned/saved entries to JSON                         |
-| `save_all_to_file(path)`            | Flush full history to disk (for history persistence)      |
+| Method                                  | Behavior                                                  |
+| --------------------------------------- | --------------------------------------------------------- |
+| `push(entry)`                           | Prepend, trim unpinned entries beyond `MAX_HISTORY` (100) |
+| `push_if_distinct(entry)`               | Skip if top entry matches (kind + content)                |
+| `push_if_distinct_with_flag(entry)`     | Same, also returns whether insertion happened             |
+| `top(n)`                                | First N entries                                           |
+| `find(id)` / `find_mut(id)`             | Lookup by ID                                              |
+| `pin(id)` / `unpin(id)`                 | Toggle pinned flag                                        |
+| `remove(id)`                            | Delete by ID                                              |
+| `clear()`                               | Remove all unpinned entries                               |
+| `set_groups(id, groups)`                | Replace the groups list for an entry                      |
+| `add_group(id, group)`                  | Add a single group tag (no duplicates)                    |
+| `purge_group(group)`                    | Remove a group tag from every entry that has it           |
+| `rename_group(old, new)`                | Rename a group tag across all entries                     |
+| `saved_entries()`                       | All entries that survive restarts (pinned or saved)       |
+| `load_saved_from_file(path, blobs_dir)` | Restore saved entries from compressed binary on startup   |
+| `save_saved_to_file(path, blobs_dir)`   | Save pinned/saved entries to compressed binary            |
+| `save_all_to_file(path, blobs_dir)`     | Flush full history to disk (compressed binary + blobs)    |
+| `load_all_from_file(path, blobs_dir)`   | Load full history from compressed binary + blobs          |
 
 #### `commands.rs` — Tauri Command Handlers
 
@@ -250,6 +260,11 @@ ClipboardEntry {
 | `set_entry_groups`         | `(id, groups) → bool`         | Set group tags for an entry, auto-save                 |
 | `purge_group_from_entries` | `(group) → bool`              | Remove a group tag from all entries                    |
 | `rename_group_in_entries`  | `(old_name, new_name) → bool` | Rename a group tag across all entries                  |
+| `bulk_delete_entries`      | `(ids) → u32`                 | Delete multiple entries, returns count removed         |
+| `bulk_pin_entries`         | `(ids, pin) → u32`            | Pin/unpin multiple entries (respects MAX_PINNED)       |
+| `bulk_set_groups`          | `(ids, groups) → u32`         | Set same groups on multiple entries                    |
+| `bulk_add_group`           | `(ids, group) → u32`          | Add a group to multiple entries                        |
+| `bulk_remove_group`        | `(ids, group) → u32`          | Remove a group from multiple entries                   |
 | `get_setting`              | `(key) → Option<Value>`       | Read a setting from `settings.json`                    |
 | `set_setting`              | `(key, value) → bool`         | Write a setting; syncs in-memory caches for known keys |
 | `get_image_file_preview`   | `(path) → Option<String>`     | Read image file → data-URL (max 12 MB)                 |
@@ -257,7 +272,7 @@ ClipboardEntry {
 
 **Internal helpers:**
 
-- `read_clipboard_entry()` — Reads current OS clipboard in priority order: text → files (CF_HDROP) → images (CF_PNG, registered formats, CF_DIB fallback). Returns `Option<ClipboardEntry>`.
+- `read_clipboard_entry()` — Reads current OS clipboard in priority order: files (CF_HDROP) → HTML (CF_HTML) → text → images (CF_PNG, registered formats, CF_DIB fallback). Returns `Option<ClipboardEntry>`.
 - `write_entry_to_clipboard(entry)` — Writes a `ClipboardEntry` back to the OS clipboard. Text via arboard (with retry), files via CF_HDROP. **Images**: on Windows uses direct Win32 API (`write_image_to_clipboard`) bypassing arboard entirely; on Linux/other uses arboard RGBA fallback.
 - `open_clipboard_with_retry()` — Opens an arboard `Clipboard` handle with up to 6 retries (50ms delay between each) to handle contention with the watcher thread or external apps.
 
@@ -269,6 +284,14 @@ Reads and writes file lists via `CF_HDROP` clipboard format using Win32 APIs:
 - **Write**: Build `DROPFILES` struct + UTF-16 filename block → `GlobalAlloc` → `SetClipboardData(CF_HDROP)`.
 - **Serialization**: File paths stored as newline-delimited strings in `ClipboardEntry.content`.
 
+#### `html.rs` — Rich Text Clipboard (CF_HTML)
+
+Reads and writes HTML content via the `CF_HTML` registered clipboard format:
+
+- **Read**: Extracts the HTML fragment from the `CF_HTML` format header (StartFragment/EndFragment markers).
+- **Write**: Constructs a `CF_HTML` header with proper byte offsets and writes the fragment via Win32 APIs.
+- HTML entries store both the HTML fragment and a plain-text fallback separated by `\n---PLAINTEXT---\n`.
+
 #### `image.rs` — Multi-Format Image Clipboard
 
 **Reading** — tries formats in priority order:
@@ -277,7 +300,7 @@ Reads and writes file lists via `CF_HDROP` clipboard format using Win32 APIs:
 2. **CF_HDROP** — image file exposed as a shell file-drop.
 3. **arboard fallback** — `CF_DIB`/`CF_DIBV5` for screenshots and classic Win32 apps.
 
-Image data is encoded as `data:<mime>;base64,...` URLs for frontend display.
+Image data is encoded as `data:<mime>;base64,...` URLs for frontend display. On disk, image bytes are stored as raw binary blob files (`blobs/{id}.blob`) — not base64 — to eliminate the 33% encoding overhead.
 
 **Writing (Windows)** — `write_image_to_clipboard(data_url)`:
 
@@ -386,17 +409,19 @@ Dev server runs on port 1420 (fixed for Tauri dev mode).
 ```typescript
 interface ClipboardEntry {
   id: string;
-  type: "text" | "image" | "file"; // serde renames "kind" → "type"
+  type: "text" | "image" | "file" | "html"; // serde renames "kind" → "type"
   content: string;
   timestamp: number;
   pinned: boolean;
+  groups: string[];
+  label?: string; // e.g. "Image Mar 17, 2:45 PM"
 }
 
 type AppScreen = "clipboard" | "search" | "shortcuts" | "settings";
 type AppTheme = "dark" | "light";
 ```
 
-Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `isImageFile()`, `isVideoFile()`, `classifyFileEntry()`.
+Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `isImageFile()`, `isVideoFile()`, `classifyFileEntry()`, `imageDisplayName()`.
 
 ### Main App
 
@@ -603,20 +628,34 @@ User presses Ctrl+Shift+V
 
 ## Persistence & Storage
 
-| What              | Location                          | Format                                                 | When Saved           | When Loaded   |
-| ----------------- | --------------------------------- | ------------------------------------------------------ | -------------------- | ------------- |
-| Pinned entries    | `{app_data}/pinned_entries.json`  | JSON array of `ClipboardEntry`                         | On pin/unpin/groups  | On startup    |
-| Full history      | `{app_data}/history.json`         | JSON array of `ClipboardEntry`                         | Every 2s when dirty  | On startup    |
-| Settings          | `{app_data}/settings.json`        | JSON object `{ key: value }`                           | On `set_setting`     | On startup    |
-| Boot ID           | `{app_data}/boot_id.txt`          | Plain text (boot epoch seconds)                        | On startup           | On startup    |
-| Window geometry   | `{app_data}/window-state.json`    | `{ x, y, width, height, maximized }`                   | On every move/resize | On startup    |
-| Theme preference  | `localStorage.sc-theme`           | `"dark"` or `"light"`                                  | On toggle            | On mount      |
-| Layout preference | `localStorage.sc-layout`          | `"masonry"` or `"list"`                                | On change            | On mount      |
-| Sort preference   | `localStorage.sc-sort`            | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"` | On change            | On mount      |
-| Paste slot count  | `localStorage.sc-paste-slots`     | `"3"` – `"10"`                                         | On change            | On popup show |
-| Recent searches   | `localStorage.sc-recent-searches` | JSON string array (max 8)                              | On search            | On mount      |
+### Binary Persistence Format
 
-**Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.json` every 2 seconds.
+History and pinned entries use a **compressed binary format** for fast, compact disk storage:
+
+1. **Metadata** (`history.bin`, `pinned_entries.bin`) — Entry metadata serialized with **MessagePack** (`rmp-serde`) and compressed with **Zstandard** (`zstd`, compression level 3). Image entries store a `blob:{id}` reference instead of inline base64 data.
+2. **Blob store** (`blobs/`) — Raw image bytes (PNG, JPEG, WebP, etc.) written directly to individual files (`{id}.blob`). Eliminates the 33% base64 encoding overhead on disk.
+3. **On load** — Blob references are transparently resolved back to `data:<mime>;base64,…` URLs in memory, so the frontend sees no difference.
+4. **Orphan cleanup** — `save_all_to_file` removes blob files that no longer correspond to any history entry.
+
+This replaces the previous JSON + inline base64 approach, yielding ~70% smaller image storage and faster serialization.
+
+### Storage Locations
+
+| What              | Location                          | Format                                                 | When Saved           | When Loaded     |
+| ----------------- | --------------------------------- | ------------------------------------------------------ | -------------------- | --------------- |
+| Pinned entries    | `{app_data}/pinned_entries.bin`   | Zstd-compressed MessagePack + blob refs                | On pin/unpin/groups  | On startup      |
+| Full history      | `{app_data}/history.bin`          | Zstd-compressed MessagePack + blob refs                | Every 2s when dirty  | On startup      |
+| Image blobs       | `{app_data}/blobs/{id}.blob`      | Raw binary image bytes (PNG/JPEG/WebP/etc.)            | On history save      | On history load |
+| Settings          | `{app_data}/settings.json`        | JSON object `{ key: value }`                           | On `set_setting`     | On startup      |
+| Boot ID           | `{app_data}/boot_id.txt`          | Plain text (boot epoch seconds)                        | On startup           | On startup      |
+| Window geometry   | `{app_data}/window-state.json`    | `{ x, y, width, height, maximized }`                   | On every move/resize | On startup      |
+| Theme preference  | `localStorage.sc-theme`           | `"dark"` or `"light"`                                  | On toggle            | On mount        |
+| Layout preference | `localStorage.sc-layout`          | `"masonry"` or `"list"`                                | On change            | On mount        |
+| Sort preference   | `localStorage.sc-sort`            | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"` | On change            | On mount        |
+| Paste slot count  | `localStorage.sc-paste-slots`     | `"3"` – `"10"`                                         | On change            | On popup show   |
+| Recent searches   | `localStorage.sc-recent-searches` | JSON string array (max 8)                              | On search            | On mount        |
+
+**Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.bin` every 2 seconds.
 
 ---
 

@@ -17,7 +17,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `Ctrl + Shift + V` → show recent history popup for quick paste
 - **Clipboard history** with support for:
   - Text entries
-  - Image entries (stored as data URLs)
+  - Image entries (stored as raw binary blobs on disk, served as data URLs in memory)
   - File entries (single and multiple files)
   - Multiple image files (with thumbnail previews)
   - Video files (with custom in-card player — play/pause, seek, mute only)
@@ -65,6 +65,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `tauri-plugin-global-shortcut` for global hotkeys
   - `arboard` for clipboard text/image access
   - `image` + `base64` for image encode/decode and data URL conversion
+  - `rmp-serde` + `zstd` for compressed binary persistence (MessagePack + Zstandard)
   - `parking_lot` for efficient shared mutex state
   - `windows-sys` for Windows input/cursor/monitor and clipboard format helpers
 
@@ -130,7 +131,7 @@ The backend is organized by **feature/domain**, not by technical layer alone.
 
 ### 1) `clipboard` module (clipboard domain)
 
-- `history.rs`: in-memory clipboard history model and operations
+- `history.rs`: in-memory clipboard history model, operations, and compressed binary persistence (blob store + MessagePack/zstd)
 - `image.rs`: image clipboard format handling + data URL conversion
 - `files.rs`: Windows `CF_HDROP` read/write for single and multiple file paths
 - `commands.rs`: Tauri IPC commands for clipboard actions (get/delete/clear/copy/paste/pin/unpin) and clipboard read/write helpers
