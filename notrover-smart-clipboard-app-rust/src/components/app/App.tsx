@@ -632,14 +632,15 @@ const App: React.FC = () => {
     setUndoSnapshot(null);
   }, [undoSnapshot]);
 
-  const { textCount, imageCount, fileCount } = entries.reduce(
+  const { textCount, imageCount, fileCount, htmlCount } = entries.reduce(
     (acc, e) => {
       if (e.type === "text") acc.textCount++;
+      else if (e.type === "html") acc.htmlCount++;
       else if (e.type === "image" || (e.type === "file" && classifyFileEntry(e.content) === "image")) acc.imageCount++;
       else if (e.type === "file" && classifyFileEntry(e.content) === "file") acc.fileCount++;
       return acc;
     },
-    { textCount: 0, imageCount: 0, fileCount: 0 },
+    { textCount: 0, imageCount: 0, fileCount: 0, htmlCount: 0 },
   );
 
   return (
@@ -689,6 +690,7 @@ const App: React.FC = () => {
             textCount={textCount}
             imageCount={imageCount}
             fileCount={fileCount}
+            htmlCount={htmlCount}
             total={entries.length}
           />
         )}
