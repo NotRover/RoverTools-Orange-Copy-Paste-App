@@ -205,6 +205,16 @@
   word-break: break-word;
   overflow: hidden;
   max-height: 120px;
+  position: relative;
+}
+
+.card-html-preview--expanded {
+  max-height: none;
+}
+
+.card-html-preview--faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
 }
 
 .card-html-preview img {
