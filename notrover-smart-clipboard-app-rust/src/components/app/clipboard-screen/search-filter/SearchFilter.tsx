@@ -58,7 +58,10 @@ export function useSearchFilter(entries: ClipboardEntry[]): SearchFilterState {
   const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(new Set());
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState("");
+  const [dateBefore, setDateBefore] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedFilterGroups, setSelectedFilterGroups] = useState<Set<string>>(new Set());
   const filterRef = useRef<HTMLDivElement>(null);
@@ -82,22 +85,27 @@ export function useSearchFilter(entries: ClipboardEntry[]): SearchFilterState {
     });
   }, []);
 
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }, []);
+
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (selectedKinds.size > 0) n++;
     if (pinnedOnly) n++;
-    if (dateAfter || dateBefore) n++;
+    if (dateAfter || (dateBefore && dateBefore !== todayStr)) n++;
     if (selectedFilterGroups.size > 0) n++;
     return n;
-  }, [selectedKinds, pinnedOnly, dateAfter, dateBefore, selectedFilterGroups]);
+  }, [selectedKinds, pinnedOnly, dateAfter, dateBefore, selectedFilterGroups, todayStr]);
 
   const clearAllFilters = useCallback(() => {
     setSelectedKinds(new Set());
     setPinnedOnly(false);
     setDateAfter("");
-    setDateBefore("");
+    setDateBefore(todayStr);
     setSelectedFilterGroups(new Set());
-  }, []);
+  }, [todayStr]);
 
   const filteredEntries = useMemo(() => {
     let pool = entries;
@@ -185,15 +193,16 @@ interface FilterDropdownProps {
 export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGroups }) => (
   <div className="sort-dropdown" ref={sf.filterRef}>
     <button
-      className={`sort-dropdown-trigger${sf.filtersOpen ? " sort-dropdown-trigger--open" : ""}`}
+      className={`sort-dropdown-trigger${sf.filtersOpen ? " sort-dropdown-trigger--open" : ""}${sf.activeFilterCount > 0 ? " sort-dropdown-trigger--active" : ""}`}
       onClick={() => sf.setFiltersOpen((v) => !v)}
       data-tooltip="Filters"
       data-tooltip-pos="below"
     >
       <FilterIcon />
-      <span className="layout-pill-label">
-        Filters{sf.activeFilterCount > 0 ? ` (${sf.activeFilterCount})` : ""}
-      </span>
+      <span className="layout-pill-label">Filters</span>
+      {sf.activeFilterCount > 0 && (
+        <span className="cs-filter-badge">{sf.activeFilterCount}</span>
+      )}
       <ChevronDownIcon className="sort-chevron" />
     </button>
     {sf.filtersOpen && (

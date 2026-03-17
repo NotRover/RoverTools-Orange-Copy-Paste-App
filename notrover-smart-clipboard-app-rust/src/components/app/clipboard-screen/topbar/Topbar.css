@@ -68,6 +68,18 @@
   color: var(--accent);
 }
 
+.sort-dropdown-trigger--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.sort-dropdown-trigger--active:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+
 .sort-chevron {
   margin-left: 1px;
   flex-shrink: 0;
