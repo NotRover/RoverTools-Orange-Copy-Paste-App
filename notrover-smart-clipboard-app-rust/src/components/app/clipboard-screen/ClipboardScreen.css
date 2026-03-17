@@ -287,7 +287,7 @@
 }
 
 .groups-dropdown {
-  position: relative;
+  position: static;
 }
 
 /* Wrapper for the select button + floating bulk popup */
@@ -626,39 +626,78 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  width: 180px;
+  width: 190px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: var(--shadow, 0 4px 12px rgba(0,0,0,.15));
+  box-shadow: var(--shadow, 0 4px 16px rgba(0,0,0,.18));
   z-index: 100;
   animation: sortDropIn 0.12s ease-out;
 }
 
-/* Layout pill switch inside options card */
+/* Section structure */
+
+.cs-options-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 2px;
+}
+
+.cs-options-section-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 4px;
+}
+
+.cs-options-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 4px;
+}
+
+/* Layout sliding pill switch */
 
 .cs-layout-switch {
+  position: relative;
   display: flex;
   align-items: center;
   padding: 2px;
   border-radius: 7px;
+  background: #fff;
   border: 1px solid var(--border);
-  background: var(--bg);
-  gap: 2px;
+  gap: 0;
   width: 100%;
 }
 
+.cs-layout-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  border-radius: 5px;
+  background: var(--accent);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+}
+
 .cs-layout-btn {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   flex: 1;
-  padding: 4px 8px;
+  padding: 3px 6px;
   border-radius: 5px;
   border: none;
   background: transparent;
@@ -667,57 +706,92 @@
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition:
-    background 0.13s ease,
-    color 0.13s ease;
+  transition: color 0.15s ease;
   user-select: none;
   white-space: nowrap;
 }
 
 .cs-layout-btn:hover {
   color: var(--text-secondary);
-  background: var(--surface-hover);
 }
 
 .cs-layout-btn--active {
-  background: var(--accent-dim-strong);
-  color: var(--accent);
+  color: #fff;
 }
 
 .cs-layout-btn--active:hover {
+  color: #fff;
+}
+
+/* Row-style buttons (groups, clear) */
+
+.cs-options-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cs-options-row:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.cs-options-row--open {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.cs-options-row--open:hover {
   background: var(--accent-dim-strong);
   color: var(--accent);
 }
 
-/* Lightweight button inside options card */
+.cs-options-row-chevron {
+  margin-left: auto;
+  opacity: 0.5;
+  transition: transform 0.15s ease;
+}
 
-.cs-options-btn {
-  display: flex;
+.cs-options-row--open .cs-options-row-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+.cs-options-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  font-size: 8.5px;
+  font-weight: 700;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  line-height: 1;
+}
+
+/* Danger row (clear history) */
+
+.cs-options-row--danger {
   color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    border-color 0.13s ease,
-    color 0.13s ease;
-  white-space: nowrap;
-  user-select: none;
 }
 
-.cs-options-btn:hover {
-  color: var(--text-secondary);
-  border-color: var(--border-light);
-}
-
-.cs-options-btn--open {
-  border-color: var(--accent);
-  color: var(--accent);
+.cs-options-row--danger:hover {
+  color: var(--danger);
+  background: rgba(255, 62, 28, 0.07);
 }

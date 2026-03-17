@@ -436,16 +436,18 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             {optionsOpen && !multiSelect.isSelecting && (
               <div className="cs-options-card">
                 {/* Layout section */}
-                <div className="cs-card-section">
-                  <div className="cs-section-label">Layout</div>
+                <div className="cs-options-section">
+                  <div className="cs-options-section-label">Layout</div>
                   <div className="cs-layout-switch">
+                    <div
+                      className="cs-layout-slider"
+                      style={{ transform: layout === "list" ? "translateX(100%)" : "translateX(0)" }}
+                    />
                     {layouts.map((l) => (
                       <button
                         key={l.id}
                         className={`cs-layout-btn${layout === l.id ? " cs-layout-btn--active" : ""}`}
-                        onClick={() => {
-                          selectLayout(l.id);
-                        }}
+                        onClick={() => selectLayout(l.id)}
                       >
                         {l.icon}
                         <span>{l.label}</span>
@@ -454,22 +456,22 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   </div>
                 </div>
 
+                <div className="cs-options-divider" />
+
                 {/* Groups section */}
-                <div className="cs-card-section">
-                  <div className="cs-section-label">
-                    Groups
-                    {availableGroups.length > 0 && (
-                      <span className="cs-count">{availableGroups.length}</span>
-                    )}
-                  </div>
+                <div className="cs-options-section">
                   <div className="groups-dropdown" ref={groupsRef}>
                     <button
-                      className={`cs-options-btn${groupsOpen ? " cs-options-btn--open" : ""}`}
+                      className={`cs-options-row${groupsOpen ? " cs-options-row--open" : ""}`}
+                      onMouseDown={(e) => { if (groupsOpen) e.stopPropagation(); }}
                       onClick={() => setGroupsOpen((v) => !v)}
                     >
-                      <TagIcon size={10} strokeWidth={2} />
+                      <TagIcon size={11} strokeWidth={2} />
                       <span>Manage Groups</span>
-                      <ChevronDownIcon className="sort-chevron" size={9} />
+                      {availableGroups.length > 0 && (
+                        <span className="cs-options-badge">{availableGroups.length}</span>
+                      )}
+                      <ChevronDownIcon className="cs-options-row-chevron" size={9} />
                     </button>
                     {groupsOpen && (
                       <GroupManagerCard
@@ -486,18 +488,21 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
                 {/* Clear history */}
                 {onClearAll && (
-                  <div className="cs-card-section">
-                    <button
-                      className="cs-card-clear-btn cs-card-clear-btn--danger"
-                      onClick={() => {
-                        onClearAll();
-                        setOptionsOpen(false);
-                      }}
-                    >
-                      <TrashIcon size={10} />
-                      Clear History
-                    </button>
-                  </div>
+                  <>
+                    <div className="cs-options-divider" />
+                    <div className="cs-options-section">
+                      <button
+                        className="cs-options-row cs-options-row--danger"
+                        onClick={() => {
+                          onClearAll();
+                          setOptionsOpen(false);
+                        }}
+                      >
+                        <TrashIcon size={11} />
+                        <span>Clear History</span>
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             )}
