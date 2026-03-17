@@ -258,24 +258,32 @@
   flex: none;
 }
 
-/*  Layout toggle pill  */
+/*  Toolbar  */
 
 .layout-toggle-wrap {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 12px 0;
   flex-shrink: 0;
   z-index: 10;
+}
+
+/* Left / right clusters */
+
+.cs-toolbar-left,
+.cs-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* Sort dropdown */
 
 .sort-dropdown {
   position: relative;
-  margin-right: auto;
 }
 
 .groups-dropdown {
@@ -392,56 +400,6 @@
 .sort-dropdown-item--active:hover {
   background: var(--accent);
   color: #fff;
-}
-
-.layout-switch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  gap: 1px;
-}
-
-.layout-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.2px;
-  transition:
-    background 0.13s ease,
-    color 0.13s ease;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.layout-switch-btn:hover {
-  color: var(--text-secondary);
-}
-
-.layout-switch-btn--active {
-  background: var(--accent);
-  color: #fff;
-}
-
-.layout-switch-btn--active:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.layout-switch-btn--danger:hover {
-  color: var(--danger);
 }
 
 /*  Entry grid (Pinterest masonry)  */
@@ -660,4 +618,106 @@
 /* Footer always pinned to the bottom of the card body */
 .entry-list .card-footer {
   margin-top: auto;
+}
+
+/* Options card */
+
+.cs-options-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow, 0 4px 12px rgba(0,0,0,.15));
+  z-index: 100;
+  animation: sortDropIn 0.12s ease-out;
+}
+
+/* Layout pill switch inside options card */
+
+.cs-layout-switch {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  gap: 2px;
+  width: 100%;
+}
+
+.cs-layout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.13s ease,
+    color 0.13s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cs-layout-btn:hover {
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+}
+
+.cs-layout-btn--active {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+.cs-layout-btn--active:hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+/* Lightweight button inside options card */
+
+.cs-options-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.13s ease,
+    color 0.13s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.cs-options-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-light);
+}
+
+.cs-options-btn--open {
+  border-color: var(--accent);
+  color: var(--accent);
 }

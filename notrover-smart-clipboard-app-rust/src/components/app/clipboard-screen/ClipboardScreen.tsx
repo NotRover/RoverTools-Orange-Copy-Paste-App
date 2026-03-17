@@ -4,6 +4,7 @@ import { EntryCard } from "./entry-card/EntryCard";
 export { EntryCard };
 import GroupManagerCard from "./group-manager/GroupManagerCard";
 import BulkActionsBar from "./bulk-actions/BulkActionsBar";
+import { useSearchFilter, SearchBar, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { SORT_OPTIONS, sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
@@ -17,6 +18,7 @@ import {
   MultiSelectIcon,
   PinIcon,
   SaveStarIcon,
+  SlidersIcon,
 } from "../../icons";
 import "./ClipboardScreen.css";
 
@@ -157,11 +159,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const [groupsOpen, setGroupsOpen] = useState(false);
   const groupsRef = useRef<HTMLDivElement>(null);
 
+  // Search & filter (delegated to sub-component)
+  const sf = useSearchFilter(entries);
+
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef<HTMLDivElement>(null);
+
   // Multi-select state
   const multiSelect = useMultiSelect();
 
   // Flat list of all visible entry IDs (respecting sort order) for range selection
-  const dayGroups = groupByDay(entries).map((g) => ({
+  const dayGroups = groupByDay(sf.filteredEntries).map((g) => ({
     ...g,
     entries: applySortWithinGroup(g.entries, sort),
   }));
@@ -212,17 +220,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       .every((e) => e.groups.includes("Saved"));
   })();
 
-  // Close sort dropdown on outside click
+  // Close sort/filter/options dropdowns on outside click
   useEffect(() => {
-    if (!sortOpen) return;
+    if (!sortOpen && !sf.filtersOpen && !optionsOpen) return;
     const handler = (e: MouseEvent) => {
-      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
-        setSortOpen(false);
-      }
+      if (sortOpen && sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
+      if (sf.filtersOpen && sf.filterRef.current && !sf.filterRef.current.contains(e.target as Node)) sf.setFiltersOpen(false);
+      if (optionsOpen && optionsRef.current && !optionsRef.current.contains(e.target as Node)) setOptionsOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [sortOpen]);
+  }, [sortOpen, sf.filtersOpen, optionsOpen]);
 
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
@@ -270,228 +278,239 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     {
       id: "masonry",
       label: "Masonry",
-      icon: <MasonryIcon />,
+      icon: <MasonryIcon size={10} />,
     },
     {
       id: "list",
       label: "List",
-      icon: <ListIcon />,
+      icon: <ListIcon size={10} />,
     },
   ];
 
   return (
     <div className="clipboard-screen-root">
-      {/*  Toolbar: sort + select (+ bulk popup) + groups + layout + clear  */}
+      {/* Toolbar: [Sort] [Filter] — Search — [Select] [Options] */}
       <div className="layout-toggle-wrap">
-        {/* Sort dropdown */}
-        <div className="sort-dropdown" ref={sortRef}>
-          <button
-            className={`sort-dropdown-trigger${sortOpen ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() => {
-              if (!sortOpen) document.dispatchEvent(new Event("tooltip:hide"));
-              setSortOpen((v) => !v);
-            }}
-            data-tooltip="Sort order"
-            data-tooltip-pos="below"
-          >
-            {SORT_OPTIONS.find((s) => s.id === sort)?.icon}
-            <span className="layout-pill-label">
-              {SORT_OPTIONS.find((s) => s.id === sort)?.label}
-            </span>
-            <ChevronDownIcon className="sort-chevron" />
-          </button>
-          {sortOpen && (
-            <div className="sort-dropdown-menu">
-              {SORT_OPTIONS.map((s) => (
-                <button
-                  key={s.id}
-                  className={`sort-dropdown-item${sort === s.id ? " sort-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    setSort(s.id);
-                    localStorage.setItem("sc-sort", s.id);
-                    setSortOpen(false);
-                  }}
-                >
-                  {s.icon}
-                  <span>{s.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Groups manager */}
-        <div
-          className="groups-dropdown"
-          ref={groupsRef}
-          style={
-            multiSelect.isSelecting
-              ? { opacity: 0.35, pointerEvents: "none" }
-              : undefined
-          }
-        >
-          <button
-            className={`sort-dropdown-trigger${groupsOpen ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() => {
-              if (multiSelect.isSelecting) return;
-              setGroupsOpen((v) => !v);
-            }}
-            data-tooltip="Manage groups"
-            data-tooltip-pos="below"
-          >
-            <TagIcon size={12} strokeWidth={2} />
-            <span className="layout-pill-label">
-              Groups
-              {availableGroups.length > 0 ? ` (${availableGroups.length})` : ""}
-            </span>
-            <ChevronDownIcon className="sort-chevron" />
-          </button>
-          {groupsOpen && !multiSelect.isSelecting && (
-            <GroupManagerCard
-              groups={availableGroups}
-              entries={entries}
-              onAddGroup={onAddGroup}
-              onDeleteGroup={onDeleteGroup}
-              onRenameGroup={onRenameGroup}
-              onClose={() => setGroupsOpen(false)}
-            />
-          )}
-        </div>
-
-        {/* Select mode button — bulk actions popup anchors here */}
-        <div className="bulk-select-wrap">
-          <button
-            className={`sort-dropdown-trigger${multiSelect.isSelecting ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() =>
-              multiSelect.isSelecting
-                ? multiSelect.exitSelectMode()
-                : multiSelect.enterSelectMode()
-            }
-            data-tooltip="Select entries"
-            data-tooltip-pos="below"
-          >
-            <MultiSelectIcon size={12} />
-            <span className="layout-pill-label">
-              {multiSelect.isSelecting
-                ? multiSelect.selectedCount > 0
-                  ? `${multiSelect.selectedCount} selected`
-                  : "Select"
-                : "Select"}
-            </span>
-            {multiSelect.isSelecting && allPinned && (
-              <span
-                style={{
-                  color: "var(--accent)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  marginLeft: 1,
-                }}
-              >
-                <PinIcon size={10} filled={true} />
-              </span>
-            )}
-            {multiSelect.isSelecting && allSaved && (
-              <span
-                style={{
-                  color: "#22c55e",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  marginLeft: 1,
-                }}
-              >
-                <SaveStarIcon size={10} filled={true} />
-              </span>
-            )}
-          </button>
-
-          {/* Bulk actions popup — floats below this wrapper */}
-          {multiSelect.isSelecting && (
-            <BulkActionsBar
-              selectedCount={multiSelect.selectedCount}
-              totalCount={entries.length}
-              onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
-              onDeselectAll={multiSelect.deselectAll}
-              onExitSelectMode={multiSelect.exitSelectMode}
-              onBulkDelete={() => {
-                if (onBulkDelete) {
-                  onBulkDelete([...multiSelect.selectedIds]);
-                  multiSelect.exitSelectMode();
-                }
-              }}
-              allPinned={allPinned}
-              onBulkTogglePin={() => {
-                if (allPinned) {
-                  if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
-                } else {
-                  if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
-                }
-              }}
-              allSaved={allSaved}
-              onBulkToggleSave={() => {
-                if (allSaved) {
-                  if (onBulkUnsave) onBulkUnsave([...multiSelect.selectedIds]);
-                } else {
-                  if (onBulkSave) onBulkSave([...multiSelect.selectedIds]);
-                }
-              }}
-              onBulkAddGroup={(group) => {
-                if (onBulkAddGroup) {
-                  onBulkAddGroup([...multiSelect.selectedIds], group);
-                }
-              }}
-              onBulkRemoveGroup={(group) => {
-                if (onBulkRemoveGroup) {
-                  onBulkRemoveGroup([...multiSelect.selectedIds], group);
-                }
-              }}
-              availableGroups={availableGroups}
-              commonGroups={commonGroups}
-            />
-          )}
-        </div>
-
-        <div className="layout-switch" role="group" aria-label="Layout">
-          {layouts.map((l) => (
+        {/* Left side: Sort + Filters */}
+        <div className="cs-toolbar-left">
+          {/* Sort dropdown */}
+          <div className="sort-dropdown" ref={sortRef}>
             <button
-              key={l.id}
-              id={`layout-option-${l.id}`}
-              className={`layout-switch-btn${layout === l.id ? " layout-switch-btn--active" : ""}`}
-              onClick={() => selectLayout(l.id)}
-              data-tooltip={l.label}
+              className={`sort-dropdown-trigger${sortOpen ? " sort-dropdown-trigger--open" : ""}`}
+              onClick={() => {
+                if (!sortOpen) document.dispatchEvent(new Event("tooltip:hide"));
+                setSortOpen((v) => !v);
+              }}
+              data-tooltip="Sort order"
               data-tooltip-pos="below"
             >
-              {l.icon}
-              <span className="layout-pill-label">{l.label}</span>
+              {SORT_OPTIONS.find((s) => s.id === sort)?.icon}
+              <span className="layout-pill-label">
+                {SORT_OPTIONS.find((s) => s.id === sort)?.label}
+              </span>
+              <ChevronDownIcon className="sort-chevron" />
             </button>
-          ))}
-        </div>
-
-        {onClearAll && (
-          <div
-            className="layout-switch"
-            role="group"
-            style={
-              multiSelect.isSelecting
-                ? { opacity: 0.35, pointerEvents: "none" }
-                : undefined
-            }
-          >
-            <button
-              className="layout-switch-btn layout-switch-btn--danger"
-              onClick={onClearAll}
-              data-tooltip="Clear all history"
-              data-tooltip-pos="below"
-            >
-              <TrashIcon size={12} />
-              <span className="layout-pill-label">Clear</span>
-            </button>
+            {sortOpen && (
+              <div className="sort-dropdown-menu">
+                {SORT_OPTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    className={`sort-dropdown-item${sort === s.id ? " sort-dropdown-item--active" : ""}`}
+                    onClick={() => {
+                      setSort(s.id);
+                      localStorage.setItem("sc-sort", s.id);
+                      setSortOpen(false);
+                    }}
+                  >
+                    {s.icon}
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Filter dropdown */}
+          <FilterDropdown sf={sf} availableGroups={availableGroups} />
+        </div>
+
+        {/* Center: Search bar */}
+        <SearchBar sf={sf} />
+
+        {/* Right side: Select + Options */}
+        <div className="cs-toolbar-right">
+          {/* Select mode button — bulk actions popup anchors here */}
+          <div className="bulk-select-wrap">
+            <button
+              className={`sort-dropdown-trigger${multiSelect.isSelecting ? " sort-dropdown-trigger--open" : ""}`}
+              onClick={() =>
+                multiSelect.isSelecting
+                  ? multiSelect.exitSelectMode()
+                  : multiSelect.enterSelectMode()
+              }
+              data-tooltip="Select entries"
+              data-tooltip-pos="below"
+            >
+              <MultiSelectIcon size={12} />
+              <span className="layout-pill-label">
+                {multiSelect.isSelecting
+                  ? multiSelect.selectedCount > 0
+                    ? `${multiSelect.selectedCount} selected`
+                    : "Select"
+                  : "Select"}
+              </span>
+              {multiSelect.isSelecting && allPinned && (
+                <span style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", marginLeft: 1 }}>
+                  <PinIcon size={10} filled={true} />
+                </span>
+              )}
+              {multiSelect.isSelecting && allSaved && (
+                <span style={{ color: "#22c55e", display: "inline-flex", alignItems: "center", marginLeft: 1 }}>
+                  <SaveStarIcon size={10} filled={true} />
+                </span>
+              )}
+            </button>
+
+            {/* Bulk actions popup — floats below this wrapper */}
+            {multiSelect.isSelecting && (
+              <BulkActionsBar
+                selectedCount={multiSelect.selectedCount}
+                totalCount={entries.length}
+                onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
+                onDeselectAll={multiSelect.deselectAll}
+                onExitSelectMode={multiSelect.exitSelectMode}
+                onBulkDelete={() => {
+                  if (onBulkDelete) {
+                    onBulkDelete([...multiSelect.selectedIds]);
+                    multiSelect.exitSelectMode();
+                  }
+                }}
+                allPinned={allPinned}
+                onBulkTogglePin={() => {
+                  if (allPinned) {
+                    if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
+                  } else {
+                    if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
+                  }
+                }}
+                allSaved={allSaved}
+                onBulkToggleSave={() => {
+                  if (allSaved) {
+                    if (onBulkUnsave) onBulkUnsave([...multiSelect.selectedIds]);
+                  } else {
+                    if (onBulkSave) onBulkSave([...multiSelect.selectedIds]);
+                  }
+                }}
+                onBulkAddGroup={(group) => {
+                  if (onBulkAddGroup) {
+                    onBulkAddGroup([...multiSelect.selectedIds], group);
+                  }
+                }}
+                onBulkRemoveGroup={(group) => {
+                  if (onBulkRemoveGroup) {
+                    onBulkRemoveGroup([...multiSelect.selectedIds], group);
+                  }
+                }}
+                availableGroups={availableGroups}
+                commonGroups={commonGroups}
+              />
+            )}
+          </div>
+
+          {/* Options button — reveals layout, groups, clear in a card */}
+          <div className="sort-dropdown" ref={optionsRef}>
+            <button
+              className={`sort-dropdown-trigger${optionsOpen ? " sort-dropdown-trigger--open" : ""}`}
+              onClick={() => setOptionsOpen((v) => !v)}
+              data-tooltip="Options"
+              data-tooltip-pos="below"
+              style={
+                multiSelect.isSelecting
+                  ? { opacity: 0.35, pointerEvents: "none" }
+                  : undefined
+              }
+            >
+              <SlidersIcon size={12} />
+              <span className="layout-pill-label">Options</span>
+            </button>
+            {optionsOpen && !multiSelect.isSelecting && (
+              <div className="cs-options-card">
+                {/* Layout section */}
+                <div className="cs-card-section">
+                  <div className="cs-section-label">Layout</div>
+                  <div className="cs-layout-switch">
+                    {layouts.map((l) => (
+                      <button
+                        key={l.id}
+                        className={`cs-layout-btn${layout === l.id ? " cs-layout-btn--active" : ""}`}
+                        onClick={() => {
+                          selectLayout(l.id);
+                        }}
+                      >
+                        {l.icon}
+                        <span>{l.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Groups section */}
+                <div className="cs-card-section">
+                  <div className="cs-section-label">
+                    Groups
+                    {availableGroups.length > 0 && (
+                      <span className="cs-count">{availableGroups.length}</span>
+                    )}
+                  </div>
+                  <div className="groups-dropdown" ref={groupsRef}>
+                    <button
+                      className={`cs-options-btn${groupsOpen ? " cs-options-btn--open" : ""}`}
+                      onClick={() => setGroupsOpen((v) => !v)}
+                    >
+                      <TagIcon size={10} strokeWidth={2} />
+                      <span>Manage Groups</span>
+                      <ChevronDownIcon className="sort-chevron" size={9} />
+                    </button>
+                    {groupsOpen && (
+                      <GroupManagerCard
+                        groups={availableGroups}
+                        entries={entries}
+                        onAddGroup={onAddGroup}
+                        onDeleteGroup={onDeleteGroup}
+                        onRenameGroup={onRenameGroup}
+                        onClose={() => setGroupsOpen(false)}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Clear history */}
+                {onClearAll && (
+                  <div className="cs-card-section">
+                    <button
+                      className="cs-card-clear-btn cs-card-clear-btn--danger"
+                      onClick={() => {
+                        onClearAll();
+                        setOptionsOpen(false);
+                      }}
+                    >
+                      <TrashIcon size={10} />
+                      Clear History
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div
         className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
       >
+        {sf.isFiltering && sf.filteredEntries.length === 0 ? (
+          <NoResults sf={sf} />
+        ) : (
         <div className="timeline-wrap">
           <div className="timeline-groups">
             {dayGroups.map((group, idx) => (
@@ -569,6 +588,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,6 @@ import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
-import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import {
@@ -663,15 +662,6 @@ const App: React.FC = () => {
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
-        ) : screen === "search" ? (
-          <SearchScreen
-            entries={entries}
-            onCopy={handleCopy}
-            onDelete={handleDelete}
-            onPin={handlePin}
-            availableGroups={availableGroups}
-            onSetGroups={handleSetGroups}
-          />
         ) : (
           <ClipboardScreen
             entries={entries}
