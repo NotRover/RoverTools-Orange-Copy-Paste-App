@@ -136,7 +136,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onBulkRemoveGroup,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
-    return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "masonry";
+    return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "tiles";
   });
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("sc-sort") as SortMode) ?? "newest";
@@ -319,7 +319,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   <div className="timeline-group-body__inner">
                     <div
                       className={
-                        layout === "masonry" ? "entry-grid" : "entry-list"
+                        layout === "tiles" ? "entry-grid" : "entry-list"
                       }
                     >
                       {group.entries.map((entry) => (

@@ -473,9 +473,9 @@ export const FolderIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ siz
   </svg>
 );
 
-/* ── Masonry layout ── */
+/* ── Tiles layout ── */
 
-export const MasonryIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+export const TilesIcon: React.FC<IconProps> = ({ size = 12, className }) => (
   <svg
     width={size}
     height={size}

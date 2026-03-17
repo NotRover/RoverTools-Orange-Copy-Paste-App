@@ -23,7 +23,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - Video files (with custom in-card player — play/pause, seek, mute only)
 - **Clipboard screen:**
   - **Day-grouped timeline** — entries grouped by date with collapsible day sections and dot-rail navigation
-  - Masonry-style card grid (Pinterest-like layout) and list layout — toggle persisted to `localStorage`
+  - Tiles card grid (Pinterest-like layout) and list layout — toggle persisted to `localStorage`
   - **Sort controls** — sort dropdown with: Newest, Oldest, A → Z, Z → A, Type (text/file/image); sort persisted to `localStorage`
   - Click any card to copy it back to clipboard
   - **Pin entries** — pin important entries so they survive clear-all; visual "Pinned" chip on pinned cards
@@ -273,7 +273,7 @@ notrover-smart-clipboard-app-rust/
 | Key         | Values                                                     | Purpose                      |
 | ----------- | ---------------------------------------------------------- | ---------------------------- |
 | `sc-theme`  | `"dark"` \| `"light"`                                      | User's manual theme override |
-| `sc-layout` | `"masonry"` \| `"list"`                                    | Clipboard screen layout mode |
+| `sc-layout` | `"tiles"` \| `"list"`                                      | Clipboard screen layout mode |
 | `sc-sort`   | `"newest"` \| `"oldest"` \| `"a-z"` \| `"z-a"` \| `"type"` | Active sort order            |
 
 ---

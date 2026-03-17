@@ -597,7 +597,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const cardClasses = [
     "entry-card",
     copied && "entry-card--copied",
-    showFileList && "entry-card--expanded",
+    (showFileList || contentExpanded) && "entry-card--expanded",
     isSelecting && "entry-card--selectable",
     isSelected && "entry-card--selected",
   ].filter(Boolean).join(" ");

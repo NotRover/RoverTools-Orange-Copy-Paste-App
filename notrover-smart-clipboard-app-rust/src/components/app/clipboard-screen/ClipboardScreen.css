@@ -258,7 +258,7 @@
   flex: none;
 }
 
-/*  Entry grid (Pinterest masonry)  */
+/*  Entry grid (tiles layout)  */
 
 .entry-grid {
   flex: 1;
@@ -328,7 +328,7 @@
 
 /*  List layout (Windows 11 Clipboard style)  */
 /* The list container is basically .entry-grid with columns: 1, so each card  */
-/* renders full-width but keeps the exact same internal structure as masonry.  */
+/* renders full-width but keeps the exact same internal structure as tiles.  */
 
 .entry-list {
   flex: 1;
@@ -464,6 +464,18 @@
 
 .entry-list .entry-card.entry-card--expanded .card-body {
   overflow: visible;
+}
+
+/* Un-clamp text and un-limit HTML height when expanded */
+.entry-list .entry-card.entry-card--expanded .card-text {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}
+
+.entry-list .entry-card.entry-card--expanded .card-html-preview {
+  max-height: none;
 }
 
 .entry-list .entry-card.entry-card--expanded .card-file-list {

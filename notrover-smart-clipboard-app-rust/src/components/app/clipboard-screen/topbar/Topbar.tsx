@@ -8,7 +8,7 @@ import { SearchBar, FilterDropdown } from "../search-filter/SearchFilter";
 import type { useSearchFilter } from "../search-filter/SearchFilter";
 import type { useMultiSelect } from "../../../../hooks/useMultiSelect";
 import {
-  MasonryIcon,
+  TilesIcon,
   ListIcon,
   ChevronDownIcon,
   TagIcon,
@@ -20,7 +20,7 @@ import {
 } from "../../../icons";
 import "./Topbar.css";
 
-export type ClipboardLayout = "masonry" | "list";
+export type ClipboardLayout = "tiles" | "list";
 
 interface TopbarProps {
   entries: ClipboardEntry[];
@@ -56,7 +56,7 @@ interface TopbarProps {
 }
 
 const LAYOUTS: { id: ClipboardLayout; label: string; icon: React.ReactNode }[] = [
-  { id: "masonry", label: "Masonry", icon: <MasonryIcon size={10} /> },
+  { id: "tiles", label: "Tiles", icon: <TilesIcon size={10} /> },
   { id: "list", label: "List", icon: <ListIcon size={10} /> },
 ];
 

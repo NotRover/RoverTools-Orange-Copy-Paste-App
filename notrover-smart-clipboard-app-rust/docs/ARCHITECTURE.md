@@ -141,7 +141,7 @@ src/
 │   │   ├── App.tsx             # Root component, state management, event listeners
 │   │   ├── App.css
 │   │   ├── sidebar/            # Navigation sidebar
-│   │   ├── clipboard-screen/   # Main history view (masonry/list, day groups)
+│   │   ├── clipboard-screen/   # Main history view (tiles/list, day groups)
 │   │   │   └── entry-card/     # Individual entry cards (text/image/file)
 │   │   ├── search-screen/      # Search + type filters
 │   │   ├── settings-screen/    # User preferences (paste slots)
@@ -449,7 +449,7 @@ The main history view. Entries are grouped by day ("Today", "Yesterday", "Mar 6"
 
 **Features:**
 
-- **Layout toggle**: Masonry (CSS grid, variable heights) or List (full-width rows). Persisted to `localStorage`.
+- **Layout toggle**: Tiles (CSS grid, variable heights) or List (full-width rows). Persisted to `localStorage`.
 - **Sort**: Newest, Oldest, A→Z, Z→A, Type. Persisted to `localStorage`.
 - **Day groups**: Collapsible with animated transitions.
 - **Toolbar**: Sort dropdown + layout toggle + clear-all button.
@@ -650,7 +650,7 @@ This replaces the previous JSON + inline base64 approach, yielding ~70% smaller 
 | Boot ID           | `{app_data}/boot_id.txt`          | Plain text (boot epoch seconds)                        | On startup           | On startup      |
 | Window geometry   | `{app_data}/window-state.json`    | `{ x, y, width, height, maximized }`                   | On every move/resize | On startup      |
 | Theme preference  | `localStorage.sc-theme`           | `"dark"` or `"light"`                                  | On toggle            | On mount        |
-| Layout preference | `localStorage.sc-layout`          | `"masonry"` or `"list"`                                | On change            | On mount        |
+| Layout preference | `localStorage.sc-layout`          | `"tiles"` or `"list"`                                  | On change            | On mount        |
 | Sort preference   | `localStorage.sc-sort`            | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"` | On change            | On mount        |
 | Paste slot count  | `localStorage.sc-paste-slots`     | `"3"` – `"10"`                                         | On change            | On popup show   |
 | Recent searches   | `localStorage.sc-recent-searches` | JSON string array (max 8)                              | On search            | On mount        |
