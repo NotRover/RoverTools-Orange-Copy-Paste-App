@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import type { ClipboardEntry, DisplayKind } from "../../../../types";
-import { deriveDisplayKind, htmlPlainText, groupColor } from "../../../../types";
+import { deriveDisplayKind, htmlPlainText, groupColor, imageDisplayName } from "../../../../types";
 import {
   TYPE_ICONS,
   TYPE_LABELS,
@@ -25,6 +25,7 @@ function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   if (entry.type === "text") return entry.content.toLowerCase().includes(lower);
   if (entry.type === "html") return htmlPlainText(entry.content).toLowerCase().includes(lower);
   if (entry.type === "file") return entry.content.toLowerCase().includes(lower);
+  if (entry.type === "image") return imageDisplayName(entry).toLowerCase().includes(lower);
   return false;
 }
 
@@ -123,10 +124,7 @@ export function useSearchFilter(entries: ClipboardEntry[]): SearchFilterState {
     }
     if (searchQuery.trim()) {
       const q = searchQuery.trim();
-      pool = pool.filter((e) => {
-        if (e.type === "image") return true;
-        return matchesQuery(e, q);
-      });
+      pool = pool.filter((e) => matchesQuery(e, q));
     }
     if (selectedFilterGroups.size > 0) {
       pool = pool.filter(

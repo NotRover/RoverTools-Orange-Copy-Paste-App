@@ -12,6 +12,8 @@ export interface ClipboardEntry {
   pinned: boolean;
   /** User-defined group tags assigned to this entry. */
   groups: string[];
+  /** Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images). */
+  label?: string;
 }
 
 export type AppScreen = "clipboard" | "shortcuts" | "settings";
@@ -268,4 +270,14 @@ export function deriveDisplayKind(entry: ClipboardEntry): DisplayKind {
   if (paths.every(isVideoFile)) return "video";
   if (paths.length === 1 && isDocumentFile(paths[0])) return "document";
   return "file";
+}
+
+/** Get a display name for a clipboard image entry. Uses persisted label if available, otherwise derives from timestamp. */
+export function imageDisplayName(entry: ClipboardEntry): string {
+  if (entry.label) return entry.label;
+  const d = new Date(entry.timestamp);
+  const month = d.toLocaleString(undefined, { month: "short" });
+  const day = d.getDate();
+  const time = d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `Image ${month} ${day}, ${time}`;
 }

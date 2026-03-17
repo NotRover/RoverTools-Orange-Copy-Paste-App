@@ -15,6 +15,51 @@ use serde::{Deserialize, Serialize};
 /// Maximum number of entries kept in history.
 pub const MAX_HISTORY: usize = 100;
 
+/// Format a human-readable label for a clipboard image from its timestamp.
+fn format_image_label(timestamp_ms: u64) -> String {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+        use windows_sys::Win32::System::Time::{
+            FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime,
+        };
+
+        // Windows FILETIME epoch = 1601-01-01, offset from Unix epoch = 11644473600 seconds
+        let ft_ticks =
+            ((timestamp_ms / 1000) + 11_644_473_600) * 10_000_000 + (timestamp_ms % 1000) * 10_000;
+        let ft = FILETIME {
+            dwLowDateTime: ft_ticks as u32,
+            dwHighDateTime: (ft_ticks >> 32) as u32,
+        };
+        let mut utc_st: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        let mut local_st: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        unsafe {
+            FileTimeToSystemTime(&ft, &mut utc_st);
+            SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc_st, &mut local_st);
+        }
+        let months = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let month = months
+            .get(local_st.wMonth.wrapping_sub(1) as usize)
+            .unwrap_or(&"???");
+        let (h12, ampm) = match local_st.wHour {
+            0 => (12, "AM"),
+            1..=11 => (local_st.wHour, "AM"),
+            12 => (12, "PM"),
+            _ => (local_st.wHour - 12, "PM"),
+        };
+        format!(
+            "Image {} {}, {}:{:02} {}",
+            month, local_st.wDay, h12, local_st.wMinute, ampm
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        format!("Image {}", timestamp_ms)
+    }
+}
+
 /// Global monotonically increasing ID counter for clipboard entries.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -63,20 +108,30 @@ pub struct ClipboardEntry {
     /// User-defined group tags assigned to this entry.
     #[serde(default)]
     pub groups: Vec<String>,
+    /// Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl ClipboardEntry {
     fn new(kind: EntryKind, content: String) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let label = if kind == EntryKind::Image {
+            Some(format_image_label(timestamp))
+        } else {
+            None
+        };
         Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string(),
             kind,
             content,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            timestamp,
             pinned: false,
             groups: Vec::new(),
+            label,
         }
     }
 

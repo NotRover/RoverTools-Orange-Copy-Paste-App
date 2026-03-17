@@ -187,6 +187,15 @@
   font-weight: 400;
 }
 
+.card-text--image-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
 /*  HTML (rich text) preview  */
 
 .card-html-preview {

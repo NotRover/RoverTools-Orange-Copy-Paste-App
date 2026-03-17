@@ -10,6 +10,7 @@ import {
   deriveDisplayKind,
   groupColor,
   htmlFragment,
+  imageDisplayName,
 } from "../../../../types";
 import {
   ImageIcon,
@@ -560,6 +561,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
       {/*  Card body  */}
       <div className="card-body">
+        {entry.type === "image" && (
+          <p className="card-text card-text--image-name">{imageDisplayName(entry)}</p>
+        )}
         {entry.type === "text" && (
           <p className="card-text">{truncateText(entry.content, 160)}</p>
         )}
