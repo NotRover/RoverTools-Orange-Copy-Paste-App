@@ -91,6 +91,11 @@
   color: #10b981;
 }
 
+.card-type-chip--html {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
 .card-type-chip--document {
   background: rgba(249, 115, 22, 0.12);
   color: #f97316;
@@ -151,6 +156,11 @@
 
 [data-theme="light"] .card-type-chip--file {
   background: rgba(139, 92, 246, 0.1);
+  color: #7c3aed;
+}
+
+[data-theme="light"] .card-type-chip--html {
+  background: rgba(168, 85, 247, 0.1);
   color: #7c3aed;
 }
 
@@ -223,6 +233,10 @@
   border-radius: 3px;
   vertical-align: middle;
   object-fit: contain;
+}
+
+.card-html-preview--expanded img {
+  max-height: none;
 }
 
 .card-html-preview a {

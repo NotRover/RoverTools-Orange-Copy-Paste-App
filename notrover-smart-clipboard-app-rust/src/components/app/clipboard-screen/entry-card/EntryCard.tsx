@@ -101,8 +101,8 @@ function sanitizeHtml(html: string): string {
         let value = attr.value;
         // Prevent javascript: URIs
         if ((name === "href" || name === "src") && /^\s*javascript:/i.test(value)) continue;
-        // img src: only allow http(s) and data URIs
-        if (name === "src" && !/^(https?:|data:image\/)/i.test(value)) continue;
+        // img src: allow http(s), data URIs, and blob URIs
+        if (name === "src" && !/^(https?:|data:|blob:)/i.test(value)) continue;
         if (name === "style") value = sanitizeStyle(value);
         attrs += ` ${name}="${value.replace(/"/g, "&quot;")}"`;
       }
@@ -334,6 +334,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   useEffect(() => {
     const el = htmlPreviewRef.current;
     if (!el || entry.type !== "html") { setHtmlOverflows(false); return; }
+    // Only measure overflow in collapsed state — when expanded,
+    // scrollHeight === clientHeight so we'd lose the overflow flag.
+    if (contentExpanded) return;
     const check = () => setHtmlOverflows(el.scrollHeight > el.clientHeight);
     check();
     if (typeof ResizeObserver === "undefined") return;
