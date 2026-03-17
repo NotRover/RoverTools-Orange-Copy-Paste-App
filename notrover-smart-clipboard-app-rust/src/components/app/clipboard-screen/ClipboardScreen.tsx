@@ -435,73 +435,63 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             </button>
             {optionsOpen && !multiSelect.isSelecting && (
               <div className="cs-options-card">
-                {/* Layout section */}
-                <div className="cs-options-section">
-                  <div className="cs-options-section-label">Layout</div>
-                  <div className="cs-layout-switch">
-                    <div
-                      className="cs-layout-slider"
-                      style={{ transform: layout === "list" ? "translateX(100%)" : "translateX(0)" }}
-                    />
-                    {layouts.map((l) => (
-                      <button
-                        key={l.id}
-                        className={`cs-layout-btn${layout === l.id ? " cs-layout-btn--active" : ""}`}
-                        onClick={() => selectLayout(l.id)}
-                      >
-                        {l.icon}
-                        <span>{l.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                {/* Layout toggle */}
+                <div className="cs-layout-switch">
+                  <div
+                    className="cs-layout-slider"
+                    style={{ transform: layout === "list" ? "translateX(100%)" : "translateX(0)" }}
+                  />
+                  {layouts.map((l) => (
+                    <button
+                      key={l.id}
+                      className={`cs-layout-btn${layout === l.id ? " cs-layout-btn--active" : ""}`}
+                      onClick={() => selectLayout(l.id)}
+                    >
+                      {l.icon}
+                      <span>{l.label}</span>
+                    </button>
+                  ))}
                 </div>
 
-                <div className="cs-options-divider" />
-
-                {/* Groups section */}
-                <div className="cs-options-section">
-                  <div className="groups-dropdown" ref={groupsRef}>
-                    <button
-                      className={`cs-options-row${groupsOpen ? " cs-options-row--open" : ""}`}
-                      onMouseDown={(e) => { if (groupsOpen) e.stopPropagation(); }}
-                      onClick={() => setGroupsOpen((v) => !v)}
-                    >
-                      <TagIcon size={11} strokeWidth={2} />
-                      <span>Manage Groups</span>
-                      {availableGroups.length > 0 && (
-                        <span className="cs-options-badge">{availableGroups.length}</span>
-                      )}
-                      <ChevronDownIcon className="cs-options-row-chevron" size={9} />
-                    </button>
-                    {groupsOpen && (
-                      <GroupManagerCard
-                        groups={availableGroups}
-                        entries={entries}
-                        onAddGroup={onAddGroup}
-                        onDeleteGroup={onDeleteGroup}
-                        onRenameGroup={onRenameGroup}
-                        onClose={() => setGroupsOpen(false)}
-                      />
+                {/* Groups */}
+                <div className="groups-dropdown" ref={groupsRef}>
+                  <button
+                    className={`cs-groups-btn${groupsOpen ? " cs-groups-btn--open" : ""}`}
+                    onMouseDown={(e) => { if (groupsOpen) e.stopPropagation(); }}
+                    onClick={() => setGroupsOpen((v) => !v)}
+                  >
+                    <TagIcon size={10} strokeWidth={2} />
+                    <span>Groups</span>
+                    {availableGroups.length > 0 && (
+                      <span className="cs-groups-count">{availableGroups.length}</span>
                     )}
-                  </div>
+                  </button>
+                  {groupsOpen && (
+                    <GroupManagerCard
+                      groups={availableGroups}
+                      entries={entries}
+                      onAddGroup={onAddGroup}
+                      onDeleteGroup={onDeleteGroup}
+                      onRenameGroup={onRenameGroup}
+                      onClose={() => setGroupsOpen(false)}
+                    />
+                  )}
                 </div>
 
                 {/* Clear history */}
                 {onClearAll && (
                   <>
                     <div className="cs-options-divider" />
-                    <div className="cs-options-section">
-                      <button
-                        className="cs-options-row cs-options-row--danger"
-                        onClick={() => {
-                          onClearAll();
-                          setOptionsOpen(false);
-                        }}
-                      >
-                        <TrashIcon size={11} />
-                        <span>Clear History</span>
-                      </button>
-                    </div>
+                    <button
+                      className="cs-clear-btn"
+                      onClick={() => {
+                        onClearAll();
+                        setOptionsOpen(false);
+                      }}
+                    >
+                      <TrashIcon size={10} />
+                      <span>Clear History</span>
+                    </button>
                   </>
                 )}
               </div>

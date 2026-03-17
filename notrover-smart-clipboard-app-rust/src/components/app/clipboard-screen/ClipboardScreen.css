@@ -626,40 +626,23 @@
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  width: 190px;
+  min-width: 142px;
   display: flex;
   flex-direction: column;
-  padding: 6px;
+  gap: 1px;
+  padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   box-shadow: var(--shadow, 0 4px 16px rgba(0,0,0,.18));
   z-index: 100;
   animation: sortDropIn 0.12s ease-out;
 }
 
-/* Section structure */
-
-.cs-options-section {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 4px 2px;
-}
-
-.cs-options-section-label {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 0 4px;
-}
-
 .cs-options-divider {
   height: 1px;
   background: var(--border);
-  margin: 2px 4px;
+  margin: 3px 4px;
 }
 
 /* Layout sliding pill switch */
@@ -723,61 +706,70 @@
   color: #fff;
 }
 
-/* Row-style buttons (groups, clear) */
+/* Groups button */
 
-.cs-options-row {
+.cs-groups-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 7px;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
   border: none;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 600;
+  color: var(--text);
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.1s ease, color 0.1s ease;
   user-select: none;
   white-space: nowrap;
 }
 
-.cs-options-row:hover {
+.cs-groups-btn:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.cs-options-row--open {
+.cs-groups-btn--open {
   color: var(--accent);
   background: var(--accent-dim);
 }
 
-.cs-options-row--open:hover {
+.cs-groups-btn--open:hover {
+  color: var(--accent);
+  background: var(--accent-dim-strong);
+}
+
+.cs-groups-count {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 99px;
   background: var(--accent-dim-strong);
   color: var(--accent);
+  line-height: 1;
 }
 
-.cs-options-row-chevron {
-  margin-left: auto;
-  opacity: 0.5;
-  transition: transform 0.15s ease;
-}
-
-.cs-options-row--open .cs-options-row-chevron {
-  transform: rotate(180deg);
-  opacity: 1;
+.cs-groups-btn--open .cs-groups-count {
+  background: var(--accent);
+  color: #fff;
 }
 
 .cs-options-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  font-size: 8.5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 8px;
   font-weight: 700;
   border-radius: 99px;
   background: var(--accent);
@@ -785,13 +777,27 @@
   line-height: 1;
 }
 
-/* Danger row (clear history) */
+/* Clear history button */
 
-.cs-options-row--danger {
-  color: var(--text-muted);
+.cs-clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  user-select: none;
+  white-space: nowrap;
 }
 
-.cs-options-row--danger:hover {
-  color: var(--danger);
-  background: rgba(255, 62, 28, 0.07);
+.cs-clear-btn:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
 }
