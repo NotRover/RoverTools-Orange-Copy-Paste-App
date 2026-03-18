@@ -68,6 +68,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 /*  Root shell: sidebar + main  */
 
 .app {

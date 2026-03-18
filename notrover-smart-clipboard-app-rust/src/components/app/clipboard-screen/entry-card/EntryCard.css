@@ -1,4 +1,4 @@
-/*  Entry card (vertical masonry card)  */
+/*  Entry card (tiles layout card)  */
 
 .entry-card {
   break-inside: avoid;
@@ -91,6 +91,11 @@
   color: #10b981;
 }
 
+.card-type-chip--html {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
 .card-type-chip--document {
   background: rgba(249, 115, 22, 0.12);
   color: #f97316;
@@ -154,6 +159,11 @@
   color: #7c3aed;
 }
 
+[data-theme="light"] .card-type-chip--html {
+  background: rgba(168, 85, 247, 0.1);
+  color: #7c3aed;
+}
+
 .card-type-label {
   line-height: 1;
 }
@@ -187,6 +197,15 @@
   font-weight: 400;
 }
 
+.card-text--image-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
 /*  HTML (rich text) preview  */
 
 .card-html-preview {
@@ -196,6 +215,33 @@
   word-break: break-word;
   overflow: hidden;
   max-height: 120px;
+  position: relative;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+/* Reset margins/padding on block elements to avoid huge gaps */
+.card-html-preview p,
+.card-html-preview div,
+.card-html-preview h1,
+.card-html-preview h2,
+.card-html-preview h3,
+.card-html-preview h4,
+.card-html-preview h5,
+.card-html-preview h6,
+.card-html-preview ul,
+.card-html-preview ol,
+.card-html-preview li {
+  margin: 2px 0;
+  padding: 0;
+}
+
+.card-html-preview--expanded {
+  max-height: none;
+}
+
+.card-html-preview--faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
 }
 
 .card-html-preview img {
@@ -204,6 +250,26 @@
   border-radius: 3px;
   vertical-align: middle;
   object-fit: contain;
+  display: inline-block;
+  margin: 2px 0;
+}
+
+.card-html-preview--expanded img {
+  max-height: none;
+}
+
+.card-html-img-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+  vertical-align: middle;
+  min-height: 24px;
 }
 
 .card-html-preview a {

@@ -21,7 +21,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - File entries (single and multiple files)
   - Multiple image files (with thumbnail previews)
 - **Clipboard screen:**
-  - Masonry-style card grid (Pinterest-like layout)
+  - Tiles card grid (Pinterest-like layout)
   - Click any card to copy it back to clipboard
   - Type chip (Text / Image / File / Files / Images) acts as expand toggle for multi-file entries
   - Compact preview of multi-file entries (first 3 names + count)

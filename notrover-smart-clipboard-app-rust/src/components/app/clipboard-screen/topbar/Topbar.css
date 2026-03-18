@@ -1,0 +1,322 @@
+/* Toolbar */
+
+.layout-toggle-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 0;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+/* Left / right clusters */
+
+.cs-toolbar-left,
+.cs-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Sort dropdown */
+
+.sort-dropdown {
+  position: relative;
+}
+
+.groups-dropdown {
+  position: static;
+}
+
+/* Wrapper for the select button + floating bulk popup */
+.bulk-select-wrap {
+  position: relative;
+}
+
+.sort-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 0.13s ease,
+    color 0.13s ease,
+    background 0.13s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.sort-dropdown-trigger:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-light);
+}
+
+.sort-dropdown-trigger--open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sort-dropdown-trigger--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.sort-dropdown-trigger--active:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+
+.sort-chevron {
+  margin-left: 1px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.sort-dropdown-trigger--open .sort-chevron {
+  transform: rotate(180deg);
+}
+
+.sort-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 120px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: sortDropIn 0.12s ease-out;
+}
+
+@keyframes sortDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sort-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.sort-dropdown-item:hover {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.sort-dropdown-item--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.sort-dropdown-item--active:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Options card */
+
+.cs-options-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 142px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow, 0 4px 16px rgba(0,0,0,.18));
+  z-index: 100;
+  animation: sortDropIn 0.12s ease-out;
+}
+
+.cs-options-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 4px;
+}
+
+/* Layout sliding pill switch */
+
+.cs-layout-switch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 7px;
+  background: #fff;
+  border: 1px solid var(--border);
+  gap: 0;
+  width: 100%;
+}
+
+.cs-layout-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  border-radius: 5px;
+  background: var(--accent);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+}
+
+.cs-layout-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cs-layout-btn:hover {
+  color: var(--text-secondary);
+}
+
+.cs-layout-btn--active {
+  color: #fff;
+}
+
+.cs-layout-btn--active:hover {
+  color: #fff;
+}
+
+/* Groups button */
+
+.cs-groups-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cs-groups-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.cs-groups-btn--open {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.cs-groups-btn--open:hover {
+  color: var(--accent);
+  background: var(--accent-dim-strong);
+}
+
+.cs-groups-count {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 99px;
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+  line-height: 1;
+}
+
+.cs-groups-btn--open .cs-groups-count {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Clear history button */
+
+.cs-clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.cs-clear-btn:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+}

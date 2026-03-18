@@ -385,6 +385,32 @@ export const GearIcon: React.FC<IconProps> = ({ size = 18, className }) => (
   </svg>
 );
 
+/* ── Sliders (horizontal tune bars) ── */
+
+export const SlidersIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="4" y1="21" x2="4" y2="14" />
+    <line x1="4" y1="10" x2="4" y2="3" />
+    <line x1="12" y1="21" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12" y2="3" />
+    <line x1="20" y1="21" x2="20" y2="16" />
+    <line x1="20" y1="12" x2="20" y2="3" />
+    <line x1="1" y1="14" x2="7" y2="14" />
+    <line x1="9" y1="8" x2="15" y2="8" />
+    <line x1="17" y1="16" x2="23" y2="16" />
+  </svg>
+);
+
 /* ── Sun (light theme) ── */
 
 export const SunIcon: React.FC<IconProps> = ({ size = 17, className }) => (
@@ -447,9 +473,9 @@ export const FolderIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ siz
   </svg>
 );
 
-/* ── Masonry layout ── */
+/* ── Tiles layout ── */
 
-export const MasonryIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+export const TilesIcon: React.FC<IconProps> = ({ size = 12, className }) => (
   <svg
     width={size}
     height={size}

@@ -10,6 +10,7 @@ import {
   deriveDisplayKind,
   groupColor,
   htmlFragment,
+  imageDisplayName,
 } from "../../../../types";
 import {
   ImageIcon,
@@ -17,6 +18,8 @@ import {
   PinIcon,
   SaveIcon,
   EntryTypePill,
+  TYPE_ICONS,
+  TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
 import { ChevronDownIcon, CheckIcon } from "../../../icons";
@@ -26,6 +29,7 @@ import "./EntryCard.css";
 const FEEDBACK_DURATION_MS = 1500;
 const REL_TIME_REFRESH_MS = 15_000;
 const CHIP_GAP_PX = 4;
+const TEXT_PREVIEW_LENGTH = 160;
 
 // Allow-list based HTML sanitiser for safe rendering of rich-text clipboard
 // content.  Strips all tags/attributes except a safe subset.
@@ -60,6 +64,40 @@ function sanitizeStyle(style: string): string {
       return SAFE_STYLE_PROPS.has(prop);
     })
     .join("; ");
+}
+
+function normalizeImageSrc(src: string): string | null {
+  const value = src.trim();
+  if (!value) return null;
+
+  // Safe URI schemes that the webview can render directly.
+  if (/^(https?:|data:|blob:|asset:)/i.test(value)) {
+    return value;
+  }
+
+  // Convert file:// URLs (common in clipboard HTML fragments) to Tauri asset URLs.
+  if (/^file:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (url.protocol.toLowerCase() !== "file:") return null;
+      const pathname = decodeURIComponent(url.pathname || "");
+      if (!pathname) return null;
+      const windowsPath = /^[A-Za-z]:/.test(pathname.slice(1))
+        ? pathname.slice(1)
+        : pathname;
+      const normalizedPath = windowsPath.replace(/\//g, "\\");
+      return convertFileSrc(normalizedPath);
+    } catch {
+      return null;
+    }
+  }
+
+  // Absolute Windows paths pasted directly into src.
+  if (/^[A-Za-z]:[\\/]/.test(value)) {
+    return convertFileSrc(value.replace(/\//g, "\\"));
+  }
+
+  return null;
 }
 
 function sanitizeHtml(html: string): string {
@@ -97,8 +135,14 @@ function sanitizeHtml(html: string): string {
         let value = attr.value;
         // Prevent javascript: URIs
         if ((name === "href" || name === "src") && /^\s*javascript:/i.test(value)) continue;
-        // img src: only allow http(s) and data URIs
-        if (name === "src" && !/^(https?:|data:image\/)/i.test(value)) continue;
+        // img src: normalize local file paths and keep only renderable schemes
+        if (tag === "img" && name === "src") {
+          const normalized = normalizeImageSrc(value);
+          if (!normalized) continue;
+          value = normalized;
+        } else if (name === "src" && !/^(https?:|data:|blob:|asset:)/i.test(value)) {
+          continue;
+        }
         if (name === "style") value = sanitizeStyle(value);
         attrs += ` ${name}="${value.replace(/"/g, "&quot;")}"`;
       }
@@ -178,6 +222,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const [missingFiles, setMissingFiles] = useState<Set<string>>(new Set());
   const [showHiddenGroups, setShowHiddenGroups] = useState(false);
   const [visibleGroupCount, setVisibleGroupCount] = useState(0);
+  const [contentExpanded, setContentExpanded] = useState(false);
+  const [htmlOverflows, setHtmlOverflows] = useState(false);
+  const htmlPreviewRef = useRef<HTMLDivElement>(null);
 
   const files = entry.type === "file" ? filePaths(entry.content) : [];
   const firstFile = files[0] ?? null;
@@ -323,6 +370,54 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     setShowHiddenGroups(false);
   }, [entry.id, hiddenGroupCount]);
 
+  // Detect if HTML preview overflows its collapsed max-height
+  useEffect(() => {
+    const el = htmlPreviewRef.current;
+    if (!el || entry.type !== "html") { setHtmlOverflows(false); return; }
+    // Only measure overflow in collapsed state — when expanded,
+    // scrollHeight === clientHeight so we'd lose the overflow flag.
+    if (contentExpanded) return;
+    const check = () => setHtmlOverflows(el.scrollHeight > el.clientHeight);
+    check();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [entry.type, entry.content, contentExpanded]);
+
+  // Replace broken images in HTML preview with a styled placeholder
+  useEffect(() => {
+    const container = htmlPreviewRef.current;
+    if (!container || entry.type !== "html") return;
+    const imgs = container.querySelectorAll("img");
+    const handlers: Array<[HTMLImageElement, () => void]> = [];
+    for (const img of imgs) {
+      const onError = () => {
+        const placeholder = document.createElement("span");
+        placeholder.className = "card-html-img-placeholder";
+        placeholder.textContent = "Preview not available";
+        img.replaceWith(placeholder);
+      };
+      // If the image already failed (cached failure), replace immediately
+      if (img.complete && img.naturalWidth === 0 && img.src) {
+        onError();
+      } else {
+        img.addEventListener("error", onError, { once: true });
+        handlers.push([img, onError]);
+      }
+    }
+    return () => {
+      for (const [img, handler] of handlers) {
+        img.removeEventListener("error", handler);
+      }
+    };
+  }, [entry.type, entry.content, contentExpanded]);
+
+  // Reset expand state when entry changes
+  useEffect(() => {
+    setContentExpanded(false);
+  }, [entry.id]);
+
   useLayoutEffect(() => {
     measureVisibleGroupCount();
   }, [measureVisibleGroupCount, relTime, entry.id]);
@@ -379,6 +474,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const visibleImageThumbs = imageFiles.slice(0, 3);
   // const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
 
+  const isTextExpandable = (entry.type === "text" || entry.type === "html") &&
+    (entry.type === "text" ? entry.content.length > TEXT_PREVIEW_LENGTH : htmlOverflows);
+
   const renderTypeChip = (withMeasureRef = false) => {
     if (entry.type === "file" && isMulti) {
       return (
@@ -405,6 +503,32 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           <span className="card-type-label">
             {imageFiles.length === files.length ? "Images" : "Files"}
           </span>
+          {!withMeasureRef && (
+            <ChevronDownIcon className="card-type-chevron" />
+          )}
+        </button>
+      );
+    }
+
+    // Expandable text / html chip
+    if (isTextExpandable) {
+      const dk = deriveDisplayKind(entry);
+      return (
+        <button
+          ref={withMeasureRef ? (typeMeasureRef as React.Ref<HTMLButtonElement>) : undefined}
+          className={`card-type-chip card-type-chip--${dk} card-type-chip--clickable${contentExpanded ? " open" : ""}`}
+          onClick={
+            withMeasureRef
+              ? undefined
+              : (e) => {
+                  e.stopPropagation();
+                  setContentExpanded((v) => !v);
+                }
+          }
+          data-tooltip={withMeasureRef ? undefined : contentExpanded ? "Collapse" : "Expand"}
+        >
+          {TYPE_ICONS[dk]}
+          <span className="card-type-label">{TYPE_LABELS[dk]}</span>
           {!withMeasureRef && (
             <ChevronDownIcon className="card-type-chevron" />
           )}
@@ -473,7 +597,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const cardClasses = [
     "entry-card",
     copied && "entry-card--copied",
-    showFileList && "entry-card--expanded",
+    (showFileList || contentExpanded) && "entry-card--expanded",
     isSelecting && "entry-card--selectable",
     isSelected && "entry-card--selected",
   ].filter(Boolean).join(" ");
@@ -560,12 +684,18 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
       {/*  Card body  */}
       <div className="card-body">
+        {entry.type === "image" && (
+          <p className="card-text card-text--image-name">{imageDisplayName(entry)}</p>
+        )}
         {entry.type === "text" && (
-          <p className="card-text">{truncateText(entry.content, 160)}</p>
+          <p className="card-text">
+            {contentExpanded ? entry.content : truncateText(entry.content, TEXT_PREVIEW_LENGTH)}
+          </p>
         )}
         {entry.type === "html" && (
           <div
-            className="card-html-preview"
+            ref={htmlPreviewRef}
+            className={`card-html-preview${contentExpanded ? " card-html-preview--expanded" : ""}${!contentExpanded && htmlOverflows ? " card-html-preview--faded" : ""}`}
             dangerouslySetInnerHTML={{ __html: sanitizeHtml(htmlFragment(entry.content)) }}
           />
         )}

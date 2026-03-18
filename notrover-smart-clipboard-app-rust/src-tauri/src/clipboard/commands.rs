@@ -102,11 +102,15 @@ fn app_data_file(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBu
 }
 
 fn get_saved_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app_data_file(app, "pinned_entries.json")
+    app_data_file(app, "pinned_entries.bin")
 }
 
 pub(crate) fn get_history_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app_data_file(app, "history.json")
+    app_data_file(app, "history.bin")
+}
+
+pub(crate) fn get_blobs_dir_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app_data_file(app, "blobs")
 }
 
 fn get_settings_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
@@ -365,9 +369,10 @@ pub fn bulk_remove_group(
 /// Called from the frontend when the user first enables keep_history.
 #[tauri::command]
 pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    get_history_file_path(&app)
-        .map(|p| state.history.lock().save_all_to_file(&p).is_ok())
-        .unwrap_or(false)
+    match (get_history_file_path(&app), get_blobs_dir_path(&app)) {
+        (Some(p), Some(b)) => state.history.lock().save_all_to_file(&p, &b).is_ok(),
+        _ => false,
+    }
 }
 
 /// Set the groups for a clipboard entry.
@@ -417,8 +422,8 @@ pub fn rename_group_in_entries(
 }
 
 fn save_after_group_change(app: &tauri::AppHandle, state: &State<'_, AppState>) {
-    if let Some(path) = get_saved_file_path(app) {
-        let _ = state.history.lock().save_saved_to_file(&path);
+    if let (Some(path), Some(blobs)) = (get_saved_file_path(app), get_blobs_dir_path(app)) {
+        let _ = state.history.lock().save_saved_to_file(&path, &blobs);
     }
     auto_save_history(app, &state.history);
 }
