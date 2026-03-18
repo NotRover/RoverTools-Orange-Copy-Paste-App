@@ -258,193 +258,7 @@
   flex: none;
 }
 
-/*  Layout toggle pill  */
-
-.layout-toggle-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 6px 12px 0;
-  flex-shrink: 0;
-  z-index: 10;
-}
-
-/* Sort dropdown */
-
-.sort-dropdown {
-  position: relative;
-  margin-right: auto;
-}
-
-.groups-dropdown {
-  position: relative;
-}
-
-/* Wrapper for the select button + floating bulk popup */
-.bulk-select-wrap {
-  position: relative;
-}
-
-.sort-dropdown-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.2px;
-  box-shadow: var(--shadow-sm);
-  transition:
-    border-color 0.13s ease,
-    color 0.13s ease,
-    background 0.13s ease;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.sort-dropdown-trigger:hover {
-  color: var(--text-secondary);
-  border-color: var(--border-light);
-}
-
-.sort-dropdown-trigger--open {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.sort-chevron {
-  margin-left: 1px;
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.sort-dropdown-trigger--open .sort-chevron {
-  transform: rotate(180deg);
-}
-
-.sort-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 120px;
-  padding: 4px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  animation: sortDropIn 0.12s ease-out;
-}
-
-@keyframes sortDropIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.sort-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-radius: 7px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.2px;
-  transition:
-    background 0.1s ease,
-    color 0.1s ease;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.sort-dropdown-item:hover {
-  background: var(--accent-dim);
-  color: var(--text);
-}
-
-.sort-dropdown-item--active {
-  background: var(--accent);
-  color: #fff;
-}
-
-.sort-dropdown-item--active:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.layout-switch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  gap: 1px;
-}
-
-.layout-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.2px;
-  transition:
-    background 0.13s ease,
-    color 0.13s ease;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.layout-switch-btn:hover {
-  color: var(--text-secondary);
-}
-
-.layout-switch-btn--active {
-  background: var(--accent);
-  color: #fff;
-}
-
-.layout-switch-btn--active:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.layout-switch-btn--danger:hover {
-  color: var(--danger);
-}
-
-/*  Entry grid (Pinterest masonry)  */
+/*  Entry grid (tiles layout)  */
 
 .entry-grid {
   flex: 1;
@@ -514,7 +328,7 @@
 
 /*  List layout (Windows 11 Clipboard style)  */
 /* The list container is basically .entry-grid with columns: 1, so each card  */
-/* renders full-width but keeps the exact same internal structure as masonry.  */
+/* renders full-width but keeps the exact same internal structure as tiles.  */
 
 .entry-list {
   flex: 1;
@@ -650,6 +464,18 @@
 
 .entry-list .entry-card.entry-card--expanded .card-body {
   overflow: visible;
+}
+
+/* Un-clamp text and un-limit HTML height when expanded */
+.entry-list .entry-card.entry-card--expanded .card-text {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}
+
+.entry-list .entry-card.entry-card--expanded .card-html-preview {
+  max-height: none;
 }
 
 .entry-list .entry-card.entry-card--expanded .card-file-list {

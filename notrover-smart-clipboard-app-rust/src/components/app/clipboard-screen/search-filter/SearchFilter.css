@@ -1,0 +1,316 @@
+/* Search bar */
+
+.cs-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 99px;
+  background: rgba(255,255,255,.25);
+  color: inherit;
+  line-height: 1;
+  margin-left: -2px;
+  margin-right: -2px;
+}
+
+.cs-searchbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 60px;
+}
+
+.cs-search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.cs-search-input {
+  width: 100%;
+  padding: 4px 26px 4px 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.16s ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.cs-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.cs-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.cs-search-clear {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.14s ease;
+  padding: 0;
+}
+
+.cs-search-clear:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Filter card (overlay dropdown) */
+
+.cs-filter-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow, 0 4px 12px rgba(0,0,0,.15));
+  z-index: 100;
+  animation: sortDropIn 0.12s ease-out;
+}
+
+/* Shared card styles (used by filter card + options card) */
+
+.cs-card-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cs-card-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
+.cs-section-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15px;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
+.cs-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  font-size: 8.5px;
+  font-weight: 700;
+  border-radius: 99px;
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+  line-height: 1;
+}
+
+.cs-card-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.cs-card-clear-btn:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.cs-card-clear-btn--danger {
+  color: var(--text-muted);
+}
+
+.cs-card-clear-btn--danger:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* Type grid — compact 2-col checkboxes */
+
+.cs-type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+
+.cs-type-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s ease;
+}
+
+.cs-type-option:hover {
+  background: var(--surface-hover, rgba(255,255,255,.04));
+}
+
+.cs-type-option--on {
+  background: var(--surface-hover, rgba(255,255,255,.04));
+}
+
+.cs-type-cb {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cs-type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  padding: 0;
+  gap: 0;
+  position: relative;
+}
+
+.cs-color-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.cs-type-icon .type-pill-label {
+  display: none;
+}
+
+.cs-type-name {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.cs-type-option--on .cs-type-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Date section */
+
+.cs-date-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cs-date-sep {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.cs-date-input {
+  width: 0;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 10.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.14s ease;
+  box-sizing: border-box;
+}
+
+.cs-date-input:focus {
+  border-color: var(--accent);
+}
+
+.cs-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.5);
+  cursor: pointer;
+  width: 11px;
+  height: 11px;
+}
+
+/* No search results */
+
+.cs-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px 40px;
+  text-align: center;
+  gap: 8px;
+}
+
+.cs-no-results-icon {
+  color: var(--text-muted);
+  opacity: 0.45;
+  margin-bottom: 6px;
+}
+
+.cs-no-results-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.cs-no-results-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+  line-height: 1.5;
+}

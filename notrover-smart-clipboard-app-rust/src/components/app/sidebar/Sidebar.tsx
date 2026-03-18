@@ -2,7 +2,6 @@ import React from "react";
 import type { AppScreen, AppTheme } from "../../../types";
 import {
   ClipboardIcon,
-  SearchIcon,
   KeyboardIcon,
   SunIcon,
   MoonIcon,
@@ -49,14 +48,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip-pos="right"
       >
         <ClipboardIcon />
-      </button>
-      <button
-        className={`nav-btn ${screen === "search" ? "active" : ""}`}
-        onClick={() => onNavigate("search")}
-        data-tooltip="Search"
-        data-tooltip-pos="right"
-      >
-        <SearchIcon size={18} />
       </button>
       <button
         className={`nav-btn ${screen === "shortcuts" ? "active" : ""}`}

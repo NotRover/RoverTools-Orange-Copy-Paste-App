@@ -14,7 +14,6 @@ import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
-import SearchScreen from "./search-screen/SearchScreen";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import {
@@ -633,14 +632,15 @@ const App: React.FC = () => {
     setUndoSnapshot(null);
   }, [undoSnapshot]);
 
-  const { textCount, imageCount, fileCount } = entries.reduce(
+  const { textCount, imageCount, fileCount, htmlCount } = entries.reduce(
     (acc, e) => {
       if (e.type === "text") acc.textCount++;
+      else if (e.type === "html") acc.htmlCount++;
       else if (e.type === "image" || (e.type === "file" && classifyFileEntry(e.content) === "image")) acc.imageCount++;
       else if (e.type === "file" && classifyFileEntry(e.content) === "file") acc.fileCount++;
       return acc;
     },
-    { textCount: 0, imageCount: 0, fileCount: 0 },
+    { textCount: 0, imageCount: 0, fileCount: 0, htmlCount: 0 },
   );
 
   return (
@@ -663,15 +663,6 @@ const App: React.FC = () => {
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
-        ) : screen === "search" ? (
-          <SearchScreen
-            entries={entries}
-            onCopy={handleCopy}
-            onDelete={handleDelete}
-            onPin={handlePin}
-            availableGroups={availableGroups}
-            onSetGroups={handleSetGroups}
-          />
         ) : (
           <ClipboardScreen
             entries={entries}
@@ -699,6 +690,7 @@ const App: React.FC = () => {
             textCount={textCount}
             imageCount={imageCount}
             fileCount={fileCount}
+            htmlCount={htmlCount}
             total={entries.length}
           />
         )}

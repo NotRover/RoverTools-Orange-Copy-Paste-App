@@ -8,12 +8,58 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 
 // Constants
 
 /// Maximum number of entries kept in history.
 pub const MAX_HISTORY: usize = 100;
+
+/// Format a human-readable label for a clipboard image from its timestamp.
+fn format_image_label(timestamp_ms: u64) -> String {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+        use windows_sys::Win32::System::Time::{
+            FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime,
+        };
+
+        // Windows FILETIME epoch = 1601-01-01, offset from Unix epoch = 11644473600 seconds
+        let ft_ticks =
+            ((timestamp_ms / 1000) + 11_644_473_600) * 10_000_000 + (timestamp_ms % 1000) * 10_000;
+        let ft = FILETIME {
+            dwLowDateTime: ft_ticks as u32,
+            dwHighDateTime: (ft_ticks >> 32) as u32,
+        };
+        let mut utc_st: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        let mut local_st: SYSTEMTIME = unsafe { std::mem::zeroed() };
+        unsafe {
+            FileTimeToSystemTime(&ft, &mut utc_st);
+            SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc_st, &mut local_st);
+        }
+        let months = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let month = months
+            .get(local_st.wMonth.wrapping_sub(1) as usize)
+            .unwrap_or(&"???");
+        let (h12, ampm) = match local_st.wHour {
+            0 => (12, "AM"),
+            1..=11 => (local_st.wHour, "AM"),
+            12 => (12, "PM"),
+            _ => (local_st.wHour - 12, "PM"),
+        };
+        format!(
+            "Image {} {}, {}:{:02} {}",
+            month, local_st.wDay, h12, local_st.wMinute, ampm
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        format!("Image {}", timestamp_ms)
+    }
+}
 
 /// Global monotonically increasing ID counter for clipboard entries.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -28,11 +74,84 @@ fn advance_id_past(entries: &[ClipboardEntry]) {
     let _ = NEXT_ID.fetch_max(max_id + 1, Ordering::Relaxed);
 }
 
-fn write_json_file(path: &std::path::Path, data: &str) -> Result<(), std::io::Error> {
+fn write_binary_file(path: &std::path::Path, data: &[u8]) -> Result<(), std::io::Error> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, data)
+}
+
+/// Decode a `data:<mime>;base64,<data>` URL into raw bytes.
+fn decode_data_url(data_url: &str) -> Option<Vec<u8>> {
+    let pos = data_url.find(";base64,")?;
+    B64.decode(&data_url[pos + 8..]).ok()
+}
+
+/// Reconstruct a `data:<mime>;base64,…` URL from raw image bytes.
+fn raw_bytes_to_data_url(bytes: &[u8]) -> String {
+    let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
+        "image/jpeg"
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.starts_with(b"BM") {
+        "image/bmp"
+    } else {
+        "image/png"
+    };
+    format!("data:{mime};base64,{}", B64.encode(bytes))
+}
+
+/// Serialize entries to zstd-compressed MessagePack, externalising image blobs.
+fn save_entries_binary(
+    entries: &[ClipboardEntry],
+    meta_path: &std::path::Path,
+    blobs_dir: &std::path::Path,
+) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(blobs_dir)?;
+
+    let mut disk_entries = entries.to_vec();
+    for entry in &mut disk_entries {
+        if entry.kind == EntryKind::Image && entry.content.starts_with("data:") {
+            if let Some(raw) = decode_data_url(&entry.content) {
+                std::fs::write(blobs_dir.join(format!("{}.blob", entry.id)), &raw)?;
+                entry.content = format!("blob:{}", entry.id);
+            }
+        }
+    }
+
+    let msgpack = rmp_serde::to_vec(&disk_entries)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let compressed = zstd::encode_all(std::io::Cursor::new(&msgpack), 3)?;
+    write_binary_file(meta_path, &compressed)
+}
+
+/// Load entries from zstd-compressed MessagePack, restoring image blobs to data URLs.
+fn load_entries_binary(
+    meta_path: &std::path::Path,
+    blobs_dir: &std::path::Path,
+) -> Result<Vec<ClipboardEntry>, std::io::Error> {
+    if !meta_path.exists() {
+        return Ok(Vec::new());
+    }
+    let compressed = std::fs::read(meta_path)?;
+    let msgpack = zstd::decode_all(std::io::Cursor::new(&compressed))?;
+    let mut loaded: Vec<ClipboardEntry> = rmp_serde::from_slice(&msgpack)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    for entry in &mut loaded {
+        if entry.content.starts_with("blob:") {
+            let blob_id = &entry.content[5..];
+            let blob_path = blobs_dir.join(format!("{blob_id}.blob"));
+            if let Ok(bytes) = std::fs::read(&blob_path) {
+                entry.content = raw_bytes_to_data_url(&bytes);
+            }
+        }
+    }
+    Ok(loaded)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,20 +182,30 @@ pub struct ClipboardEntry {
     /// User-defined group tags assigned to this entry.
     #[serde(default)]
     pub groups: Vec<String>,
+    /// Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl ClipboardEntry {
     fn new(kind: EntryKind, content: String) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let label = if kind == EntryKind::Image {
+            Some(format_image_label(timestamp))
+        } else {
+            None
+        };
         Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string(),
             kind,
             content,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            timestamp,
             pinned: false,
             groups: Vec::new(),
+            label,
         }
     }
 
@@ -285,12 +414,15 @@ impl ClipboardHistory {
     /// Load saved entries from a file and merge them into history.
     /// Any existing entries with matching IDs are replaced.
     /// Advances the global ID counter past the highest loaded ID.
-    pub fn load_saved_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        if !path.exists() {
+    pub fn load_saved_from_file(
+        &mut self,
+        path: &std::path::Path,
+        blobs_dir: &std::path::Path,
+    ) -> Result<(), std::io::Error> {
+        let loaded = load_entries_binary(path, blobs_dir)?;
+        if loaded.is_empty() {
             return Ok(());
         }
-        let data = std::fs::read_to_string(path)?;
-        let loaded: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
 
         advance_id_past(&loaded);
 
@@ -306,26 +438,50 @@ impl ClipboardHistory {
     }
 
     /// Save all saved entries (pinned + saved-group) to a file.
-    pub fn save_saved_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        write_json_file(path, &serde_json::to_string_pretty(&self.saved_entries())?)
+    pub fn save_saved_to_file(
+        &self,
+        path: &std::path::Path,
+        blobs_dir: &std::path::Path,
+    ) -> Result<(), std::io::Error> {
+        save_entries_binary(&self.saved_entries(), path, blobs_dir)
     }
 
     /// Save the entire history (all entries) to a file.
-    pub fn save_all_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        write_json_file(path, &serde_json::to_string_pretty(&self.entries)?)
+    pub fn save_all_to_file(
+        &self,
+        path: &std::path::Path,
+        blobs_dir: &std::path::Path,
+    ) -> Result<(), std::io::Error> {
+        save_entries_binary(&self.entries, path, blobs_dir)?;
+
+        // Clean up orphaned blob files
+        let referenced: std::collections::HashSet<String> = self
+            .entries
+            .iter()
+            .filter(|e| e.kind == EntryKind::Image)
+            .map(|e| format!("{}.blob", e.id))
+            .collect();
+        if let Ok(read_dir) = std::fs::read_dir(blobs_dir) {
+            for entry in read_dir.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".blob") && !referenced.contains(&name) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Load the full history from a file, replacing all current entries.
     /// Advances the global ID counter past the highest loaded ID.
-
-    pub fn load_all_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        if !path.exists() {
-            return Ok(());
-        }
-        let data = std::fs::read_to_string(path)?;
-        let loaded: Vec<ClipboardEntry> = serde_json::from_str(&data).unwrap_or_default();
+    pub fn load_all_from_file(
+        &mut self,
+        path: &std::path::Path,
+        blobs_dir: &std::path::Path,
+    ) -> Result<(), std::io::Error> {
+        let loaded = load_entries_binary(path, blobs_dir)?;
         advance_id_past(&loaded);
-
         self.entries = loaded;
         Ok(())
     }

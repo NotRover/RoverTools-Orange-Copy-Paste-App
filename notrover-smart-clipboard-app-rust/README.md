@@ -17,13 +17,13 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `Ctrl + Shift + V` → show recent history popup for quick paste
 - **Clipboard history** with support for:
   - Text entries
-  - Image entries (stored as data URLs)
+  - Image entries (stored as raw binary blobs on disk, served as data URLs in memory)
   - File entries (single and multiple files)
   - Multiple image files (with thumbnail previews)
   - Video files (with custom in-card player — play/pause, seek, mute only)
 - **Clipboard screen:**
   - **Day-grouped timeline** — entries grouped by date with collapsible day sections and dot-rail navigation
-  - Masonry-style card grid (Pinterest-like layout) and list layout — toggle persisted to `localStorage`
+  - Tiles card grid (Pinterest-like layout) and list layout — toggle persisted to `localStorage`
   - **Sort controls** — sort dropdown with: Newest, Oldest, A → Z, Z → A, Type (text/file/image); sort persisted to `localStorage`
   - Click any card to copy it back to clipboard
   - **Pin entries** — pin important entries so they survive clear-all; visual "Pinned" chip on pinned cards
@@ -65,6 +65,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `tauri-plugin-global-shortcut` for global hotkeys
   - `arboard` for clipboard text/image access
   - `image` + `base64` for image encode/decode and data URL conversion
+  - `rmp-serde` + `zstd` for compressed binary persistence (MessagePack + Zstandard)
   - `parking_lot` for efficient shared mutex state
   - `windows-sys` for Windows input/cursor/monitor and clipboard format helpers
 
@@ -130,7 +131,7 @@ The backend is organized by **feature/domain**, not by technical layer alone.
 
 ### 1) `clipboard` module (clipboard domain)
 
-- `history.rs`: in-memory clipboard history model and operations
+- `history.rs`: in-memory clipboard history model, operations, and compressed binary persistence (blob store + MessagePack/zstd)
 - `image.rs`: image clipboard format handling + data URL conversion
 - `files.rs`: Windows `CF_HDROP` read/write for single and multiple file paths
 - `commands.rs`: Tauri IPC commands for clipboard actions (get/delete/clear/copy/paste/pin/unpin) and clipboard read/write helpers
@@ -272,7 +273,7 @@ notrover-smart-clipboard-app-rust/
 | Key         | Values                                                     | Purpose                      |
 | ----------- | ---------------------------------------------------------- | ---------------------------- |
 | `sc-theme`  | `"dark"` \| `"light"`                                      | User's manual theme override |
-| `sc-layout` | `"masonry"` \| `"list"`                                    | Clipboard screen layout mode |
+| `sc-layout` | `"tiles"` \| `"list"`                                      | Clipboard screen layout mode |
 | `sc-sort`   | `"newest"` \| `"oldest"` \| `"a-z"` \| `"z-a"` \| `"type"` | Active sort order            |
 
 ---
