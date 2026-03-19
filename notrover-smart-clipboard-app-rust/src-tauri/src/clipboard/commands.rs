@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
 use arboard::Clipboard;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::clipboard::files::{
     content_to_files, files_to_content, read_files_from_clipboard, write_files_to_clipboard,
@@ -81,7 +81,6 @@ pub fn get_history(state: State<'_, AppState>) -> Vec<ClipboardEntry> {
 
 #[tauri::command]
 pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    use tauri::Emitter;
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
@@ -126,8 +125,6 @@ pub fn unpin_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
 const MAX_PINNED: usize = 10;
 
 fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin: bool) -> bool {
-    use tauri::Emitter;
-
     let success = {
         let mut hist = state.history.lock();
         // Enforce pin limit — pinning is now paste-popup only.
@@ -207,7 +204,6 @@ pub fn bulk_delete_entries(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    use tauri::Emitter;
     let mut hist = state.history.lock();
     let mut removed = 0u32;
     for id in &ids {
@@ -232,7 +228,6 @@ pub fn bulk_pin_entries(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    use tauri::Emitter;
     let mut hist = state.history.lock();
     let mut changed = 0u32;
 
@@ -274,7 +269,6 @@ pub fn bulk_set_groups(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    use tauri::Emitter;
     let mut hist = state.history.lock();
     let mut changed = 0u32;
 
@@ -304,7 +298,6 @@ pub fn bulk_add_group(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    use tauri::Emitter;
     let mut hist = state.history.lock();
     let mut changed = 0u32;
 
@@ -337,7 +330,6 @@ pub fn bulk_remove_group(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    use tauri::Emitter;
     let mut hist = state.history.lock();
     let mut changed = 0u32;
 
@@ -379,8 +371,6 @@ pub fn set_entry_groups(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> bool {
-    use tauri::Emitter;
-
     let success = state.history.lock().set_groups(&id, groups.clone());
     if success {
         save_after_group_change(&app, &state);

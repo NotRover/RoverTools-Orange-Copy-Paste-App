@@ -3,7 +3,15 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind, htmlPlainText, resolveImageSrc } from "../../types";
+import type { ClipboardEntry, AppTheme } from "../../types";
+import {
+  deriveDisplayKind,
+  htmlPlainText,
+  isImageFile,
+  isVideoFile,
+  readTheme,
+  resolveImageSrc,
+} from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   TrashIcon,
@@ -12,27 +20,6 @@ import {
   SaveStarIcon,
 } from "../icons";
 import "./copyPopup.css";
-
-type AppTheme = "dark" | "light";
-
-function readTheme(): AppTheme {
-  return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
-}
-
-import {
-  IMAGE_FILE_EXTENSIONS as IMAGE_EXTS,
-  VIDEO_FILE_EXTENSIONS as VIDEO_EXTS,
-  fileExtension as fileExt,
-} from "../../types";
-
-interface HistoryEntry {
-  id: string;
-  type: "text" | "image" | "file" | "html";
-  content: string;
-  timestamp: number;
-  pinned: boolean;
-  groups?: string[];
-}
 
 // Layout constants (must match Rust COPY_POPUP_W)
 const BODY_PAD = 12; // body padding (6px * 2)
@@ -105,7 +92,7 @@ const CopyPopup: React.FC = () => {
         // Fetch pinned/saved state for the entry
         try {
           const [history, autosaveVal] = await Promise.all([
-            invoke<HistoryEntry[]>("get_history"),
+            invoke<ClipboardEntry[]>("get_history"),
             invoke<boolean | null>("get_setting", { key: "autosave" }),
           ]);
           if (!cancelled) {
@@ -167,7 +154,7 @@ const CopyPopup: React.FC = () => {
   const firstFile = files[0] ?? "";
 
   useEffect(() => {
-    if (kind !== "file" || !firstFile || !IMAGE_EXTS.has(fileExt(firstFile))) {
+    if (kind !== "file" || !firstFile || !isImageFile(firstFile)) {
       setImagePreview(null);
       return;
     }
@@ -183,8 +170,7 @@ const CopyPopup: React.FC = () => {
       kind === "image" ||
       (kind === "file" &&
         !!firstFile &&
-        (IMAGE_EXTS.has(fileExt(firstFile)) ||
-          VIDEO_EXTS.has(fileExt(firstFile))));
+        (isImageFile(firstFile) || isVideoFile(firstFile)));
     const previewH = estimatePreviewHeight(kind, content, hasMedia);
     const totalH = CHROME_H + previewH;
     invoke("resize_copy_popup", { height: totalH }).catch(console.error);
@@ -215,7 +201,7 @@ const CopyPopup: React.FC = () => {
     if (!entryId) return;
     cancelBlur();
     try {
-      const history = await invoke<HistoryEntry[]>("get_history");
+      const history = await invoke<ClipboardEntry[]>("get_history");
       const match = history.find((h) => h.id === entryId);
       const groups = match?.groups ?? [];
       const has = groups.includes("Saved");
@@ -295,14 +281,14 @@ const CopyPopup: React.FC = () => {
               </p>
             ) : kind === "file" ? (
               <>
-                {firstFile && IMAGE_EXTS.has(fileExt(firstFile)) && (
+                {firstFile && isImageFile(firstFile) && (
                   <img
                     src={imagePreview ?? convertFileSrc(firstFile)}
                     alt="File preview"
                     className="popup-preview-media"
                   />
                 )}
-                {firstFile && VIDEO_EXTS.has(fileExt(firstFile)) && (
+                {firstFile && isVideoFile(firstFile) && (
                   <video
                     className="popup-preview-media"
                     controls

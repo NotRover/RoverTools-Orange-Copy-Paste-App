@@ -1,14 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { readSlots } from "../../../types";
 import { ChevronDownIcon, CheckIcon, FolderIcon } from "../../icons";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
-
-function readSlots(): number {
-  const v = parseInt(localStorage.getItem("sc-paste-slots") ?? "3", 10);
-  return Number.isNaN(v) ? 3 : Math.max(3, Math.min(10, v));
-}
 
 interface CustomSelectProps {
   value: number;

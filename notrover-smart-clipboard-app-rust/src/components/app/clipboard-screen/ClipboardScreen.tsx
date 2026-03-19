@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
-export { EntryCard };
 import { useSearchFilter, NoResults } from "./search-filter/SearchFilter";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { sortableText } from "../sort-options";

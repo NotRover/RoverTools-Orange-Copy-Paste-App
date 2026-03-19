@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../../types";
 import {
+  fileNameFromPath,
   filePaths,
   isImageFile,
   isVideoFile,
@@ -164,9 +165,6 @@ function sanitizeHtml(html: string): string {
   return result;
 }
 
-function fileNameFromPath(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
 
 interface EntryCardProps {
   entry: ClipboardEntry;
@@ -473,7 +471,6 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   };
 
   const visibleImageThumbs = imageFiles.slice(0, 3);
-  // const remainingImageThumbs = imageFiles.length - visibleImageThumbs.length;
 
   const isTextExpandable = (entry.type === "text" || entry.type === "html") &&
     (entry.type === "text" ? entry.content.length > TEXT_PREVIEW_LENGTH : htmlOverflows);

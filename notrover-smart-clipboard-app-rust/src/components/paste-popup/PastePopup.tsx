@@ -3,7 +3,18 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind, htmlPlainText, resolveImageSrc } from "../../types";
+import type { ClipboardEntry, AppTheme } from "../../types";
+import {
+  deriveDisplayKind,
+  fileNameFromPath,
+  htmlPlainText,
+  isImageFile as isImagePath,
+  isUrl,
+  filePaths as getFilePaths,
+  readSlots,
+  readTheme,
+  resolveImageSrc,
+} from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   CloseIcon,
@@ -14,7 +25,6 @@ import {
 } from "../icons";
 import "./pastePopup.css";
 
-type AppTheme = "dark" | "light";
 type Tab = "recent" | "pinned";
 
 // Layout constants (must match Rust PASTE_POPUP_W)
@@ -24,41 +34,14 @@ const BOTTOM_PAD = 0;
 const BODY_PAD = 10; // body padding (6px top + 4px container bottom)
 const MIN_EMPTY_H = 100;
 
-function readTheme(): AppTheme {
-  return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
-}
-
-function readSlots(): number {
-  const v = parseInt(localStorage.getItem("sc-paste-slots") ?? "3", 10);
-  return Number.isNaN(v) ? 3 : Math.max(3, Math.min(10, v));
-}
-
-interface PopupEntry {
-  id: string;
-  type: "text" | "image" | "file" | "html";
-  content: string;
-  timestamp: number;
-  pinned: boolean;
-}
-
-interface PastePayload {
-  recent: PopupEntry[];
-  pinned: PopupEntry[];
-}
-
 function textPreview(content: string, max = 60): string {
   const line = content.replace(/[\r\n]+/g, " ").trim();
   return line.length > max ? line.slice(0, max) + "…" : line;
 }
 
-import {
-  isImageFile as isImagePath,
-  isUrl,
-  filePaths as getFilePaths,
-} from "../../types";
-
-function fileNameFromPath(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
+interface PastePayload {
+  recent: ClipboardEntry[];
+  pinned: ClipboardEntry[];
 }
 
 function relativeTime(ts: number): string {
@@ -82,8 +65,8 @@ function resizePopup(entryCount: number, extraH = 0) {
 }
 
 const PastePopup: React.FC = () => {
-  const [recentAll, setRecentAll] = useState<PopupEntry[]>([]);
-  const [pinnedAll, setPinnedAll] = useState<PopupEntry[]>([]);
+  const [recentAll, setRecentAll] = useState<ClipboardEntry[]>([]);
+  const [pinnedAll, setPinnedAll] = useState<ClipboardEntry[]>([]);
   const [visible, setVisible] = useState(false);
   const [theme, setTheme] = useState<AppTheme>(readTheme);
   const [tab, setTab] = useState<Tab>("recent");
@@ -334,8 +317,6 @@ const PastePopup: React.FC = () => {
           <CloseIcon size={10} />
         </button>
       </div>
-
-      {/* <div className="paste-divider" /> */}
 
       {entries.length === 0 ? (
         <div className="paste-empty">
