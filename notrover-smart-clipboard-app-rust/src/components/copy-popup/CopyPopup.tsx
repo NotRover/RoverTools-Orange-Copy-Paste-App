@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind, htmlPlainText } from "../../types";
+import { deriveDisplayKind, htmlPlainText, resolveImageSrc } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   TrashIcon,
@@ -283,7 +283,7 @@ const CopyPopup: React.FC = () => {
           <div className="popup-preview">
             {kind === "image" && content ? (
               <img
-                src={content}
+                src={resolveImageSrc(content, convertFileSrc)}
                 alt="Copied image"
                 className="popup-preview-media"
               />

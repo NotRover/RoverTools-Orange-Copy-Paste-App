@@ -11,6 +11,7 @@ import {
   groupColor,
   htmlFragment,
   imageDisplayName,
+  resolveImageSrc,
 } from "../../../../types";
 import {
   ImageIcon,
@@ -626,7 +627,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       {entry.type === "image" && (
         <div className="card-media">
           <img
-            src={entry.content}
+            src={resolveImageSrc(entry.content, convertFileSrc)}
             alt="Copied image"
             className="card-media-img"
           />

@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { deriveDisplayKind, htmlPlainText } from "../../types";
+import { deriveDisplayKind, htmlPlainText, resolveImageSrc } from "../../types";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   CloseIcon,
@@ -367,7 +367,7 @@ const PastePopup: React.FC = () => {
                   <div className="paste-preview-wrap">
                     <img
                       className="paste-thumb"
-                      src={entry.content}
+                      src={resolveImageSrc(entry.content, convertFileSrc)}
                       alt=""
                       draggable={false}
                     />

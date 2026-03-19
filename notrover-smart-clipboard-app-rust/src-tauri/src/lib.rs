@@ -173,9 +173,14 @@ fn setup_runtime(
 
     let history_file = path("history.bin");
     let saved_file = path("pinned_entries.bin");
-    let blobs_dir = path("blobs");
+    let images_dir = path("images");
     let settings_file = path("settings.json");
     let boot_file = path("boot_id.txt");
+
+    // Configure the images directory so pushed images are saved to disk.
+    if let Some(ref dir) = images_dir {
+        history.lock().set_images_dir(dir.clone());
+    }
 
     // Seed the cached keep_history flag from disk (one-time read at boot).
     let keep_enabled = settings_file
@@ -185,10 +190,9 @@ fn setup_runtime(
 
     // Load history: full restore if same boot + keep enabled, saved-only otherwise.
     if keep_enabled {
-        if let (Some(hf), Some(pf), Some(bd), Some(bf), Some(ad)) = (
+        if let (Some(hf), Some(pf), Some(bf), Some(ad)) = (
             &history_file,
             &saved_file,
-            &blobs_dir,
             &boot_file,
             &app_data,
         ) {
@@ -202,21 +206,21 @@ fn setup_runtime(
 
             if same_boot && hf.exists() {
                 // Same boot session — restore everything.
-                let _ = history.lock().load_all_from_file(hf, bd);
+                let _ = history.lock().load_all_from_file(hf);
             } else if hf.exists() {
                 // New boot — load full history then strip unsaved entries.
-                let _ = history.lock().load_all_from_file(hf, bd);
+                let _ = history.lock().load_all_from_file(hf);
                 history.lock().clear();
             } else {
                 // Fallback: first run with keep enabled.
-                let _ = history.lock().load_saved_from_file(pf, bd);
+                let _ = history.lock().load_saved_from_file(pf);
             }
 
             let _ = std::fs::create_dir_all(ad);
             let _ = std::fs::write(bf, current_boot.to_string());
         }
-    } else if let (Some(pf), Some(bd)) = (&saved_file, &blobs_dir) {
-        let _ = history.lock().load_saved_from_file(pf, bd);
+    } else if let Some(pf) = &saved_file {
+        let _ = history.lock().load_saved_from_file(pf);
     }
 
     // Seed the in-memory boolean flags from disk.
@@ -268,23 +272,17 @@ fn setup_runtime(
             if !dirty.swap(false, Ordering::Relaxed) {
                 continue;
             }
-            let blobs = crate::clipboard::commands::get_blobs_dir_path(&app_handle);
-            if let (Some(path), Some(bd)) = (
-                crate::clipboard::commands::get_history_file_path(&app_handle),
-                blobs.as_ref(),
-            ) {
-                let _ = hist.lock().save_all_to_file(&path, bd);
+            if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
+                let _ = hist.lock().save_all_to_file(&path);
             }
             // Also keep the saved entries file up-to-date.
-            if let (Some(pf), Some(bd)) = (
-                app_handle
-                    .path()
-                    .app_data_dir()
-                    .ok()
-                    .map(|d| d.join("pinned_entries.bin")),
-                blobs.as_ref(),
-            ) {
-                let _ = hist.lock().save_saved_to_file(&pf, bd);
+            if let Some(pf) = app_handle
+                .path()
+                .app_data_dir()
+                .ok()
+                .map(|d| d.join("pinned_entries.bin"))
+            {
+                let _ = hist.lock().save_saved_to_file(&pf);
             }
         });
     }

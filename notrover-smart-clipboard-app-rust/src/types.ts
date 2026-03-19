@@ -272,12 +272,27 @@ export function deriveDisplayKind(entry: ClipboardEntry): DisplayKind {
   return "file";
 }
 
-/** Get a display name for a clipboard image entry. Uses persisted label if available, otherwise derives from timestamp. */
+/** Display name for a clipboard image entry, prefixed with its unique ID.
+ *  Uses the persisted label when available, otherwise derives one from the timestamp. */
 export function imageDisplayName(entry: ClipboardEntry): string {
-  if (entry.label) return entry.label;
-  const d = new Date(entry.timestamp);
-  const month = d.toLocaleString(undefined, { month: "short" });
-  const day = d.getDate();
-  const time = d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
-  return `Image ${month} ${day}, ${time}`;
+  const name = entry.label
+    ? entry.label
+    : (() => {
+        const d = new Date(entry.timestamp);
+        const month = d.toLocaleString(undefined, { month: "short" });
+        const day = d.getDate();
+        const time = d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
+        return `Image ${month} ${day}, ${time}`;
+      })();
+  return `#${entry.id} ${name}`;
+}
+
+/** Resolve a clipboard image entry's content to a displayable `<img>` src.
+ *  Inline data-URLs are returned as-is; file paths are converted to Tauri
+ *  asset-protocol URLs so the sandboxed webview can load them. */
+export function resolveImageSrc(
+  content: string,
+  convertFileSrc: (path: string) => string,
+): string {
+  return content.startsWith("data:") ? content : convertFileSrc(content);
 }
