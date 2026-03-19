@@ -81,77 +81,68 @@ fn write_binary_file(path: &std::path::Path, data: &[u8]) -> Result<(), std::io:
     std::fs::write(path, data)
 }
 
-/// Decode a `data:<mime>;base64,<data>` URL into raw bytes.
-fn decode_data_url(data_url: &str) -> Option<Vec<u8>> {
-    let pos = data_url.find(";base64,")?;
-    B64.decode(&data_url[pos + 8..]).ok()
-}
+/// Decode a `data:<mime>;base64,<data>` URL and write the raw image bytes
+/// to the images directory.  The file is named `{id}_{label}.{ext}` so it
+/// is both human-readable and unique.  Returns the absolute file path on
+/// success, or `None` if decoding / writing fails.
+fn save_image_to_disk(entry: &ClipboardEntry, images_dir: &std::path::Path) -> Option<String> {
+    let pos = entry.content.find(";base64,")?;
+    let mime = &entry.content[5..pos];
+    let b64_data = &entry.content[pos + 8..];
+    let raw = B64.decode(b64_data).ok()?;
 
-/// Reconstruct a `data:<mime>;base64,…` URL from raw image bytes.
-fn raw_bytes_to_data_url(bytes: &[u8]) -> String {
-    let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "image/png"
-    } else if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
-        "image/jpeg"
-    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        "image/webp"
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        "image/gif"
-    } else if bytes.starts_with(b"BM") {
-        "image/bmp"
-    } else {
-        "image/png"
+    let ext = match mime {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        _ => "png",
     };
-    format!("data:{mime};base64,{}", B64.encode(bytes))
+
+    let label = entry.label.as_deref().unwrap_or("Image");
+    let safe: String = label
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let filename = format!("{}_{}.{}", entry.id, safe.trim(), ext);
+    let filepath = images_dir.join(&filename);
+
+    std::fs::create_dir_all(images_dir).ok()?;
+    std::fs::write(&filepath, &raw).ok()?;
+
+    Some(filepath.to_string_lossy().to_string())
 }
 
-/// Serialize entries to zstd-compressed MessagePack, externalising image blobs.
+/// Serialize entries to MessagePack binary and write to `path`.
 fn save_entries_binary(
     entries: &[ClipboardEntry],
-    meta_path: &std::path::Path,
-    blobs_dir: &std::path::Path,
+    path: &std::path::Path,
 ) -> Result<(), std::io::Error> {
-    std::fs::create_dir_all(blobs_dir)?;
-
-    let mut disk_entries = entries.to_vec();
-    for entry in &mut disk_entries {
-        if entry.kind == EntryKind::Image && entry.content.starts_with("data:") {
-            if let Some(raw) = decode_data_url(&entry.content) {
-                std::fs::write(blobs_dir.join(format!("{}.blob", entry.id)), &raw)?;
-                entry.content = format!("blob:{}", entry.id);
-            }
-        }
-    }
-
-    let msgpack = rmp_serde::to_vec(&disk_entries)
+    let msgpack = rmp_serde::to_vec(entries)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let compressed = zstd::encode_all(std::io::Cursor::new(&msgpack), 3)?;
-    write_binary_file(meta_path, &compressed)
+    write_binary_file(path, &msgpack)
 }
 
-/// Load entries from zstd-compressed MessagePack, restoring image blobs to data URLs.
-fn load_entries_binary(
-    meta_path: &std::path::Path,
-    blobs_dir: &std::path::Path,
-) -> Result<Vec<ClipboardEntry>, std::io::Error> {
-    if !meta_path.exists() {
+/// Load entries from a MessagePack binary file.  If the file was written
+/// by the previous zstd-compressed format it is transparently decompressed
+/// first (one-time migration).
+fn load_entries_binary(path: &std::path::Path) -> Result<Vec<ClipboardEntry>, std::io::Error> {
+    if !path.exists() {
         return Ok(Vec::new());
     }
-    let compressed = std::fs::read(meta_path)?;
-    let msgpack = zstd::decode_all(std::io::Cursor::new(&compressed))?;
-    let mut loaded: Vec<ClipboardEntry> = rmp_serde::from_slice(&msgpack)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-    for entry in &mut loaded {
-        if entry.content.starts_with("blob:") {
-            let blob_id = &entry.content[5..];
-            let blob_path = blobs_dir.join(format!("{blob_id}.blob"));
-            if let Ok(bytes) = std::fs::read(&blob_path) {
-                entry.content = raw_bytes_to_data_url(&bytes);
-            }
-        }
-    }
-    Ok(loaded)
+    let data = std::fs::read(path)?;
+    // Try raw MessagePack first; fall back to zstd-compressed (old format).
+    rmp_serde::from_slice::<Vec<ClipboardEntry>>(&data).or_else(|_| {
+        let decompressed = zstd::decode_all(std::io::Cursor::new(&data))?;
+        rmp_serde::from_slice(&decompressed)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -253,6 +244,9 @@ impl ClipboardEntry {
 #[derive(Debug, Default)]
 pub struct ClipboardHistory {
     entries: Vec<ClipboardEntry>,
+    /// Directory where externalised image files are stored.
+    /// Configured once at startup via [`Self::set_images_dir`].
+    images_dir: Option<std::path::PathBuf>,
 }
 
 impl ClipboardHistory {
@@ -260,9 +254,24 @@ impl ClipboardHistory {
         Self::default()
     }
 
+    /// Set the directory used to persist clipboard images as files on disk.
+    pub fn set_images_dir(&mut self, dir: std::path::PathBuf) {
+        self.images_dir = Some(dir);
+    }
+
     /// Prepend an entry and trim to [`MAX_HISTORY`] (excluding saved entries).
     /// Returns a clone of the newly inserted entry.
-    pub fn push(&mut self, entry: ClipboardEntry) -> ClipboardEntry {
+    pub fn push(&mut self, mut entry: ClipboardEntry) -> ClipboardEntry {
+        // For image entries still carrying an inline data-URL, persist the
+        // raw bytes to disk and replace the content with the file path.
+        // This keeps the in-memory footprint small and paste fast.
+        if entry.kind == EntryKind::Image && entry.content.starts_with("data:") {
+            if let Some(ref dir) = self.images_dir {
+                if let Some(path) = save_image_to_disk(&entry, dir) {
+                    entry.content = path;
+                }
+            }
+        }
         self.entries.insert(0, entry.clone());
         // Keep saved entries + up to MAX_HISTORY non-saved entries
         if self.entries.len() > MAX_HISTORY {
@@ -414,12 +423,8 @@ impl ClipboardHistory {
     /// Load saved entries from a file and merge them into history.
     /// Any existing entries with matching IDs are replaced.
     /// Advances the global ID counter past the highest loaded ID.
-    pub fn load_saved_from_file(
-        &mut self,
-        path: &std::path::Path,
-        blobs_dir: &std::path::Path,
-    ) -> Result<(), std::io::Error> {
-        let loaded = load_entries_binary(path, blobs_dir)?;
+    pub fn load_saved_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        let loaded = load_entries_binary(path)?;
         if loaded.is_empty() {
             return Ok(());
         }
@@ -434,38 +439,37 @@ impl ClipboardHistory {
             self.entries.insert(0, entry);
         }
 
+        self.externalize_images();
         Ok(())
     }
 
     /// Save all saved entries (pinned + saved-group) to a file.
-    pub fn save_saved_to_file(
-        &self,
-        path: &std::path::Path,
-        blobs_dir: &std::path::Path,
-    ) -> Result<(), std::io::Error> {
-        save_entries_binary(&self.saved_entries(), path, blobs_dir)
+    pub fn save_saved_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        save_entries_binary(&self.saved_entries(), path)
     }
 
     /// Save the entire history (all entries) to a file.
-    pub fn save_all_to_file(
-        &self,
-        path: &std::path::Path,
-        blobs_dir: &std::path::Path,
-    ) -> Result<(), std::io::Error> {
-        save_entries_binary(&self.entries, path, blobs_dir)?;
+    pub fn save_all_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        save_entries_binary(&self.entries, path)?;
 
-        // Clean up orphaned blob files
-        let referenced: std::collections::HashSet<String> = self
-            .entries
-            .iter()
-            .filter(|e| e.kind == EntryKind::Image)
-            .map(|e| format!("{}.blob", e.id))
-            .collect();
-        if let Ok(read_dir) = std::fs::read_dir(blobs_dir) {
-            for entry in read_dir.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.ends_with(".blob") && !referenced.contains(&name) {
-                    let _ = std::fs::remove_file(entry.path());
+        // Remove image files that are no longer referenced by any entry.
+        if let Some(ref dir) = self.images_dir {
+            let referenced: std::collections::HashSet<String> = self
+                .entries
+                .iter()
+                .filter(|e| e.kind == EntryKind::Image && !e.content.starts_with("data:"))
+                .filter_map(|e| {
+                    std::path::Path::new(&e.content)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                })
+                .collect();
+            if let Ok(read_dir) = std::fs::read_dir(dir) {
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !referenced.contains(&name) {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
                 }
             }
         }
@@ -475,14 +479,27 @@ impl ClipboardHistory {
 
     /// Load the full history from a file, replacing all current entries.
     /// Advances the global ID counter past the highest loaded ID.
-    pub fn load_all_from_file(
-        &mut self,
-        path: &std::path::Path,
-        blobs_dir: &std::path::Path,
-    ) -> Result<(), std::io::Error> {
-        let loaded = load_entries_binary(path, blobs_dir)?;
+    pub fn load_all_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        let loaded = load_entries_binary(path)?;
         advance_id_past(&loaded);
         self.entries = loaded;
+        self.externalize_images();
         Ok(())
+    }
+
+    /// Migrate any in-memory data-URL images to on-disk files.
+    /// Called after loading entries from a previous session so that old
+    /// inline images are externalised to the images directory.
+    fn externalize_images(&mut self) {
+        let Some(ref dir) = self.images_dir else {
+            return;
+        };
+        for entry in &mut self.entries {
+            if entry.kind == EntryKind::Image && entry.content.starts_with("data:") {
+                if let Some(path) = save_image_to_disk(entry, dir) {
+                    entry.content = path;
+                }
+            }
+        }
     }
 }

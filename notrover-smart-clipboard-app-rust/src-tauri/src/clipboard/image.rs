@@ -302,14 +302,14 @@ pub fn data_url_to_rgba(data_url: &str) -> Result<(usize, usize, Vec<u8>), Strin
 // and calling the Win32 API directly — with retries around `OpenClipboard` —
 // eliminates this failure mode entirely.
 
-/// Write an image (stored as a `data:image/…;base64,…` URL) to the system
-/// clipboard using direct Win32 API calls.
+/// Write raw image bytes (PNG, JPEG, WebP, etc.) to the system clipboard
+/// using direct Win32 API calls.
 ///
-/// All expensive work (base64 decode, image decode, pixel conversion) is
-/// performed **before** the clipboard is opened, so the exclusive Win32
-/// clipboard lock is held for < 1 ms.
+/// All expensive work — image decode, RGBA→BGRA pixel conversion, DIB
+/// construction — is performed **before** the clipboard is opened so the
+/// exclusive Win32 clipboard lock is held for < 1 ms.
 #[cfg(windows)]
-pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
+pub fn write_image_bytes_to_clipboard(raw_bytes: &[u8]) -> Result<(), String> {
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
     };
@@ -321,15 +321,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     const OPEN_RETRIES: usize = 10;
     const OPEN_RETRY_DELAY_MS: u64 = 50;
 
-    //  1. Decode everything BEFORE touching the clipboard
-    let b64_data = data_url
-        .find(";base64,")
-        .map(|pos| &data_url[pos + 8..])
-        .ok_or_else(|| "Missing ;base64, in data URL".to_string())?;
-
-    let raw_bytes = B64.decode(b64_data).map_err(|e| e.to_string())?;
-
-    let img = image::load_from_memory(&raw_bytes)
+    let img = image::load_from_memory(raw_bytes)
         .map_err(|e| e.to_string())?
         .into_rgba8();
     let (w, h) = img.dimensions();
@@ -337,7 +329,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     let height = h as usize;
     let rgba = img.into_raw();
 
-    //  2. Prepare CF_DIB blob (BITMAPINFOHEADER + BGRA bottom-up)
+    //  Prepare CF_DIB blob (BITMAPINFOHEADER + BGRA bottom-up)
     let header_size = 40usize; // sizeof(BITMAPINFOHEADER)
     let row_bytes = width * 4;
     let pixel_bytes = row_bytes * height;
@@ -370,17 +362,17 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
         }
     }
 
-    //  3. Prepare registered "PNG" blob
-    // If the raw bytes are already PNG, reuse them directly (zero cost).
-    // Otherwise skip the PNG clipboard format — CF_DIB is sufficient for
-    // the vast majority of paste targets.
-    let png_data: Option<Vec<u8>> = if raw_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+    //  Prepare registered "PNG" blob.
+    // If the source bytes are already PNG we reuse them directly (zero copy).
+    // Otherwise the PNG clipboard format is skipped — CF_DIB is sufficient
+    // for the vast majority of paste targets.
+    let png_data: Option<&[u8]> = if raw_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some(raw_bytes)
     } else {
         None
     };
 
-    //  4. Open clipboard with retry, write, close ─
+    //  Open clipboard with retry, write, close
     unsafe {
         let mut opened = false;
         for attempt in 0..OPEN_RETRIES {
@@ -421,7 +413,7 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
         }
 
         //  Write registered "PNG" format (best-effort)
-        if let Some(png) = &png_data {
+        if let Some(png) = png_data {
             let wide: Vec<u16> = "PNG\0".encode_utf16().collect();
             let cf_png = RegisterClipboardFormatW(wide.as_ptr());
             if cf_png != 0 {
@@ -442,4 +434,18 @@ pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Write an image stored as a `data:image/…;base64,…` URL to the system
+/// clipboard.  Decodes the base64 payload and delegates to
+/// [`write_image_bytes_to_clipboard`].
+#[cfg(windows)]
+pub fn write_image_to_clipboard(data_url: &str) -> Result<(), String> {
+    let b64_data = data_url
+        .find(";base64,")
+        .map(|pos| &data_url[pos + 8..])
+        .ok_or_else(|| "Missing ;base64, in data URL".to_string())?;
+
+    let raw_bytes = B64.decode(b64_data).map_err(|e| e.to_string())?;
+    write_image_bytes_to_clipboard(&raw_bytes)
 }

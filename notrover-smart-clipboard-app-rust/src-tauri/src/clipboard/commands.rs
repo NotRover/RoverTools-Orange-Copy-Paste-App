@@ -109,10 +109,6 @@ pub(crate) fn get_history_file_path(app: &tauri::AppHandle) -> Option<std::path:
     app_data_file(app, "history.bin")
 }
 
-pub(crate) fn get_blobs_dir_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app_data_file(app, "blobs")
-}
-
 fn get_settings_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     app_data_file(app, "settings.json")
 }
@@ -369,8 +365,8 @@ pub fn bulk_remove_group(
 /// Called from the frontend when the user first enables keep_history.
 #[tauri::command]
 pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    match (get_history_file_path(&app), get_blobs_dir_path(&app)) {
-        (Some(p), Some(b)) => state.history.lock().save_all_to_file(&p, &b).is_ok(),
+    match get_history_file_path(&app) {
+        Some(p) => state.history.lock().save_all_to_file(&p).is_ok(),
         _ => false,
     }
 }
@@ -422,8 +418,8 @@ pub fn rename_group_in_entries(
 }
 
 fn save_after_group_change(app: &tauri::AppHandle, state: &State<'_, AppState>) {
-    if let (Some(path), Some(blobs)) = (get_saved_file_path(app), get_blobs_dir_path(app)) {
-        let _ = state.history.lock().save_saved_to_file(&path, &blobs);
+    if let Some(path) = get_saved_file_path(app) {
+        let _ = state.history.lock().save_saved_to_file(&path);
     }
     auto_save_history(app, &state.history);
 }
@@ -552,13 +548,17 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
             crate::clipboard::html::write_html_to_clipboard(html, plain)?;
         }
         EntryKind::Image => {
-            // Bypass arboard entirely — its internal proxy-thread architecture
-            // races with the clipboard watcher and external apps, producing
-            // OS error 1418 ("Thread does not have a clipboard open").
-            // Direct Win32 API with retries is fully reliable.
             #[cfg(windows)]
             {
-                crate::clipboard::image::write_image_to_clipboard(&entry.content)?;
+                if entry.content.starts_with("data:") {
+                    // In-memory data-URL (legacy or migration path).
+                    crate::clipboard::image::write_image_to_clipboard(&entry.content)?;
+                } else {
+                    // File-backed image: write as CF_HDROP so the paste target
+                    // receives the file directly — no image decode or pixel
+                    // conversion, matching Explorer-copy performance.
+                    write_files_to_clipboard(&[entry.content.clone()])?;
+                }
             }
             #[cfg(not(windows))]
             {
