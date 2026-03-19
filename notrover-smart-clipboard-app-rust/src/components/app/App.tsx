@@ -131,6 +131,9 @@ const App: React.FC = () => {
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didRecoverGroupsRef = useRef(false);
 
+  // ID of the entry currently in the OS clipboard
+  const [activeClipboardId, setActiveClipboardId] = useState("");
+
   // Undo state for group deletion
   const [deletedGroup, setDeletedGroup] = useState<{
     name: string;
@@ -265,12 +268,27 @@ const App: React.FC = () => {
       else unlistenGroups = fn;
     });
 
+    let unlistenActiveId: (() => void) | undefined;
+
+    invoke<string>("get_active_clipboard_id").then((id) => {
+      if (!cancelled) setActiveClipboardId(id);
+    });
+
+    listen<string>("clipboard:active-id", (event) => {
+      if (cancelled) return;
+      setActiveClipboardId(event.payload);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenActiveId = fn;
+    });
+
     return () => {
       cancelled = true;
       unlisten?.();
       unlistenDeleted?.();
       unlistenPinned?.();
       unlistenGroups?.();
+      unlistenActiveId?.();
     };
   }, []);
 
@@ -300,6 +318,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleCopy = useCallback(async (id: string) => {
+    setActiveClipboardId(id);
     await invoke("copy_entry", { id });
   }, []);
 
@@ -682,6 +701,7 @@ const App: React.FC = () => {
             onBulkUnsave={handleBulkUnsave}
             onBulkAddGroup={handleBulkAddGroup}
             onBulkRemoveGroup={handleBulkRemoveGroup}
+            activeClipboardId={activeClipboardId}
           />
         )}
 

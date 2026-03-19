@@ -24,7 +24,7 @@ import {
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
-import { ChevronDownIcon, CheckIcon } from "../../../icons";
+import { ChevronDownIcon, CheckIcon, ClipboardIcon } from "../../../icons";
 import VideoPlayer from "./VideoPlayer";
 import "./EntryCard.css";
 
@@ -181,6 +181,8 @@ interface EntryCardProps {
   onToggleSelect?: (id: string) => void;
   /** Shift+click range selection. */
   onRangeSelect?: (id: string) => void;
+  /** Whether this entry is currently in the OS clipboard. */
+  isInClipboard?: boolean;
 }
 
 export const EntryCard: React.FC<EntryCardProps> = ({
@@ -194,6 +196,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   isSelected = false,
   onToggleSelect,
   onRangeSelect,
+  isInClipboard = false,
 }) => {
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
@@ -237,6 +240,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const typeMeasureRef = useRef<HTMLElement | null>(null);
   const pinMeasureRef = useRef<HTMLSpanElement | null>(null);
   const savedMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const clipboardMeasureRef = useRef<HTMLSpanElement | null>(null);
   const overflowMeasureRef = useRef<HTMLButtonElement | null>(null);
 
   const visibleGroups = displayGroups.slice(0, visibleGroupCount);
@@ -268,6 +272,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     if (entryGroups.includes("Saved")) {
       const savedWidth = widthOf(savedMeasureRef.current);
       if (savedWidth > 0) baseChipWidths.push(savedWidth);
+    }
+    if (isInClipboard) {
+      const clipboardWidth = widthOf(clipboardMeasureRef.current);
+      if (clipboardWidth > 0) baseChipWidths.push(clipboardWidth);
     }
 
     let usedWidth = 0;
@@ -305,7 +313,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     }
 
     setVisibleGroupCount(Math.max(0, Math.min(fitCount, displayGroups.length)));
-  }, [displayGroups, entry.pinned, entryGroups]);
+  }, [displayGroups, entry.pinned, entryGroups, isInClipboard]);
 
   // Load image previews for file entries (single or multi)
   useEffect(() => {
@@ -566,6 +574,17 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       </span>
     ) : null;
 
+  const renderClipboardChip = (withMeasureRef = false) =>
+    isInClipboard ? (
+      <span
+        ref={withMeasureRef ? clipboardMeasureRef : undefined}
+        className="card-type-chip card-type-chip--in-clipboard"
+      >
+        <ClipboardIcon size={9} strokeWidth={2.5} />
+        <span className="card-type-label">In clipboard</span>
+      </span>
+    ) : null;
+
   const renderGroupChip = (
     group: string,
     key: string,
@@ -598,6 +617,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     (showFileList || contentExpanded) && "entry-card--expanded",
     isSelecting && "entry-card--selectable",
     isSelected && "entry-card--selected",
+    isInClipboard && "entry-card--in-clipboard",
   ].filter(Boolean).join(" ");
 
   return (
@@ -777,6 +797,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             {renderTypeChip()}
             {renderPinnedChip()}
             {renderSavedChip()}
+            {renderClipboardChip()}
             {visibleGroups.length > 0 &&
               visibleGroups.map((g) => renderGroupChip(g, g))}
             {hiddenGroupCount > 0 && (
@@ -803,6 +824,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               {renderTypeChip(true)}
               {renderPinnedChip(true)}
               {renderSavedChip(true)}
+              {renderClipboardChip(true)}
               {displayGroups.map((g, idx) =>
                 renderGroupChip(g, `measure-${g}-${idx}`, idx),
               )}

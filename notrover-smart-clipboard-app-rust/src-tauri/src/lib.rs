@@ -303,6 +303,7 @@ pub fn run() {
         notif_copy: Arc::new(AtomicBool::new(true)),
         notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(false)),
+        active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
     };
 
     tauri::Builder::default()
@@ -334,6 +335,7 @@ pub fn run() {
             crate::clipboard::commands::bulk_set_groups,
             crate::clipboard::commands::bulk_add_group,
             crate::clipboard::commands::bulk_remove_group,
+            crate::clipboard::commands::get_active_clipboard_id,
             crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,

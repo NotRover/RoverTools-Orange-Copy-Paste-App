@@ -62,32 +62,32 @@ const CardMenu: React.FC<CardMenuProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const groupsRowRef = useRef<HTMLButtonElement>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
-  const [pos, setPos] = useState({ x: anchorX, y: anchorY });
   const closeAfter = (fn: () => void) => () => {
     fn();
     onClose();
   };
 
-  // Reposition the menu when the anchor changes so it stays within the viewport.
-  useLayoutEffect(() => {
-    if (!open) return;
-    setPos({ x: anchorX, y: anchorY });
-  }, [open, anchorX, anchorY]);
-
+  // Position the menu at the anchor and adjust for viewport overflow.
+  // Uses direct DOM manipulation to avoid a flash at (0,0) on first open.
   useLayoutEffect(() => {
     if (!open || !dropdownRef.current) return;
     const el = dropdownRef.current;
+    el.style.left = `${anchorX}px`;
+    el.style.top = `${anchorY}px`;
     const rect = el.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    let x = pos.x;
-    let y = pos.y;
+    let x = anchorX;
+    let y = anchorY;
     if (rect.bottom > vh) y = Math.max(0, anchorY - rect.height);
     if (rect.top < 0) y = 4;
     if (rect.right > vw) x = Math.max(0, anchorX - rect.width);
     if (rect.left < 0) x = 4;
-    if (x !== pos.x || y !== pos.y) setPos({ x, y });
-  });
+    if (x !== anchorX || y !== anchorY) {
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+    }
+  }, [open, anchorX, anchorY]);
 
   useEffect(() => {
     if (!open) setGroupsOpen(false);
@@ -122,7 +122,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
     <div
       ref={dropdownRef}
       className="card-menu-dropdown"
-      style={{ position: "fixed", left: pos.x, top: pos.y }}
+      style={{ position: "fixed", left: anchorX, top: anchorY }}
       onClick={(e) => e.stopPropagation()}
     >
       <button

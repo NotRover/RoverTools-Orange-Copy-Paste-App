@@ -155,6 +155,7 @@ fn handle_copy_shortcut(
             let _ = app.emit("clipboard:new-entry", &entry);
             crate::clipboard::commands::auto_save_history(&app, &history);
         }
+        crate::clipboard::commands::set_active_clipboard_id(&app, &entry.id);
         show_copy_popup(&app, &entry);
     });
 }

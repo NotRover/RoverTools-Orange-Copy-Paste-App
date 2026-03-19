@@ -120,7 +120,7 @@
 /* Separator */
 
 .card-menu-separator {
-  height: 1px;
+  height: 0.5px;
   background: var(--border);
   margin: 3px 4px;
 }

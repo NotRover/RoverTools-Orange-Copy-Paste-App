@@ -433,6 +433,7 @@ pub fn copy_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle)
     let ok = write_entry_to_clipboard(&entry).is_ok();
     if ok {
         state.suppress_next_capture.store(true, Ordering::Relaxed);
+        set_active_clipboard_id(&app, &id);
         crate::runtime::notifications::notify_if_enabled(&app, &entry);
     }
     ok
@@ -459,6 +460,7 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
 
         match write_entry_to_clipboard(&entry) {
             Ok(()) => {
+                set_active_clipboard_id(&app_handle, &entry.id);
                 crate::runtime::notifications::notify_paste_if_enabled(&app_handle, &entry);
                 schedule_paste();
             }
@@ -526,6 +528,18 @@ fn open_clipboard_with_retry() -> Result<Clipboard, String> {
     Err(format!(
         "failed to open clipboard after {CLIPBOARD_OPEN_RETRIES} attempts: {last_err}"
     ))
+}
+
+/// Update the active clipboard entry ID and notify the frontend.
+pub(crate) fn set_active_clipboard_id(app: &tauri::AppHandle, id: &str) {
+    let state: tauri::State<'_, AppState> = app.state();
+    *state.active_clipboard_id.lock() = id.to_owned();
+    let _ = app.emit("clipboard:active-id", id);
+}
+
+#[tauri::command]
+pub fn get_active_clipboard_id(state: State<'_, AppState>) -> String {
+    state.active_clipboard_id.lock().clone()
 }
 
 pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), String> {

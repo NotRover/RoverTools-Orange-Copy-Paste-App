@@ -35,4 +35,6 @@ pub struct AppState {
     /// When `true`, every new clipboard entry is automatically added to the
     /// "Saved" group so it persists across restarts.
     pub autosave: Arc<AtomicBool>,
+    /// ID of the entry currently in the OS clipboard.
+    pub active_clipboard_id: Arc<Mutex<String>>,
 }

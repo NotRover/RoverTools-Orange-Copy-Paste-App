@@ -113,6 +113,8 @@ interface ClipboardScreenProps {
   onBulkUnsave?: (ids: string[]) => void;
   onBulkAddGroup?: (ids: string[], group: string) => void;
   onBulkRemoveGroup?: (ids: string[], group: string) => void;
+  /** ID of the entry currently in the OS clipboard. */
+  activeClipboardId?: string;
 }
 
 const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
@@ -133,6 +135,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onBulkUnsave,
   onBulkAddGroup,
   onBulkRemoveGroup,
+  activeClipboardId,
 }) => {
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "tiles";
@@ -336,6 +339,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onRangeSelect={(id) =>
                             multiSelect.selectRange(id, allVisibleIds)
                           }
+                          isInClipboard={entry.id === activeClipboardId}
                         />
                       ))}
                     </div>
