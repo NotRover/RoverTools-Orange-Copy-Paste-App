@@ -61,6 +61,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const groupsRowRef = useRef<HTMLButtonElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
   const closeAfter = (fn: () => void) => () => {
     fn();
@@ -92,6 +93,30 @@ const CardMenu: React.FC<CardMenuProps> = ({
   useEffect(() => {
     if (!open) setGroupsOpen(false);
   }, [open]);
+
+  // Position the groups flyout so it doesn't overflow the viewport.
+  useLayoutEffect(() => {
+    if (!groupsOpen || !flyoutRef.current || !dropdownRef.current) return;
+    const flyout = flyoutRef.current;
+    const menu = dropdownRef.current;
+    const menuRect = menu.getBoundingClientRect();
+    const gap = 6;
+
+    // Reset to default (right-side) so we can measure the natural size.
+    flyout.style.left = "";
+    flyout.style.right = "";
+    const flyoutW = flyout.offsetWidth;
+    const vw = window.innerWidth;
+
+    if (menuRect.right + gap + flyoutW > vw) {
+      // Not enough room on the right — flip to the left side.
+      flyout.style.left = "auto";
+      flyout.style.right = `calc(100% + ${gap}px)`;
+    } else {
+      flyout.style.left = `calc(100% + ${gap}px)`;
+      flyout.style.right = "auto";
+    }
+  }, [groupsOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -170,7 +195,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
               />
             </button>
             {groupsOpen && (
-              <div className="card-menu-groups-flyout">
+              <div ref={flyoutRef} className="card-menu-groups-flyout">
                 <div className="card-menu-groups-flyout-header">
                   <span>Groups</span>
                 </div>
