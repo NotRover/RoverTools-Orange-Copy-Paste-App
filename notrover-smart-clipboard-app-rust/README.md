@@ -17,7 +17,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `Ctrl + Shift + V` → show recent history popup for quick paste
 - **Clipboard history** with support for:
   - Text entries
-  - Image entries (stored as raw binary blobs on disk, served as data URLs in memory)
+  - Image entries (stored as raw binary files on disk, served via Tauri asset protocol)
   - File entries (single and multiple files)
   - Multiple image files (with thumbnail previews)
   - Video files (with custom in-card player — play/pause, seek, mute only)
@@ -65,7 +65,7 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `tauri-plugin-global-shortcut` for global hotkeys
   - `arboard` for clipboard text/image access
   - `image` + `base64` for image encode/decode and data URL conversion
-  - `rmp-serde` + `zstd` for compressed binary persistence (MessagePack + Zstandard)
+  - `rmp-serde` for binary persistence (MessagePack)
   - `parking_lot` for efficient shared mutex state
   - `windows-sys` for Windows input/cursor/monitor and clipboard format helpers
 
@@ -131,21 +131,25 @@ The backend is organized by **feature/domain**, not by technical layer alone.
 
 ### 1) `clipboard` module (clipboard domain)
 
-- `history.rs`: in-memory clipboard history model, operations, and compressed binary persistence (blob store + MessagePack/zstd)
+- `history.rs`: in-memory clipboard history model, operations, and binary persistence (image files + MessagePack)
 - `image.rs`: image clipboard format handling + data URL conversion
 - `files.rs`: Windows `CF_HDROP` read/write for single and multiple file paths
-- `commands.rs`: Tauri IPC commands for clipboard actions (get/delete/clear/copy/paste/pin/unpin) and clipboard read/write helpers
+- `html.rs`: CF_HTML rich text clipboard read/write
+- `commands.rs`: Tauri IPC commands for clipboard actions (get/delete/clear/copy/paste/pin/unpin/groups/bulk) and clipboard read/write helpers
 
 ### 2) `runtime` module (OS/runtime integrations)
 
 - `hotkeys.rs`: global hotkey registration and handlers
-- `platform.rs` + `platform_windows.rs`: platform-specific OS interaction (simulate copy/paste, cursor position, monitor work area, screen-boundary clamping)
+- `platform/` (`mod.rs`, `windows.rs`, `linux.rs`): platform-specific OS interaction (simulate copy/paste, cursor position, monitor work area, screen-boundary clamping)
 - `popup_windows.rs`: popup window creation, positioning helpers, screen-edge clamping, popup hide utilities
-- `commands.rs`: runtime-oriented IPC commands (close popup windows)
+- `notifications.rs`: copy/paste notification toast logic
+- `tray.rs`: system tray icon and menu
+- `window_state.rs`: saved window geometry (position/size persistence)
+- `commands.rs`: runtime-oriented IPC commands (close/resize popups, autostart, open data folder)
 
 ### 3) `state` module (shared app state)
 
-- `app_state.rs`: `AppState` managed by Tauri — includes shared history and `suppress_next_capture` atomic flag
+- `app_state.rs`: `AppState` managed by Tauri — includes shared history, suppress flag, notification toggles, active clipboard ID, and other setting caches
 - `popup_state.rs`: popup constants and payload types used for emitted events
 
 ### 4) `lib.rs` (composition root)
@@ -165,18 +169,15 @@ src/components/
 ├─ app/                          ← main window
 │  ├─ App.tsx                    ← root state, layout, screen routing, theme
 │  ├─ App.css                    ← global CSS variables (dark/light), layout
+│  ├─ sort-options.tsx            ← sort dropdown options
 │  ├─ clipboard-screen/
 │  │  ├─ ClipboardScreen.tsx     ← day-grouped timeline, sort controls, layout toggle, clear-all
 │  │  ├─ ClipboardScreen.css
 │  │  └─ entry-card/
 │  │     ├─ EntryCard.tsx        ← per-entry card (text/image/file/video previews, chips, footer)
-│  │     ├─ EntryCard.css
-│  │     └─ VideoPlayer.tsx      ← custom video player (play/pause, seek, mute; no native controls)
-│  ├─ search-screen/
-│  │  ├─ SearchScreen.tsx        ← full-text search/filter across history
-│  │  └─ SearchScreen.css
+│  │     └─ EntryCard.css
 │  ├─ settings-screen/
-│  │  ├─ SettingsScreen.tsx      ← placeholder
+│  │  ├─ SettingsScreen.tsx      ← user preferences (persist history, notifications, close-to-tray)
 │  │  └─ SettingsScreen.css
 │  ├─ shortcuts-screen/
 │  │  ├─ ShortcutsScreen.tsx     ← shortcut reference docs
@@ -188,15 +189,24 @@ src/components/
 │  │  ├─ StatusPill.tsx          ← entry type counts bar
 │  │  └─ StatusPill.css
 │  ├─ card-menu/
-│  │  ├─ CardMenu.tsx            ← right-click context menu (copy/pin/delete)
+│  │  ├─ CardMenu.tsx            ← right-click context menu (copy/pin/save/groups/delete)
 │  │  └─ CardMenu.css
-│  └─ toast/
-│     └─ ToastNotification.tsx   ← undo toast for clear-all
-├─ cursor-popup/                 ← standalone OS window
-│  ├─ CursorPopup.tsx
-│  ├─ cursor-popup.html
-│  └─ popup.css
-└─ paste-popup/                  ← standalone OS window
+│  ├─ toast/
+│  │  └─ ToastNotification.tsx   ← undo toast for clear-all
+│  └─ tooltip/
+│     └─ TooltipPortal.tsx       ← CSS-driven tooltip component
+├─ copy-popup/                  ← standalone OS window
+│  ├─ CopyPopup.tsx
+│  ├─ copy-popup.html
+│  └─ copyPopup.css
+├─ notifications/               ← standalone OS window
+│  ├─ CopyNotification.tsx
+│  ├─ copy-notification.html
+│  └─ copyNotification.css
+├─ entry-types/                 ← shared component
+│  ├─ EntryTypePill.tsx
+│  └─ entryTypes.css
+└─ paste-popup/                 ← standalone OS window
    ├─ PastePopup.tsx
    ├─ paste-popup.html
    └─ pastePopup.css
@@ -211,8 +221,11 @@ notrover-smart-clipboard-app-rust/
 ├─ src/
 │  ├─ components/
 │  │  ├─ app/
-│  │  ├─ cursor-popup/
+│  │  ├─ copy-popup/
+│  │  ├─ notifications/
+│  │  ├─ entry-types/
 │  │  └─ paste-popup/
+│  ├─ hooks/
 │  ├─ types.ts
 │  └─ assets/
 ├─ src-tauri/
@@ -224,20 +237,29 @@ notrover-smart-clipboard-app-rust/
 │  │  │  ├─ commands.rs
 │  │  │  ├─ files.rs
 │  │  │  ├─ history.rs
+│  │  │  ├─ html.rs
 │  │  │  └─ image.rs
 │  │  ├─ runtime/
 │  │  │  ├─ mod.rs
 │  │  │  ├─ commands.rs
 │  │  │  ├─ hotkeys.rs
-│  │  │  ├─ platform.rs
-│  │  │  ├─ platform_windows.rs
-│  │  │  └─ popup_windows.rs
+│  │  │  ├─ notifications.rs
+│  │  │  ├─ popup_windows.rs
+│  │  │  ├─ tray.rs
+│  │  │  ├─ window_state.rs
+│  │  │  └─ platform/
+│  │  │     ├─ mod.rs
+│  │  │     ├─ windows.rs
+│  │  │     └─ linux.rs
 │  │  └─ state/
 │  │     ├─ mod.rs
 │  │     ├─ app_state.rs
 │  │     └─ popup_state.rs
 │  ├─ Cargo.toml
 │  └─ tauri.conf.json
+├─ docs/
+│  ├─ ARCHITECTURE.md
+│  └─ BUGFIX_HISTORY.md
 ├─ package.json
 └─ README.md
 ```
@@ -250,19 +272,21 @@ notrover-smart-clipboard-app-rust/
 
 1. User presses `Ctrl+Shift+C`
 2. Runtime simulates `Ctrl+C`, reads clipboard (text → files → image)
-3. New entry is pushed to history; `clipboard:new-entry` event emitted to main window and cursor popup
-4. Cursor popup appears near the cursor showing what was captured
+3. New entry is pushed to history; `clipboard:new-entry` event emitted to main window and copy popup
+4. Copy popup appears near the cursor showing what was captured
+5. Active clipboard ID is updated; `clipboard:active-id` event emitted
 
 **Paste flow:**
 
 1. User presses `Ctrl+Shift+V`
-2. Paste popup appears near cursor with the 5 most recent entries
+2. Paste popup appears near cursor with the top 10 recent + top 10 pinned entries
 3. Selecting an entry: sets `suppress_next_capture` flag, writes to clipboard, hides popup, simulates `Ctrl+V`
 4. Clipboard watcher sees the suppress flag and skips re-adding the entry to history
+5. Active clipboard ID is updated; paste notification shown if enabled
 
 **Suppress flag** (`Arc<AtomicBool>` in `AppState`):
 
-- Set by `copy_entry` and `paste_entry` commands before writing to clipboard
+- Set by `copy_entry`, `paste_entry`, and Ctrl+Shift+C shortcut before writing to clipboard
 - Checked by the clipboard watcher before recording a new capture
 - Prevents duplicate entries when copying from within the app
 
@@ -270,11 +294,13 @@ notrover-smart-clipboard-app-rust/
 
 ## localStorage Keys
 
-| Key         | Values                                                     | Purpose                      |
-| ----------- | ---------------------------------------------------------- | ---------------------------- |
-| `sc-theme`  | `"dark"` \| `"light"`                                      | User's manual theme override |
-| `sc-layout` | `"tiles"` \| `"list"`                                      | Clipboard screen layout mode |
-| `sc-sort`   | `"newest"` \| `"oldest"` \| `"a-z"` \| `"z-a"` \| `"type"` | Active sort order            |
+| Key                  | Values                                                     | Purpose                      |
+| -------------------- | ---------------------------------------------------------- | ---------------------------- |
+| `sc-theme`           | `"dark"` \| `"light"`                                      | User's manual theme override |
+| `sc-layout`          | `"tiles"` \| `"list"`                                      | Clipboard screen layout mode |
+| `sc-sort`            | `"newest"` \| `"oldest"` \| `"a-z"` \| `"z-a"` \| `"type"` | Active sort order            |
+| `sc-paste-slots`     | `"3"` – `"10"`                                             | Paste popup entry count      |
+| `sc-recent-searches` | JSON string array (max 8)                                  | Recent search terms          |
 
 ---
 
