@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { groupColor } from "../../../types";
 import {
@@ -9,6 +9,8 @@ import {
   TagIcon,
   ChevronRightIcon,
   TrashIcon,
+  ExpandIcon,
+  CollapseIcon,
 } from "../../icons";
 import "./CardMenu.css";
 
@@ -30,6 +32,12 @@ export interface CardMenuProps {
   entryGroups: string[];
   /** Toggle a group on/off for this entry. */
   onToggleGroup: (group: string) => void;
+  /** Whether this entry can be expanded (long text / overflowing html). */
+  isExpandable?: boolean;
+  /** Whether this entry is currently expanded. */
+  isExpanded?: boolean;
+  /** Toggle expand / collapse for this entry. */
+  onToggleExpand?: () => void;
 }
 
 const CardMenu: React.FC<CardMenuProps> = ({
@@ -47,14 +55,39 @@ const CardMenu: React.FC<CardMenuProps> = ({
   availableGroups,
   entryGroups,
   onToggleGroup,
+  isExpandable,
+  isExpanded,
+  onToggleExpand,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const groupsRowRef = useRef<HTMLButtonElement>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
+  const [pos, setPos] = useState({ x: anchorX, y: anchorY });
   const closeAfter = (fn: () => void) => () => {
     fn();
     onClose();
   };
+
+  // Reposition the menu when the anchor changes so it stays within the viewport.
+  useLayoutEffect(() => {
+    if (!open) return;
+    setPos({ x: anchorX, y: anchorY });
+  }, [open, anchorX, anchorY]);
+
+  useLayoutEffect(() => {
+    if (!open || !dropdownRef.current) return;
+    const el = dropdownRef.current;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = pos.x;
+    let y = pos.y;
+    if (rect.bottom > vh) y = Math.max(0, anchorY - rect.height);
+    if (rect.top < 0) y = 4;
+    if (rect.right > vw) x = Math.max(0, anchorX - rect.width);
+    if (rect.left < 0) x = 4;
+    if (x !== pos.x || y !== pos.y) setPos({ x, y });
+  });
 
   useEffect(() => {
     if (!open) setGroupsOpen(false);
@@ -89,7 +122,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
     <div
       ref={dropdownRef}
       className="card-menu-dropdown"
-      style={{ position: "fixed", left: anchorX, top: anchorY }}
+      style={{ position: "fixed", left: pos.x, top: pos.y }}
       onClick={(e) => e.stopPropagation()}
     >
       <button
@@ -171,6 +204,17 @@ const CardMenu: React.FC<CardMenuProps> = ({
             )}
           </div>
         </>
+      )}
+
+      {/* Expand / Collapse */}
+      {isExpandable && onToggleExpand && (
+        <button
+          className="card-menu-item card-menu-item--expand"
+          onClick={closeAfter(onToggleExpand)}
+        >
+          {isExpanded ? <CollapseIcon size={13} /> : <ExpandIcon size={13} />}
+          <span>{isExpanded ? "Collapse" : "Expand"}</span>
+        </button>
       )}
 
       <div className="card-menu-separator" />

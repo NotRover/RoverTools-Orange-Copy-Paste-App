@@ -110,6 +110,13 @@
   color: #fff;
 }
 
+/* Expand / Collapse button */
+
+.card-menu-item--expand:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
 /* Separator */
 
 .card-menu-separator {

@@ -884,6 +884,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             : [...current, group];
           onSetGroups(entry.id, newGroups);
         }}
+        isExpandable={isTextExpandable}
+        isExpanded={contentExpanded}
+        onToggleExpand={() => setContentExpanded((v) => !v)}
       />
     </div>
   );
