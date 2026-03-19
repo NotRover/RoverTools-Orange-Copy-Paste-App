@@ -483,7 +483,29 @@
   overflow-y: auto;
 }
 
+/* Expanded media: switch to block layout so image/video renders above body */
+.entry-list .entry-card.entry-card--expanded .card-media {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.entry-list .entry-card.entry-card--expanded .card-media-img {
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
+}
+
 /* Footer always pinned to the bottom of the card body */
 .entry-list .card-footer {
   margin-top: auto;
+}
+
+.entry-list .card-chips {
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
