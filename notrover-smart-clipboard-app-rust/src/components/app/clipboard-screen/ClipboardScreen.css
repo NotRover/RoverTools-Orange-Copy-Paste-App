@@ -206,7 +206,7 @@
 .timeline-day-row::after {
   content: "";
   flex: 1;
-  height: 1px;
+  height: 0.5px;
   background: var(--accent);
   opacity: 0.25;
   margin-left: 4px;

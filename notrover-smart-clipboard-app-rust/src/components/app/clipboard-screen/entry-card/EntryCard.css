@@ -23,6 +23,14 @@
   border-color: var(--border-light);
 }
 
+.entry-card--in-clipboard {
+  border-color: var(--accent);
+}
+
+.entry-card--in-clipboard:hover {
+  border-color: var(--accent);
+}
+
 @keyframes cardFadeIn {
   from {
     opacity: 0;
@@ -114,6 +122,11 @@
 .card-type-chip--saved {
   background: rgba(34, 197, 94, 0.12);
   color: #22c55e;
+}
+
+.card-type-chip--in-clipboard {
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .card-type-chip--group {

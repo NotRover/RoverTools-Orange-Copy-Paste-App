@@ -62,14 +62,15 @@ fn capture_clipboard_change(
         }
     };
 
-    if let Some(new_entry) = maybe_new_entry {
+    if let Some(ref new_entry) = maybe_new_entry {
         // If autosave is enabled, add the "Saved" group to the new entry.
         let state: tauri::State<'_, AppState> = app.state();
         if state.autosave.load(Ordering::Relaxed) {
             history.lock().add_group(&new_entry.id, "Saved");
         }
-        let _ = app.emit("clipboard:new-entry", &new_entry);
-        crate::runtime::notifications::notify_if_enabled(app, &new_entry);
+        crate::clipboard::commands::set_active_clipboard_id(app, &new_entry.id);
+        let _ = app.emit("clipboard:new-entry", new_entry);
+        crate::runtime::notifications::notify_if_enabled(app, new_entry);
         crate::clipboard::commands::auto_save_history(app, history);
     }
     true
