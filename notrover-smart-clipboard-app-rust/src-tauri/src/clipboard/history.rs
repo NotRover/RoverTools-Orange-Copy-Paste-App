@@ -148,6 +148,18 @@ pub enum EntryKind {
     Html,
 }
 
+impl EntryKind {
+    /// Short lowercase label for this kind, used in event payloads and popups.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Image => "image",
+            Self::File => "file",
+            Self::Html => "html",
+        }
+    }
+}
+
 /// A single clipboard history entry.
 ///
 /// `content` is either a plain text string (for [`EntryKind::Text`]) or a
@@ -269,21 +281,17 @@ impl ClipboardHistory {
         self.entries.insert(0, entry.clone());
         // Keep saved entries + up to MAX_HISTORY non-saved entries
         if self.entries.len() > MAX_HISTORY {
-            let saved_count = self.entries.iter().filter(|e| e.is_saved()).count();
-            if saved_count < self.entries.len() {
-                // Remove oldest non-saved entries beyond MAX_HISTORY limit
-                let mut kept = Vec::new();
-                let mut normal_count = 0;
-                for e in self.entries.drain(..) {
-                    if e.is_saved() || normal_count < MAX_HISTORY {
-                        if !e.is_saved() {
-                            normal_count += 1;
-                        }
-                        kept.push(e);
-                    }
+            let mut normal_count = 0;
+            self.entries.retain(|e| {
+                if e.is_saved() {
+                    true
+                } else if normal_count < MAX_HISTORY {
+                    normal_count += 1;
+                    true
+                } else {
+                    false
                 }
-                self.entries = kept;
-            }
+            });
         }
         entry
     }

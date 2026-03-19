@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { AppTheme } from "../../types";
+import { readTheme } from "../../types";
 import { ClipboardIcon } from "../icons";
 import "./copyNotification.css";
-
-type AppTheme = "dark" | "light";
 
 const DISMISS_MS = 2500;
 const FADE_MS = 250;
@@ -20,9 +20,7 @@ const KIND_LABELS: Record<string, string> = {
 const CopyNotification: React.FC = () => {
   const [visible, setVisible] = useState(false);
   const [kind, setKind] = useState("text");
-  const [theme, setTheme] = useState<AppTheme>(
-    () => (localStorage.getItem("sc-theme") as AppTheme) ?? "dark",
-  );
+  const [theme, setTheme] = useState<AppTheme>(readTheme);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -40,7 +38,7 @@ const CopyNotification: React.FC = () => {
     listen<{ kind: string }>("copy-notification:show", (event) => {
       if (cancelled) return;
       setKind(event.payload.kind);
-      setTheme((localStorage.getItem("sc-theme") as AppTheme) ?? "dark");
+      setTheme(readTheme());
 
       // Reset animation
       setVisible(false);

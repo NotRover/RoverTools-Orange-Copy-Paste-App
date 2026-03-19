@@ -8,7 +8,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutS
 use crate::clipboard::commands::read_clipboard_entry;
 use crate::state::app_state::AppState;
 use crate::{
-    clipboard::history::{ClipboardEntry, ClipboardHistory, EntryKind},
+    clipboard::history::{ClipboardEntry, ClipboardHistory},
     runtime::platform,
     state::{
         CopyPopupPayload, PastePopupPayload, COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H,
@@ -41,15 +41,6 @@ fn toggle_popup_if_visible(app: &tauri::AppHandle, label: &str) -> bool {
     false
 }
 
-fn entry_kind_label(kind: &EntryKind) -> &'static str {
-    match kind {
-        EntryKind::Text => "text",
-        EntryKind::Image => "image",
-        EntryKind::File => "file",
-        EntryKind::Html => "html",
-    }
-}
-
 fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
     let (px, py) = platform::popup_position(COPY_POPUP_W as i32, COPY_POPUP_H as i32);
 
@@ -57,7 +48,7 @@ fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
         let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
         let payload = CopyPopupPayload {
             id: entry.id.clone(),
-            kind: entry_kind_label(&entry.kind).to_string(),
+            kind: entry.kind.label().to_string(),
             content: entry.content.clone(),
         };
         let _ = win.emit("clipboard:copied", &payload);

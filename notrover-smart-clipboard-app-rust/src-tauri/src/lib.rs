@@ -45,23 +45,14 @@ fn system_boot_epoch_secs() -> u64 {
     0
 }
 
-fn read_bool_setting(path: &std::path::Path, key: &str) -> bool {
+fn read_bool_setting(path: &std::path::Path, key: &str, default: bool) -> bool {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|data| {
             serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data).ok()
         })
         .and_then(|map| map.get(key)?.as_bool())
-        .unwrap_or(false)
-}
-
-fn read_optional_bool_setting(path: &std::path::Path, key: &str) -> Option<bool> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|data| {
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data).ok()
-        })
-        .and_then(|map| map.get(key)?.as_bool())
+        .unwrap_or(default)
 }
 
 /// Kill any other running instance of this executable before we start.
@@ -185,17 +176,14 @@ fn setup_runtime(
     // Seed the cached keep_history flag from disk (one-time read at boot).
     let keep_enabled = settings_file
         .as_deref()
-        .map(|p| read_bool_setting(p, "keep_history"))
+        .map(|p| read_bool_setting(p, "keep_history", false))
         .unwrap_or(false);
 
     // Load history: full restore if same boot + keep enabled, saved-only otherwise.
     if keep_enabled {
-        if let (Some(hf), Some(pf), Some(bf), Some(ad)) = (
-            &history_file,
-            &saved_file,
-            &boot_file,
-            &app_data,
-        ) {
+        if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
+            (&history_file, &saved_file, &boot_file, &app_data)
+        {
             let current_boot = system_boot_epoch_secs();
             let previous_boot: u64 = std::fs::read_to_string(bf)
                 .ok()
@@ -228,27 +216,19 @@ fn setup_runtime(
     state_ref
         .keep_history
         .store(keep_enabled, Ordering::Relaxed);
-    for (key, flag) in [
-        ("close_to_tray", &state_ref.close_to_tray),
-        ("start_minimized", &state_ref.start_minimized),
-        ("autosave", &state_ref.autosave),
+    for (key, flag, default) in [
+        ("close_to_tray", &state_ref.close_to_tray, false),
+        ("start_minimized", &state_ref.start_minimized, false),
+        ("autosave", &state_ref.autosave, false),
+        // copy_notification defaults to true when the key is absent from settings.json.
+        // Operation-based notification flags also default to true.
+        ("copy_notification", &state_ref.copy_notification, true),
+        ("notif_copy", &state_ref.notif_copy, true),
     ] {
         let val = settings_file
             .as_deref()
-            .map(|p| read_bool_setting(p, key))
-            .unwrap_or(false);
-        flag.store(val, Ordering::Relaxed);
-    }
-    // copy_notification defaults to true when the key is absent from settings.json.
-    // Operation-based notification flags also default to true.
-    for (key, flag) in [
-        ("copy_notification", &state_ref.copy_notification),
-        ("notif_copy", &state_ref.notif_copy),
-    ] {
-        let val = settings_file
-            .as_deref()
-            .and_then(|p| read_optional_bool_setting(p, key))
-            .unwrap_or(true);
+            .map(|p| read_bool_setting(p, key, default))
+            .unwrap_or(default);
         flag.store(val, Ordering::Relaxed);
     }
 

@@ -296,3 +296,16 @@ export function resolveImageSrc(
 ): string {
   return content.startsWith("data:") ? content : convertFileSrc(content);
 }
+
+export function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+export function readTheme(): AppTheme {
+  return (localStorage.getItem("sc-theme") as AppTheme) ?? "dark";
+}
+
+export function readSlots(): number {
+  const v = parseInt(localStorage.getItem("sc-paste-slots") ?? "3", 10);
+  return Number.isNaN(v) ? 3 : Math.max(3, Math.min(10, v));
+}
