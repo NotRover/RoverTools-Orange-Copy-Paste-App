@@ -139,3 +139,21 @@ The `.card-chips` container had `overflow: hidden`, which silently clipped any c
 1. First try fitting all groups without an overflow button.
 2. If not all fit, reserve overflow button width before calculating how many groups fit.
 3. If even the overflow button can't fit alongside base chips, show 0 groups with no overflow button (chips wrap naturally).
+
+## #6 — Screenshots and image copies produce duplicate history entries
+
+**Date**: 2026-03-19
+**Severity**: Medium
+**Symptoms**:
+
+- Taking a screenshot (Win+Shift+S, Snipping Tool) or copying an image from certain apps would add the same image entry to clipboard history twice.
+- Both entries appeared identical in the UI, wasting space and confusing the user.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/clipboard/history.rs`, `src-tauri/src/runtime/clipboard_watcher.rs`
+Some Windows apps (Snipping Tool, browsers) write to the clipboard in multiple passes, incrementing the clipboard sequence number more than once for a single copy operation. The clipboard watcher polls every 220ms using `GetClipboardSequenceNumber()` and captured each sequence-number change independently.
+
+On the first capture, `push()` externalised the image from an inline data-URL (`data:image/png;base64,…`) to a file path (`C:\…\images\42_Image.png`), replacing the entry's `content` field. On the second capture (triggered by the second sequence-number increment), the watcher read the same image from the clipboard as a fresh data-URL. The deduplication check (`is_duplicate_top`) compared this data-URL string against the stored file path string — they didn't match, so the image was pushed as a new entry.
+
+**Fix**: Added a `content_hash: Option<u64>` field to `ClipboardEntry`. When an image entry is created, a 64-bit hash of the data-URL string is computed (using Rust's `DefaultHasher`) and stored on the entry. This hash survives externalization — when `push()` replaces the data-URL with a file path, the hash remains unchanged. The `content_matches()` function and `is_duplicate_top()` now compare hashes for image entries instead of raw content strings. This is O(1) with zero I/O, zero base64 decoding, and zero file reads. The hash is session-only (`#[serde(skip)]`) since the dedup issue only occurs within a single 220ms window, not across restarts.
