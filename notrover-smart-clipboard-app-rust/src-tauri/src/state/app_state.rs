@@ -30,6 +30,8 @@ pub struct AppState {
     pub copy_notification: Arc<AtomicBool>,
     /// When `true`, show notifications for copy operations.
     pub notif_copy: Arc<AtomicBool>,
+    /// When `true`, show notifications for paste operations.
+    pub notif_paste: Arc<AtomicBool>,
     /// When `true`, every new clipboard entry is automatically added to the
     /// "Saved" group so it persists across restarts.
     pub autosave: Arc<AtomicBool>,

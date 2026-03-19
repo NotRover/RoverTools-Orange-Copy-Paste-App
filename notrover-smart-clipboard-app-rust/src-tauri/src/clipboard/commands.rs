@@ -170,6 +170,7 @@ pub fn set_setting(
         "start_minimized" => Some(&state.start_minimized),
         "copy_notification" => Some(&state.copy_notification),
         "notif_copy" => Some(&state.notif_copy),
+        "notif_paste" => Some(&state.notif_paste),
         "autosave" => Some(&state.autosave),
         _ => None,
     };
@@ -425,13 +426,14 @@ pub(crate) fn auto_save_history(app: &tauri::AppHandle, _history: &crate::Shared
 }
 
 #[tauri::command]
-pub fn copy_entry(id: String, state: State<'_, AppState>) -> bool {
+pub fn copy_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     let Some(entry) = find_entry_by_id(&state, &id) else {
         return false;
     };
     let ok = write_entry_to_clipboard(&entry).is_ok();
     if ok {
         state.suppress_next_capture.store(true, Ordering::Relaxed);
+        crate::runtime::notifications::notify_if_enabled(&app, &entry);
     }
     ok
 }
@@ -446,6 +448,7 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
     };
 
     let suppress_next_capture = state.suppress_next_capture.clone();
+    let app_handle = app.clone();
 
     // Spawn a background thread so we don't block the Tauri event loop
     // during heavy image decoding/clipboard writing.
@@ -456,6 +459,7 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
 
         match write_entry_to_clipboard(&entry) {
             Ok(()) => {
+                crate::runtime::notifications::notify_paste_if_enabled(&app_handle, &entry);
                 schedule_paste();
             }
             Err(e) => {

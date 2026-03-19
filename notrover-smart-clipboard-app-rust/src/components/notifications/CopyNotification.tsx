@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AppTheme } from "../../types";
 import { readTheme } from "../../types";
-import { ClipboardIcon } from "../icons";
+import { ClipboardIcon, ClipboardPasteIcon } from "../icons";
 import "./copyNotification.css";
 
 const DISMISS_MS = 2500;
@@ -20,6 +20,7 @@ const KIND_LABELS: Record<string, string> = {
 const CopyNotification: React.FC = () => {
   const [visible, setVisible] = useState(false);
   const [kind, setKind] = useState("text");
+  const [action, setAction] = useState("Copied");
   const [theme, setTheme] = useState<AppTheme>(readTheme);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -35,9 +36,10 @@ const CopyNotification: React.FC = () => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<{ kind: string }>("copy-notification:show", (event) => {
+    listen<{ kind: string; action: string }>("copy-notification:show", (event) => {
       if (cancelled) return;
       setKind(event.payload.kind);
+      setAction(event.payload.action ?? "Copied");
       setTheme(readTheme());
 
       // Reset animation
@@ -70,8 +72,8 @@ const CopyNotification: React.FC = () => {
       className={`cn-container${visible ? " cn-visible" : ""}`}
       data-theme={theme}
     >
-      <ClipboardIcon size={14} />
-      <span className="cn-label">Copied</span>
+      {action === "Pasted" ? <ClipboardPasteIcon size={14} /> : <ClipboardIcon size={14} />}
+      <span className="cn-label">{action}</span>
       <span className="cn-dot">&middot;</span>
       <span className="cn-kind">{KIND_LABELS[kind] ?? kind}</span>
     </div>
