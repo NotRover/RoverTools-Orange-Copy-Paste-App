@@ -129,20 +129,14 @@ fn save_entries_binary(
     write_binary_file(path, &msgpack)
 }
 
-/// Load entries from a MessagePack binary file.  If the file was written
-/// by the previous zstd-compressed format it is transparently decompressed
-/// first (one-time migration).
+/// Load entries from a MessagePack binary file.
 fn load_entries_binary(path: &std::path::Path) -> Result<Vec<ClipboardEntry>, std::io::Error> {
     if !path.exists() {
         return Ok(Vec::new());
     }
     let data = std::fs::read(path)?;
-    // Try raw MessagePack first; fall back to zstd-compressed (old format).
-    rmp_serde::from_slice::<Vec<ClipboardEntry>>(&data).or_else(|_| {
-        let decompressed = zstd::decode_all(std::io::Cursor::new(&data))?;
-        rmp_serde::from_slice(&decompressed)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    })
+    rmp_serde::from_slice(&data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

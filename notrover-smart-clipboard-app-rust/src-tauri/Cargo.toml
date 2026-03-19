@@ -33,9 +33,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Base64 encoding for clipboard image data URLs
 base64 = "0.22"
 
-# Binary serialisation (MessagePack) + compression for history persistence
+# Binary serialisation (MessagePack) for history persistence
 rmp-serde = "1"
-zstd = "0.13"
 
 # Ergonomic lock primitives (no poisoning, direct lock() → MutexGuard)
 parking_lot = "0.12"
