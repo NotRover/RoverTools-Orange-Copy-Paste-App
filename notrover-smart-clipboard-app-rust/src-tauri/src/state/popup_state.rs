@@ -38,4 +38,6 @@ pub(crate) struct PastePopupPayload {
 #[derive(serde::Serialize, Clone)]
 pub(crate) struct CopyNotificationPayload {
     pub kind: String,
+    /// `"Copied"` or `"Pasted"` — displayed as the notification label.
+    pub action: String,
 }

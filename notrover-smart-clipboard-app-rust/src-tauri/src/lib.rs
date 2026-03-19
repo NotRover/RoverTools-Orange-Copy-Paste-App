@@ -224,6 +224,7 @@ fn setup_runtime(
         // Operation-based notification flags also default to true.
         ("copy_notification", &state_ref.copy_notification, true),
         ("notif_copy", &state_ref.notif_copy, true),
+        ("notif_paste", &state_ref.notif_paste, true),
     ] {
         let val = settings_file
             .as_deref()
@@ -300,6 +301,7 @@ pub fn run() {
         start_minimized: Arc::new(AtomicBool::new(false)),
         copy_notification: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
+        notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(false)),
     };
 

@@ -72,6 +72,7 @@ const SettingsScreen: React.FC = () => {
   const [startMinimized, setStartMinimized] = useState(false);
   const [copyNotification, setCopyNotification] = useState(true);
   const [notifCopy, setNotifCopy] = useState(true);
+  const [notifPaste, setNotifPaste] = useState(true);
   const [autosave, setAutosave] = useState(false);
   const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
@@ -85,6 +86,7 @@ const SettingsScreen: React.FC = () => {
     loadBoolWithDefault("start_minimized", setStartMinimized, false);
     loadBoolWithDefault("copy_notification", setCopyNotification, true);
     loadBoolWithDefault("notif_copy", setNotifCopy, true);
+    loadBoolWithDefault("notif_paste", setNotifPaste, true);
     loadBoolWithDefault("autosave", setAutosave, false);
     invoke<boolean>("get_autostart").then(setRunOnStartup);
   }, []);
@@ -246,6 +248,20 @@ const SettingsScreen: React.FC = () => {
                   <span className="settings-checkbox-label">Copy operations</span>
                   <span className="settings-checkbox-desc">
                     Show notification when content is copied via Ctrl+C or other methods
+                  </span>
+                </div>
+              </label>
+              <label className="settings-checkbox-row">
+                <span
+                  className={`settings-checkbox${notifPaste ? " checked" : ""}`}
+                  onClick={() => toggleBoolSetting(notifPaste, setNotifPaste, "notif_paste")}
+                >
+                  {notifPaste && <CheckIcon size={9} strokeWidth={3} />}
+                </span>
+                <div className="settings-checkbox-info">
+                  <span className="settings-checkbox-label">Paste operations</span>
+                  <span className="settings-checkbox-desc">
+                    Show notification when an entry is pasted via Ctrl+Shift+V
                   </span>
                 </div>
               </label>
