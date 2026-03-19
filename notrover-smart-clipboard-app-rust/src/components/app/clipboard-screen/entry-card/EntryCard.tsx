@@ -286,30 +286,47 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       chipCount += 1;
     }
 
+    const overflowWidth = widthOf(overflowMeasureRef.current);
     const groupWidths = displayGroups.map((_, i) => widthOf(groupMeasureRefs.current[i]));
-    let fitCount = 0;
 
+    // Try to fit all groups first (no overflow button needed).
+    let fitCount = 0;
+    let fitUsed = usedWidth;
+    let fitChips = chipCount;
     for (const width of groupWidths) {
       if (width <= 0) continue;
-      const nextWidth = usedWidth + (chipCount > 0 ? CHIP_GAP_PX : 0) + width;
-      if (nextWidth > containerWidth) break;
-      usedWidth = nextWidth;
-      chipCount += 1;
+      const next = fitUsed + (fitChips > 0 ? CHIP_GAP_PX : 0) + width;
+      if (next > containerWidth) break;
+      fitUsed = next;
+      fitChips += 1;
       fitCount += 1;
     }
 
-    const remaining = displayGroups.length - fitCount;
-    if (remaining > 0) {
-      const overflowWidth = widthOf(overflowMeasureRef.current);
-      const overflowWithGap = (chipCount > 0 ? CHIP_GAP_PX : 0) + overflowWidth;
+    // If all groups fit, no overflow button is needed.
+    if (fitCount >= displayGroups.length) {
+      setVisibleGroupCount(displayGroups.length);
+      return;
+    }
 
-      while (fitCount > 0 && usedWidth + overflowWithGap > containerWidth) {
-        const removedWidth = groupWidths[fitCount - 1] ?? 0;
-        usedWidth -= removedWidth;
-        chipCount -= 1;
-        if (chipCount > 0) usedWidth -= CHIP_GAP_PX;
-        fitCount -= 1;
-      }
+    // Some groups are hidden — we need the overflow button.
+    // Reserve space for it and re-calculate how many groups fit.
+    const overflowWithGap = (chipCount > 0 ? CHIP_GAP_PX : 0) + overflowWidth;
+    const budgetForGroups = containerWidth - usedWidth - overflowWithGap;
+
+    if (budgetForGroups <= 0) {
+      // No room on the first row — chips will wrap; show 0 groups + overflow.
+      setVisibleGroupCount(0);
+      return;
+    }
+
+    let groupsUsed = 0;
+    fitCount = 0;
+    for (const width of groupWidths) {
+      if (width <= 0) continue;
+      const next = groupsUsed + (fitCount > 0 ? CHIP_GAP_PX : 0) + width;
+      if (next > budgetForGroups) break;
+      groupsUsed = next;
+      fitCount += 1;
     }
 
     setVisibleGroupCount(Math.max(0, Math.min(fitCount, displayGroups.length)));

@@ -492,7 +492,7 @@ button.card-type-chip.open .card-type-chevron {
 
 .card-footer {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
 }
@@ -500,10 +500,10 @@ button.card-type-chip.open .card-type-chevron {
 .card-chips {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
   position: relative;
 }
 
@@ -524,6 +524,8 @@ button.card-type-chip.open .card-type-chevron {
   color: var(--text-muted);
   flex-shrink: 0;
   white-space: nowrap;
+  /* Align with the first row of chips (matches chip padding-top + centering) */
+  padding-top: 3px;
 }
 
 .card-type-chip--group {
