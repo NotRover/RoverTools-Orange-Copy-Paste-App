@@ -361,6 +361,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
   const isTextExpandable = (entry.type === "text" || entry.type === "html") &&
     (entry.type === "text" ? entry.content.length > TEXT_PREVIEW_LENGTH : htmlOverflows);
+  const isMediaExpandable =
+    entry.type === "image" ||
+    (entry.type === "file" && !isMulti && firstFile != null &&
+      (isImageFile(firstFile) || isVideoFile(firstFile)) && !missingFiles.has(firstFile));
+  const isMultiFileExpandable = entry.type === "file" && isMulti;
+  const isExpandable = isTextExpandable || isMediaExpandable || isMultiFileExpandable;
 
   const displayKind = deriveDisplayKind(entry);
   const cardClasses = [
@@ -556,7 +562,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           setShowFileList={setShowFileList}
           contentExpanded={contentExpanded}
           setContentExpanded={setContentExpanded}
-          isTextExpandable={isTextExpandable}
+          isExpandable={isExpandable}
           cardRef={cardRef}
           justPinned={justPinned}
           copied={copied}
@@ -594,9 +600,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
             : [...current, group];
           onSetGroups(entry.id, newGroups);
         }}
-        isExpandable={isTextExpandable}
-        isExpanded={contentExpanded}
-        onToggleExpand={() => setContentExpanded((v) => !v)}
+        isExpandable={isExpandable}
+        isExpanded={isMultiFileExpandable ? showFileList : contentExpanded}
+        onToggleExpand={() => isMultiFileExpandable ? setShowFileList((v) => !v) : setContentExpanded((v) => !v)}
       />
     </div>
   );

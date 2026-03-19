@@ -26,7 +26,7 @@ interface ChipBarProps {
   setShowFileList: React.Dispatch<React.SetStateAction<boolean>>;
   contentExpanded: boolean;
   setContentExpanded: React.Dispatch<React.SetStateAction<boolean>>;
-  isTextExpandable: boolean;
+  isExpandable: boolean;
   cardRef: React.RefObject<HTMLDivElement | null>;
   justPinned: boolean;
   copied: boolean;
@@ -45,13 +45,14 @@ const ChipBar: React.FC<ChipBarProps> = ({
   setShowFileList,
   contentExpanded,
   setContentExpanded,
-  isTextExpandable,
+  isExpandable,
   cardRef,
   justPinned,
   copied,
   relTime,
 }) => {
-  const [showHiddenGroups, setShowHiddenGroups] = useState(false);
+  const [showHiddenChips, setShowHiddenChips] = useState(false);
+  const [visibleBaseCount, setVisibleBaseCount] = useState(0);
   const [visibleGroupCount, setVisibleGroupCount] = useState(0);
 
   const footerChipsRef = useRef<HTMLDivElement>(null);
@@ -62,18 +63,25 @@ const ChipBar: React.FC<ChipBarProps> = ({
   const clipboardMeasureRef = useRef<HTMLSpanElement | null>(null);
   const overflowMeasureRef = useRef<HTMLButtonElement | null>(null);
 
+  // Build an ordered list of optional base chips (excluding type, which always shows)
+  const optionalBases: Array<{ key: "pinned" | "saved" | "clipboard"; width: 0 }> = [];
+  if (entry.pinned) optionalBases.push({ key: "pinned", width: 0 });
+  if (entryGroups.includes("Saved")) optionalBases.push({ key: "saved", width: 0 });
+  if (isInClipboard) optionalBases.push({ key: "clipboard", width: 0 });
+
+  const visibleBases = optionalBases.slice(0, visibleBaseCount);
+  const hiddenBases = optionalBases.slice(visibleBaseCount);
   const visibleGroups = displayGroups.slice(0, visibleGroupCount);
   const hiddenGroups = displayGroups.slice(visibleGroupCount);
-  const hiddenGroupCount = hiddenGroups.length;
+  const totalHiddenCount = hiddenBases.length + hiddenGroups.length;
 
-  const measureVisibleGroupCount = useCallback(() => {
+  const measureChipOverflow = useCallback(() => {
     const chipContainer = footerChipsRef.current;
-    if (!chipContainer) {
-      return;
-    }
+    if (!chipContainer) return;
 
     const containerWidth = chipContainer.clientWidth;
     if (containerWidth <= 0) {
+      setVisibleBaseCount(0);
       setVisibleGroupCount(0);
       return;
     }
@@ -81,78 +89,84 @@ const ChipBar: React.FC<ChipBarProps> = ({
     const widthOf = (node: Element | null): number =>
       node ? Math.ceil(node.getBoundingClientRect().width) : 0;
 
-    const baseChipWidths: number[] = [];
+    // Type chip always visible
     const typeWidth = widthOf(typeMeasureRef.current);
-    if (typeWidth > 0) baseChipWidths.push(typeWidth);
-    if (entry.pinned) {
-      const pinWidth = widthOf(pinMeasureRef.current);
-      if (pinWidth > 0) baseChipWidths.push(pinWidth);
-    }
-    if (entryGroups.includes("Saved")) {
-      const savedWidth = widthOf(savedMeasureRef.current);
-      if (savedWidth > 0) baseChipWidths.push(savedWidth);
-    }
-    if (isInClipboard) {
-      const clipboardWidth = widthOf(clipboardMeasureRef.current);
-      if (clipboardWidth > 0) baseChipWidths.push(clipboardWidth);
-    }
+    let typeUsed = typeWidth > 0 ? typeWidth : 0;
 
-    let usedWidth = 0;
-    let chipCount = 0;
-    for (const width of baseChipWidths) {
-      if (chipCount > 0) usedWidth += CHIP_GAP_PX;
-      usedWidth += width;
-      chipCount += 1;
-    }
+    // Measure optional base chips
+    const baseRefs = [pinMeasureRef, savedMeasureRef, clipboardMeasureRef];
+    const baseWidths: number[] = [];
+    if (entry.pinned) baseWidths.push(widthOf(baseRefs[0].current));
+    if (entryGroups.includes("Saved")) baseWidths.push(widthOf(baseRefs[1].current));
+    if (isInClipboard) baseWidths.push(widthOf(baseRefs[2].current));
 
     const overflowWidth = widthOf(overflowMeasureRef.current);
     const groupWidths = displayGroups.map((_, i) => widthOf(groupMeasureRefs.current[i]));
 
-    let fitCount = 0;
-    let fitUsed = usedWidth;
-    let fitChips = chipCount;
-    for (const width of groupWidths) {
-      if (width <= 0) continue;
-      const next = fitUsed + (fitChips > 0 ? CHIP_GAP_PX : 0) + width;
-      if (next > containerWidth) break;
-      fitUsed = next;
-      fitChips += 1;
-      fitCount += 1;
+    // All optional chip widths in order: bases then groups
+    const allOptionalWidths = [...baseWidths, ...groupWidths];
+
+    // Try fitting everything (no overflow button needed)
+    let fitAll = true;
+    let tempUsed = typeUsed;
+    let tempChips = typeUsed > 0 ? 1 : 0;
+    for (const w of allOptionalWidths) {
+      if (w <= 0) continue;
+      const next = tempUsed + (tempChips > 0 ? CHIP_GAP_PX : 0) + w;
+      if (next > containerWidth) { fitAll = false; break; }
+      tempUsed = next;
+      tempChips++;
     }
 
-    if (fitCount >= displayGroups.length) {
+    if (fitAll) {
+      setVisibleBaseCount(baseWidths.length);
       setVisibleGroupCount(displayGroups.length);
       return;
     }
 
-    const overflowWithGap = (chipCount > 0 ? CHIP_GAP_PX : 0) + overflowWidth;
-    const budgetForGroups = containerWidth - usedWidth - overflowWithGap;
+    // Not everything fits — reserve space for overflow button
+    const overflowReserve = (typeUsed > 0 ? CHIP_GAP_PX : 0) + overflowWidth;
+    let budget = containerWidth - typeUsed - overflowReserve;
 
-    if (budgetForGroups <= 0) {
+    if (budget <= 0) {
+      setVisibleBaseCount(0);
       setVisibleGroupCount(0);
       return;
     }
 
-    let groupsUsed = 0;
-    fitCount = 0;
-    for (const width of groupWidths) {
-      if (width <= 0) continue;
-      const next = groupsUsed + (fitCount > 0 ? CHIP_GAP_PX : 0) + width;
-      if (next > budgetForGroups) break;
-      groupsUsed = next;
-      fitCount += 1;
+    // Fit base chips first, then group chips
+    let baseFit = 0;
+    let fitCount = 0;
+    for (const w of baseWidths) {
+      if (w <= 0) { baseFit++; continue; }
+      const needed = (fitCount > 0 ? CHIP_GAP_PX : 0) + w;
+      if (needed > budget) break;
+      budget -= needed;
+      fitCount++;
+      baseFit++;
     }
 
-    setVisibleGroupCount(Math.max(0, Math.min(fitCount, displayGroups.length)));
+    let groupFit = 0;
+    for (const w of groupWidths) {
+      if (w <= 0) continue;
+      const needed = (fitCount > 0 ? CHIP_GAP_PX : 0) + w;
+      if (needed > budget) break;
+      budget -= needed;
+      fitCount++;
+      groupFit++;
+    }
+
+    setVisibleBaseCount(baseFit);
+    setVisibleGroupCount(Math.max(0, Math.min(groupFit, displayGroups.length)));
   }, [displayGroups, entry.pinned, entryGroups, isInClipboard]);
 
   useEffect(() => {
-    setShowHiddenGroups(false);
-  }, [entry.id, hiddenGroupCount]);
+    setShowHiddenChips(false);
+  }, [entry.id, totalHiddenCount]);
 
   useLayoutEffect(() => {
-    measureVisibleGroupCount();
-  }, [measureVisibleGroupCount, relTime, entry.id]);
+    measureChipOverflow();
+  }, [measureChipOverflow, relTime, entry.id]);
 
   useEffect(() => {
     const target = footerChipsRef.current;
@@ -160,22 +174,22 @@ const ChipBar: React.FC<ChipBarProps> = ({
       return;
     }
     const ro = new ResizeObserver(() => {
-      measureVisibleGroupCount();
+      measureChipOverflow();
     });
     ro.observe(target);
     return () => ro.disconnect();
-  }, [measureVisibleGroupCount]);
+  }, [measureChipOverflow]);
 
   useEffect(() => {
-    if (!showHiddenGroups) return;
+    if (!showHiddenChips) return;
     const handler = (e: MouseEvent) => {
       if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-        setShowHiddenGroups(false);
+        setShowHiddenChips(false);
       }
     };
     document.addEventListener("mousedown", handler, true);
     return () => document.removeEventListener("mousedown", handler, true);
-  }, [showHiddenGroups, cardRef]);
+  }, [showHiddenChips, cardRef]);
 
   const renderTypeChip = (withMeasureRef = false) => {
     if (entry.type === "file" && isMulti) {
@@ -210,7 +224,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
       );
     }
 
-    if (isTextExpandable) {
+    if (isExpandable) {
       const dk = deriveDisplayKind(entry);
       return (
         <button
@@ -308,27 +322,27 @@ const ChipBar: React.FC<ChipBarProps> = ({
       <div className="card-footer">
         <div className="card-chips" ref={footerChipsRef}>
           {renderTypeChip()}
-          {renderPinnedChip()}
-          {renderSavedChip()}
-          {renderClipboardChip()}
+          {visibleBases.some((b) => b.key === "pinned") && renderPinnedChip()}
+          {visibleBases.some((b) => b.key === "saved") && renderSavedChip()}
+          {visibleBases.some((b) => b.key === "clipboard") && renderClipboardChip()}
           {visibleGroups.length > 0 &&
             visibleGroups.map((g) => renderGroupChip(g, g))}
-          {hiddenGroupCount > 0 && (
+          {totalHiddenCount > 0 && (
             <button
               type="button"
-              className={`card-type-chip card-type-chip--group-overflow card-type-chip--group-overflow-btn${showHiddenGroups ? " active" : ""}`}
+              className={`card-type-chip card-type-chip--group-overflow card-type-chip--group-overflow-btn${showHiddenChips ? " active" : ""}`}
               data-tooltip={
-                showHiddenGroups
-                  ? "Hide extra groups"
-                  : `show ${hiddenGroupCount} more group${hiddenGroupCount > 1 ? "s" : ""}`
+                showHiddenChips
+                  ? "Hide"
+                  : `show ${totalHiddenCount} more`
               }
               onClick={(e) => {
                 e.stopPropagation();
-                setShowHiddenGroups((v) => !v);
+                setShowHiddenChips((v) => !v);
               }}
-              aria-expanded={showHiddenGroups}
+              aria-expanded={showHiddenChips}
             >
-              +{hiddenGroupCount}
+              +{totalHiddenCount}
             </button>
           )}
 
@@ -364,11 +378,14 @@ const ChipBar: React.FC<ChipBarProps> = ({
           <span className="card-time">{relTime}</span>
         )}
       </div>
-      {showHiddenGroups && hiddenGroups.length > 0 && (
+      {showHiddenChips && totalHiddenCount > 0 && (
         <div
           className="card-hidden-groups"
           onClick={(e) => e.stopPropagation()}
         >
+          {hiddenBases.some((b) => b.key === "pinned") && renderPinnedChip()}
+          {hiddenBases.some((b) => b.key === "saved") && renderSavedChip()}
+          {hiddenBases.some((b) => b.key === "clipboard") && renderClipboardChip()}
           {hiddenGroups.map((g) => {
             const gc = groupColor(g);
             return (
