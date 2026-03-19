@@ -24,7 +24,7 @@ fn is_duplicate_top(history: &ClipboardHistory, entry: &ClipboardEntry) -> bool 
     history
         .top(1)
         .first()
-        .map(|top| top.kind == entry.kind && top.content == entry.content)
+        .map(|top| crate::clipboard::history::content_matches(top, entry))
         .unwrap_or(false)
 }
 

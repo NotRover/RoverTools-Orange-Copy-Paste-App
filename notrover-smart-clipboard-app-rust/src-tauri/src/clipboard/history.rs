@@ -5,6 +5,7 @@
 //! in a [`parking_lot::Mutex`] so it can be shared across Tauri commands and
 //! global-shortcut handlers.
 
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -119,6 +120,30 @@ fn save_image_to_disk(entry: &ClipboardEntry, images_dir: &std::path::Path) -> O
     Some(filepath.to_string_lossy().to_string())
 }
 
+/// Check whether two entries have equivalent content.
+///
+/// For most entry types this is a simple string comparison.  For images,
+/// the `content` field might be a data-URL in one entry and a file path
+/// in the other (after externalisation).  To handle that cheaply, each
+/// image entry carries a `content_hash` computed from the original
+/// data-URL at creation time.  Comparing two u64 hashes is O(1) with no
+/// I/O or base64 decoding.
+pub(crate) fn content_matches(a: &ClipboardEntry, b: &ClipboardEntry) -> bool {
+    if a.kind != b.kind {
+        return false;
+    }
+    if a.content == b.content {
+        return true;
+    }
+    // For images, compare the content hash (survives externalisation).
+    if a.kind == EntryKind::Image {
+        if let (Some(ha), Some(hb)) = (a.content_hash, b.content_hash) {
+            return ha == hb;
+        }
+    }
+    false
+}
+
 /// Serialize entries to MessagePack binary and write to `path`.
 fn save_entries_binary(
     entries: &[ClipboardEntry],
@@ -182,6 +207,18 @@ pub struct ClipboardEntry {
     /// Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Fast content fingerprint for image deduplication.  Computed from the
+    /// original data-URL at creation time so it survives externalisation to
+    /// a file path.  Not persisted — only relevant within a single session.
+    #[serde(skip)]
+    pub content_hash: Option<u64>,
+}
+
+/// Compute a fast 64-bit hash of the given string.
+fn hash_content(s: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl ClipboardEntry {
@@ -195,6 +232,11 @@ impl ClipboardEntry {
         } else {
             None
         };
+        let content_hash = if kind == EntryKind::Image {
+            Some(hash_content(&content))
+        } else {
+            None
+        };
         Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string(),
             kind,
@@ -203,6 +245,7 @@ impl ClipboardEntry {
             pinned: false,
             groups: Vec::new(),
             label,
+            content_hash,
         }
     }
 
@@ -305,7 +348,7 @@ impl ClipboardHistory {
     /// Same as [`Self::push_if_distinct`], but also returns whether insertion happened.
     pub fn push_if_distinct_with_flag(&mut self, entry: ClipboardEntry) -> (ClipboardEntry, bool) {
         if let Some(existing) = self.entries.first() {
-            if existing.kind == entry.kind && existing.content == entry.content {
+            if content_matches(existing, &entry) {
                 return (existing.clone(), false);
             }
         }
