@@ -216,7 +216,7 @@
   letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0.5px solid var(--border);
   margin-bottom: 5px;
 }
 

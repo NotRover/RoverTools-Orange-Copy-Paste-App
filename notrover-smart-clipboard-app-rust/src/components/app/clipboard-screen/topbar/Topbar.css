@@ -130,10 +130,10 @@
 
 .cs-toolbar-sep {
   width: 1px;
-  height: 16px;
+  height: 18px;
   background: var(--border);
   flex-shrink: 0;
-  opacity: 0.6;
+  opacity: 1;
 }
 
 .sort-chevron {
