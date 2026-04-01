@@ -4,7 +4,7 @@ import type { SortMode } from "../../sort-options";
 import { SORT_OPTIONS } from "../../sort-options";
 import GroupManagerCard from "../group-manager/GroupManagerCard";
 import BulkActionsBar from "../bulk-actions/BulkActionsBar";
-import { SearchBar, FilterDropdown } from "../search-filter/SearchFilter";
+import { FilterDropdown } from "../search-filter/SearchFilter";
 import type { useSearchFilter } from "../search-filter/SearchFilter";
 import type { useMultiSelect } from "../../../../hooks/useMultiSelect";
 import {
@@ -14,9 +14,8 @@ import {
   TagIcon,
   TrashIcon,
   MultiSelectIcon,
-  PinIcon,
-  SaveStarIcon,
-  SlidersIcon,
+  SearchIcon,
+  CloseIcon,
 } from "../../../icons";
 import "./Topbar.css";
 
@@ -55,11 +54,6 @@ interface TopbarProps {
   onClearAll?: () => void;
 }
 
-const LAYOUTS: { id: ClipboardLayout; label: string; icon: React.ReactNode }[] = [
-  { id: "tiles", label: "Tiles", icon: <TilesIcon size={10} /> },
-  { id: "list", label: "List", icon: <ListIcon size={10} /> },
-];
-
 const Topbar: React.FC<TopbarProps> = ({
   entries,
   sort,
@@ -87,22 +81,19 @@ const Topbar: React.FC<TopbarProps> = ({
 }) => {
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLDivElement>(null);
-  const [optionsOpen, setOptionsOpen] = useState(false);
-  const optionsRef = useRef<HTMLDivElement>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
   const groupsRef = useRef<HTMLDivElement>(null);
-
   // Close dropdowns on outside click
   useEffect(() => {
-    if (!sortOpen && !sf.filtersOpen && !optionsOpen) return;
+    if (!sortOpen && !sf.filtersOpen && !groupsOpen) return;
     const handler = (e: MouseEvent) => {
       if (sortOpen && sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
       if (sf.filtersOpen && sf.filterRef.current && !sf.filterRef.current.contains(e.target as Node)) sf.setFiltersOpen(false);
-      if (optionsOpen && optionsRef.current && !optionsRef.current.contains(e.target as Node)) setOptionsOpen(false);
+      if (groupsOpen && groupsRef.current && !groupsRef.current.contains(e.target as Node)) setGroupsOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [sortOpen, sf.filtersOpen, optionsOpen]);
+  }, [sortOpen, sf.filtersOpen, groupsOpen]);
 
   return (
     <div className="layout-toggle-wrap">
@@ -110,18 +101,15 @@ const Topbar: React.FC<TopbarProps> = ({
       <div className="cs-toolbar-left">
         <div className="sort-dropdown" ref={sortRef}>
           <button
-            className={`sort-dropdown-trigger${sortOpen ? " sort-dropdown-trigger--open" : ""}`}
+            className={`cs-tb-btn${sortOpen ? " cs-tb-btn--open" : ""}`}
             onClick={() => {
               if (!sortOpen) document.dispatchEvent(new Event("tooltip:hide"));
               setSortOpen((v) => !v);
             }}
-            data-tooltip="Sort order"
+            data-tooltip={`Sort: ${SORT_OPTIONS.find((s) => s.id === sort)?.label}`}
             data-tooltip-pos="below"
           >
             {SORT_OPTIONS.find((s) => s.id === sort)?.icon}
-            <span className="layout-pill-label">
-              {SORT_OPTIONS.find((s) => s.id === sort)?.label}
-            </span>
             <ChevronDownIcon className="sort-chevron" />
           </button>
           {sortOpen && (
@@ -147,40 +135,79 @@ const Topbar: React.FC<TopbarProps> = ({
         <FilterDropdown sf={sf} availableGroups={availableGroups} />
       </div>
 
-      {/* Center: Search */}
-      <SearchBar sf={sf} />
-
-      {/* Right: Select + Options */}
-      <div className="cs-toolbar-right">
-        {/* Select mode button */}
-        <div className="bulk-select-wrap">
+      {/* Center: compact search */}
+      <div className="cs-inline-search">
+        <SearchIcon size={11} className="cs-inline-search-icon" />
+        <input
+          ref={sf.searchInputRef}
+          type="text"
+          className="cs-inline-search-input"
+          placeholder="Search…"
+          value={sf.searchQuery}
+          onChange={(e) => sf.setSearchQuery(e.target.value)}
+        />
+        {sf.searchQuery && (
           <button
-            className={`sort-dropdown-trigger${multiSelect.isSelecting ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() =>
-              multiSelect.isSelecting
-                ? multiSelect.exitSelectMode()
-                : multiSelect.enterSelectMode()
-            }
-            data-tooltip="Select entries"
+            className="cs-inline-search-clear"
+            onClick={() => {
+              sf.setSearchQuery("");
+              sf.searchInputRef.current?.focus();
+            }}
+          >
+            <CloseIcon size={8} />
+          </button>
+        )}
+      </div>
+
+      {/* Right: actions */}
+      <div className="cs-toolbar-right">
+        <div className="cs-layout-segment">
+          <div
+            className="cs-layout-slider"
+            style={{ transform: layout === "list" ? "translateX(100%)" : "translateX(0)" }}
+          />
+          <button
+            className={`cs-layout-seg-btn${layout === "tiles" ? " cs-layout-seg-btn--active" : ""}`}
+            onClick={() => selectLayout("tiles")}
+            data-tooltip="Tiles view"
             data-tooltip-pos="below"
           >
-            <MultiSelectIcon size={12} />
-            <span className="layout-pill-label">
-              {multiSelect.isSelecting
+            <TilesIcon size={12} />
+          </button>
+          <button
+            className={`cs-layout-seg-btn${layout === "list" ? " cs-layout-seg-btn--active" : ""}`}
+            onClick={() => selectLayout("list")}
+            data-tooltip="List view"
+            data-tooltip-pos="below"
+          >
+            <ListIcon size={12} />
+          </button>
+        </div>
+
+        <div className="cs-toolbar-sep" />
+
+        {/* Select mode */}
+        <div className="bulk-select-wrap">
+          <button
+            className={`cs-tb-btn${multiSelect.isSelecting ? " cs-tb-btn--active" : ""}`}
+            onClick={() => {
+              document.dispatchEvent(new Event("tooltip:hide"));
+              multiSelect.isSelecting
+                ? multiSelect.exitSelectMode()
+                : multiSelect.enterSelectMode();
+            }}
+            data-tooltip={
+              multiSelect.isSelecting
                 ? multiSelect.selectedCount > 0
                   ? `${multiSelect.selectedCount} selected`
-                  : "Select"
-                : "Select"}
-            </span>
-            {multiSelect.isSelecting && allPinned && (
-              <span style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", marginLeft: 1 }}>
-                <PinIcon size={10} filled={true} />
-              </span>
-            )}
-            {multiSelect.isSelecting && allSaved && (
-              <span style={{ color: "#22c55e", display: "inline-flex", alignItems: "center", marginLeft: 1 }}>
-                <SaveStarIcon size={10} filled={true} />
-              </span>
+                  : "Exit selection"
+                : "Select entries"
+            }
+            data-tooltip-pos="below"
+          >
+            <MultiSelectIcon size={13} />
+            {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
+              <span className="cs-tb-badge">{multiSelect.selectedCount}</span>
             )}
           </button>
 
@@ -225,86 +252,49 @@ const Topbar: React.FC<TopbarProps> = ({
           )}
         </div>
 
-        {/* Options button */}
-        <div className="sort-dropdown" ref={optionsRef}>
+        {/* Groups */}
+        <div className="sort-dropdown" ref={groupsRef}>
           <button
-            className={`sort-dropdown-trigger${optionsOpen ? " sort-dropdown-trigger--open" : ""}`}
-            onClick={() => setOptionsOpen((v) => !v)}
-            data-tooltip="Options"
+            className={`cs-tb-btn${groupsOpen ? " cs-tb-btn--open" : ""}`}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              if (multiSelect.isSelecting) return;
+              if (!groupsOpen) document.dispatchEvent(new Event("tooltip:hide"));
+              setGroupsOpen((v) => !v);
+            }}
+            disabled={multiSelect.isSelecting}
+            data-tooltip="Groups"
             data-tooltip-pos="below"
-            style={
-              multiSelect.isSelecting
-                ? { opacity: 0.35, pointerEvents: "none" }
-                : undefined
-            }
           >
-            <SlidersIcon size={12} />
-            <span className="layout-pill-label">Options</span>
+            <TagIcon size={13} strokeWidth={2} />
+            {availableGroups.length > 0 && (
+              <span className="cs-tb-badge">{availableGroups.length}</span>
+            )}
           </button>
-          {optionsOpen && !multiSelect.isSelecting && (
-            <div className="cs-options-card">
-              {/* Layout toggle */}
-              <div className="cs-layout-switch">
-                <div
-                  className="cs-layout-slider"
-                  style={{ transform: layout === "list" ? "translateX(100%)" : "translateX(0)" }}
-                />
-                {LAYOUTS.map((l) => (
-                  <button
-                    key={l.id}
-                    className={`cs-layout-btn${layout === l.id ? " cs-layout-btn--active" : ""}`}
-                    onClick={() => selectLayout(l.id)}
-                  >
-                    {l.icon}
-                    <span>{l.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Groups */}
-              <div className="groups-dropdown" ref={groupsRef}>
-                <button
-                  className={`cs-groups-btn${groupsOpen ? " cs-groups-btn--open" : ""}`}
-                  onMouseDown={(e) => { if (groupsOpen) e.stopPropagation(); }}
-                  onClick={() => setGroupsOpen((v) => !v)}
-                >
-                  <TagIcon size={10} strokeWidth={2} />
-                  <span>Groups</span>
-                  {availableGroups.length > 0 && (
-                    <span className="cs-groups-count">{availableGroups.length}</span>
-                  )}
-                </button>
-                {groupsOpen && (
-                  <GroupManagerCard
-                    groups={availableGroups}
-                    entries={entries}
-                    onAddGroup={onAddGroup}
-                    onDeleteGroup={onDeleteGroup}
-                    onRenameGroup={onRenameGroup}
-                    onClose={() => setGroupsOpen(false)}
-                  />
-                )}
-              </div>
-
-              {/* Clear history */}
-              {onClearAll && (
-                <>
-                  <div className="cs-options-divider" />
-                  <button
-                    className="cs-clear-btn"
-                    onClick={() => {
-                      onClearAll();
-                      setOptionsOpen(false);
-                    }}
-                  >
-                    <TrashIcon size={10} />
-                    <span>Clear History</span>
-                  </button>
-                </>
-              )}
-            </div>
+          {groupsOpen && (
+            <GroupManagerCard
+              groups={availableGroups}
+              entries={entries}
+              onAddGroup={onAddGroup}
+              onDeleteGroup={onDeleteGroup}
+              onRenameGroup={onRenameGroup}
+              onClose={() => setGroupsOpen(false)}
+            />
           )}
         </div>
+
+        {/* Clear history */}
+        {onClearAll && (
+          <button
+            className="cs-tb-btn cs-tb-btn--danger"
+            onClick={onClearAll}
+            disabled={multiSelect.isSelecting}
+            data-tooltip="Clear history"
+            data-tooltip-pos="below"
+          >
+            <TrashIcon size={11} />
+          </button>
+        )}
       </div>
     </div>
   );

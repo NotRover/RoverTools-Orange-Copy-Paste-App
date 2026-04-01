@@ -864,17 +864,13 @@ export const MultiSelectIcon: React.FC<IconProps> = ({ size = 12, className }) =
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    strokeWidth="2"
+    strokeWidth="2.2"
     strokeLinecap="round"
     strokeLinejoin="round"
     className={className}
   >
-    <rect x="3" y="3" width="7" height="7" rx="1.5" />
-    <path d="M5 6.5l1.5 1.5L9 5" />
-    <rect x="3" y="14" width="7" height="7" rx="1.5" />
-    <path d="M5 17.5l1.5 1.5L9 16" />
-    <line x1="14" y1="6.5" x2="21" y2="6.5" />
-    <line x1="14" y1="17.5" x2="21" y2="17.5" />
+    <rect x="3" y="3" width="18" height="18" rx="4" />
+    <path d="M8 12.5l2.5 2.5L16 9" />
   </svg>
 );
 
