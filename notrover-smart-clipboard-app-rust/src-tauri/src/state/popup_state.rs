@@ -10,8 +10,8 @@ pub(crate) const COPY_POPUP_H: f64 = 260.0;
 pub(crate) const PASTE_POPUP_W: f64 = 340.0;
 pub(crate) const PASTE_POPUP_H: f64 = 460.0;
 
-pub(crate) const COPY_NOTIF_W: f64 = 220.0;
-pub(crate) const COPY_NOTIF_H: f64 = 72.0;
+pub(crate) const NOTIF_W: f64 = 220.0;
+pub(crate) const NOTIF_H: f64 = 72.0;
 
 //  Event payloads
 
@@ -34,9 +34,9 @@ pub(crate) struct PastePopupPayload {
     pub pinned: Vec<ClipboardEntry>,
 }
 
-/// Payload emitted with the `"copy-notification:show"` event.
+/// Payload emitted with the `"notification:show"` event.
 #[derive(serde::Serialize, Clone)]
-pub(crate) struct CopyNotificationPayload {
+pub(crate) struct NotificationPayload {
     pub kind: String,
     /// `"Copied"` or `"Pasted"` — displayed as the notification label.
     pub action: String,

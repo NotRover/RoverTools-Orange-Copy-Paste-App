@@ -1,8 +1,6 @@
 use tauri::Manager;
 
-use crate::state::{
-    COPY_NOTIF_H, COPY_NOTIF_W, COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W,
-};
+use crate::state::{COPY_POPUP_H, COPY_POPUP_W, NOTIF_H, NOTIF_W, PASTE_POPUP_H, PASTE_POPUP_W};
 
 const OFFSCREEN_POS: f64 = -9999.0;
 
@@ -58,7 +56,8 @@ pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
 pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
     hide_popup(app, "copy-popup");
     hide_popup(app, "paste-popup");
-    hide_popup(app, "copy-notification");
+    // NOTE: notification is NOT hidden here — it auto-dismisses on its
+    // own timer and should remain visible even when the main window gains focus.
 }
 
 /// Create the copy-popup and paste-popup windows eagerly but hidden.
@@ -83,10 +82,10 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             ignore_cursor_events: false,
         },
         PopupWindowSpec {
-            label: "copy-notification",
-            url: "src/components/notifications/copy-notification.html",
-            width: COPY_NOTIF_W,
-            height: COPY_NOTIF_H,
+            label: "notification",
+            url: "src/components/notifications/notification.html",
+            width: NOTIF_W,
+            height: NOTIF_H,
             focused: false,
             ignore_cursor_events: true,
         },

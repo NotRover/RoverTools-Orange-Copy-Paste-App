@@ -168,7 +168,7 @@ pub fn set_setting(
         "keep_history" => Some(&state.keep_history),
         "close_to_tray" => Some(&state.close_to_tray),
         "start_minimized" => Some(&state.start_minimized),
-        "copy_notification" => Some(&state.copy_notification),
+        "notification" => Some(&state.notification_enabled),
         "notif_copy" => Some(&state.notif_copy),
         "notif_paste" => Some(&state.notif_paste),
         "autosave" => Some(&state.autosave),
