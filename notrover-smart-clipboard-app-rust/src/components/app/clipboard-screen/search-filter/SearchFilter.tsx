@@ -12,7 +12,6 @@ import {
   FilterIcon,
   SearchXIcon,
   SaveStarIcon,
-  ChevronDownIcon,
 } from "../../../icons";
 import "./SearchFilter.css";
 
@@ -191,17 +190,18 @@ interface FilterDropdownProps {
 export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGroups }) => (
   <div className="sort-dropdown" ref={sf.filterRef}>
     <button
-      className={`sort-dropdown-trigger${sf.filtersOpen ? " sort-dropdown-trigger--open" : ""}${sf.activeFilterCount > 0 ? " sort-dropdown-trigger--active" : ""}`}
-      onClick={() => sf.setFiltersOpen((v) => !v)}
+      className={`cs-tb-btn${sf.filtersOpen ? " cs-tb-btn--open" : ""}`}
+      onClick={() => {
+        if (!sf.filtersOpen) document.dispatchEvent(new Event("tooltip:hide"));
+        sf.setFiltersOpen((v) => !v);
+      }}
       data-tooltip="Filters"
       data-tooltip-pos="below"
     >
-      <FilterIcon />
-      <span className="layout-pill-label">Filters</span>
+      <FilterIcon size={12} />
       {sf.activeFilterCount > 0 && (
-        <span className="cs-filter-badge">{sf.activeFilterCount}</span>
+        <span className="cs-tb-badge">{sf.activeFilterCount}</span>
       )}
-      <ChevronDownIcon className="sort-chevron" />
     </button>
     {sf.filtersOpen && (
       <div className="cs-filter-card">
