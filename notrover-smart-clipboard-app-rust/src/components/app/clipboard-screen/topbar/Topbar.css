@@ -95,7 +95,7 @@
 }
 
 .cs-tb-btn--danger {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .cs-tb-btn--danger:hover {
