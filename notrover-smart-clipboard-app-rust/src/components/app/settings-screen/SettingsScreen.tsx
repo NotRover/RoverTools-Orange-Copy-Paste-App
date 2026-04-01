@@ -70,7 +70,7 @@ const SettingsScreen: React.FC = () => {
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
-  const [copyNotification, setCopyNotification] = useState(true);
+  const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [notifCopy, setNotifCopy] = useState(true);
   const [notifPaste, setNotifPaste] = useState(true);
   const [autosave, setAutosave] = useState(false);
@@ -84,7 +84,7 @@ const SettingsScreen: React.FC = () => {
     loadBoolWithDefault("keep_history", setKeepHistory, false);
     loadBoolWithDefault("close_to_tray", setCloseToTray, false);
     loadBoolWithDefault("start_minimized", setStartMinimized, false);
-    loadBoolWithDefault("copy_notification", setCopyNotification, true);
+    loadBoolWithDefault("notification", setNotificationEnabled, true);
     loadBoolWithDefault("notif_copy", setNotifCopy, true);
     loadBoolWithDefault("notif_paste", setNotifPaste, true);
     loadBoolWithDefault("autosave", setAutosave, false);
@@ -113,17 +113,17 @@ const SettingsScreen: React.FC = () => {
   const handleCloseToTrayToggle = () => toggleBoolSetting(closeToTray, setCloseToTray, "close_to_tray");
   const handleStartMinimizedToggle = () => toggleBoolSetting(startMinimized, setStartMinimized, "start_minimized");
   
-  const handleCopyNotificationToggle = () => {
-    if (copyNotification) {
+  const handleNotificationToggle = () => {
+    if (notificationEnabled) {
       // Turning off - trigger closing animation first
       setNotifClosing(true);
       setTimeout(() => {
-        toggleBoolSetting(copyNotification, setCopyNotification, "copy_notification");
+        toggleBoolSetting(notificationEnabled, setNotificationEnabled, "notification");
         setNotifClosing(false);
       }, 180); // Match slideUp animation duration
     } else {
       // Turning on - no delay needed
-      toggleBoolSetting(copyNotification, setCopyNotification, "copy_notification");
+      toggleBoolSetting(notificationEnabled, setNotificationEnabled, "notification");
     }
   };
 
@@ -227,15 +227,15 @@ const SettingsScreen: React.FC = () => {
             </div>
             <button
               type="button"
-              className={`settings-toggle${copyNotification ? " active" : ""}`}
-              onClick={handleCopyNotificationToggle}
-              aria-pressed={copyNotification}
+              className={`settings-toggle${notificationEnabled ? " active" : ""}`}
+              onClick={handleNotificationToggle}
+              aria-pressed={notificationEnabled}
             >
               <span className="settings-toggle-knob" />
             </button>
           </div>
 
-          {(copyNotification || notifClosing) && (
+          {(notificationEnabled || notifClosing) && (
             <div className={`settings-child-checks${notifClosing ? " closing" : ""}`}>
               <label className="settings-checkbox-row">
                 <span

@@ -20,8 +20,8 @@ pub fn close_paste_popup(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub fn close_copy_notification(app: tauri::AppHandle) {
-    hide_popup(&app, "copy-notification");
+pub fn close_notification(app: tauri::AppHandle) {
+    hide_popup(&app, "notification");
 }
 
 fn resize_popup(app: &tauri::AppHandle, label: &str, width: f64, height: f64) {

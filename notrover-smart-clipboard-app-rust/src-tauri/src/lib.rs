@@ -220,9 +220,9 @@ fn setup_runtime(
         ("close_to_tray", &state_ref.close_to_tray, false),
         ("start_minimized", &state_ref.start_minimized, false),
         ("autosave", &state_ref.autosave, false),
-        // copy_notification defaults to true when the key is absent from settings.json.
+        // notification defaults to true when the key is absent from settings.json.
         // Operation-based notification flags also default to true.
-        ("copy_notification", &state_ref.copy_notification, true),
+        ("notification", &state_ref.notification_enabled, true),
         ("notif_copy", &state_ref.notif_copy, true),
         ("notif_paste", &state_ref.notif_paste, true),
     ] {
@@ -299,7 +299,7 @@ pub fn run() {
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         start_minimized: Arc::new(AtomicBool::new(false)),
-        copy_notification: Arc::new(AtomicBool::new(true)),
+        notification_enabled: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
         notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(false)),
@@ -343,7 +343,7 @@ pub fn run() {
             crate::runtime::commands::open_data_folder,
             crate::runtime::commands::get_autostart,
             crate::runtime::commands::set_autostart,
-            crate::runtime::commands::close_copy_notification,
+            crate::runtime::commands::close_notification,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {

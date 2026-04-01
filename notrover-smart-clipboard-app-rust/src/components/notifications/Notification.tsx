@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { AppTheme } from "../../types";
 import { readTheme } from "../../types";
 import { ClipboardIcon, ClipboardPasteIcon } from "../icons";
-import "./copyNotification.css";
+import "./notification.css";
 
 const DISMISS_MS = 2500;
 const FADE_MS = 250;
@@ -17,7 +17,7 @@ const KIND_LABELS: Record<string, string> = {
   html: "Rich Text",
 };
 
-const CopyNotification: React.FC = () => {
+const Notification: React.FC = () => {
   const [visible, setVisible] = useState(false);
   const [kind, setKind] = useState("text");
   const [action, setAction] = useState("Copied");
@@ -36,7 +36,7 @@ const CopyNotification: React.FC = () => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    listen<{ kind: string; action: string }>("copy-notification:show", (event) => {
+    listen<{ kind: string; action: string }>("notification:show", (event) => {
       if (cancelled) return;
       setKind(event.payload.kind);
       setAction(event.payload.action ?? "Copied");
@@ -52,7 +52,7 @@ const CopyNotification: React.FC = () => {
         setVisible(false);
         // Wait for fade-out transition before hiding the window
         setTimeout(() => {
-          invoke("close_copy_notification").catch(() => {});
+          invoke("close_notification").catch(() => {});
         }, FADE_MS);
       }, DISMISS_MS);
     }).then((fn) => {
@@ -81,5 +81,5 @@ const CopyNotification: React.FC = () => {
 };
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <CopyNotification />,
+  <Notification />,
 );
