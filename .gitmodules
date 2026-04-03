@@ -1,0 +1,3 @@
+[submodule "orange-copy-paste-clipboard-backend"]
+	path = orange-copy-paste-clipboard-backend
+	url = https://github.com/Spectrewolf8/RoverTools-Smart-Clipboard-App-Backend.git
