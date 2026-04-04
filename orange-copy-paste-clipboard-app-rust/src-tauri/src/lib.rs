@@ -1,6 +1,7 @@
 //! Smart Clipboard – Tauri/Rust backend.
 
 pub mod clipboard;
+pub mod notes;
 pub mod runtime;
 pub mod state;
 
@@ -167,6 +168,7 @@ fn setup_runtime(
     let images_dir = path("images");
     let settings_file = path("settings.json");
     let boot_file = path("boot_id.txt");
+    let notes_file = path("notes.bin");
 
     // Configure the images directory so pushed images are saved to disk.
     if let Some(ref dir) = images_dir {
@@ -211,6 +213,11 @@ fn setup_runtime(
         let _ = history.lock().load_saved_from_file(pf);
     }
 
+    // Load notes from disk.
+    if let Some(ref nf) = notes_file {
+        let _ = app.state::<AppState>().notes.lock().load_from_file(nf);
+    }
+
     // Seed the in-memory boolean flags from disk.
     let state_ref: tauri::State<'_, AppState> = app.state();
     state_ref
@@ -242,28 +249,39 @@ fn setup_runtime(
         let state: tauri::State<'_, AppState> = app.state();
         let dirty = Arc::clone(&state.history_dirty);
         let persist = Arc::clone(&state.keep_history);
+        let notes_store = Arc::clone(&state.notes);
+        let notes_dirty = Arc::clone(&state.notes_dirty);
         let app_handle = app.handle().clone();
 
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
 
-            if !persist.load(Ordering::Relaxed) {
-                continue;
+            // Flush clipboard history.
+            if persist.load(Ordering::Relaxed) && dirty.swap(false, Ordering::Relaxed) {
+                if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
+                    let _ = hist.lock().save_all_to_file(&path);
+                }
+                // Also keep the saved entries file up-to-date.
+                if let Some(pf) = app_handle
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .map(|d| d.join("pinned_entries.bin"))
+                {
+                    let _ = hist.lock().save_saved_to_file(&pf);
+                }
             }
-            if !dirty.swap(false, Ordering::Relaxed) {
-                continue;
-            }
-            if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
-                let _ = hist.lock().save_all_to_file(&path);
-            }
-            // Also keep the saved entries file up-to-date.
-            if let Some(pf) = app_handle
-                .path()
-                .app_data_dir()
-                .ok()
-                .map(|d| d.join("pinned_entries.bin"))
-            {
-                let _ = hist.lock().save_saved_to_file(&pf);
+
+            // Flush notes.
+            if notes_dirty.swap(false, Ordering::Relaxed) {
+                if let Some(nf) = app_handle
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .map(|d| d.join("notes.bin"))
+                {
+                    let _ = notes_store.lock().save_to_file(&nf);
+                }
             }
         });
     }
@@ -304,6 +322,8 @@ pub fn run() {
         notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(false)),
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
+        notes: Arc::new(parking_lot::Mutex::new(crate::notes::NoteStore::new())),
+        notes_dirty: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
@@ -344,6 +364,15 @@ pub fn run() {
             crate::runtime::commands::get_autostart,
             crate::runtime::commands::set_autostart,
             crate::runtime::commands::close_notification,
+            crate::notes::commands::get_notes,
+            crate::notes::commands::create_note,
+            crate::notes::commands::update_note,
+            crate::notes::commands::delete_note,
+            crate::notes::commands::pin_note,
+            crate::notes::commands::unpin_note,
+            crate::notes::commands::set_note_groups,
+            crate::notes::commands::purge_group_from_notes,
+            crate::notes::commands::rename_group_in_notes,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {

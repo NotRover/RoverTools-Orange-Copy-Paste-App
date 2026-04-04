@@ -16,7 +16,22 @@ export interface ClipboardEntry {
   label?: string;
 }
 
-export type AppScreen = "clipboard" | "shortcuts" | "settings";
+/** Matches the Rust `Note` struct. */
+export interface Note {
+  id: string;
+  title: string;
+  /** Rich-text content stored as sanitised HTML. */
+  content: string;
+  /** Unix epoch in milliseconds. */
+  created_at: number;
+  /** Unix epoch in milliseconds. */
+  updated_at: number;
+  pinned: boolean;
+  /** User-defined group tags (shared with clipboard groups). */
+  groups: string[];
+}
+
+export type AppScreen = "clipboard" | "notes" | "shortcuts" | "settings";
 export type AppTheme = "dark" | "light";
 
 // ── Group tag colors ────────────────────────────────────────────────

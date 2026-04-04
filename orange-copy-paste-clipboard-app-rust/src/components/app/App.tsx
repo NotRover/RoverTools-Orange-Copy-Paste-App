@@ -1,9 +1,9 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ClipboardEntry, AppScreen, AppTheme } from "../../types";
+import type { ClipboardEntry, Note, AppScreen, AppTheme } from "../../types";
 import {
   classifyFileEntry,
   removeGroupColor,
@@ -14,6 +14,7 @@ import StatusPill from "./status-pill/StatusPill";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
+import NotesScreen from "./notes-screen/NotesScreen";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import {
@@ -156,6 +157,9 @@ const App: React.FC = () => {
     return readStoredGroups();
   });
 
+  // Notes state
+  const [notes, setNotes] = useState<Note[]>([]);
+
   const systemPrefersDark = () =>
     window.matchMedia("(prefers-color-scheme: dark)").matches;
 
@@ -289,6 +293,33 @@ const App: React.FC = () => {
       unlistenPinned?.();
       unlistenGroups?.();
       unlistenActiveId?.();
+    };
+  }, []);
+
+  // Load notes on mount.
+  useEffect(() => {
+    invoke<Note[]>("get_notes").then(setNotes);
+  }, []);
+
+  // Re-sync notes when window regains focus.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const win = getCurrentWindow();
+    win
+      .listen("tauri://focus", () => {
+        if (cancelled) return;
+        invoke<Note[]>("get_notes").then((ns) => {
+          if (!cancelled) setNotes(ns);
+        });
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -480,8 +511,11 @@ const App: React.FC = () => {
       });
       renameGroupColor(oldName, newName);
       await invoke("rename_group_in_entries", { oldName, newName });
+      await invoke("rename_group_in_notes", { oldName, newName });
       const history = await invoke<ClipboardEntry[]>("get_history");
       setEntries(history);
+      const updatedNotes = await invoke<Note[]>("get_notes");
+      setNotes(updatedNotes);
     },
     [],
   );
@@ -662,6 +696,53 @@ const App: React.FC = () => {
     { textCount: 0, imageCount: 0, fileCount: 0, htmlCount: 0 },
   );
 
+  // ── Notes handlers ─────────────────────────────────────────────────
+
+  const handleCreateNote = useCallback(async () => {
+    const note = await invoke<Note>("create_note");
+    setNotes((prev) => [note, ...prev]);
+    return note;
+  }, []);
+
+  const handleUpdateNote = useCallback(
+    async (id: string, title: string, content: string) => {
+      await invoke("update_note", { id, title, content });
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === id
+            ? { ...n, title, content, updated_at: Date.now() }
+            : n,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleDeleteNote = useCallback(async (id: string) => {
+    await invoke("delete_note", { id });
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  const handlePinNote = useCallback(
+    async (id: string, pin: boolean) => {
+      await invoke(pin ? "pin_note" : "unpin_note", { id });
+      setNotes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, pinned: pin } : n)),
+      );
+    },
+    [],
+  );
+
+  const handleSetNoteGroups = useCallback(
+    async (id: string, groups: string[]) => {
+      setNotes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, groups } : n)),
+      );
+      await invoke("set_note_groups", { id, groups });
+    },
+    [],
+  );
+
   return (
     <div className="app" data-theme={theme}>
       <TooltipPortal />
@@ -682,6 +763,18 @@ const App: React.FC = () => {
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
+        ) : screen === "notes" ? (
+          <NotesScreen
+            notes={notes}
+            entries={entries}
+            availableGroups={availableGroups}
+            onCreate={handleCreateNote}
+            onUpdate={handleUpdateNote}
+            onDelete={handleDeleteNote}
+            onPin={handlePinNote}
+            onSetGroups={handleSetNoteGroups}
+            onCopyEntry={handleCopy}
+          />
         ) : (
           <ClipboardScreen
             entries={entries}

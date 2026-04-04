@@ -887,3 +887,237 @@ export const CollapseIcon: React.FC<IconProps> = ({ size = 13, className }) => (
     <line x1="3" y1="21" x2="10" y2="14" />
   </svg>
 );
+
+/* ── Notes (notepad with text) ── */
+
+export const NotesIcon: React.FC<IconProps> = ({ size = 18, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M8 2v4" />
+    <path d="M12 2v4" />
+    <path d="M16 2v4" />
+    <rect x="4" y="4" width="16" height="18" rx="2" />
+    <path d="M8 10h6" />
+    <path d="M8 14h8" />
+    <path d="M8 18h5" />
+  </svg>
+);
+
+/* ── Plus (add / create) ── */
+
+export const PlusIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 14,
+  strokeWidth = 2.2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
+/* ── Bold (B) ── */
+
+export const BoldIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+    <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+  </svg>
+);
+
+/* ── Italic (I) ── */
+
+export const ItalicIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="19" y1="4" x2="10" y2="4" />
+    <line x1="14" y1="20" x2="5" y2="20" />
+    <line x1="15" y1="4" x2="9" y2="20" />
+  </svg>
+);
+
+/* ── Underline (U) ── */
+
+export const UnderlineIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3" />
+    <line x1="4" y1="21" x2="20" y2="21" />
+  </svg>
+);
+
+/* ── Strike-through (S) ── */
+
+export const StrikethroughIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M16 4c-.5-1.5-2.2-3-5-3-3 0-5 2.5-5 5 0 1.5.5 2.5 1.5 3.5" />
+    <path d="M12 21c3 0 5-2.5 5-5 0-1.5-.5-2.5-1.5-3.5" />
+    <line x1="4" y1="12" x2="20" y2="12" />
+  </svg>
+);
+
+/* ── Heading (H) ── */
+
+export const HeadingIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M6 4v16" />
+    <path d="M18 4v16" />
+    <path d="M6 12h12" />
+  </svg>
+);
+
+/* ── Bullet list ── */
+
+export const BulletListIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="9" y1="6" x2="20" y2="6" />
+    <line x1="9" y1="12" x2="20" y2="12" />
+    <line x1="9" y1="18" x2="20" y2="18" />
+    <circle cx="5" cy="6" r="1" fill="currentColor" />
+    <circle cx="5" cy="12" r="1" fill="currentColor" />
+    <circle cx="5" cy="18" r="1" fill="currentColor" />
+  </svg>
+);
+
+/* ── Ordered list (1 2 3) ── */
+
+export const OrderedListIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="10" y1="6" x2="21" y2="6" />
+    <line x1="10" y1="12" x2="21" y2="12" />
+    <line x1="10" y1="18" x2="21" y2="18" />
+    <path d="M4 6h1v4" />
+    <path d="M4 10h2" />
+    <path d="M3 14h2a1 1 0 0 1 0 2H4a1 1 0 0 0 0 2h2" />
+  </svg>
+);
+
+/* ── Block quote ── */
+
+export const QuoteIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M3 6h18" />
+    <path d="M3 12h18" />
+    <path d="M3 18h18" />
+    <line x1="3" y1="6" x2="3" y2="18" strokeWidth="3.5" />
+  </svg>
+);
+
+/* ── Embed / Clip reference ── */
+
+export const EmbedClipIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="3" y="3" width="18" height="18" rx="3" />
+    <path d="M9 3v18" />
+    <path d="M13 8h4" />
+    <path d="M13 12h4" />
+    <path d="M13 16h2" />
+  </svg>
+);
