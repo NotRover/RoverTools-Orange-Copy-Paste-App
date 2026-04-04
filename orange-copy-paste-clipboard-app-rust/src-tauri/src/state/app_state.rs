@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::clipboard::history::ClipboardHistory;
+use crate::notes::NoteStore;
 
 /// State managed by Tauri and injected into every command handler.
 pub struct AppState {
@@ -37,4 +38,8 @@ pub struct AppState {
     pub autosave: Arc<AtomicBool>,
     /// ID of the entry currently in the OS clipboard.
     pub active_clipboard_id: Arc<Mutex<String>>,
+    /// Thread-safe notes store.
+    pub notes: Arc<Mutex<NoteStore>>,
+    /// Set to `true` whenever the in-memory notes diverge from disk.
+    pub notes_dirty: Arc<AtomicBool>,
 }

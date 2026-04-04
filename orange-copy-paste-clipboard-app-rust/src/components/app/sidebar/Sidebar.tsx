@@ -2,6 +2,7 @@ import React from "react";
 import type { AppScreen, AppTheme } from "../../../types";
 import {
   ClipboardIcon,
+  NotesIcon,
   KeyboardIcon,
   SunIcon,
   MoonIcon,
@@ -48,6 +49,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip-pos="right"
       >
         <ClipboardIcon />
+      </button>
+      <button
+        className={`nav-btn ${screen === "notes" ? "active" : ""}`}
+        onClick={() => onNavigate("notes")}
+        data-tooltip="Notes"
+        data-tooltip-pos="right"
+      >
+        <NotesIcon />
       </button>
       <button
         className={`nav-btn ${screen === "shortcuts" ? "active" : ""}`}
