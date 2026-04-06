@@ -148,6 +148,14 @@ const App: React.FC = () => {
   const [deletedEntry, setDeletedEntry] = useState<ClipboardEntry | null>(null);
   const deleteEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Undo state for single-note deletion
+  const [deletedNote, setDeletedNote] = useState<Note | null>(null);
+  const deleteNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Undo state for bulk note deletion
+  const [bulkDeletedNotes, setBulkDeletedNotes] = useState<Note[] | null>(null);
+  const bulkDeleteNotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Toast: max pins reached
   const [pinLimitReached, setPinLimitReached] = useState(false);
   const pinLimitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -718,10 +726,46 @@ const App: React.FC = () => {
     [],
   );
 
-  const handleDeleteNote = useCallback(async (id: string) => {
-    await invoke("delete_note", { id });
-    setNotes((prev) => prev.filter((n) => n.id !== id));
-  }, []);
+  const handleDeleteNote = useCallback(
+    (id: string) => {
+      // Commit any pending note delete immediately
+      if (deleteNoteTimerRef.current !== null) {
+        clearTimeout(deleteNoteTimerRef.current);
+        deleteNoteTimerRef.current = null;
+        if (deletedNote) {
+          invoke("delete_note", { id: deletedNote.id }).catch(console.error);
+        }
+      }
+
+      const note = notes.find((n) => n.id === id);
+      if (!note) return;
+
+      setDeletedNote(note);
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+
+      // Defer backend delete
+      deleteNoteTimerRef.current = setTimeout(async () => {
+        deleteNoteTimerRef.current = null;
+        setDeletedNote(null);
+        await invoke("delete_note", { id });
+      }, 5000);
+    },
+    [notes, deletedNote],
+  );
+
+  const handleUndoDeleteNote = useCallback(() => {
+    if (deleteNoteTimerRef.current !== null) {
+      clearTimeout(deleteNoteTimerRef.current);
+      deleteNoteTimerRef.current = null;
+    }
+    if (!deletedNote) return;
+    setNotes((prev) => {
+      const next = [...prev, deletedNote];
+      next.sort((a, b) => b.updated_at - a.updated_at);
+      return next;
+    });
+    setDeletedNote(null);
+  }, [deletedNote]);
 
   const handlePinNote = useCallback(
     async (id: string, pin: boolean) => {
@@ -743,10 +787,54 @@ const App: React.FC = () => {
     [],
   );
 
-  const handleBulkDeleteNotes = useCallback(async (ids: string[]) => {
-    setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
-    for (const id of ids) await invoke("delete_note", { id });
-  }, []);
+  const handleBulkDeleteNotes = useCallback(
+    (ids: string[]) => {
+      // Commit any pending single note delete
+      if (deleteNoteTimerRef.current !== null) {
+        clearTimeout(deleteNoteTimerRef.current);
+        deleteNoteTimerRef.current = null;
+        if (deletedNote) {
+          invoke("delete_note", { id: deletedNote.id }).catch(console.error);
+          setDeletedNote(null);
+        }
+      }
+      // Commit any pending bulk note delete
+      if (bulkDeleteNotesTimerRef.current !== null) {
+        clearTimeout(bulkDeleteNotesTimerRef.current);
+        bulkDeleteNotesTimerRef.current = null;
+        if (bulkDeletedNotes) {
+          for (const n of bulkDeletedNotes)
+            invoke("delete_note", { id: n.id }).catch(console.error);
+          setBulkDeletedNotes(null);
+        }
+      }
+
+      const snapshot = notes.filter((n) => ids.includes(n.id));
+      setBulkDeletedNotes(snapshot);
+      setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
+
+      bulkDeleteNotesTimerRef.current = setTimeout(async () => {
+        bulkDeleteNotesTimerRef.current = null;
+        setBulkDeletedNotes(null);
+        for (const id of ids) await invoke("delete_note", { id });
+      }, 5000);
+    },
+    [notes, deletedNote, bulkDeletedNotes],
+  );
+
+  const handleUndoBulkDeleteNotes = useCallback(() => {
+    if (bulkDeleteNotesTimerRef.current !== null) {
+      clearTimeout(bulkDeleteNotesTimerRef.current);
+      bulkDeleteNotesTimerRef.current = null;
+    }
+    if (!bulkDeletedNotes) return;
+    setNotes((prev) => {
+      const next = [...prev, ...bulkDeletedNotes];
+      next.sort((a, b) => b.updated_at - a.updated_at);
+      return next;
+    });
+    setBulkDeletedNotes(null);
+  }, [bulkDeletedNotes]);
 
   const handleBulkPinNotes = useCallback(async (ids: string[]) => {
     setNotes((prev) => prev.map((n) => ids.includes(n.id) ? { ...n, pinned: true } : n));
@@ -919,6 +1007,34 @@ const App: React.FC = () => {
             }}
             duration={5000}
             onDismiss={() => setBulkDeletedEntries(null)}
+          />
+        )}
+
+        {deletedNote !== null && (
+          <ToastNotification
+            message="Note deleted"
+            icon={<TrashIcon />}
+            action={{
+              label: "Undo",
+              icon: <UndoIcon />,
+              onClick: handleUndoDeleteNote,
+            }}
+            duration={5000}
+            onDismiss={() => setDeletedNote(null)}
+          />
+        )}
+
+        {bulkDeletedNotes !== null && (
+          <ToastNotification
+            message={`${bulkDeletedNotes.length} notes deleted`}
+            icon={<TrashIcon />}
+            action={{
+              label: "Undo",
+              icon: <UndoIcon />,
+              onClick: handleUndoBulkDeleteNotes,
+            }}
+            duration={5000}
+            onDismiss={() => setBulkDeletedNotes(null)}
           />
         )}
       </div>
