@@ -768,6 +768,9 @@ const App: React.FC = () => {
             notes={notes}
             entries={entries}
             availableGroups={availableGroups}
+            onAddGroup={handleAddGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onRenameGroup={handleRenameGroup}
             onCreate={handleCreateNote}
             onUpdate={handleUpdateNote}
             onDelete={handleDeleteNote}

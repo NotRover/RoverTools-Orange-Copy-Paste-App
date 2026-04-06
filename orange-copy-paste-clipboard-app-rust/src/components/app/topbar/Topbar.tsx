@@ -1,8 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
-import type { ClipboardEntry } from "../../../../types";
-import type { SortMode } from "../../sort-options";
-import { SORT_OPTIONS } from "../../sort-options";
-import GroupManagerCard from "../group-manager/GroupManagerCard";
+import type { ClipboardEntry } from "../../../types";
+import type { SortMode } from "../sort-options";
+import { SORT_OPTIONS } from "../sort-options";
+import GroupManagerCard from "../clipboard-screen/group-manager/GroupManagerCard";
 import {
   TilesIcon,
   ListIcon,
@@ -10,7 +10,7 @@ import {
   TagIcon,
   SearchIcon,
   CloseIcon,
-} from "../../../icons";
+} from "../../icons";
 import "./Topbar.css";
 
 export type ClipboardLayout = "tiles" | "list";
@@ -39,7 +39,9 @@ const Topbar: React.FC<TopbarProps> = ({
 
   return (
     <div className="layout-toggle-wrap">
-      {leftSlot && <div className="cs-toolbar-left">{leftSlot}</div>}
+      <div className="cs-toolbar-left cs-toolbar-slot">
+        {leftSlot}
+      </div>
 
       <div className="cs-inline-search">
         <SearchIcon size={11} className="cs-inline-search-icon" />
@@ -64,7 +66,9 @@ const Topbar: React.FC<TopbarProps> = ({
         )}
       </div>
 
-      {rightSlot && <div className="cs-toolbar-right">{rightSlot}</div>}
+      <div className="cs-toolbar-right cs-toolbar-slot">
+        {rightSlot}
+      </div>
     </div>
   );
 };

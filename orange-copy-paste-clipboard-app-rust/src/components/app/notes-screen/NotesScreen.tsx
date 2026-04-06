@@ -1,10 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note, ClipboardEntry } from "../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../types";
+import type { SortMode } from "../sort-options";
+import Topbar, {
+  SortDropdown,
+  LayoutSegment,
+  GroupsButton,
+} from "../topbar/Topbar";
+import type { ClipboardLayout } from "../topbar/Topbar";
 import {
   NotesIcon,
   PlusIcon,
-  SearchIcon,
   CloseIcon,
   TrashIcon,
   PinIcon,
@@ -19,7 +25,10 @@ import {
   EmbedClipIcon,
   CheckIcon,
   ChevronRightIcon,
+  FilterIcon,
 } from "../../icons";
+import { PinIcon as PinIconElement } from "../../entry-types/EntryTypePill";
+import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -469,12 +478,142 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   );
 };
 
+// ── Notes filter dropdown ───────────────────────────────────────────
+
+interface NotesFilterState {
+  pinnedOnly: boolean;
+  setPinnedOnly: React.Dispatch<React.SetStateAction<boolean>>;
+  selectedGroups: Set<string>;
+  toggleGroup: (g: string) => void;
+  activeFilterCount: number;
+  clearAll: () => void;
+  filtersOpen: boolean;
+  setFiltersOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  filterRef: React.RefObject<HTMLDivElement | null>;
+}
+
+function useNotesFilter(): NotesFilterState {
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  const toggleGroup = useCallback((g: string) => {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g);
+      else next.add(g);
+      return next;
+    });
+  }, []);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (pinnedOnly) n++;
+    if (selectedGroups.size > 0) n++;
+    return n;
+  }, [pinnedOnly, selectedGroups]);
+
+  const clearAll = useCallback(() => {
+    setPinnedOnly(false);
+    setSelectedGroups(new Set());
+  }, []);
+
+  return {
+    pinnedOnly, setPinnedOnly,
+    selectedGroups, toggleGroup,
+    activeFilterCount, clearAll,
+    filtersOpen, setFiltersOpen,
+    filterRef,
+  };
+}
+
+const NotesFilterDropdown: React.FC<{
+  nf: NotesFilterState;
+  availableGroups: string[];
+}> = ({ nf, availableGroups }) => (
+  <div className="sort-dropdown" ref={nf.filterRef}>
+    <button
+      className={`cs-tb-btn${nf.filtersOpen ? " cs-tb-btn--open" : ""}`}
+      onClick={() => {
+        if (!nf.filtersOpen) document.dispatchEvent(new Event("tooltip:hide"));
+        nf.setFiltersOpen((v) => !v);
+      }}
+      data-tooltip="Filters"
+      data-tooltip-pos="below"
+    >
+      <FilterIcon size={12} />
+      {nf.activeFilterCount > 0 && (
+        <span className="cs-tb-badge">{nf.activeFilterCount}</span>
+      )}
+    </button>
+    {nf.filtersOpen && (
+      <div className="cs-filter-card">
+        {/* System section */}
+        <div className="cs-card-section">
+          <div className="cs-section-label">System</div>
+          <div className="cs-type-grid">
+            <label className={`cs-type-option${nf.pinnedOnly ? " cs-type-option--on" : ""}`}>
+              <input type="checkbox" checked={nf.pinnedOnly} onChange={() => nf.setPinnedOnly((v) => !v)} className="cs-type-cb" />
+              <span className="cs-type-icon type-pill" style={{ background: "var(--accent-dim)", color: "var(--accent)" }}>
+                {PinIconElement}
+              </span>
+              <span className="cs-type-name">Pinned</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Groups section */}
+        {availableGroups.length > 0 && (
+          <>
+            <div className="cs-card-divider" />
+            <div className="cs-card-section">
+              <div className="cs-section-label">
+                Groups
+                {nf.selectedGroups.size > 0 && <span className="cs-count">{nf.selectedGroups.size}</span>}
+              </div>
+              <div className="cs-type-grid">
+                {availableGroups.map((g) => {
+                  const gc = groupColor(g);
+                  return (
+                    <label key={g} className={`cs-type-option${nf.selectedGroups.has(g) ? " cs-type-option--on" : ""}`}>
+                      <input type="checkbox" checked={nf.selectedGroups.has(g)} onChange={() => nf.toggleGroup(g)} className="cs-type-cb" />
+                      <span className="cs-type-icon type-pill" style={{ background: gc.bg, color: gc.fg }}>
+                        <span className="cs-color-dot" style={{ background: gc.fg }} />
+                      </span>
+                      <span className="cs-type-name">{g}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Clear filters button */}
+        {nf.activeFilterCount > 0 && (
+          <>
+            <div className="cs-card-divider" />
+            <button className="cs-card-clear-btn" onClick={nf.clearAll}>
+              <CloseIcon size={12} />
+              Clear Filters
+            </button>
+          </>
+        )}
+      </div>
+    )}
+  </div>
+);
+
 // ── NotesScreen ─────────────────────────────────────────────────────
 
 interface NotesScreenProps {
   notes: Note[];
   entries: ClipboardEntry[];
   availableGroups: string[];
+  onAddGroup: (name: string) => void;
+  onDeleteGroup: (name: string) => void;
+  onRenameGroup: (oldName: string, newName: string) => void;
   onCreate: () => Promise<Note> | Note;
   onUpdate: (id: string, title: string, content: string) => void;
   onDelete: (id: string) => void;
@@ -487,6 +626,9 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   notes,
   entries,
   availableGroups,
+  onAddGroup,
+  onDeleteGroup,
+  onRenameGroup,
   onCreate,
   onUpdate,
   onDelete,
@@ -496,11 +638,30 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filterGroup, setFilterGroup] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const nf = useNotesFilter();
+
+  const [sort, setSort] = useState<SortMode>(() => {
+    return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
+  });
+  const [layout, setLayout] = useState<ClipboardLayout>(() => {
+    return (localStorage.getItem("ns-layout") as ClipboardLayout) ?? "tiles";
+  });
+
+  // Close filter dropdown on outside click
+  useEffect(() => {
+    if (!nf.filtersOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (nf.filterRef.current && !nf.filterRef.current.contains(e.target as Node))
+        nf.setFiltersOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [nf.filtersOpen]);
 
   const filteredNotes = notes.filter((n) => {
-    if (filterGroup && !n.groups.includes(filterGroup)) return false;
+    if (nf.pinnedOnly && !n.pinned) return false;
+    if (nf.selectedGroups.size > 0 && !n.groups.some((g) => nf.selectedGroups.has(g))) return false;
     if (search) {
       const q = search.toLowerCase();
       if (
@@ -514,7 +675,16 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
   const sortedNotes = [...filteredNotes].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return b.updated_at - a.updated_at;
+    switch (sort) {
+      case "oldest":
+        return a.updated_at - b.updated_at;
+      case "a-z":
+        return (a.title || "").localeCompare(b.title || "");
+      case "z-a":
+        return (b.title || "").localeCompare(a.title || "");
+      default:
+        return b.updated_at - a.updated_at;
+    }
   });
 
   const editingNote = editingId
@@ -524,11 +694,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   useEffect(() => {
     if (editingId && !notes.some((n) => n.id === editingId)) setEditingId(null);
   }, [notes, editingId]);
-
-  // All groups from clipboard + notes.
-  const allGroups = [
-    ...new Set([...availableGroups, ...notes.flatMap((n) => n.groups)]),
-  ];
 
   const handleCreate = useCallback(async () => {
     const note = await onCreate();
@@ -543,66 +708,50 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     [onDelete, editingId],
   );
 
+  const selectLayout = useCallback((l: ClipboardLayout) => {
+    setLayout(l);
+    localStorage.setItem("ns-layout", l);
+  }, []);
+
   return (
     <div className="notes-screen-root">
-      {/* ── Toolbar (matches clipboard topbar layout) ── */}
-      <div className="ns-toolbar">
-        <div className="ns-toolbar-left">
-          <button className="ns-new-btn" onClick={handleCreate}>
-            <PlusIcon size={11} />
-            <span>New</span>
-          </button>
-        </div>
-
-        <div className="ns-inline-search">
-          <SearchIcon size={11} className="ns-inline-search-icon" />
-          <input
-            ref={searchRef}
-            type="text"
-            className="ns-inline-search-input"
-            placeholder="Search notes…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <button
-              className="ns-inline-search-clear"
-              onClick={() => {
-                setSearch("");
-                searchRef.current?.focus();
+      <Topbar
+        searchQuery={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search notes…"
+        searchInputRef={searchRef}
+        leftSlot={
+          <>
+            <SortDropdown
+              sort={sort}
+              onSortChange={(s) => {
+                setSort(s);
+                localStorage.setItem("ns-sort", s);
               }}
-            >
-              <CloseIcon size={8} />
+            />
+            <NotesFilterDropdown nf={nf} availableGroups={availableGroups} />
+            <button className="ns-new-btn" onClick={handleCreate}>
+              <PlusIcon size={11} />
+              <span>New</span>
             </button>
-          )}
-        </div>
+          </>
+        }
+        rightSlot={
+          <>
+            <LayoutSegment layout={layout} onLayoutChange={selectLayout} />
 
-        <div className="ns-toolbar-right">
-          {/* placeholder for future toolbar actions */}
-        </div>
-      </div>
+            <div className="cs-toolbar-sep" />
 
-      {/* Group filter chips */}
-      {allGroups.length > 0 && (
-        <div className="ns-group-chips">
-          {allGroups.map((g) => {
-            const c = groupColor(g);
-            return (
-              <button
-                key={g}
-                className={`ns-group-chip${filterGroup === g ? " ns-group-chip--active" : ""}`}
-                style={{ background: c.bg, color: c.fg }}
-                onClick={() =>
-                  setFilterGroup((prev) => (prev === g ? null : g))
-                }
-              >
-                <span className="ns-group-chip-dot" />
-                {g}
-              </button>
-            );
-          })}
-        </div>
-      )}
+            <GroupsButton
+              availableGroups={availableGroups}
+              entries={entries}
+              onAddGroup={onAddGroup}
+              onDeleteGroup={onDeleteGroup}
+              onRenameGroup={onRenameGroup}
+            />
+          </>
+        }
+      />
 
       {/* ── Masonry grid ── */}
       <div className="ns-viewport">
@@ -619,7 +768,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             </p>
           </div>
         ) : (
-          <div className="ns-grid">
+          <div className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}>
             {sortedNotes.map((n) => (
               <div
                 key={n.id}

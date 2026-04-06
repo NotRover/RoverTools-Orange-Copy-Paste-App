@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
-import { useSearchFilter, NoResults } from "./search-filter/SearchFilter";
+import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import BulkActionsBar from "./bulk-actions/BulkActionsBar";
 import { sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
-import Topbar from "./topbar/Topbar";
-import type { ClipboardLayout } from "./topbar/Topbar";
+import Topbar, { SortDropdown, LayoutSegment, GroupsButton } from "../topbar/Topbar";
+import type { ClipboardLayout } from "../topbar/Topbar";
 import {
   ClipboardIcon,
   ChevronDownIcon,
+  MultiSelectIcon,
+  TrashIcon,
 } from "../../icons";
 import "./ClipboardScreen.css";
 
@@ -220,6 +223,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     };
   }, []);
 
+  // Close filter dropdown on outside click
+  useEffect(() => {
+    if (!sf.filtersOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (sf.filterRef.current && !sf.filterRef.current.contains(e.target as Node))
+        sf.setFiltersOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [sf.filtersOpen]);
+
   const selectLayout = (l: ClipboardLayout) => {
     if (l === layout) return;
     setFading(true);
@@ -246,29 +260,122 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   return (
     <div className="clipboard-screen-root">
       <Topbar
-        entries={entries}
-        sort={sort}
-        setSort={setSort}
-        layout={layout}
-        selectLayout={selectLayout}
-        sf={sf}
-        multiSelect={multiSelect}
-        allVisibleIds={allVisibleIds}
-        allPinned={allPinned}
-        allSaved={allSaved}
-        commonGroups={commonGroups}
-        availableGroups={availableGroups}
-        onAddGroup={onAddGroup}
-        onDeleteGroup={onDeleteGroup}
-        onRenameGroup={onRenameGroup}
-        onBulkDelete={onBulkDelete}
-        onBulkPin={onBulkPin}
-        onBulkUnpin={onBulkUnpin}
-        onBulkSave={onBulkSave}
-        onBulkUnsave={onBulkUnsave}
-        onBulkAddGroup={onBulkAddGroup}
-        onBulkRemoveGroup={onBulkRemoveGroup}
-        onClearAll={onClearAll}
+        searchQuery={sf.searchQuery}
+        onSearchChange={sf.setSearchQuery}
+        searchInputRef={sf.searchInputRef}
+        leftSlot={
+          <>
+            <SortDropdown
+              sort={sort}
+              onSortChange={(s) => {
+                setSort(s);
+                localStorage.setItem("sc-sort", s);
+              }}
+            />
+            <FilterDropdown sf={sf} availableGroups={availableGroups} />
+          </>
+        }
+        rightSlot={
+          <>
+            <LayoutSegment layout={layout} onLayoutChange={selectLayout} />
+
+            <div className="cs-toolbar-sep" />
+
+            {/* Select mode */}
+            <div className="bulk-select-wrap">
+              <button
+                className={`cs-tb-btn${multiSelect.isSelecting ? " cs-tb-btn--active" : ""}`}
+                onClick={() => {
+                  document.dispatchEvent(new Event("tooltip:hide"));
+                  multiSelect.isSelecting
+                    ? multiSelect.exitSelectMode()
+                    : multiSelect.enterSelectMode();
+                }}
+                data-tooltip={
+                  multiSelect.isSelecting
+                    ? multiSelect.selectedCount > 0
+                      ? `${multiSelect.selectedCount} selected`
+                      : "Exit selection"
+                    : "Select entries"
+                }
+                data-tooltip-pos="below"
+              >
+                <MultiSelectIcon size={13} />
+                {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
+                  <span className="cs-tb-badge">
+                    {multiSelect.selectedCount}
+                  </span>
+                )}
+              </button>
+
+              {multiSelect.isSelecting && (
+                <BulkActionsBar
+                  selectedCount={multiSelect.selectedCount}
+                  totalCount={entries.length}
+                  onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
+                  onDeselectAll={multiSelect.deselectAll}
+                  onExitSelectMode={multiSelect.exitSelectMode}
+                  onBulkDelete={() => {
+                    if (onBulkDelete) {
+                      onBulkDelete([...multiSelect.selectedIds]);
+                      multiSelect.exitSelectMode();
+                    }
+                  }}
+                  allPinned={allPinned}
+                  onBulkTogglePin={() => {
+                    if (allPinned) {
+                      if (onBulkUnpin)
+                        onBulkUnpin([...multiSelect.selectedIds]);
+                    } else {
+                      if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
+                    }
+                  }}
+                  allSaved={allSaved}
+                  onBulkToggleSave={() => {
+                    if (allSaved) {
+                      if (onBulkUnsave)
+                        onBulkUnsave([...multiSelect.selectedIds]);
+                    } else {
+                      if (onBulkSave) onBulkSave([...multiSelect.selectedIds]);
+                    }
+                  }}
+                  onBulkAddGroup={(group) => {
+                    if (onBulkAddGroup)
+                      onBulkAddGroup([...multiSelect.selectedIds], group);
+                  }}
+                  onBulkRemoveGroup={(group) => {
+                    if (onBulkRemoveGroup)
+                      onBulkRemoveGroup([...multiSelect.selectedIds], group);
+                  }}
+                  availableGroups={availableGroups}
+                  commonGroups={commonGroups}
+                />
+              )}
+            </div>
+
+            <GroupsButton
+              availableGroups={availableGroups}
+              entries={entries}
+              onAddGroup={onAddGroup}
+              onDeleteGroup={onDeleteGroup}
+              onRenameGroup={onRenameGroup}
+              disabled={multiSelect.isSelecting}
+            />
+
+            {/* Clear history */}
+            {onClearAll && (
+              <button
+                className="cs-tb-btn cs-tb-btn--danger"
+                onClick={onClearAll}
+                disabled={multiSelect.isSelecting}
+                data-tooltip="Clear history"
+                data-tooltip-pos="below"
+              >
+                <TrashIcon size={13} />
+              </button>
+            )}
+          </>
+        }
       />
 
       <div
