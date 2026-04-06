@@ -20,6 +20,17 @@
   flex-shrink: 0;
 }
 
+/* Slot transition for smooth screen switching */
+
+.cs-toolbar-slot {
+  animation: toolbarSlotIn 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes toolbarSlotIn {
+  from { opacity: 0; filter: blur(4px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+
 /* Sort dropdown */
 
 .sort-dropdown {
