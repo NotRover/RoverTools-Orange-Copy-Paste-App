@@ -912,6 +912,29 @@ export const NotesIcon: React.FC<IconProps> = ({ size = 18, className }) => (
   </svg>
 );
 
+/* ── Compose (pen-to-square / new note) ── */
+
+export const ComposeIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z" />
+  </svg>
+);
+
 /* ── Plus (add / create) ── */
 
 export const PlusIcon: React.FC<IconProps & { strokeWidth?: number }> = ({

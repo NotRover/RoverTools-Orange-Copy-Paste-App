@@ -743,6 +743,47 @@ const App: React.FC = () => {
     [],
   );
 
+  const handleBulkDeleteNotes = useCallback(async (ids: string[]) => {
+    setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
+    for (const id of ids) await invoke("delete_note", { id });
+  }, []);
+
+  const handleBulkPinNotes = useCallback(async (ids: string[]) => {
+    setNotes((prev) => prev.map((n) => ids.includes(n.id) ? { ...n, pinned: true } : n));
+    for (const id of ids) await invoke("pin_note", { id });
+  }, []);
+
+  const handleBulkUnpinNotes = useCallback(async (ids: string[]) => {
+    setNotes((prev) => prev.map((n) => ids.includes(n.id) ? { ...n, pinned: false } : n));
+    for (const id of ids) await invoke("unpin_note", { id });
+  }, []);
+
+  const handleBulkAddGroupNotes = useCallback(async (ids: string[], group: string) => {
+    setNotes((prev) => prev.map((n) =>
+      ids.includes(n.id) && !n.groups.includes(group)
+        ? { ...n, groups: [...n.groups, group] }
+        : n,
+    ));
+    for (const id of ids) {
+      const note = notes.find((n) => n.id === id);
+      if (note && !note.groups.includes(group))
+        await invoke("set_note_groups", { id, groups: [...note.groups, group] });
+    }
+  }, [notes]);
+
+  const handleBulkRemoveGroupNotes = useCallback(async (ids: string[], group: string) => {
+    setNotes((prev) => prev.map((n) =>
+      ids.includes(n.id)
+        ? { ...n, groups: n.groups.filter((g) => g !== group) }
+        : n,
+    ));
+    for (const id of ids) {
+      const note = notes.find((n) => n.id === id);
+      if (note)
+        await invoke("set_note_groups", { id, groups: note.groups.filter((g: string) => g !== group) });
+    }
+  }, [notes]);
+
   return (
     <div className="app" data-theme={theme}>
       <TooltipPortal />
@@ -777,6 +818,11 @@ const App: React.FC = () => {
             onPin={handlePinNote}
             onSetGroups={handleSetNoteGroups}
             onCopyEntry={handleCopy}
+            onBulkDelete={handleBulkDeleteNotes}
+            onBulkPin={handleBulkPinNotes}
+            onBulkUnpin={handleBulkUnpinNotes}
+            onBulkAddGroup={handleBulkAddGroupNotes}
+            onBulkRemoveGroup={handleBulkRemoveGroupNotes}
           />
         ) : (
           <ClipboardScreen
