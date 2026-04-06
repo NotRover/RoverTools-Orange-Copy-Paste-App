@@ -116,6 +116,19 @@
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08);
 }
 
+.cs-tb-btn--accent {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.cs-tb-btn--accent:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 2px 6px rgba(0,0,0,.12);
+}
+
 /* Badge on icon buttons */
 
 .cs-tb-badge {

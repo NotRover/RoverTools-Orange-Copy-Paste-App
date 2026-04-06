@@ -14,6 +14,9 @@ import {
   CloseIcon,
   TrashIcon,
   PinIcon,
+  ComposeIcon,
+  MultiSelectIcon,
+  CheckIcon,
   BoldIcon,
   ItalicIcon,
   UnderlineIcon,
@@ -23,11 +26,12 @@ import {
   OrderedListIcon,
   QuoteIcon,
   EmbedClipIcon,
-  CheckIcon,
   ChevronRightIcon,
   FilterIcon,
 } from "../../icons";
 import { PinIcon as PinIconElement } from "../../entry-types/EntryTypePill";
+import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
 
@@ -620,6 +624,11 @@ interface NotesScreenProps {
   onPin: (id: string, pin: boolean) => void;
   onSetGroups: (id: string, groups: string[]) => void;
   onCopyEntry?: (id: string) => void;
+  onBulkDelete?: (ids: string[]) => void;
+  onBulkPin?: (ids: string[]) => void;
+  onBulkUnpin?: (ids: string[]) => void;
+  onBulkAddGroup?: (ids: string[], group: string) => void;
+  onBulkRemoveGroup?: (ids: string[], group: string) => void;
 }
 
 const NotesScreen: React.FC<NotesScreenProps> = ({
@@ -635,11 +644,18 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   onPin,
   onSetGroups,
   onCopyEntry,
+  onBulkDelete,
+  onBulkPin,
+  onBulkUnpin,
+  onBulkAddGroup,
+  onBulkRemoveGroup,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const nf = useNotesFilter();
+
+  const multiSelect = useMultiSelect();
 
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
@@ -713,6 +729,36 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     localStorage.setItem("ns-layout", l);
   }, []);
 
+  const allVisibleIds = sortedNotes.map((n) => n.id);
+
+  // Prune stale selections when notes change
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    const activeIds = new Set(notes.map((n) => n.id));
+    multiSelect.pruneStaleIds(activeIds);
+  }, [notes, multiSelect.isSelecting]);
+
+  // Exit multi-select on Escape
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") multiSelect.exitSelectMode();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [multiSelect.isSelecting]);
+
+  // Compute bulk state
+  const allPinned = multiSelect.selectedCount > 0 &&
+    notes.filter((n) => multiSelect.selectedIds.has(n.id)).every((n) => n.pinned);
+  const commonGroups = (() => {
+    if (multiSelect.selectedCount === 0) return [] as string[];
+    const sel = notes.filter((n) => multiSelect.selectedIds.has(n.id));
+    if (sel.length === 0) return [] as string[];
+    const first = new Set(sel[0].groups);
+    return [...first].filter((g) => sel.every((n) => n.groups.includes(g)));
+  })();
+
   return (
     <div className="notes-screen-root">
       <Topbar
@@ -722,6 +768,17 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
         searchInputRef={searchRef}
         leftSlot={
           <>
+            <button
+              className="cs-tb-btn"
+              onClick={handleCreate}
+              data-tooltip="New note"
+              data-tooltip-pos="below"
+            >
+              <ComposeIcon size={13} />
+            </button>
+
+            <div className="cs-toolbar-sep" />
+
             <SortDropdown
               sort={sort}
               onSortChange={(s) => {
@@ -730,10 +787,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
               }}
             />
             <NotesFilterDropdown nf={nf} availableGroups={availableGroups} />
-            <button className="ns-new-btn" onClick={handleCreate}>
-              <PlusIcon size={11} />
-              <span>New</span>
-            </button>
           </>
         }
         rightSlot={
@@ -742,12 +795,75 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
             <div className="cs-toolbar-sep" />
 
+            {/* Select mode */}
+            <div className="bulk-select-wrap">
+              <button
+                className={`cs-tb-btn${multiSelect.isSelecting ? " cs-tb-btn--active" : ""}`}
+                onClick={() => {
+                  document.dispatchEvent(new Event("tooltip:hide"));
+                  multiSelect.isSelecting
+                    ? multiSelect.exitSelectMode()
+                    : multiSelect.enterSelectMode();
+                }}
+                data-tooltip={
+                  multiSelect.isSelecting
+                    ? multiSelect.selectedCount > 0
+                      ? `${multiSelect.selectedCount} selected`
+                      : "Exit selection"
+                    : "Select notes"
+                }
+                data-tooltip-pos="below"
+              >
+                <MultiSelectIcon size={13} />
+                {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
+                  <span className="cs-tb-badge">
+                    {multiSelect.selectedCount}
+                  </span>
+                )}
+              </button>
+
+              {multiSelect.isSelecting && (
+                <BulkActionsBar
+                  selectedCount={multiSelect.selectedCount}
+                  totalCount={notes.length}
+                  onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
+                  onDeselectAll={multiSelect.deselectAll}
+                  onExitSelectMode={multiSelect.exitSelectMode}
+                  onBulkDelete={() => {
+                    if (onBulkDelete) {
+                      onBulkDelete([...multiSelect.selectedIds]);
+                      multiSelect.exitSelectMode();
+                    }
+                  }}
+                  allPinned={allPinned}
+                  onBulkTogglePin={() => {
+                    if (allPinned) {
+                      if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
+                    } else {
+                      if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
+                    }
+                  }}
+                  allSaved={false}
+                  onBulkToggleSave={() => {}}
+                  onBulkAddGroup={(group) => {
+                    if (onBulkAddGroup) onBulkAddGroup([...multiSelect.selectedIds], group);
+                  }}
+                  onBulkRemoveGroup={(group) => {
+                    if (onBulkRemoveGroup) onBulkRemoveGroup([...multiSelect.selectedIds], group);
+                  }}
+                  availableGroups={availableGroups}
+                  commonGroups={commonGroups}
+                />
+              )}
+            </div>
+
             <GroupsButton
               availableGroups={availableGroups}
               entries={entries}
               onAddGroup={onAddGroup}
               onDeleteGroup={onDeleteGroup}
               onRenameGroup={onRenameGroup}
+              disabled={multiSelect.isSelecting}
             />
           </>
         }
@@ -772,9 +888,28 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             {sortedNotes.map((n) => (
               <div
                 key={n.id}
-                className="ns-card"
-                onClick={() => setEditingId(n.id)}
+                className={[
+                  "ns-card",
+                  multiSelect.isSelecting && "ns-card--selectable",
+                  multiSelect.selectedIds.has(n.id) && "ns-card--selected",
+                ].filter(Boolean).join(" ")}
+                onClick={(e) => {
+                  if (multiSelect.isSelecting) {
+                    if (e.shiftKey) {
+                      multiSelect.selectRange(n.id, allVisibleIds);
+                    } else {
+                      multiSelect.toggleSelect(n.id);
+                    }
+                    return;
+                  }
+                  setEditingId(n.id);
+                }}
               >
+                {multiSelect.isSelecting && (
+                  <span className="ns-card-checkbox">
+                    <CheckIcon size={10} strokeWidth={3} />
+                  </span>
+                )}
                 <div className="ns-card-body">
                   <div
                     className={`ns-card-title${!n.title ? " ns-card-title--untitled" : ""}`}
