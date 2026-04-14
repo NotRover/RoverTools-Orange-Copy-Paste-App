@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Note, ClipboardEntry } from "../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../types";
 import type { SortMode } from "../sort-options";
@@ -28,6 +34,10 @@ import {
   EmbedClipIcon,
   ChevronRightIcon,
   FilterIcon,
+  SearchXIcon,
+  ImageIcon,
+  FileIcon,
+  ClipboardIcon,
 } from "../../icons";
 import { PinIcon as PinIconElement } from "../../entry-types/EntryTypePill";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
@@ -41,6 +51,36 @@ function stripHtml(html: string): string {
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
   return tmp.textContent ?? tmp.innerText ?? "";
+}
+
+function sanitizeNotePreviewHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  template.content
+    .querySelectorAll("script, style, iframe, object, embed, link, meta")
+    .forEach((el) => el.remove());
+
+  template.content.querySelectorAll("*").forEach((el) => {
+    [...el.attributes].forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim();
+
+      if (name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+        return;
+      }
+
+      if (
+        (name === "href" || name === "src") &&
+        /^\s*javascript:/i.test(value)
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+
+  return template.innerHTML;
 }
 
 // ── Formatting state (active toolbar buttons) ───────────────────────
@@ -98,8 +138,13 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [formatState, setFormatState] = useState<FormatState>(queryFormatState);
   const currentNoteIdRef = useRef(note.id);
 
-  // ── Format state tracking via selectionchange ──
+  // ── Embed picker state ──
+  const [showEmbedPicker, setShowEmbedPicker] = useState(false);
+  const [embedSearch, setEmbedSearch] = useState("");
+  const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
+  const embedPickerRef = useRef<HTMLDivElement>(null);
 
+  // ── Format state tracking via selectionchange ──
   useEffect(() => {
     const update = () => setFormatState(queryFormatState());
     document.addEventListener("selectionchange", update);
@@ -109,34 +154,53 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // Render clipboard embed placeholders.
   useEffect(() => {
     if (!editorRef.current) return;
-    const placeholders =
-      editorRef.current.querySelectorAll("[data-clip-embed]");
-    placeholders.forEach((el) => {
-      const embedId = el.getAttribute("data-clip-embed");
-      if (!embedId || el.getAttribute("data-rendered")) return;
-      el.setAttribute("data-rendered", "1");
+    editorRef.current
+      .querySelectorAll("[data-clip-embed]:not([data-rendered])")
+      .forEach((el) => {
+        const embedId = el.getAttribute("data-clip-embed")!;
+        el.setAttribute("data-rendered", "1");
+        const entry = entries.find((e) => e.id === embedId);
+        // Show minimal reference: just a label or ID
+        const label = entry
+          ? entry.type === "image"
+            ? (entry.label ?? "Image")
+            : entry.type === "file"
+              ? (entry.label ?? "File")
+              : truncateText(
+                  entry.type === "html"
+                    ? stripHtml(entry.content)
+                    : entry.content,
+                  40, // Reduced length for minimal reference
+                ) || "(Text)"
+          : `#${embedId}`;
+        el.className = "clip-embed";
+        // Use inline SVG icon instead of emoji
+        const iconSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/><path d="M13 8h4"/><path d="M13 12h4"/><path d="M13 16h2"/></svg>`;
+        el.innerHTML = `<span style="flex-shrink:0;display:inline-flex;align-items:center;color:var(--accent)">${iconSvg}</span><span class="${entry ? "clip-embed-text" : "clip-embed-missing"}">${label}</span>`;
+        if (entry && onCopyEntry) {
+          (el as HTMLElement).onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onCopyEntry(entry.id);
+          };
+        }
+      });
+  });
 
-      const entry = entries.find((e) => e.id === embedId);
-      const label = entry
-        ? entry.type === "image"
-          ? (entry.label ?? "Image")
-          : truncateText(
-              entry.type === "html" ? stripHtml(entry.content) : entry.content,
-              60,
-            )
-        : `Clip #${embedId} not found`;
-
-      el.className = "clip-embed";
-      el.innerHTML = `<span style="flex-shrink:0;color:var(--accent)">📋</span><span class="${entry ? "clip-embed-text" : "clip-embed-missing"}">${label}</span>`;
-
-      if (entry && onCopyEntry) {
-        (el as HTMLElement).onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onCopyEntry(entry.id);
-        };
-      }
-    });
+  // Render group reference placeholders.
+  useEffect(() => {
+    if (!editorRef.current) return;
+    editorRef.current
+      .querySelectorAll("[data-group-ref]:not([data-rendered])")
+      .forEach((el) => {
+        const groupName = el.getAttribute("data-group-ref")!;
+        el.setAttribute("data-rendered", "1");
+        const c = groupColor(groupName);
+        el.className = "group-embed";
+        (el as HTMLElement).style.background = c.bg;
+        (el as HTMLElement).style.color = c.fg;
+        el.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block;flex-shrink:0;opacity:0.8"></span>${groupName}`;
+      });
   });
 
   // Load content when note changes.
@@ -174,6 +238,20 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showGroupDropdown]);
+
+  // Close embed picker on outside click.
+  useEffect(() => {
+    if (!showEmbedPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        embedPickerRef.current &&
+        !embedPickerRef.current.contains(e.target as Node)
+      )
+        setShowEmbedPicker(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showEmbedPicker]);
 
   // Debounced auto-save.
   const scheduleSave = useCallback(() => {
@@ -222,17 +300,33 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     [scheduleSave],
   );
 
-  const insertEmbed = useCallback(() => {
-    const id = prompt("Enter clipboard entry ID:");
-    if (!id) return;
-    editorRef.current?.focus();
-    document.execCommand(
-      "insertHTML",
-      false,
-      `<span data-clip-embed="${id}" contenteditable="false">[clip:${id}]</span>&nbsp;`,
-    );
-    scheduleSave();
-  }, [scheduleSave]);
+  const insertClipEmbed = useCallback(
+    (id: string) => {
+      editorRef.current?.focus();
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<span data-clip-embed="${id}" contenteditable="false">[clip:${id}]</span>&nbsp;`,
+      );
+      scheduleSave();
+      setShowEmbedPicker(false);
+    },
+    [scheduleSave],
+  );
+
+  const insertGroupEmbed = useCallback(
+    (group: string) => {
+      editorRef.current?.focus();
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<span data-group-ref="${group}" contenteditable="false">[#${group}]</span>&nbsp;`,
+      );
+      scheduleSave();
+      setShowEmbedPicker(false);
+    },
+    [scheduleSave],
+  );
 
   const toggleGroup = useCallback(
     (group: string) => {
@@ -246,8 +340,35 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const updateFormat = () => setFormatState(queryFormatState());
 
+  // Filtered entries / groups for the embed picker
+  const filteredPickerEntries = useMemo(() => {
+    const q = embedSearch.trim().toLowerCase();
+    const list = q
+      ? entries.filter((e) => {
+          const text = e.type === "html" ? stripHtml(e.content) : e.content;
+          return (
+            text.toLowerCase().includes(q) ||
+            (e.label ?? "").toLowerCase().includes(q)
+          );
+        })
+      : entries;
+    return list.slice(0, 50);
+  }, [entries, embedSearch]);
+
+  const filteredPickerGroups = useMemo(() => {
+    const q = embedSearch.trim().toLowerCase();
+    return q
+      ? availableGroups.filter((g) => g.toLowerCase().includes(q))
+      : availableGroups;
+  }, [availableGroups, embedSearch]);
+
   return (
-    <div className="ns-editor-overlay">
+    <div
+      className="ns-editor-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onBack();
+      }}
+    >
       <div className="ns-editor">
         {/* Header */}
         <div className="ns-editor-header">
@@ -277,7 +398,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               <PinIcon size={12} filled={note.pinned} />
             </button>
             <button
-              className="ns-tb-btn"
+              className="ns-tb-btn ns-tb-btn--danger"
               onClick={() => {
                 onDelete(note.id);
                 onBack();
@@ -302,7 +423,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 onClick={() => toggleGroup(g)}
                 title={`Remove from "${g}"`}
               >
-                {g}
+                <span className="ns-chip-dot" />
+                <span className="ns-chip-label">{g}</span>
               </button>
             );
           })}
@@ -437,14 +559,113 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
           <span className="ns-fmt-sep" />
 
-          <button
-            className="ns-fmt-btn"
-            onClick={insertEmbed}
-            data-tooltip="Embed clipboard entry"
-            data-tooltip-pos="below"
-          >
-            <EmbedClipIcon size={13} />
-          </button>
+          {/* Embed picker */}
+          <div className="ns-embed-wrap" ref={embedPickerRef}>
+            <button
+              className={`ns-fmt-btn${showEmbedPicker ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowEmbedPicker((p) => !p);
+                setEmbedSearch("");
+              }}
+              data-tooltip="Embed reference"
+              data-tooltip-pos="below"
+            >
+              <EmbedClipIcon size={13} />
+            </button>
+            {showEmbedPicker && (
+              <div className="ns-embed-picker">
+                <div className="ns-embed-picker-tabs">
+                  <button
+                    className={`ns-embed-tab${embedTab === "entries" ? " ns-embed-tab--active" : ""}`}
+                    onClick={() => setEmbedTab("entries")}
+                  >
+                    Clipboard
+                  </button>
+                  <button
+                    className={`ns-embed-tab${embedTab === "groups" ? " ns-embed-tab--active" : ""}`}
+                    onClick={() => setEmbedTab("groups")}
+                  >
+                    Groups
+                  </button>
+                </div>
+                <input
+                  className="ns-embed-search"
+                  placeholder={
+                    embedTab === "entries"
+                      ? "Search entries…"
+                      : "Search groups…"
+                  }
+                  value={embedSearch}
+                  onChange={(e) => setEmbedSearch(e.target.value)}
+                  autoFocus
+                />
+                <div className="ns-embed-list">
+                  {embedTab === "entries" ? (
+                    filteredPickerEntries.length === 0 ? (
+                      <div className="ns-embed-empty">No entries found</div>
+                    ) : (
+                      filteredPickerEntries.map((entry) => {
+                        const text =
+                          entry.type === "image"
+                            ? (entry.label ?? "Image")
+                            : truncateText(
+                                entry.type === "html"
+                                  ? stripHtml(entry.content)
+                                  : entry.content,
+                                72,
+                              );
+                        return (
+                          <button
+                            key={entry.id}
+                            className="ns-embed-item"
+                            onClick={() => insertClipEmbed(entry.id)}
+                          >
+                            <span className="ns-embed-item-icon">
+                              {entry.type === "image" ? (
+                                <ImageIcon size={10} />
+                              ) : entry.type === "file" ? (
+                                <FileIcon size={10} />
+                              ) : (
+                                <ClipboardIcon size={10} />
+                              )}
+                            </span>
+                            <span className="ns-embed-item-text">{text}</span>
+                            <span className="ns-embed-item-time">
+                              {timeAgo(entry.timestamp)}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )
+                  ) : filteredPickerGroups.length === 0 ? (
+                    <div className="ns-embed-empty">No groups found</div>
+                  ) : (
+                    filteredPickerGroups.map((group) => {
+                      const c = groupColor(group);
+                      return (
+                        <button
+                          key={group}
+                          className="ns-embed-item"
+                          onClick={() => insertGroupEmbed(group)}
+                        >
+                          <span
+                            className="ns-embed-item-group"
+                            style={{ background: c.bg, color: c.fg }}
+                          >
+                            <span
+                              className="ns-embed-group-dot"
+                              style={{ background: c.fg }}
+                            />
+                            {group}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Richtext editor */}
@@ -524,10 +745,14 @@ function useNotesFilter(): NotesFilterState {
   }, []);
 
   return {
-    pinnedOnly, setPinnedOnly,
-    selectedGroups, toggleGroup,
-    activeFilterCount, clearAll,
-    filtersOpen, setFiltersOpen,
+    pinnedOnly,
+    setPinnedOnly,
+    selectedGroups,
+    toggleGroup,
+    activeFilterCount,
+    clearAll,
+    filtersOpen,
+    setFiltersOpen,
     filterRef,
   };
 }
@@ -557,9 +782,22 @@ const NotesFilterDropdown: React.FC<{
         <div className="cs-card-section">
           <div className="cs-section-label">System</div>
           <div className="cs-type-grid">
-            <label className={`cs-type-option${nf.pinnedOnly ? " cs-type-option--on" : ""}`}>
-              <input type="checkbox" checked={nf.pinnedOnly} onChange={() => nf.setPinnedOnly((v) => !v)} className="cs-type-cb" />
-              <span className="cs-type-icon type-pill" style={{ background: "var(--accent-dim)", color: "var(--accent)" }}>
+            <label
+              className={`cs-type-option${nf.pinnedOnly ? " cs-type-option--on" : ""}`}
+            >
+              <input
+                type="checkbox"
+                checked={nf.pinnedOnly}
+                onChange={() => nf.setPinnedOnly((v) => !v)}
+                className="cs-type-cb"
+              />
+              <span
+                className="cs-type-icon type-pill"
+                style={{
+                  background: "var(--accent-dim)",
+                  color: "var(--accent)",
+                }}
+              >
                 {PinIconElement}
               </span>
               <span className="cs-type-name">Pinned</span>
@@ -574,16 +812,32 @@ const NotesFilterDropdown: React.FC<{
             <div className="cs-card-section">
               <div className="cs-section-label">
                 Groups
-                {nf.selectedGroups.size > 0 && <span className="cs-count">{nf.selectedGroups.size}</span>}
+                {nf.selectedGroups.size > 0 && (
+                  <span className="cs-count">{nf.selectedGroups.size}</span>
+                )}
               </div>
               <div className="cs-type-grid">
                 {availableGroups.map((g) => {
                   const gc = groupColor(g);
                   return (
-                    <label key={g} className={`cs-type-option${nf.selectedGroups.has(g) ? " cs-type-option--on" : ""}`}>
-                      <input type="checkbox" checked={nf.selectedGroups.has(g)} onChange={() => nf.toggleGroup(g)} className="cs-type-cb" />
-                      <span className="cs-type-icon type-pill" style={{ background: gc.bg, color: gc.fg }}>
-                        <span className="cs-color-dot" style={{ background: gc.fg }} />
+                    <label
+                      key={g}
+                      className={`cs-type-option${nf.selectedGroups.has(g) ? " cs-type-option--on" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={nf.selectedGroups.has(g)}
+                        onChange={() => nf.toggleGroup(g)}
+                        className="cs-type-cb"
+                      />
+                      <span
+                        className="cs-type-icon type-pill"
+                        style={{ background: gc.bg, color: gc.fg }}
+                      >
+                        <span
+                          className="cs-color-dot"
+                          style={{ background: gc.fg }}
+                        />
                       </span>
                       <span className="cs-type-name">{g}</span>
                     </label>
@@ -652,6 +906,8 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [fading, setFading] = useState(false);
+  const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const nf = useNotesFilter();
 
@@ -663,12 +919,19 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const [layout, setLayout] = useState<ClipboardLayout>(() => {
     return (localStorage.getItem("ns-layout") as ClipboardLayout) ?? "tiles";
   });
+  const [collapsedSections, setCollapsedSections] = useState({
+    pinned: false,
+    notes: false,
+  });
 
   // Close filter dropdown on outside click
   useEffect(() => {
     if (!nf.filtersOpen) return;
     const handler = (e: MouseEvent) => {
-      if (nf.filterRef.current && !nf.filterRef.current.contains(e.target as Node))
+      if (
+        nf.filterRef.current &&
+        !nf.filterRef.current.contains(e.target as Node)
+      )
         nf.setFiltersOpen(false);
     };
     document.addEventListener("mousedown", handler);
@@ -677,7 +940,11 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
   const filteredNotes = notes.filter((n) => {
     if (nf.pinnedOnly && !n.pinned) return false;
-    if (nf.selectedGroups.size > 0 && !n.groups.some((g) => nf.selectedGroups.has(g))) return false;
+    if (
+      nf.selectedGroups.size > 0 &&
+      !n.groups.some((g) => nf.selectedGroups.has(g))
+    )
+      return false;
     if (search) {
       const q = search.toLowerCase();
       if (
@@ -724,12 +991,37 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     [onDelete, editingId],
   );
 
-  const selectLayout = useCallback((l: ClipboardLayout) => {
-    setLayout(l);
-    localStorage.setItem("ns-layout", l);
-  }, []);
+  useEffect(
+    () => () => {
+      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
+    },
+    [],
+  );
 
-  const allVisibleIds = sortedNotes.map((n) => n.id);
+  const selectLayout = useCallback(
+    (l: ClipboardLayout) => {
+      if (l === layout) return;
+      setFading(true);
+      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
+      layoutTimerRef.current = setTimeout(() => {
+        setLayout(l);
+        localStorage.setItem("ns-layout", l);
+        setFading(false);
+      }, 160);
+    },
+    [layout],
+  );
+
+  const pinnedCount = sortedNotes.filter((n) => n.pinned).length;
+  const showSections = pinnedCount > 0 && pinnedCount < sortedNotes.length;
+  const visibleNotes = showSections
+    ? sortedNotes.filter((n) => {
+        if (n.pinned && collapsedSections.pinned) return false;
+        if (!n.pinned && collapsedSections.notes) return false;
+        return true;
+      })
+    : sortedNotes;
+  const allVisibleIds = visibleNotes.map((n) => n.id);
 
   // Prune stale selections when notes change
   useEffect(() => {
@@ -749,8 +1041,11 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   }, [multiSelect.isSelecting]);
 
   // Compute bulk state
-  const allPinned = multiSelect.selectedCount > 0 &&
-    notes.filter((n) => multiSelect.selectedIds.has(n.id)).every((n) => n.pinned);
+  const allPinned =
+    multiSelect.selectedCount > 0 &&
+    notes
+      .filter((n) => multiSelect.selectedIds.has(n.id))
+      .every((n) => n.pinned);
   const commonGroups = (() => {
     if (multiSelect.selectedCount === 0) return [] as string[];
     const sel = notes.filter((n) => multiSelect.selectedIds.has(n.id));
@@ -838,7 +1133,8 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                   allPinned={allPinned}
                   onBulkTogglePin={() => {
                     if (allPinned) {
-                      if (onBulkUnpin) onBulkUnpin([...multiSelect.selectedIds]);
+                      if (onBulkUnpin)
+                        onBulkUnpin([...multiSelect.selectedIds]);
                     } else {
                       if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
                     }
@@ -846,10 +1142,12 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                   allSaved={false}
                   onBulkToggleSave={() => {}}
                   onBulkAddGroup={(group) => {
-                    if (onBulkAddGroup) onBulkAddGroup([...multiSelect.selectedIds], group);
+                    if (onBulkAddGroup)
+                      onBulkAddGroup([...multiSelect.selectedIds], group);
                   }}
                   onBulkRemoveGroup={(group) => {
-                    if (onBulkRemoveGroup) onBulkRemoveGroup([...multiSelect.selectedIds], group);
+                    if (onBulkRemoveGroup)
+                      onBulkRemoveGroup([...multiSelect.selectedIds], group);
                   }}
                   availableGroups={availableGroups}
                   commonGroups={commonGroups}
@@ -870,93 +1168,161 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
       />
 
       {/* ── Masonry grid ── */}
-      <div className="ns-viewport">
-        {sortedNotes.length === 0 ? (
+      <div className={`ns-viewport${fading ? " ns-viewport--fading" : ""}`}>
+        {notes.length === 0 ? (
           <div className="ns-empty">
             <NotesIcon size={36} className="ns-empty-icon" />
-            <h3 className="ns-empty-title">
-              {notes.length === 0 ? "No notes yet" : "No matching notes"}
-            </h3>
+            <h3 className="ns-empty-title">No notes yet</h3>
             <p className="ns-empty-subtitle">
-              {notes.length === 0
-                ? 'Click "New" to create your first note.'
-                : "Try a different search or group filter."}
+              Click the compose button to create your first note.
+            </p>
+          </div>
+        ) : sortedNotes.length === 0 ? (
+          <div className="cs-no-results">
+            <SearchXIcon size={44} className="cs-no-results-icon" />
+            <p className="cs-no-results-title">No matching notes</p>
+            <p className="cs-no-results-subtitle">
+              {search.trim() ? (
+                <>
+                  Nothing matches &ldquo;{search.trim()}&rdquo;
+                  {nf.activeFilterCount > 0 ? " with the current filters" : ""}.
+                </>
+              ) : (
+                <>No notes match the current filters.</>
+              )}
             </p>
           </div>
         ) : (
-          <div className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}>
-            {sortedNotes.map((n) => (
-              <div
-                key={n.id}
-                className={[
-                  "ns-card",
-                  multiSelect.isSelecting && "ns-card--selectable",
-                  multiSelect.selectedIds.has(n.id) && "ns-card--selected",
-                ].filter(Boolean).join(" ")}
-                onClick={(e) => {
-                  if (multiSelect.isSelecting) {
-                    if (e.shiftKey) {
-                      multiSelect.selectRange(n.id, allVisibleIds);
-                    } else {
-                      multiSelect.toggleSelect(n.id);
+          <div
+            className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}
+          >
+            {sortedNotes.map((n, idx) => (
+              <React.Fragment key={n.id}>
+                {showSections && idx === 0 && (
+                  <button
+                    type="button"
+                    className="ns-section-label"
+                    onClick={() =>
+                      setCollapsedSections((prev) => ({
+                        ...prev,
+                        pinned: !prev.pinned,
+                      }))
                     }
-                    return;
-                  }
-                  setEditingId(n.id);
-                }}
-              >
-                {multiSelect.isSelecting && (
-                  <span className="ns-card-checkbox">
-                    <CheckIcon size={10} strokeWidth={3} />
-                  </span>
-                )}
-                <div className="ns-card-body">
-                  <div
-                    className={`ns-card-title${!n.title ? " ns-card-title--untitled" : ""}`}
+                    aria-expanded={!collapsedSections.pinned}
                   >
-                    {n.title || "Untitled Note"}
-                  </div>
-                  {n.content && (
-                    <div className="ns-card-preview">
-                      {truncateText(stripHtml(n.content), 200)}
+                    <PinIcon size={9} />
+                    Pinned
+                    <ChevronRightIcon
+                      size={10}
+                      className={`ns-section-chevron${collapsedSections.pinned ? "" : " ns-section-chevron--open"}`}
+                    />
+                  </button>
+                )}
+                {showSections && idx === pinnedCount && (
+                  <button
+                    type="button"
+                    className="ns-section-label"
+                    onClick={() =>
+                      setCollapsedSections((prev) => ({
+                        ...prev,
+                        notes: !prev.notes,
+                      }))
+                    }
+                    aria-expanded={!collapsedSections.notes}
+                  >
+                    <NotesIcon size={10} />
+                    Notes
+                    <ChevronRightIcon
+                      size={10}
+                      className={`ns-section-chevron${collapsedSections.notes ? "" : " ns-section-chevron--open"}`}
+                    />
+                  </button>
+                )}
+                {(!showSections ||
+                  (n.pinned && !collapsedSections.pinned) ||
+                  (!n.pinned && !collapsedSections.notes)) && (
+                  <div
+                    className={[
+                      "ns-card",
+                      multiSelect.isSelecting && "ns-card--selectable",
+                      multiSelect.selectedIds.has(n.id) && "ns-card--selected",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    onClick={(e) => {
+                      if (multiSelect.isSelecting) {
+                        if (e.shiftKey) {
+                          multiSelect.selectRange(n.id, allVisibleIds);
+                        } else {
+                          multiSelect.toggleSelect(n.id);
+                        }
+                        return;
+                      }
+                      setEditingId(n.id);
+                    }}
+                  >
+                    {multiSelect.isSelecting && (
+                      <span className="ns-card-checkbox">
+                        <CheckIcon size={10} strokeWidth={3} />
+                      </span>
+                    )}
+                    <div className="ns-card-body">
+                      <div
+                        className={`ns-card-title${!n.title ? " ns-card-title--untitled" : ""}`}
+                      >
+                        {n.title || "Untitled Note"}
+                      </div>
+                      {n.content && layout === "list" && (
+                        <div className="ns-card-preview">
+                          {truncateText(stripHtml(n.content), 200)}
+                        </div>
+                      )}
+                      {n.content && layout !== "list" && (
+                        <div
+                          className="ns-card-preview ns-card-preview--rich"
+                          dangerouslySetInnerHTML={{
+                            __html: sanitizeNotePreviewHtml(n.content),
+                          }}
+                        />
+                      )}
+                      <div className="ns-card-footer">
+                        <div className="ns-card-chips">
+                          {n.groups.map((g) => {
+                            const c = groupColor(g);
+                            return (
+                              <span
+                                key={g}
+                                className="ns-chip"
+                                style={{ background: c.bg, color: c.fg }}
+                              >
+                                <span className="ns-chip-dot" />
+                                <span className="ns-chip-label">{g}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <span
+                          className={`ns-card-time${n.pinned ? " ns-card-time--pinned" : ""}`}
+                        >
+                          {n.pinned && <PinIcon size={8} />}
+                          {timeAgo(n.updated_at)}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                  <div className="ns-card-footer">
-                    <div className="ns-card-chips">
-                      {n.groups.map((g) => {
-                        const c = groupColor(g);
-                        return (
-                          <span
-                            key={g}
-                            className="ns-chip"
-                            style={{ background: c.bg, color: c.fg }}
-                          >
-                            <span className="ns-chip-dot" />
-                            <span className="ns-chip-label">{g}</span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <span
-                      className={`ns-card-time${n.pinned ? " ns-card-time--pinned" : ""}`}
+                    <button
+                      className="ns-card-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(n.id);
+                      }}
+                      data-tooltip="Delete"
+                      data-tooltip-pos="left"
                     >
-                      {n.pinned && <PinIcon size={8} />}
-                      {timeAgo(n.updated_at)}
-                    </span>
+                      <TrashIcon size={10} />
+                    </button>
                   </div>
-                </div>
-                <button
-                  className="ns-card-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(n.id);
-                  }}
-                  data-tooltip="Delete"
-                  data-tooltip-pos="left"
-                >
-                  <TrashIcon size={10} />
-                </button>
-              </div>
+                )}
+              </React.Fragment>
             ))}
           </div>
         )}
