@@ -150,11 +150,9 @@ export const CloseIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
 
 /* ── Chevron down ── */
 
-export const ChevronDownIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
-  size = 8,
-  strokeWidth = 2.8,
-  className,
-}) => (
+export const ChevronDownIcon: React.FC<
+  IconProps & { strokeWidth?: number }
+> = ({ size = 8, strokeWidth = 2.8, className }) => (
   <svg
     width={size}
     height={size}
@@ -172,11 +170,9 @@ export const ChevronDownIcon: React.FC<IconProps & { strokeWidth?: number }> = (
 
 /* ── Chevron right ── */
 
-export const ChevronRightIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
-  size = 10,
-  strokeWidth = 2.5,
-  className,
-}) => (
+export const ChevronRightIcon: React.FC<
+  IconProps & { strokeWidth?: number }
+> = ({ size = 10, strokeWidth = 2.5, className }) => (
   <svg
     width={size}
     height={size}
@@ -194,7 +190,11 @@ export const ChevronRightIcon: React.FC<IconProps & { strokeWidth?: number }> = 
 
 /* ── Tag / Label ── */
 
-export const TagIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ size = 11, strokeWidth = 2.2, className }) => (
+export const TagIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 11,
+  strokeWidth = 2.2,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -213,7 +213,11 @@ export const TagIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ size =
 
 /* ── Search (magnifying glass) ── */
 
-export const SearchIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ size = 16, strokeWidth = 2, className }) => (
+export const SearchIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 16,
+  strokeWidth = 2,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -246,8 +250,22 @@ export const SearchXIcon: React.FC<IconProps> = ({ size = 44, className }) => (
   >
     <circle cx="11" cy="11" r="8" />
     <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    <line x1="8" y1="8" x2="14" y2="14" stroke="currentColor" strokeWidth="1.8" />
-    <line x1="14" y1="8" x2="8" y2="14" stroke="currentColor" strokeWidth="1.8" />
+    <line
+      x1="8"
+      y1="8"
+      x2="14"
+      y2="14"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    />
+    <line
+      x1="14"
+      y1="8"
+      x2="8"
+      y2="14"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    />
   </svg>
 );
 
@@ -290,7 +308,11 @@ export const ClockIcon: React.FC<IconProps> = ({ size = 11, className }) => (
 
 /* ── Clipboard ── */
 
-export const ClipboardIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ size = 18, strokeWidth = 2, className }) => (
+export const ClipboardIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 18,
+  strokeWidth = 2,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -309,7 +331,10 @@ export const ClipboardIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ 
 
 /* ── Clipboard with down arrow (paste) ── */
 
-export const ClipboardPasteIcon: React.FC<IconProps> = ({ size = 13, className }) => (
+export const ClipboardPasteIcon: React.FC<IconProps> = ({
+  size = 13,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -329,7 +354,11 @@ export const ClipboardPasteIcon: React.FC<IconProps> = ({ size = 13, className }
 
 /* ── Copy (overlapping rectangles) ── */
 
-export const CopyIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ size = 13, strokeWidth = 2, className }) => (
+export const CopyIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -457,7 +486,11 @@ export const MoonIcon: React.FC<IconProps> = ({ size = 16, className }) => (
 
 /* ── Folder ── */
 
-export const FolderIcon: React.FC<IconProps & { strokeWidth?: number }> = ({ size = 13, strokeWidth = 2, className }) => (
+export const FolderIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -519,7 +552,10 @@ export const ListIcon: React.FC<IconProps> = ({ size = 12, className }) => (
 
 /* ── System groups (concentric arcs) ── */
 
-export const SystemGroupsIcon: React.FC<IconProps> = ({ size = 13, className }) => (
+export const SystemGroupsIcon: React.FC<IconProps> = ({
+  size = 13,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -724,7 +760,10 @@ export const HtmlCodeIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
 
 /* ── Sort: Newest (arrow up) ── */
 
-export const SortNewestIcon: React.FC<IconProps> = ({ size = 11, className }) => (
+export const SortNewestIcon: React.FC<IconProps> = ({
+  size = 11,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -743,7 +782,10 @@ export const SortNewestIcon: React.FC<IconProps> = ({ size = 11, className }) =>
 
 /* ── Sort: Oldest (arrow down) ── */
 
-export const SortOldestIcon: React.FC<IconProps> = ({ size = 11, className }) => (
+export const SortOldestIcon: React.FC<IconProps> = ({
+  size = 11,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -829,27 +871,71 @@ export const MinimizeIcon: React.FC = () => (
 
 export const MaximizeIcon: React.FC = () => (
   <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-    <rect x="0.5" y="0.5" width="9" height="9" rx="1" stroke="currentColor" strokeWidth="1.2" />
+    <rect
+      x="0.5"
+      y="0.5"
+      width="9"
+      height="9"
+      rx="1"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
   </svg>
 );
 
 export const RestoreIcon: React.FC = () => (
   <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-    <rect x="2" y="0" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.2" />
-    <rect x="0" y="2" width="8" height="8" rx="1" fill="var(--bg)" stroke="currentColor" strokeWidth="1.2" />
+    <rect
+      x="2"
+      y="0"
+      width="8"
+      height="8"
+      rx="1"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
+    <rect
+      x="0"
+      y="2"
+      width="8"
+      height="8"
+      rx="1"
+      fill="var(--bg)"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
   </svg>
 );
 
 export const WindowCloseIcon: React.FC = () => (
   <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-    <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <line
+      x1="1"
+      y1="1"
+      x2="9"
+      y2="9"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
+    <line
+      x1="9"
+      y1="1"
+      x2="1"
+      y2="9"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+    />
   </svg>
 );
 
 /* ── Multi-select checkbox (list with checks) ── */
 
-export const MultiSelectIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+export const MultiSelectIcon: React.FC<IconProps> = ({
+  size = 12,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -869,7 +955,17 @@ export const MultiSelectIcon: React.FC<IconProps> = ({ size = 12, className }) =
 /* ── Expand (arrows out) ── */
 
 export const ExpandIcon: React.FC<IconProps> = ({ size = 13, className }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
     <polyline points="15 3 21 3 21 9" />
     <polyline points="9 21 3 21 3 15" />
     <line x1="21" y1="3" x2="14" y2="10" />
@@ -880,7 +976,17 @@ export const ExpandIcon: React.FC<IconProps> = ({ size = 13, className }) => (
 /* ── Collapse (arrows in) ── */
 
 export const CollapseIcon: React.FC<IconProps> = ({ size = 13, className }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
     <polyline points="4 14 10 14 10 20" />
     <polyline points="20 10 14 10 14 4" />
     <line x1="14" y1="10" x2="21" y2="3" />
@@ -999,7 +1105,10 @@ export const ItalicIcon: React.FC<IconProps> = ({ size = 14, className }) => (
 
 /* ── Underline (U) ── */
 
-export const UnderlineIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+export const UnderlineIcon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -1018,7 +1127,10 @@ export const UnderlineIcon: React.FC<IconProps> = ({ size = 14, className }) => 
 
 /* ── Strike-through (S) ── */
 
-export const StrikethroughIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+export const StrikethroughIcon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -1058,7 +1170,10 @@ export const HeadingIcon: React.FC<IconProps> = ({ size = 14, className }) => (
 
 /* ── Bullet list ── */
 
-export const BulletListIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+export const BulletListIcon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -1081,7 +1196,10 @@ export const BulletListIcon: React.FC<IconProps> = ({ size = 14, className }) =>
 
 /* ── Ordered list (1 2 3) ── */
 
-export const OrderedListIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+export const OrderedListIcon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
@@ -1125,7 +1243,10 @@ export const QuoteIcon: React.FC<IconProps> = ({ size = 14, className }) => (
 
 /* ── Embed / Clip reference ── */
 
-export const EmbedClipIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+export const EmbedClipIcon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
   <svg
     width={size}
     height={size}
