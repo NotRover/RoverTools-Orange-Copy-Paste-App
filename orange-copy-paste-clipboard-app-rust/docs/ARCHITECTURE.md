@@ -112,6 +112,10 @@ src-tauri/
 │   │   ├── files.rs            # CF_HDROP read/write (Windows file clipboard)
 │   │   ├── html.rs             # CF_HTML read/write (rich text clipboard)
 │   │   └── image.rs            # Multi-format image clipboard read/write
+│   ├── notes/
+│   │   ├── mod.rs              # Module re-exports
+│   │   ├── commands.rs         # Tauri command handlers (get_notes, create/update/delete, groups)
+│   │   └── store.rs            # Note model + MessagePack persistence
 │   ├── runtime/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── clipboard_watcher.rs # Background polling thread (220ms)
@@ -142,7 +146,12 @@ src/
 │   │   ├── App.css
 │   │   ├── sidebar/            # Navigation sidebar
 │   │   ├── clipboard-screen/   # Main history view (tiles/list, day groups)
+│   │   │   ├── bulk-actions/   # Multi-select actions bar
+│   │   │   ├── group-manager/  # Group CRUD card
+│   │   │   ├── search-filter/  # Search + filters panel
+│   │   │   ├── topbar/         # Sort/layout/filter/group controls
 │   │   │   └── entry-card/     # Individual entry cards (text/image/file)
+│   │   ├── notes-screen/       # Notes UI (editor, list, filters, groups)
 │   │   ├── settings-screen/    # User preferences (paste slots, notifications)
 │   │   ├── shortcuts-screen/   # Keyboard shortcut reference
 │   │   ├── card-menu/          # Right-click context menu (portal)
@@ -154,9 +163,9 @@ src/
 │   │   ├── CopyPopup.tsx       # Copy confirmation popup (preview, pin, delete)
 │   │   └── copyPopup.css
 │   ├── notifications/
-│   │   ├── copy-notification.html  # Copy/paste notification HTML entry
-│   │   ├── CopyNotification.tsx    # Notification component ("Copied"/"Pasted")
-│   │   └── copyNotification.css
+│   │   ├── notification.html   # Copy/paste notification HTML entry
+│   │   ├── Notification.tsx    # Notification component ("Copied"/"Pasted")
+│   │   └── notification.css
 │   └── paste-popup/
 │       ├── paste-popup.html    # Paste popup HTML entry
 │       ├── PastePopup.tsx      # Quick paste popup (keyboard slots, tabs)
@@ -200,11 +209,13 @@ AppState
 ├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.bin
 ├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
 ├── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
-├── copy_notification: Arc<AtomicBool>      ← master toggle for copy/paste notifications
+├── notification_enabled: Arc<AtomicBool>   ← master toggle for copy/paste notifications
 ├── notif_copy: Arc<AtomicBool>             ← show notification on copy action
 ├── notif_paste: Arc<AtomicBool>            ← show notification on paste action
 ├── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries
-└── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
+├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
+├── notes: Arc<Mutex<NoteStore>>            ← shared notes store
+└── notes_dirty: Arc<AtomicBool>            ← triggers periodic flush to notes.bin
 ```
 
 **`AppState`** is managed by Tauri and injected into every command handler via `State<'_, AppState>`. The same `Arc` references are also held by the clipboard watcher thread and the hotkey handler closures.
@@ -280,6 +291,21 @@ ClipboardEntry {
 | `set_setting`              | `(key, value) → bool`         | Write a setting; syncs in-memory caches for known keys                                               |
 | `get_image_file_preview`   | `(path) → Option<String>`     | Read image file → data-URL (max 12 MB)                                                               |
 | `get_video_file_preview`   | `(path) → Option<String>`     | Read video file → data-URL (max 36 MB)                                                               |
+| `check_missing_files`      | `(paths) → Vec<String>`       | Returns paths that do not exist (used by paste popup before paste)                                   |
+
+#### `notes/commands.rs` — Notes Command Handlers
+
+| Command                  | Signature                              | Description                                  |
+| ------------------------ | -------------------------------------- | -------------------------------------------- |
+| `get_notes`              | `() → Vec<Note>`                       | Return all notes                             |
+| `create_note`            | `() → Note`                            | Create a new blank note                      |
+| `update_note`            | `(id, title, content) → bool`          | Update note content/title                    |
+| `delete_note`            | `(id) → bool`                          | Delete a note by ID                          |
+| `pin_note`               | `(id) → bool`                          | Pin a note                                   |
+| `unpin_note`             | `(id) → bool`                          | Unpin a note                                 |
+| `set_note_groups`        | `(id, groups) → bool`                  | Replace note groups                          |
+| `purge_group_from_notes` | `(group) → ()`                         | Remove a group from all notes                |
+| `rename_group_in_notes`  | `(old_name, new_name) → ()`            | Rename a group across all notes              |
 
 **Internal helpers:**
 
@@ -325,6 +351,27 @@ Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal pr
 
 **Writing (Linux/other)** — uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()` (which works reliably on non-Windows platforms).
 
+### Notes Module
+
+#### `store.rs` — Note Model and Storage
+
+`NoteStore` keeps notes in-memory as `Vec<Note>` and persists them to `{app_data}/notes.bin` using MessagePack.
+
+`Note` fields:
+
+- `id`, `title`, `content` (sanitised HTML)
+- `created_at`, `updated_at`
+- `pinned`
+- `groups`
+
+Notes are sorted by `updated_at` descending, and a monotonic in-process counter is advanced on load to avoid ID collisions.
+
+#### Persistence Behavior
+
+- Note mutations set `notes_dirty = true`.
+- The shared background flush thread writes `notes.bin` every ~2s when dirty.
+- Notes are loaded during startup in `setup_runtime`.
+
 ### Runtime Module
 
 #### `clipboard_watcher.rs` — Background Polling Thread
@@ -362,11 +409,11 @@ Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal pr
 
 #### `popup_windows.rs` — Multi-Window Management
 
-Creates two popup windows at startup (hidden, off-screen, frameless, transparent, always-on-top, skip-taskbar):
+Creates popup windows at startup (hidden, off-screen, frameless, transparent, always-on-top, skip-taskbar):
 
 - **copy-popup** (340×260) — Copy confirmation with preview.
 - **paste-popup** (340×460) — Quick paste list with keyboard shortcuts.
-- **copy-notification** (220×72) — Brief "Copied"/"Pasted" toast at bottom-right of screen.
+- **notification** (220×72) — Brief "Copied"/"Pasted" toast at bottom-right of screen.
 
 **Hiding**: `hide_popup()` moves the window to `(-9999, -9999)` **before** calling `hide()`. This prevents the invisible-but-positioned window from intercepting mouse clicks on the content underneath.
 
@@ -374,13 +421,13 @@ Also sets up a handler that hides all popups when the main window gains focus.
 
 #### `notifications.rs` — Copy/Paste Notifications
 
-Manages the "copy-notification" popup window that appears briefly at the bottom-right of the screen:
+Manages the "notification" popup window that appears briefly at the bottom-right of the screen:
 
-- `show_notification(app, entry, action)` — Positions the notification window and emits a `copy-notification:show` event with a `CopyNotificationPayload { kind, action }`.
-- `notify_if_enabled(app, entry)` — Shows a "Copied" notification if both the master toggle (`copy_notification`) and per-type flag (`notif_copy`) are enabled.
-- `notify_paste_if_enabled(app, entry)` — Shows a "Pasted" notification if both `copy_notification` and `notif_paste` are enabled.
+- `show_notification(app, entry, action)` — Positions the notification window and emits a `notification:show` event with a `NotificationPayload { kind, action }`.
+- `notify_if_enabled(app, entry)` — Shows a "Copied" notification if both the master toggle (`notification_enabled`) and per-type flag (`notif_copy`) are enabled.
+- `notify_paste_if_enabled(app, entry)` — Shows a "Pasted" notification if both `notification_enabled` and `notif_paste` are enabled.
 
-The frontend `CopyNotification.tsx` component renders a dynamic label and icon (clipboard icon for "Copied", paste icon for "Pasted") based on the `action` field.
+The frontend `Notification.tsx` component renders a dynamic label and icon (clipboard icon for "Copied", paste icon for "Pasted") based on the `action` field.
 
 #### `platform/` — OS Abstraction
 
@@ -418,13 +465,14 @@ Saves window position, size, and maximized state to `{app_data}/window-state.jso
 
 ### Build & Entry Points
 
-Vite is configured for a **multi-page build** (three separate HTML entry points → three separate JS bundles):
+Vite is configured for a **multi-page build** (four separate HTML entry points → four separate JS bundles):
 
 | Window      | Entry HTML                                    | Entry Component  | Dimensions         |
 | ----------- | --------------------------------------------- | ---------------- | ------------------ |
 | main        | `src/components/app/index.html`               | `App.tsx`        | 920×560, resizable |
 | copy-popup  | `src/components/copy-popup/copy-popup.html`   | `CopyPopup.tsx`  | 340×260, frameless |
 | paste-popup | `src/components/paste-popup/paste-popup.html` | `PastePopup.tsx` | 340×460, frameless |
+| notification | `src/components/notifications/notification.html` | `Notification.tsx` | 220×72, frameless |
 
 Dev server runs on port 1420 (fixed for Tauri dev mode).
 
@@ -443,7 +491,7 @@ interface ClipboardEntry {
   label?: string; // e.g. "Image Mar 17, 2:45 PM"
 }
 
-type AppScreen = "clipboard" | "shortcuts" | "settings";
+type AppScreen = "clipboard" | "notes" | "shortcuts" | "settings";
 type AppTheme = "dark" | "light";
 ```
 
@@ -454,6 +502,7 @@ Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `fileExtension()`, `fileN
 **`App.tsx`** is the root of the main window. It owns:
 
 - **`entries: ClipboardEntry[]`** — the full clipboard history state.
+- **`notes: Note[]`** — note collection used by the Notes screen.
 - **`screen: AppScreen`** — which screen is currently active.
 - **`theme: AppTheme`** — dark/light mode (persisted to `localStorage`).
 - **`undoSnapshot`** — snapshot for "undo clear history" (5-second window).
@@ -513,6 +562,15 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Start minimized**: Launch hidden in tray. Stored in `settings.json`.
 - **Notifications**: Master toggle + individual checkboxes for copy and paste notifications. Stored in `settings.json`.
 
+#### Notes Screen (`NotesScreen.tsx`)
+
+- **Rich-text editing**: Formatting toolbar with headings, lists, quotes, code, and inline styling.
+- **Clipboard/group embeds**: Insert clipboard references and group tags into note content.
+- **Auto-save**: Debounced save while typing plus flush-on-unmount behavior.
+- **Pinning and groups**: Pin notes and assign shared group tags.
+- **Filtering**: Search and filter notes by query, groups, date range, and pin state.
+- **Bulk actions**: Multi-select delete/pin/group operations.
+
 #### Shortcuts Screen (`ShortcutsScreen.tsx`)
 
 Read-only reference page showing all keyboard shortcuts organized by section (Global, Clipboard Cards, Search & Filter).
@@ -550,7 +608,7 @@ Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 | `StatusPill`        | "N text · M img · K files · X total" summary bar.                                                                                                                                         |
 | `CardMenu`          | Right-click context menu (Copy, Pin/Unpin, Save, Groups, Expand/Collapse, Delete). Portal to body. Uses direct DOM positioning in `useLayoutEffect` to avoid first-render flash at (0,0). |
 | `ToastNotification` | Timed notification with progress bar + optional action (Undo).                                                                                                                            |
-| `CopyNotification`  | Small bottom-right toast showing "Copied" or "Pasted" with dynamic icon. Separate webview window.                                                                                         |
+| `Notification`      | Small bottom-right toast showing "Copied" or "Pasted" with dynamic icon. Separate webview window.                                                                                         |
 | `TooltipPortal`     | CSS-driven tooltips via `data-tooltip` attributes.                                                                                                                                        |
 | `WindowControls`    | Frameless window buttons (minimize, maximize/restore, close).                                                                                                                             |
 
@@ -686,12 +744,15 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Full history      | `{app_data}/history.bin`               | MessagePack binary                                     | Every 2s when dirty  | On startup         |
 | Image files       | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)            | On push to history   | Via asset protocol |
 | Settings          | `{app_data}/settings.json`             | JSON object `{ key: value }`                           | On `set_setting`     | On startup         |
+| Notes             | `{app_data}/notes.bin`                 | MessagePack binary                                     | Every 2s when dirty  | On startup         |
 | Boot ID           | `{app_data}/boot_id.txt`               | Plain text (boot epoch seconds)                        | On startup           | On startup         |
 | Window geometry   | `{app_data}/window-state.json`         | `{ x, y, width, height, maximized }`                   | On every move/resize | On startup         |
 | Theme preference  | `localStorage.sc-theme`                | `"dark"` or `"light"`                                  | On toggle            | On mount           |
 | Layout preference | `localStorage.sc-layout`               | `"tiles"` or `"list"`                                  | On change            | On mount           |
 | Sort preference   | `localStorage.sc-sort`                 | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"` | On change            | On mount           |
 | Paste slot count  | `localStorage.sc-paste-slots`          | `"3"` – `"10"`                                         | On change            | On popup show      |
+| Group names       | `localStorage.sc-groups`               | JSON string array                                      | On group edits       | On mount           |
+| Group colors      | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                 | On color change      | On mount           |
 | Recent searches   | `localStorage.sc-recent-searches`      | JSON string array (max 8)                              | On search            | On mount           |
 
 **Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.bin` every 2 seconds.
@@ -707,7 +768,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | main              | 920×560 | Resizable (min 640×440), frameless, initially hidden (shown by window-state restore), dark bg `#0e0e0e` |
 | copy-popup        | 340×260 | Frameless, transparent, no shadow, always-on-top, skip taskbar, not resizable                           |
 | paste-popup       | 340×460 | Same as copy-popup                                                                                      |
-| copy-notification | 220×72  | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
+| notification      | 220×72  | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
 
 ### Permissions (capabilities/default.json)
 
