@@ -15,10 +15,19 @@ Treat this as a README for coding agents: concise, actionable, and verification-
 - Use code as truth; use docs as context.
 - Read in this order:
   1. Files directly touched by the task
-  2. orange-copy-paste-clipboard-app-rust/README.md
-  3. orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md
-  4. orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md
-  5. CLAUDE.md
+  2. orange-copy-paste-clipboard-app-rust/src-tauri/src/
+  3. orange-copy-paste-clipboard-app-rust/src/components/
+  4. orange-copy-paste-clipboard-app-rust/README.md
+  5. docs/ARCHITECTURE.md (workspace-level architecture/planning notes; semi-active, verify against code)
+  6. orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md
+  7. orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md
+  8. CLAUDE.md
+
+## Root Docs Policy
+
+- Root docs/ is shared project context and may change semi-actively.
+- Treat root docs as contextual guidance, not implementation truth.
+- When docs and code diverge, trust current code and note the mismatch in handoff (don't update/read unless asked and/or necessary).
 
 ## Setup and Commands
 
@@ -102,6 +111,7 @@ Treat this as a README for coding agents: concise, actionable, and verification-
 
 - Read only files required for the active task.
 - For large files, inspect targeted sections before expanding.
+- Read root docs/ selectively; do not load unrelated docs files.
 - Prefer concise diffs over broad refactors.
 - Avoid repeating architecture background already in docs.
 - For unrelated tasks, start a fresh session/context when possible.
