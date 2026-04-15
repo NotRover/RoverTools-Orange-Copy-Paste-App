@@ -64,7 +64,7 @@ On startup, `get_history` replaced the entire React state. If a `clipboard:new-e
 
 ### 2c. `simulate_paste` corrupts keyboard modifier state
 
-**File**: `src-tauri/src/runtime/platform_windows.rs`  
+**File**: `src-tauri/src/runtime/platform/windows.rs`  
 `simulate_copy` defensively releases Shift and Ctrl before sending its keystroke sequence, but `simulate_paste` did not. When a delayed paste simulation fired while the user was holding Ctrl+Shift (e.g. pressing Ctrl+Shift+V to reopen the popup), the injected Ctrl-up event released the user's physical Ctrl key in the OS input queue. This caused the global shortcut to fail to register for several seconds.
 **Fix**: `simulate_paste` now mirrors `simulate_copy` by sending Shift-up and Ctrl-up before the Ctrl+V sequence.
 

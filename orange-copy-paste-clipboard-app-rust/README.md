@@ -25,15 +25,18 @@ It captures copied text/images/files into history, shows quick popups near the c
   - **Day-grouped timeline** — entries grouped by date with collapsible day sections and dot-rail navigation
   - Tiles card grid (Pinterest-like layout) and list layout — toggle persisted to `localStorage`
   - **Sort controls** — sort dropdown with: Newest, Oldest, A → Z, Z → A, Type (text/file/image); sort persisted to `localStorage`
+  - **Search & filter panel** — search by content and filter by type/date/groups (with active filter count)
+  - **Group manager** — create, rename, recolor, and delete user groups; system groups (`Pinned`, `Saved`) are protected
+  - **Bulk selection mode** — bulk delete, bulk pin/unpin, and bulk group operations
   - Click any card to copy it back to clipboard
   - **Pin entries** — pin important entries so they survive clear-all; visual "Pinned" chip on pinned cards
+  - **Active clipboard indicator** — chip + accent border marks the entry currently in the OS clipboard
   - Type chip (Text / Image / File / Files / Images) acts as expand toggle for multi-file entries
   - Compact preview of multi-file entries (first 3 names + count)
   - Full expanded file list with per-file thumbnails
   - Relative timestamp shown in card footer, refreshed every 15 s
   - Subtle "Copied" and "Pinned" feedback animations on cards
   - Right-click context menu (CardMenu) per entry: copy, pin/unpin, delete
-  - Search/filter screen to filter text entries by content
   - **Clear all** button with 5-second undo toast — pinned entries are preserved
   - Duplicate suppression — copying from history does not re-add the entry
 - **Video player (custom):**
@@ -49,7 +52,16 @@ It captures copied text/images/files into history, shows quick popups near the c
   - Closes on focus loss
   - Syncs with main app's dark/light theme
 - **Popup screen-boundary clamping** — popups never render off-screen or clipped at monitor edges
-- **Settings screen** (placeholder, to be filled)
+- **Notes screen**:
+  - Rich-text editor with formatting controls
+  - Clipboard embed references and group references
+  - Pin/unpin and group tagging
+  - Search/filter and bulk actions
+- **Settings screen**:
+  - Paste popup entry count (3–10)
+  - Persist history, close-to-tray, and start-minimized toggles
+  - Notification master toggle and per-action toggles (`notif_copy`, `notif_paste`)
+  - Autosave toggle to auto-tag new entries with the `Saved` group
 - **Shortcuts screen** — documents all app shortcuts and interactions
 - **Status pill** — bottom-right Obsidian-style bar showing text / image / file / total counts
 - **Dark & Light mode** — toggle persisted to `localStorage`, shared across main window and popups; follows OS preference automatically when no manual override is set
@@ -152,7 +164,12 @@ The backend is organized by **feature/domain**, not by technical layer alone.
 - `app_state.rs`: `AppState` managed by Tauri — includes shared history, suppress flag, notification toggles, active clipboard ID, and other setting caches
 - `popup_state.rs`: popup constants and payload types used for emitted events
 
-### 4) `lib.rs` (composition root)
+### 4) `notes` module (notes domain)
+
+- `store.rs`: `Note` model, in-memory note store, MessagePack persistence (`notes.bin`)
+- `commands.rs`: Tauri IPC commands for note CRUD, pinning, and group operations
+
+### 5) `lib.rs` (composition root)
 
 `src-tauri/src/lib.rs` wires all modules:
 
@@ -173,9 +190,16 @@ src/components/
 │  ├─ clipboard-screen/
 │  │  ├─ ClipboardScreen.tsx     ← day-grouped timeline, sort controls, layout toggle, clear-all
 │  │  ├─ ClipboardScreen.css
+│  │  ├─ bulk-actions/
+│  │  ├─ group-manager/
+│  │  ├─ search-filter/
+│  │  ├─ topbar/
 │  │  └─ entry-card/
 │  │     ├─ EntryCard.tsx        ← per-entry card (text/image/file/video previews, chips, footer)
 │  │     └─ EntryCard.css
+│  ├─ notes-screen/
+│  │  ├─ NotesScreen.tsx         ← note CRUD, rich text editor, embeds, groups, filters
+│  │  └─ NotesScreen.css
 │  ├─ settings-screen/
 │  │  ├─ SettingsScreen.tsx      ← user preferences (persist history, notifications, close-to-tray)
 │  │  └─ SettingsScreen.css
@@ -200,9 +224,9 @@ src/components/
 │  ├─ copy-popup.html
 │  └─ copyPopup.css
 ├─ notifications/               ← standalone OS window
-│  ├─ CopyNotification.tsx
-│  ├─ copy-notification.html
-│  └─ copyNotification.css
+│  ├─ Notification.tsx
+│  ├─ notification.html
+│  └─ notification.css
 ├─ entry-types/                 ← shared component
 │  ├─ EntryTypePill.tsx
 │  └─ entryTypes.css
@@ -243,6 +267,7 @@ notrover-smart-clipboard-app-rust/
 │  │  │  ├─ mod.rs
 │  │  │  ├─ commands.rs
 │  │  │  ├─ hotkeys.rs
+│  │  │  ├─ clipboard_watcher.rs
 │  │  │  ├─ notifications.rs
 │  │  │  ├─ popup_windows.rs
 │  │  │  ├─ tray.rs
@@ -251,6 +276,10 @@ notrover-smart-clipboard-app-rust/
 │  │  │     ├─ mod.rs
 │  │  │     ├─ windows.rs
 │  │  │     └─ linux.rs
+│  │  ├─ notes/
+│  │  │  ├─ mod.rs
+│  │  │  ├─ commands.rs
+│  │  │  └─ store.rs
 │  │  └─ state/
 │  │     ├─ mod.rs
 │  │     ├─ app_state.rs
@@ -271,7 +300,7 @@ notrover-smart-clipboard-app-rust/
 **Copy flow:**
 
 1. User presses `Ctrl+Shift+C`
-2. Runtime simulates `Ctrl+C`, reads clipboard (text → files → image)
+2. Runtime simulates `Ctrl+C`, reads clipboard (Windows priority: files → html → text → image)
 3. New entry is pushed to history; `clipboard:new-entry` event emitted to main window and copy popup
 4. Copy popup appears near the cursor showing what was captured
 5. Active clipboard ID is updated; `clipboard:active-id` event emitted
@@ -301,6 +330,8 @@ notrover-smart-clipboard-app-rust/
 | `sc-sort`            | `"newest"` \| `"oldest"` \| `"a-z"` \| `"z-a"` \| `"type"` | Active sort order            |
 | `sc-paste-slots`     | `"3"` – `"10"`                                             | Paste popup entry count      |
 | `sc-recent-searches` | JSON string array (max 8)                                  | Recent search terms          |
+| `sc-groups`          | JSON string array                                           | Available custom groups      |
+| `sc-group-colors`    | JSON object (`group -> palette index`)                     | User-picked group colors     |
 
 ---
 
