@@ -3,6 +3,11 @@
 This workspace has two submodules. Apply these instructions to both.
 Keep edits minimal, verify changes, and avoid unnecessary token usage.
 
+## Instruction Scope
+
+- `CLAUDE.md` is the authoritative instruction file for Claude Code behavior in this workspace.
+- `AGENTS.md` is for other agents/tools and should be ignored by Claude Code.
+
 ## Workspace Layout
 
 - `orange-copy-paste-clipboard-app-rust/`: desktop Smart Clipboard app (React + TypeScript + Tauri + Rust) with clipboard and notes domains.
@@ -12,13 +17,20 @@ Keep edits minimal, verify changes, and avoid unnecessary token usage.
 
 Use live code first, then docs for context.
 
-- `orange-copy-paste-clipboard-app-rust/README.md`
-- `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md`
 - `orange-copy-paste-clipboard-app-rust/src-tauri/src/**`
 - `orange-copy-paste-clipboard-app-rust/src/components/**`
+- `orange-copy-paste-clipboard-app-rust/README.md`
+- `docs/**/*.md` (workspace-level architecture/planning notes; semi-active, verify against code)
+- `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md`
 - `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` (high-value regression history)
 
 Docs may be stale. Confirm behavior from current code before making assumptions.
+
+## Root Docs Directory Policy
+
+- Root `docs/` is a shared project context area and may be updated periodically.
+- Treat `docs/` content as planning/context guidance, not executable truth.
+- If root docs conflict with implementation, trust current code and report the mismatch (don't update/read unless asked and/or necessary).
 
 ## App Submodule: Key Commands
 
@@ -92,6 +104,7 @@ Pick the smallest valid check set for the files changed.
 - Read only files tied to the task; avoid broad recursive reads.
 - For large files, inspect targeted sections first, expand only when necessary.
 - Prefer concise in-place diffs over wide refactors.
+- Read root `docs/` selectively (only files relevant to the task at hand).
 - Do not repeat architecture details already known from local docs/code.
 - Summarize findings with actionable points only.
 - For unrelated tasks, start a fresh session/context.
