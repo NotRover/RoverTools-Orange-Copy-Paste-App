@@ -1157,7 +1157,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
       setIsResizingSplit(false);
     };
 
-    document.body.style.cursor = "col-resize";
+    document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -1540,19 +1540,19 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
         {editingNote && (
           <>
-            <button
-              type="button"
-              className="ns-splitter"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                setIsResizingSplit(true);
-              }}
-              aria-label="Resize notes list and editor"
-              data-tooltip="Drag to resize"
-              data-tooltip-pos="left"
-            >
-              <span className="ns-splitter-handle" />
-            </button>
+            <div className="ns-splitter" aria-hidden="true">
+              <button
+                type="button"
+                className="ns-splitter-handle"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setIsResizingSplit(true);
+                }}
+                aria-label="Resize notes list and editor"
+                data-tooltip="Drag to resize"
+                data-tooltip-pos="left"
+              />
+            </div>
 
             <div className="ns-editor-dock">
               <NoteEditor
