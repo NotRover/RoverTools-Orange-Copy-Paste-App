@@ -5,8 +5,17 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../types";
-import { groupColor, timeAgo, truncateText } from "../../../types";
+import {
+  classifyFileEntry,
+  filePaths,
+  groupColor,
+  isImageFile,
+  resolveImageSrc,
+  timeAgo,
+  truncateText,
+} from "../../../types";
 import type { SortMode } from "../sort-options";
 import Topbar, {
   SortDropdown,
@@ -45,6 +54,11 @@ import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
 
+const NOTES_SPLIT_STORAGE_KEY = "ns-notes-list-width";
+const NOTES_SPLIT_DEFAULT = 40;
+const NOTES_SPLIT_MIN = 40;
+const NOTES_SPLIT_MAX = 68;
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function stripHtml(html: string): string {
@@ -81,6 +95,10 @@ function sanitizeNotePreviewHtml(html: string): string {
   });
 
   return template.innerHTML;
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 // ── Formatting state (active toolbar buttons) ───────────────────────
@@ -143,6 +161,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [embedSearch, setEmbedSearch] = useState("");
   const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
   const embedPickerRef = useRef<HTMLDivElement>(null);
+  void onCopyEntry;
 
   // ── Format state tracking via selectionchange ──
   useEffect(() => {
@@ -157,33 +176,107 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     editorRef.current
       .querySelectorAll("[data-clip-embed]:not([data-rendered])")
       .forEach((el) => {
-        const embedId = el.getAttribute("data-clip-embed")!;
-        el.setAttribute("data-rendered", "1");
+        const embedId = el.getAttribute("data-clip-embed") ?? "";
+        const host = el as HTMLElement;
+        host.setAttribute("data-rendered", "1");
         const entry = entries.find((e) => e.id === embedId);
-        // Show minimal reference: just a label or ID
-        const label = entry
-          ? entry.type === "image"
-            ? (entry.label ?? "Image")
-            : entry.type === "file"
-              ? (entry.label ?? "File")
-              : truncateText(
-                  entry.type === "html"
-                    ? stripHtml(entry.content)
-                    : entry.content,
-                  40, // Reduced length for minimal reference
-                ) || "(Text)"
-          : `#${embedId}`;
-        el.className = "clip-embed";
-        // Use inline SVG icon instead of emoji
-        const iconSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style="flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/><path d="M13 8h4"/><path d="M13 12h4"/><path d="M13 16h2"/></svg>`;
-        el.innerHTML = `<span style="flex-shrink:0;display:inline-flex;align-items:center;color:var(--accent)">${iconSvg}</span><span class="${entry ? "clip-embed-text" : "clip-embed-missing"}">${label}</span>`;
-        if (entry && onCopyEntry) {
-          (el as HTMLElement).onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onCopyEntry(entry.id);
-          };
+        host.className = entry
+          ? "clip-embed"
+          : "clip-embed clip-embed--missing";
+        host.onclick = null;
+        host.replaceChildren();
+
+        const header = document.createElement("div");
+        header.className = "clip-embed-header";
+
+        const title = document.createElement("span");
+        title.className = "clip-embed-title";
+
+        const kind = document.createElement("span");
+        kind.className = "clip-embed-kind";
+
+        const ts = document.createElement("span");
+        ts.className = "clip-embed-time";
+
+        const body = document.createElement("div");
+        body.className = "clip-embed-body";
+
+        if (!entry) {
+          title.textContent = "Missing clipboard reference";
+          kind.textContent = "missing";
+          ts.textContent = "";
+          body.textContent = `Reference #${embedId} no longer exists in history.`;
+          body.classList.add("clip-embed-fallback");
+        } else {
+          const paths = entry.type === "file" ? filePaths(entry.content) : [];
+          const fileKind =
+            entry.type === "file" ? classifyFileEntry(entry.content) : "file";
+
+          title.textContent =
+            entry.label?.trim() ||
+            (entry.type === "image"
+              ? "Embedded image"
+              : entry.type === "file"
+                ? "Embedded file"
+                : "Embedded clip");
+
+          if (entry.type === "file" && fileKind === "image") {
+            kind.textContent = "image set";
+          } else {
+            kind.textContent = entry.type;
+          }
+          ts.textContent = timeAgo(entry.timestamp);
+
+          if (entry.type === "image") {
+            const img = document.createElement("img");
+            img.className = "clip-embed-image";
+            img.alt = title.textContent;
+            img.src = resolveImageSrc(entry.content, convertFileSrc);
+            img.addEventListener(
+              "error",
+              () => {
+                img.remove();
+                body.textContent = "Image preview unavailable.";
+                body.classList.add("clip-embed-fallback");
+              },
+              { once: true },
+            );
+            body.appendChild(img);
+          } else if (entry.type === "file") {
+            const firstImagePath = paths.find((p) => isImageFile(p));
+            if (fileKind === "image" && firstImagePath) {
+              const img = document.createElement("img");
+              img.className = "clip-embed-image";
+              img.alt = fileName(firstImagePath);
+              img.src = convertFileSrc(firstImagePath);
+              img.addEventListener(
+                "error",
+                () => {
+                  img.remove();
+                  body.textContent = "Image preview unavailable.";
+                  body.classList.add("clip-embed-fallback");
+                },
+                { once: true },
+              );
+              body.appendChild(img);
+            } else {
+              const firstPath = paths[0] ?? "";
+              body.textContent = firstPath
+                ? `${fileName(firstPath)}${paths.length > 1 ? ` (+${paths.length - 1} more)` : ""}`
+                : "File reference";
+              body.classList.add("clip-embed-path");
+            }
+          } else {
+            const source =
+              entry.type === "html" ? stripHtml(entry.content) : entry.content;
+            body.textContent =
+              truncateText(source.replace(/\s+/g, " ").trim(), 220) ||
+              "(Empty clip)";
+          }
         }
+
+        header.append(title, kind, ts);
+        host.append(header, body);
       });
   });
 
@@ -306,7 +399,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       document.execCommand(
         "insertHTML",
         false,
-        `<span data-clip-embed="${id}" contenteditable="false">[clip:${id}]</span>&nbsp;`,
+        `<div data-clip-embed="${id}" contenteditable="false">[clip:${id}]</div><p><br></p>`,
       );
       scheduleSave();
       setShowEmbedPicker(false);
@@ -363,22 +456,17 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, [availableGroups, embedSearch]);
 
   return (
-    <div
-      className="ns-editor-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onBack();
-      }}
-    >
+    <div className="ns-editor-shell">
       <div className="ns-editor">
         {/* Header */}
         <div className="ns-editor-header">
           <button
             className="ns-back-btn"
             onClick={onBack}
-            data-tooltip="Back to notes"
+            data-tooltip="Close editor"
             data-tooltip-pos="right"
           >
-            <ChevronRightIcon size={12} className="ns-back-chevron" />
+            <CloseIcon size={12} />
           </button>
           <input
             ref={titleRef}
@@ -923,6 +1011,13 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     pinned: false,
     notes: false,
   });
+  const [notesListWidthPct, setNotesListWidthPct] = useState<number>(() => {
+    const raw = Number(localStorage.getItem(NOTES_SPLIT_STORAGE_KEY));
+    if (!Number.isFinite(raw)) return NOTES_SPLIT_DEFAULT;
+    return Math.min(NOTES_SPLIT_MAX, Math.max(NOTES_SPLIT_MIN, raw));
+  });
+  const [isResizingSplit, setIsResizingSplit] = useState(false);
+  const mainRef = useRef<HTMLDivElement>(null);
 
   // Close filter dropdown on outside click
   useEffect(() => {
@@ -977,6 +1072,40 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   useEffect(() => {
     if (editingId && !notes.some((n) => n.id === editingId)) setEditingId(null);
   }, [notes, editingId]);
+
+  useEffect(() => {
+    localStorage.setItem(NOTES_SPLIT_STORAGE_KEY, notesListWidthPct.toFixed(2));
+  }, [notesListWidthPct]);
+
+  useEffect(() => {
+    if (!isResizingSplit) return;
+
+    const onMove = (e: MouseEvent) => {
+      const container = mainRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.min(NOTES_SPLIT_MAX, Math.max(NOTES_SPLIT_MIN, pct));
+      setNotesListWidthPct(clamped);
+    };
+
+    const onUp = () => {
+      setIsResizingSplit(false);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizingSplit]);
 
   const handleCreate = useCallback(async () => {
     const note = await onCreate();
@@ -1055,7 +1184,9 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   })();
 
   return (
-    <div className="notes-screen-root">
+    <div
+      className={`notes-screen-root${editingNote ? " notes-screen-root--editing" : ""}`}
+    >
       <Topbar
         searchQuery={search}
         onSearchChange={setSearch}
@@ -1167,182 +1298,217 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
         }
       />
 
-      {/* ── Masonry grid ── */}
-      <div className={`ns-viewport${fading ? " ns-viewport--fading" : ""}`}>
-        {notes.length === 0 ? (
-          <div className="ns-empty">
-            <NotesIcon size={36} className="ns-empty-icon" />
-            <h3 className="ns-empty-title">No notes yet</h3>
-            <p className="ns-empty-subtitle">
-              Click the compose button to create your first note.
-            </p>
-          </div>
-        ) : sortedNotes.length === 0 ? (
-          <div className="cs-no-results">
-            <SearchXIcon size={44} className="cs-no-results-icon" />
-            <p className="cs-no-results-title">No matching notes</p>
-            <p className="cs-no-results-subtitle">
-              {search.trim() ? (
-                <>
-                  Nothing matches &ldquo;{search.trim()}&rdquo;
-                  {nf.activeFilterCount > 0 ? " with the current filters" : ""}.
-                </>
-              ) : (
-                <>No notes match the current filters.</>
-              )}
-            </p>
-          </div>
-        ) : (
-          <div
-            className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}
-          >
-            {sortedNotes.map((n, idx) => (
-              <React.Fragment key={n.id}>
-                {showSections && idx === 0 && (
-                  <button
-                    type="button"
-                    className="ns-section-label"
-                    onClick={() =>
-                      setCollapsedSections((prev) => ({
-                        ...prev,
-                        pinned: !prev.pinned,
-                      }))
-                    }
-                    aria-expanded={!collapsedSections.pinned}
-                  >
-                    <PinIcon size={9} />
-                    Pinned
-                    <ChevronRightIcon
-                      size={10}
-                      className={`ns-section-chevron${collapsedSections.pinned ? "" : " ns-section-chevron--open"}`}
-                    />
-                  </button>
+      <div
+        ref={mainRef}
+        className={`ns-main${editingNote ? " ns-main--editing" : ""}${isResizingSplit ? " ns-main--resizing" : ""}`}
+      >
+        {/* ── Masonry grid ── */}
+        <div
+          className={`ns-viewport${fading ? " ns-viewport--fading" : ""}`}
+          style={
+            editingNote
+              ? {
+                  flex: "0 0 auto",
+                  width: `${notesListWidthPct}%`,
+                }
+              : undefined
+          }
+        >
+          {notes.length === 0 ? (
+            <div className="ns-empty">
+              <NotesIcon size={36} className="ns-empty-icon" />
+              <h3 className="ns-empty-title">No notes yet</h3>
+              <p className="ns-empty-subtitle">
+                Click the compose button to create your first note.
+              </p>
+            </div>
+          ) : sortedNotes.length === 0 ? (
+            <div className="cs-no-results">
+              <SearchXIcon size={44} className="cs-no-results-icon" />
+              <p className="cs-no-results-title">No matching notes</p>
+              <p className="cs-no-results-subtitle">
+                {search.trim() ? (
+                  <>
+                    Nothing matches &ldquo;{search.trim()}&rdquo;
+                    {nf.activeFilterCount > 0
+                      ? " with the current filters"
+                      : ""}
+                    .
+                  </>
+                ) : (
+                  <>No notes match the current filters.</>
                 )}
-                {showSections && idx === pinnedCount && (
-                  <button
-                    type="button"
-                    className="ns-section-label"
-                    onClick={() =>
-                      setCollapsedSections((prev) => ({
-                        ...prev,
-                        notes: !prev.notes,
-                      }))
-                    }
-                    aria-expanded={!collapsedSections.notes}
-                  >
-                    <NotesIcon size={10} />
-                    Notes
-                    <ChevronRightIcon
-                      size={10}
-                      className={`ns-section-chevron${collapsedSections.notes ? "" : " ns-section-chevron--open"}`}
-                    />
-                  </button>
-                )}
-                {(!showSections ||
-                  (n.pinned && !collapsedSections.pinned) ||
-                  (!n.pinned && !collapsedSections.notes)) && (
-                  <div
-                    className={[
-                      "ns-card",
-                      multiSelect.isSelecting && "ns-card--selectable",
-                      multiSelect.selectedIds.has(n.id) && "ns-card--selected",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={(e) => {
-                      if (multiSelect.isSelecting) {
-                        if (e.shiftKey) {
-                          multiSelect.selectRange(n.id, allVisibleIds);
-                        } else {
-                          multiSelect.toggleSelect(n.id);
-                        }
-                        return;
-                      }
-                      setEditingId(n.id);
-                    }}
-                  >
-                    {multiSelect.isSelecting && (
-                      <span className="ns-card-checkbox">
-                        <CheckIcon size={10} strokeWidth={3} />
-                      </span>
-                    )}
-                    <div className="ns-card-body">
-                      <div
-                        className={`ns-card-title${!n.title ? " ns-card-title--untitled" : ""}`}
-                      >
-                        {n.title || "Untitled Note"}
-                      </div>
-                      {n.content && layout === "list" && (
-                        <div className="ns-card-preview">
-                          {truncateText(stripHtml(n.content), 200)}
-                        </div>
-                      )}
-                      {n.content && layout !== "list" && (
-                        <div
-                          className="ns-card-preview ns-card-preview--rich"
-                          dangerouslySetInnerHTML={{
-                            __html: sanitizeNotePreviewHtml(n.content),
-                          }}
-                        />
-                      )}
-                      <div className="ns-card-footer">
-                        <div className="ns-card-chips">
-                          {n.groups.map((g) => {
-                            const c = groupColor(g);
-                            return (
-                              <span
-                                key={g}
-                                className="ns-chip"
-                                style={{ background: c.bg, color: c.fg }}
-                              >
-                                <span className="ns-chip-dot" />
-                                <span className="ns-chip-label">{g}</span>
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <span
-                          className={`ns-card-time${n.pinned ? " ns-card-time--pinned" : ""}`}
-                        >
-                          {n.pinned && <PinIcon size={8} />}
-                          {timeAgo(n.updated_at)}
-                        </span>
-                      </div>
-                    </div>
+              </p>
+            </div>
+          ) : (
+            <div
+              className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}
+            >
+              {sortedNotes.map((n, idx) => (
+                <React.Fragment key={n.id}>
+                  {showSections && idx === 0 && (
                     <button
-                      className="ns-card-delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(n.id);
-                      }}
-                      data-tooltip="Delete"
-                      data-tooltip-pos="left"
+                      type="button"
+                      className="ns-section-label"
+                      onClick={() =>
+                        setCollapsedSections((prev) => ({
+                          ...prev,
+                          pinned: !prev.pinned,
+                        }))
+                      }
+                      aria-expanded={!collapsedSections.pinned}
                     >
-                      <TrashIcon size={10} />
+                      <PinIcon size={9} />
+                      Pinned
+                      <ChevronRightIcon
+                        size={10}
+                        className={`ns-section-chevron${collapsedSections.pinned ? "" : " ns-section-chevron--open"}`}
+                      />
                     </button>
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+                  )}
+                  {showSections && idx === pinnedCount && (
+                    <button
+                      type="button"
+                      className="ns-section-label"
+                      onClick={() =>
+                        setCollapsedSections((prev) => ({
+                          ...prev,
+                          notes: !prev.notes,
+                        }))
+                      }
+                      aria-expanded={!collapsedSections.notes}
+                    >
+                      <NotesIcon size={10} />
+                      Notes
+                      <ChevronRightIcon
+                        size={10}
+                        className={`ns-section-chevron${collapsedSections.notes ? "" : " ns-section-chevron--open"}`}
+                      />
+                    </button>
+                  )}
+                  {(!showSections ||
+                    (n.pinned && !collapsedSections.pinned) ||
+                    (!n.pinned && !collapsedSections.notes)) && (
+                    <div
+                      className={[
+                        "ns-card",
+                        multiSelect.isSelecting && "ns-card--selectable",
+                        multiSelect.selectedIds.has(n.id) &&
+                          "ns-card--selected",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      onClick={(e) => {
+                        if (multiSelect.isSelecting) {
+                          if (e.shiftKey) {
+                            multiSelect.selectRange(n.id, allVisibleIds);
+                          } else {
+                            multiSelect.toggleSelect(n.id);
+                          }
+                          return;
+                        }
+                        setEditingId(n.id);
+                      }}
+                    >
+                      {multiSelect.isSelecting && (
+                        <span className="ns-card-checkbox">
+                          <CheckIcon size={10} strokeWidth={3} />
+                        </span>
+                      )}
+                      <div className="ns-card-body">
+                        <div
+                          className={`ns-card-title${!n.title ? " ns-card-title--untitled" : ""}`}
+                        >
+                          {n.title || "Untitled Note"}
+                        </div>
+                        {n.content && layout === "list" && (
+                          <div className="ns-card-preview">
+                            {truncateText(stripHtml(n.content), 200)}
+                          </div>
+                        )}
+                        {n.content && layout !== "list" && (
+                          <div
+                            className="ns-card-preview ns-card-preview--rich"
+                            dangerouslySetInnerHTML={{
+                              __html: sanitizeNotePreviewHtml(n.content),
+                            }}
+                          />
+                        )}
+                        <div className="ns-card-footer">
+                          <div className="ns-card-chips">
+                            {n.groups.map((g) => {
+                              const c = groupColor(g);
+                              return (
+                                <span
+                                  key={g}
+                                  className="ns-chip"
+                                  style={{ background: c.bg, color: c.fg }}
+                                >
+                                  <span className="ns-chip-dot" />
+                                  <span className="ns-chip-label">{g}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <span
+                            className={`ns-card-time${n.pinned ? " ns-card-time--pinned" : ""}`}
+                          >
+                            {n.pinned && <PinIcon size={8} />}
+                            {timeAgo(n.updated_at)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        className="ns-card-delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(n.id);
+                        }}
+                        data-tooltip="Delete"
+                        data-tooltip-pos="left"
+                      >
+                        <TrashIcon size={10} />
+                      </button>
+                    </div>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {editingNote && (
+          <>
+            <button
+              type="button"
+              className="ns-splitter"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setIsResizingSplit(true);
+              }}
+              aria-label="Resize notes list and editor"
+              title="Drag to resize"
+            >
+              <span className="ns-splitter-handle" />
+            </button>
+
+            <div className="ns-editor-dock">
+              <NoteEditor
+                key={editingNote.id}
+                note={editingNote}
+                entries={entries}
+                availableGroups={availableGroups}
+                onUpdate={onUpdate}
+                onDelete={handleDelete}
+                onPin={onPin}
+                onSetGroups={onSetGroups}
+                onCopyEntry={onCopyEntry}
+                onBack={() => setEditingId(null)}
+              />
+            </div>
+          </>
         )}
       </div>
-
-      {/* ── Editor overlay ── */}
-      {editingNote && (
-        <NoteEditor
-          key={editingNote.id}
-          note={editingNote}
-          entries={entries}
-          availableGroups={availableGroups}
-          onUpdate={onUpdate}
-          onDelete={handleDelete}
-          onPin={onPin}
-          onSetGroups={onSetGroups}
-          onCopyEntry={onCopyEntry}
-          onBack={() => setEditingId(null)}
-        />
-      )}
     </div>
   );
 };
