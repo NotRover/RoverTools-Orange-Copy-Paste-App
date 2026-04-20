@@ -27,10 +27,39 @@ const TEXT_PREVIEW_LENGTH = 160;
 // Allow-list based HTML sanitiser for safe rendering of rich-text clipboard
 // content.  Strips all tags/attributes except a safe subset.
 const ALLOWED_TAGS = new Set([
-  "p", "br", "b", "i", "u", "em", "strong", "s", "sub", "sup",
-  "span", "div", "a", "img", "ul", "ol", "li", "blockquote",
-  "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody",
-  "tr", "th", "td", "pre", "code", "hr",
+  "p",
+  "br",
+  "b",
+  "i",
+  "u",
+  "em",
+  "strong",
+  "s",
+  "sub",
+  "sup",
+  "span",
+  "div",
+  "a",
+  "img",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "pre",
+  "code",
+  "hr",
 ]);
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(["href"]),
@@ -43,9 +72,18 @@ const ALLOWED_ATTRS: Record<string, Set<string>> = {
 };
 // Only allow safe CSS properties in inline styles
 const SAFE_STYLE_PROPS = new Set([
-  "color", "background-color", "background", "font-weight",
-  "font-style", "font-size", "text-decoration", "text-align",
-  "margin", "padding", "border", "display",
+  "color",
+  "background-color",
+  "background",
+  "font-weight",
+  "font-style",
+  "font-size",
+  "text-decoration",
+  "text-align",
+  "margin",
+  "padding",
+  "border",
+  "display",
 ]);
 
 function sanitizeStyle(style: string): string {
@@ -127,13 +165,20 @@ function sanitizeHtml(html: string): string {
         if (!allowedSet.has(name)) continue;
         let value = attr.value;
         // Prevent javascript: URIs
-        if ((name === "href" || name === "src") && /^\s*javascript:/i.test(value)) continue;
+        if (
+          (name === "href" || name === "src") &&
+          /^\s*javascript:/i.test(value)
+        )
+          continue;
         // img src: normalize local file paths and keep only renderable schemes
         if (tag === "img" && name === "src") {
           const normalized = normalizeImageSrc(value);
           if (!normalized) continue;
           value = normalized;
-        } else if (name === "src" && !/^(https?:|data:|blob:|asset:)/i.test(value)) {
+        } else if (
+          name === "src" &&
+          !/^(https?:|data:|blob:|asset:)/i.test(value)
+        ) {
           continue;
         }
         if (name === "style") value = sanitizeStyle(value);
@@ -155,7 +200,6 @@ function sanitizeHtml(html: string): string {
   }
   return result;
 }
-
 
 interface EntryCardProps {
   entry: ClipboardEntry;
@@ -262,10 +306,14 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       return;
     }
     let active = true;
-    invoke<string[]>("check_missing_files", { paths: files }).then((missing) => {
-      if (active) setMissingFiles(new Set(missing));
-    }).catch(() => {});
-    return () => { active = false; };
+    invoke<string[]>("check_missing_files", { paths: files })
+      .then((missing) => {
+        if (active) setMissingFiles(new Set(missing));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [entry.type, entry.content]);
 
   useEffect(() => {
@@ -286,7 +334,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   // Detect if HTML preview overflows its collapsed max-height
   useEffect(() => {
     const el = htmlPreviewRef.current;
-    if (!el || entry.type !== "html") { setHtmlOverflows(false); return; }
+    if (!el || entry.type !== "html") {
+      setHtmlOverflows(false);
+      return;
+    }
     // Only measure overflow in collapsed state — when expanded,
     // scrollHeight === clientHeight so we'd lose the overflow flag.
     if (contentExpanded) return;
@@ -359,14 +410,21 @@ export const EntryCard: React.FC<EntryCardProps> = ({
 
   const visibleImageThumbs = imageFiles.slice(0, 3);
 
-  const isTextExpandable = (entry.type === "text" || entry.type === "html") &&
-    (entry.type === "text" ? entry.content.length > TEXT_PREVIEW_LENGTH : htmlOverflows);
+  const isTextExpandable =
+    (entry.type === "text" || entry.type === "html") &&
+    (entry.type === "text"
+      ? entry.content.length > TEXT_PREVIEW_LENGTH
+      : htmlOverflows);
   const isMediaExpandable =
     entry.type === "image" ||
-    (entry.type === "file" && !isMulti && firstFile != null &&
-      (isImageFile(firstFile) || isVideoFile(firstFile)) && !missingFiles.has(firstFile));
+    (entry.type === "file" &&
+      !isMulti &&
+      firstFile != null &&
+      (isImageFile(firstFile) || isVideoFile(firstFile)) &&
+      !missingFiles.has(firstFile));
   const isMultiFileExpandable = entry.type === "file" && isMulti;
-  const isExpandable = isTextExpandable || isMediaExpandable || isMultiFileExpandable;
+  const isExpandable =
+    isTextExpandable || isMediaExpandable || isMultiFileExpandable;
 
   const displayKind = deriveDisplayKind(entry);
   const cardClasses = [
@@ -376,7 +434,9 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     isSelecting && "entry-card--selectable",
     isSelected && "entry-card--selected",
     isInClipboard && "entry-card--in-clipboard",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
@@ -409,30 +469,38 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         </div>
       )}
       {/* Multi-image file strip */}
-      {entry.type === "file" && isMulti && imageFiles.filter((f) => !missingFiles.has(f)).length > 0 && (
-        <div className="card-media card-media--multi">
-          {visibleImageThumbs.filter((f) => !missingFiles.has(f)).map((f, i, arr) => {
-            const nonMissingRemaining = imageFiles.filter((ff) => !missingFiles.has(ff)).length - arr.length;
-            const isLast = i === arr.length - 1 && nonMissingRemaining > 0;
-            return (
-              <div key={f} className="card-media-thumb">
-                {imagePreviews[f] ? (
-                  <img
-                    src={imagePreviews[f]!}
-                    alt=""
-                    className="card-thumb-img"
-                  />
-                ) : (
-                  <div className="card-thumb-placeholder" />
-                )}
-                {isLast && (
-                  <div className="card-thumb-more">+{nonMissingRemaining}</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {entry.type === "file" &&
+        isMulti &&
+        imageFiles.filter((f) => !missingFiles.has(f)).length > 0 && (
+          <div className="card-media card-media--multi">
+            {visibleImageThumbs
+              .filter((f) => !missingFiles.has(f))
+              .map((f, i, arr) => {
+                const nonMissingRemaining =
+                  imageFiles.filter((ff) => !missingFiles.has(ff)).length -
+                  arr.length;
+                const isLast = i === arr.length - 1 && nonMissingRemaining > 0;
+                return (
+                  <div key={f} className="card-media-thumb">
+                    {imagePreviews[f] ? (
+                      <img
+                        src={imagePreviews[f]!}
+                        alt=""
+                        className="card-thumb-img"
+                      />
+                    ) : (
+                      <div className="card-thumb-placeholder" />
+                    )}
+                    {isLast && (
+                      <div className="card-thumb-more">
+                        +{nonMissingRemaining}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       {/* Single image file */}
       {entry.type === "file" &&
         !isMulti &&
@@ -461,27 +529,47 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       {/*  Card body  */}
       <div className="card-body">
         {entry.type === "image" && (
-          <p className="card-text card-text--image-name">{imageDisplayName(entry)}</p>
+          <p className="card-text card-text--image-name">
+            {imageDisplayName(entry)}
+          </p>
         )}
         {entry.type === "text" && (
           <p className="card-text">
-            {contentExpanded ? entry.content : truncateText(entry.content, TEXT_PREVIEW_LENGTH)}
+            {contentExpanded
+              ? entry.content
+              : truncateText(entry.content, TEXT_PREVIEW_LENGTH)}
           </p>
         )}
         {entry.type === "html" && (
           <div
             ref={htmlPreviewRef}
             className={`card-html-preview${contentExpanded ? " card-html-preview--expanded" : ""}${!contentExpanded && htmlOverflows ? " card-html-preview--faded" : ""}`}
-            dangerouslySetInnerHTML={{ __html: sanitizeHtml(htmlFragment(entry.content)) }}
+            dangerouslySetInnerHTML={{
+              __html: sanitizeHtml(htmlFragment(entry.content)),
+            }}
           />
         )}
         {entry.type === "file" && !isMulti && (
-          <p className={`card-text card-text--file${firstFile && missingFiles.has(firstFile) ? " card-text--missing" : ""}`}>
-            <span {...(firstFile && missingFiles.has(firstFile) ? { "data-tooltip": "File no longer exists on disk", "data-tooltip-pos": "above" } : {})}>
+          <p
+            className={`card-text card-text--file${firstFile && missingFiles.has(firstFile) ? " card-text--missing" : ""}`}
+          >
+            <span
+              {...(firstFile && missingFiles.has(firstFile)
+                ? {
+                    "data-tooltip": "File no longer exists on disk",
+                    "data-tooltip-pos": "above",
+                  }
+                : {})}
+            >
               {firstFile ? fileNameFromPath(firstFile) : "[File]"}
             </span>
             {firstFile && missingFiles.has(firstFile) && (
-              <span className="card-missing-hint" data-tooltip="File no longer exists on disk">missing</span>
+              <span
+                className="card-missing-hint"
+                data-tooltip="File no longer exists on disk"
+              >
+                missing
+              </span>
             )}
           </p>
         )}
@@ -491,15 +579,29 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               const name = fileNameFromPath(f);
               const isImg = isImageFile(f);
               return (
-                <span key={f} className={`card-file-preview-item${missingFiles.has(f) ? " card-file-preview-item--missing" : ""}`}>
+                <span
+                  key={f}
+                  className={`card-file-preview-item${missingFiles.has(f) ? " card-file-preview-item--missing" : ""}`}
+                >
                   {isImg ? ImageIcon : FileIcon}
                   <span
                     className="card-file-preview-name"
-                    {...(missingFiles.has(f) ? { "data-tooltip": "File no longer exists on disk", "data-tooltip-pos": "above" } : {})}>
+                    {...(missingFiles.has(f)
+                      ? {
+                          "data-tooltip": "File no longer exists on disk",
+                          "data-tooltip-pos": "above",
+                        }
+                      : {})}
+                  >
                     {name}
                   </span>
                   {missingFiles.has(f) && (
-                    <span className="card-missing-hint" data-tooltip="File missing">missing</span>
+                    <span
+                      className="card-missing-hint"
+                      data-tooltip="File missing"
+                    >
+                      missing
+                    </span>
                   )}
                 </span>
               );
@@ -522,7 +624,10 @@ export const EntryCard: React.FC<EntryCardProps> = ({
               const isMissing = missingFiles.has(f);
               const preview = imagePreviews[f];
               return (
-                <div key={f} className={`card-file-list-item${isMissing ? " card-file-list-item--missing" : ""}`}>
+                <div
+                  key={f}
+                  className={`card-file-list-item${isMissing ? " card-file-list-item--missing" : ""}`}
+                >
                   {isImg && !isMissing && (
                     <div className="card-file-thumb">
                       {preview ? (
@@ -538,11 +643,22 @@ export const EntryCard: React.FC<EntryCardProps> = ({
                   )}
                   <span
                     className="card-file-name"
-                    {...(missingFiles.has(f) ? { "data-tooltip": "File no longer exists on disk", "data-tooltip-pos": "above" } : {})}>
+                    {...(missingFiles.has(f)
+                      ? {
+                          "data-tooltip": "File no longer exists on disk",
+                          "data-tooltip-pos": "above",
+                        }
+                      : {})}
+                  >
                     {name}
                   </span>
                   {missingFiles.has(f) && (
-                    <span className="card-missing-hint" data-tooltip="File missing">missing</span>
+                    <span
+                      className="card-missing-hint"
+                      data-tooltip="File missing"
+                    >
+                      missing
+                    </span>
                   )}
                 </div>
               );
@@ -602,7 +718,11 @@ export const EntryCard: React.FC<EntryCardProps> = ({
         }}
         isExpandable={isExpandable}
         isExpanded={isMultiFileExpandable ? showFileList : contentExpanded}
-        onToggleExpand={() => isMultiFileExpandable ? setShowFileList((v) => !v) : setContentExpanded((v) => !v)}
+        onToggleExpand={() =>
+          isMultiFileExpandable
+            ? setShowFileList((v) => !v)
+            : setContentExpanded((v) => !v)
+        }
       />
     </div>
   );
