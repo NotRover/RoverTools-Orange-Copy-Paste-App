@@ -51,6 +51,7 @@ import {
 import { PinIcon as PinIconElement } from "../../entry-types/EntryTypePill";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
+import CardMenu from "../card-menu/CardMenu";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
 
@@ -89,9 +90,30 @@ function hasMeaningfulContent(contentHtml: string): boolean {
   return plainNoteText(contentHtml).length > 0;
 }
 
+function isNoteExpandable(note: Note): boolean {
+  return plainNoteText(note.content).length > 180;
+}
+
 function sanitizeNotePreviewHtml(html: string): string {
   const template = document.createElement("template");
   template.innerHTML = html;
+
+  // Keep card previews compact by rendering note embeds as small chips.
+  template.content.querySelectorAll("[data-clip-embed]").forEach((el) => {
+    const embedId = el.getAttribute("data-clip-embed") ?? "";
+    const chip = document.createElement("span");
+    chip.className = "ns-preview-embed-chip";
+    chip.textContent = embedId ? `Clip #${embedId}` : "Clip reference";
+    el.replaceWith(chip);
+  });
+
+  template.content.querySelectorAll("[data-group-ref]").forEach((el) => {
+    const group = el.getAttribute("data-group-ref") ?? "Group";
+    const chip = document.createElement("span");
+    chip.className = "ns-preview-group-chip";
+    chip.textContent = `#${group}`;
+    el.replaceWith(chip);
+  });
 
   template.content
     .querySelectorAll("script, style, iframe, object, embed, link, meta")
@@ -1074,6 +1096,14 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     pinned: false,
     notes: false,
   });
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [menuState, setMenuState] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [notesListWidthPct, setNotesListWidthPct] = useState<number>(() => {
     const raw = Number(localStorage.getItem(NOTES_SPLIT_STORAGE_KEY));
     if (!Number.isFinite(raw)) return NOTES_SPLIT_DEFAULT;
@@ -1131,10 +1161,19 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const editingNote = editingId
     ? (notes.find((n) => n.id === editingId) ?? null)
     : null;
+  const menuNote = menuState
+    ? (notes.find((n) => n.id === menuState.id) ?? null)
+    : null;
 
   useEffect(() => {
     if (editingId && !notes.some((n) => n.id === editingId)) setEditingId(null);
   }, [notes, editingId]);
+
+  useEffect(() => {
+    if (menuState && !notes.some((n) => n.id === menuState.id)) {
+      setMenuState(null);
+    }
+  }, [notes, menuState]);
 
   useEffect(() => {
     localStorage.setItem(NOTES_SPLIT_STORAGE_KEY, notesListWidthPct.toFixed(2));
@@ -1178,6 +1217,12 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const handleDelete = useCallback(
     (id: string) => {
       onDelete(id);
+      setExpandedNoteIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       if (editingId === id) setEditingId(null);
     },
     [onDelete, editingId],
@@ -1461,6 +1506,12 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       ]
                         .filter(Boolean)
                         .join(" ")}
+                      onContextMenu={(e) => {
+                        if (multiSelect.isSelecting) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setMenuState({ id: n.id, x: e.clientX, y: e.clientY });
+                      }}
                       onClick={(e) => {
                         if (multiSelect.isSelecting) {
                           if (e.shiftKey) {
@@ -1482,14 +1533,16 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                         <div className="ns-card-title">
                           {deriveNoteTitle(n.title, n.content)}
                         </div>
-                        {n.content && layout === "list" && (
-                          <div className="ns-card-preview">
-                            {truncateText(stripHtml(n.content), 200)}
-                          </div>
-                        )}
-                        {n.content && layout !== "list" && (
+                        {n.content && (
                           <div
-                            className="ns-card-preview ns-card-preview--rich"
+                            className={[
+                              "ns-card-preview",
+                              "ns-card-preview--rich",
+                              expandedNoteIds.has(n.id) &&
+                                "ns-card-preview--expanded",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
                             dangerouslySetInnerHTML={{
                               __html: sanitizeNotePreviewHtml(n.content),
                             }}
@@ -1569,6 +1622,42 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
               />
             </div>
           </>
+        )}
+
+        {menuNote && menuState && (
+          <CardMenu
+            open={true}
+            anchorX={menuState.x}
+            anchorY={menuState.y}
+            onClose={() => setMenuState(null)}
+            isPinned={menuNote.pinned}
+            isSaved={false}
+            copied={false}
+            onCopy={() => {}}
+            onDelete={() => handleDelete(menuNote.id)}
+            onPin={(shouldPin) => onPin(menuNote.id, shouldPin)}
+            onToggleSave={() => {}}
+            availableGroups={availableGroups}
+            entryGroups={menuNote.groups}
+            onToggleGroup={(group) => {
+              const next = menuNote.groups.includes(group)
+                ? menuNote.groups.filter((g) => g !== group)
+                : [...menuNote.groups, group];
+              onSetGroups(menuNote.id, next);
+            }}
+            isExpandable={isNoteExpandable(menuNote)}
+            isExpanded={expandedNoteIds.has(menuNote.id)}
+            onToggleExpand={() => {
+              setExpandedNoteIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(menuNote.id)) next.delete(menuNote.id);
+                else next.add(menuNote.id);
+                return next;
+              });
+            }}
+            showCopy={false}
+            showSave={false}
+          />
         )}
       </div>
     </div>

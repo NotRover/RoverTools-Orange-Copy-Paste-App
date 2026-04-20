@@ -213,7 +213,15 @@
 }
 
 .ns-grid--list .ns-card-preview {
-  display: none;
+  display: block;
+  max-height: 3.8em;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, #000 0%, #000 82%, transparent 100%);
 }
 
 .ns-grid--list .ns-card-footer {
@@ -368,10 +376,43 @@
   font-size: 11px;
 }
 
+.ns-card-preview--expanded,
+.ns-grid--list .ns-card-preview--expanded {
+  max-height: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
 .ns-card-preview--rich th,
 .ns-card-preview--rich td {
   border: 1px solid var(--border);
   padding: 2px 4px;
+}
+
+.ns-card-preview--rich .ns-preview-embed-chip,
+.ns-card-preview--rich .ns-preview-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 4px 4px 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+.ns-card-preview--rich .ns-preview-embed-chip {
+  border: 1px solid color-mix(in srgb, var(--border-light) 88%, var(--accent));
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+  color: var(--text-secondary);
+}
+
+.ns-card-preview--rich .ns-preview-group-chip {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
 }
 
 /* Card footer (matches .card-footer) */

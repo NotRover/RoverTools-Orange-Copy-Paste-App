@@ -38,6 +38,10 @@ export interface CardMenuProps {
   isExpanded?: boolean;
   /** Toggle expand / collapse for this entry. */
   onToggleExpand?: () => void;
+  /** Show copy action (default true). */
+  showCopy?: boolean;
+  /** Show save action (default true). */
+  showSave?: boolean;
 }
 
 const CardMenu: React.FC<CardMenuProps> = ({
@@ -58,6 +62,8 @@ const CardMenu: React.FC<CardMenuProps> = ({
   isExpandable,
   isExpanded,
   onToggleExpand,
+  showCopy = true,
+  showSave = true,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const groupsRowRef = useRef<HTMLButtonElement>(null);
@@ -150,17 +156,15 @@ const CardMenu: React.FC<CardMenuProps> = ({
       style={{ position: "fixed", left: anchorX, top: anchorY }}
       onClick={(e) => e.stopPropagation()}
     >
-      <button
-        className={`card-menu-item card-menu-item--copy${copied ? " card-menu-item--success" : ""}`}
-        onClick={closeAfter(onCopy)}
-      >
-        {copied ? (
-          <CheckIcon size={13} />
-        ) : (
-          <CopyIcon />
-        )}
-        <span>{copied ? "Copied!" : "Copy"}</span>
-      </button>
+      {showCopy && (
+        <button
+          className={`card-menu-item card-menu-item--copy${copied ? " card-menu-item--success" : ""}`}
+          onClick={closeAfter(onCopy)}
+        >
+          {copied ? <CheckIcon size={13} /> : <CopyIcon />}
+          <span>{copied ? "Copied!" : "Copy"}</span>
+        </button>
+      )}
 
       <button
         className={`card-menu-item card-menu-item--pin${isPinned ? " card-menu-item--pinned" : ""}`}
@@ -170,13 +174,15 @@ const CardMenu: React.FC<CardMenuProps> = ({
         <span>{isPinned ? "Unpin" : "Pin"}</span>
       </button>
 
-      <button
-        className={`card-menu-item card-menu-item--save${isSaved ? " card-menu-item--saved" : ""}`}
-        onClick={closeAfter(onToggleSave)}
-      >
-        <SaveStarIcon size={13} filled={isSaved} />
-        <span>{isSaved ? "Unsave" : "Save"}</span>
-      </button>
+      {showSave && (
+        <button
+          className={`card-menu-item card-menu-item--save${isSaved ? " card-menu-item--saved" : ""}`}
+          onClick={closeAfter(onToggleSave)}
+        >
+          <SaveStarIcon size={13} filled={isSaved} />
+          <span>{isSaved ? "Unsave" : "Save"}</span>
+        </button>
+      )}
 
       {/* Groups submenu */}
       {hasGroups && (
