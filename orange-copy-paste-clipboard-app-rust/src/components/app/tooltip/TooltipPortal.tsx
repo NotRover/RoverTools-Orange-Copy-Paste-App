@@ -35,6 +35,14 @@ function resolvePos(r: DOMRect, preferred: TipPos): TipPos {
     // fall through to vertical logic
   }
 
+  if (preferred === "left") {
+    const spaceLeft = r.left;
+    const spaceRight = vw - r.right;
+    if (spaceLeft >= EST_W + GAP) return "left";
+    if (spaceRight >= EST_W + GAP) return "right";
+    // fall through to vertical logic
+  }
+
   const spaceAbove = r.top;
   const spaceBelow = vh - r.bottom;
 
@@ -172,14 +180,16 @@ export default function TooltipPortal() {
   return ReactDOM.createPortal(
     <div
       className="tooltip-bubble"
-      style={{
-        position: "fixed",
-        left: tip.x,
-        top: tip.y,
-        "--tt-transform": TRANSFORMS[tip.pos],
-        zIndex: 99999,
-        pointerEvents: "none",
-      } as React.CSSProperties}
+      style={
+        {
+          position: "fixed",
+          left: tip.x,
+          top: tip.y,
+          "--tt-transform": TRANSFORMS[tip.pos],
+          zIndex: 99999,
+          pointerEvents: "none",
+        } as React.CSSProperties
+      }
     >
       {tip.text}
     </div>,

@@ -58,6 +58,7 @@ const NOTES_SPLIT_STORAGE_KEY = "ns-notes-list-width";
 const NOTES_SPLIT_DEFAULT = 40;
 const NOTES_SPLIT_MIN = 40;
 const NOTES_SPLIT_MAX = 68;
+const DEFAULT_NOTE_TITLE = "New note";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -65,6 +66,27 @@ function stripHtml(html: string): string {
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
   return tmp.textContent ?? tmp.innerText ?? "";
+}
+
+function plainNoteText(html: string): string {
+  return stripHtml(html)
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function deriveNoteTitle(rawTitle: string, contentHtml: string): string {
+  const fromTitle = rawTitle.trim();
+  if (fromTitle) return fromTitle;
+
+  const fromContent = plainNoteText(contentHtml);
+  if (fromContent) return truncateText(fromContent, 54);
+
+  return DEFAULT_NOTE_TITLE;
+}
+
+function hasMeaningfulContent(contentHtml: string): boolean {
+  return plainNoteText(contentHtml).length > 0;
 }
 
 function sanitizeNotePreviewHtml(html: string): string {
@@ -162,6 +184,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
   const embedPickerRef = useRef<HTMLDivElement>(null);
   void onCopyEntry;
+
+  const initialTitle = useMemo(
+    () => deriveNoteTitle(note.title, note.content),
+    [note.title, note.content],
+  );
 
   // ── Format state tracking via selectionchange ──
   useEffect(() => {
@@ -318,6 +345,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       titleRef.current.focus();
   }, [note.id]);
 
+  // Ensure untitled notes are normalized as soon as the editor opens.
+  useEffect(() => {
+    if (!titleRef.current) return;
+    if (titleRef.current.value.trim()) return;
+    const nextTitle = deriveNoteTitle(note.title, note.content);
+    titleRef.current.value = nextTitle;
+    onUpdate(note.id, nextTitle, note.content);
+  }, [note.id, note.title, note.content, onUpdate]);
+
   // Close group dropdown on outside click.
   useEffect(() => {
     if (!showGroupDropdown) return;
@@ -351,11 +387,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       if (!editorRef.current) return;
-      onUpdate(
-        note.id,
+      const content = editorRef.current.innerHTML;
+      const normalizedTitle = deriveNoteTitle(
         titleRef.current?.value ?? "",
-        editorRef.current.innerHTML,
+        content,
       );
+      if (titleRef.current && titleRef.current.value !== normalizedTitle) {
+        titleRef.current.value = normalizedTitle;
+      }
+      onUpdate(note.id, normalizedTitle, content);
     }, 500);
   }, [note.id, onUpdate]);
 
@@ -373,15 +413,38 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
         if (editorRef.current && titleRef.current) {
-          onUpdate(
-            currentNoteIdRef.current,
+          const content = editorRef.current.innerHTML;
+          const normalizedTitle = deriveNoteTitle(
             titleRef.current.value,
-            editorRef.current.innerHTML,
+            content,
           );
+          onUpdate(currentNoteIdRef.current, normalizedTitle, content);
         }
       }
     };
   }, [note.id]);
+
+  const handleCloseEditor = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
+    const content = editorRef.current?.innerHTML ?? note.content;
+    if (!hasMeaningfulContent(content)) {
+      onDelete(note.id);
+      onBack();
+      return;
+    }
+
+    const normalizedTitle = deriveNoteTitle(
+      titleRef.current?.value ?? note.title,
+      content,
+    );
+    if (titleRef.current) titleRef.current.value = normalizedTitle;
+    onUpdate(note.id, normalizedTitle, content);
+    onBack();
+  }, [note.id, note.title, note.content, onDelete, onBack, onUpdate]);
 
   const execCmd = useCallback(
     (cmd: string, value?: string) => {
@@ -462,7 +525,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         <div className="ns-editor-header">
           <button
             className="ns-back-btn"
-            onClick={onBack}
+            onClick={handleCloseEditor}
             data-tooltip="Close editor"
             data-tooltip-pos="right"
           >
@@ -471,8 +534,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           <input
             ref={titleRef}
             className="ns-title-input"
-            placeholder="Untitled Note"
-            defaultValue={note.title}
+            placeholder="Note title"
+            defaultValue={initialTitle}
             key={note.id}
             onChange={scheduleSave}
           />
@@ -1416,10 +1479,8 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                         </span>
                       )}
                       <div className="ns-card-body">
-                        <div
-                          className={`ns-card-title${!n.title ? " ns-card-title--untitled" : ""}`}
-                        >
-                          {n.title || "Untitled Note"}
+                        <div className="ns-card-title">
+                          {deriveNoteTitle(n.title, n.content)}
                         </div>
                         {n.content && layout === "list" && (
                           <div className="ns-card-preview">
@@ -1487,7 +1548,8 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 setIsResizingSplit(true);
               }}
               aria-label="Resize notes list and editor"
-              title="Drag to resize"
+              data-tooltip="Drag to resize"
+              data-tooltip-pos="left"
             >
               <span className="ns-splitter-handle" />
             </button>
