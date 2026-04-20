@@ -26,8 +26,8 @@
 }
 
 .ns-splitter {
-  width: 10px;
-  min-width: 10px;
+  width: 16px;
+  min-width: 16px;
   border: none;
   background: transparent;
   padding: 0;
@@ -36,20 +36,35 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s ease;
+  transition: none;
 }
 
 .ns-splitter:hover,
 .ns-main--resizing .ns-splitter {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: transparent;
 }
 
 .ns-splitter-handle {
   width: 4px;
-  height: 40px;
+  height: 60px;
   border-radius: 999px;
   background: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition:
+    height 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease;
+}
+
+.ns-splitter:hover .ns-splitter-handle {
+  height: 70px;
+}
+
+.ns-splitter:active .ns-splitter-handle,
+.ns-main--resizing .ns-splitter-handle {
+  height: 75px;
+  transform: scaleX(1.08);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
 .ns-editor-dock {
@@ -289,19 +304,14 @@
 }
 
 .ns-card-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 13.5px;
+  font-weight: 750;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.3;
-}
-
-.ns-card-title--untitled {
-  color: var(--text-muted);
-  font-style: italic;
-  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
 }
 
 .ns-card-preview {
@@ -682,16 +692,28 @@
 /* Title input — bigger and bolder */
 .ns-title-input {
   flex: 1;
-  border: none;
-  background: transparent;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--surface) 90%, var(--bg));
+  border-radius: 10px;
   color: var(--text);
-  font-size: 22px;
+  font-size: 23px;
   font-weight: 800;
   font-family: inherit;
   outline: none;
   min-width: 0;
   line-height: 1.25;
   letter-spacing: -0.02em;
+  padding: 6px 10px;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.ns-title-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--surface) 98%, var(--bg));
 }
 
 .ns-title-input::placeholder {
