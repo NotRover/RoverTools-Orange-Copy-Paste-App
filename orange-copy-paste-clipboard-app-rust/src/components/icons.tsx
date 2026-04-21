@@ -1168,6 +1168,54 @@ export const HeadingIcon: React.FC<IconProps> = ({ size = 14, className }) => (
   </svg>
 );
 
+/* ── Heading 1 (H + 1) ── */
+
+export const Heading1Icon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="3" y1="5" x2="3" y2="19" />
+    <line x1="11" y1="5" x2="11" y2="19" />
+    <line x1="3" y1="12" x2="11" y2="12" />
+    <path d="M16 10l2-2v9" strokeWidth="2" />
+  </svg>
+);
+
+/* ── Heading 2 (H + 2) ── */
+
+export const Heading2Icon: React.FC<IconProps> = ({
+  size = 14,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <line x1="3" y1="5" x2="3" y2="19" />
+    <line x1="11" y1="5" x2="11" y2="19" />
+    <line x1="3" y1="12" x2="11" y2="12" />
+    <path d="M21 9a3 3 0 0 0-6 0l6 6h-6" strokeWidth="2" />
+  </svg>
+);
+
 /* ── Bullet list ── */
 
 export const BulletListIcon: React.FC<IconProps> = ({

@@ -5,11 +5,13 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../types";
 import {
   classifyFileEntry,
   filePaths,
   groupColor,
+  resolveImageSrc,
   timeAgo,
   truncateText,
 } from "../../../types";
@@ -33,7 +35,8 @@ import {
   ItalicIcon,
   UnderlineIcon,
   StrikethroughIcon,
-  HeadingIcon,
+  Heading1Icon,
+  Heading2Icon,
   BulletListIcon,
   OrderedListIcon,
   QuoteIcon,
@@ -44,6 +47,7 @@ import {
   ImageIcon,
   FileIcon,
   ClipboardIcon,
+  LinkIcon,
 } from "../../icons";
 import { PinIcon as PinIconElement } from "../../entry-types/EntryTypePill";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
@@ -91,7 +95,10 @@ function isNoteExpandable(note: Note): boolean {
   return plainNoteText(note.content).length > 180;
 }
 
-function sanitizeNotePreviewHtml(html: string): string {
+function sanitizeNotePreviewHtml(
+  html: string,
+  entries: ClipboardEntry[] = [],
+): string {
   const template = document.createElement("template");
   template.innerHTML = html;
 
@@ -100,7 +107,36 @@ function sanitizeNotePreviewHtml(html: string): string {
     const embedId = el.getAttribute("data-clip-embed") ?? "";
     const chip = document.createElement("span");
     chip.className = "ns-preview-embed-chip";
-    chip.textContent = embedId ? `#${embedId}` : "Clip";
+
+    const entry = entries.find((e) => e.id === embedId);
+    if (entry) {
+      const paths = entry.type === "file" ? filePaths(entry.content) : [];
+      const fileKind =
+        entry.type === "file" ? classifyFileEntry(entry.content) : "file";
+      const label =
+        entry.type === "image"
+          ? (entry.label ?? "Image")
+          : entry.type === "file"
+            ? fileKind === "image"
+              ? "Image file"
+              : paths[0]
+                ? fileName(paths[0])
+                : "File"
+            : truncateText(
+                (entry.type === "html"
+                  ? stripHtml(entry.content)
+                  : entry.content)
+                  .replace(/\s+/g, " ")
+                  .trim(),
+                28,
+              ) || "Clip";
+      chip.textContent = label;
+    } else if (embedId) {
+      chip.textContent = "Missing clip";
+      chip.classList.add("ns-preview-embed-chip--missing");
+    } else {
+      chip.textContent = "Clip";
+    }
     el.replaceWith(chip);
   });
 
@@ -141,6 +177,15 @@ function sanitizeNotePreviewHtml(html: string): string {
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
+
+// ── Inline SVG strings for clip-embed type icons ─────────────────────
+
+const SVG_IMAGE = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/><path d="M21 15l-5-5L5 21"/></svg>`;
+const SVG_FILE = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+const SVG_TEXT = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>`;
+const SVG_MISSING = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.5" fill="currentColor" stroke="none"/></svg>`;
+const SVG_EXPAND = `<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+const SVG_COLLAPSE = `<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`;
 
 // ── Formatting state (active toolbar buttons) ───────────────────────
 
@@ -197,11 +242,16 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [formatState, setFormatState] = useState<FormatState>(queryFormatState);
   const currentNoteIdRef = useRef(note.id);
 
-  // ── Embed picker state ──
+  // ── Embed / link picker state ──
   const [showEmbedPicker, setShowEmbedPicker] = useState(false);
   const [embedSearch, setEmbedSearch] = useState("");
   const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
   const embedPickerRef = useRef<HTMLDivElement>(null);
+  const [showLinkPicker, setShowLinkPicker] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const linkPickerRef = useRef<HTMLDivElement>(null);
+  // Saved cursor range — captured when a picker opens so we can restore it on insert.
+  const savedRangeRef = useRef<Range | null>(null);
   void onCopyEntry;
 
   const initialTitle = useMemo(
@@ -216,53 +266,130 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     return () => document.removeEventListener("selectionchange", update);
   }, []);
 
-  // Render clipboard embed placeholders.
-  useEffect(() => {
-    if (!editorRef.current) return;
-    editorRef.current.querySelectorAll("[data-clip-embed]").forEach((el) => {
-      const embedId = el.getAttribute("data-clip-embed") ?? "";
-      const host = el as HTMLElement;
+  // Render a single clipboard embed host element (inline chip or block card).
+  // No onclick is set here — toggling is handled via event delegation on the editor div.
+  const renderClipEmbed = useCallback(
+    (host: HTMLElement) => {
+      const embedId = host.getAttribute("data-clip-embed") ?? "";
+      const embedMode = host.getAttribute("data-embed-mode") ?? "inline";
       const entry = entries.find((e) => e.id === embedId);
-      host.className = entry ? "clip-embed" : "clip-embed clip-embed--missing";
-      host.onclick = null;
+
+      const typeClass = !entry
+        ? "clip-embed--missing"
+        : entry.type === "image"
+          ? "clip-embed--image"
+          : entry.type === "file"
+            ? "clip-embed--file"
+            : "";
+      const isBlock = embedMode === "block" && !!entry;
+      host.className = ["clip-embed", typeClass, isBlock && "clip-embed--block"]
+        .filter(Boolean)
+        .join(" ");
       host.replaceChildren();
-      const icon = document.createElement("span");
-      icon.className = "clip-embed-dot";
 
-      const text = document.createElement("span");
-      text.className = "clip-embed-text";
+      const mkIcon = (svgStr: string): HTMLElement => {
+        const s = document.createElement("span");
+        s.className = "clip-embed-icon";
+        s.innerHTML = svgStr;
+        return s;
+      };
 
-      if (!entry) {
-        text.textContent = embedId ? `Missing #${embedId}` : "Missing clip";
-        text.classList.add("clip-embed-fallback");
-      } else {
+      const entryIconSvg = !entry
+        ? SVG_MISSING
+        : entry.type === "image"
+          ? SVG_IMAGE
+          : entry.type === "file"
+            ? SVG_FILE
+            : SVG_TEXT;
+
+      const getEntryLabel = (maxLen: number): string => {
+        if (!entry) return "Missing clip";
         const paths = entry.type === "file" ? filePaths(entry.content) : [];
         const fileKind =
           entry.type === "file" ? classifyFileEntry(entry.content) : "file";
-        const label =
-          entry.type === "image"
-            ? (entry.label ?? "Image")
-            : entry.type === "file"
-              ? fileKind === "image"
-                ? "Image file"
-                : paths[0]
-                  ? fileName(paths[0])
-                  : "File"
-              : truncateText(
-                  (entry.type === "html"
-                    ? stripHtml(entry.content)
-                    : entry.content
-                  )
-                    .replace(/\s+/g, " ")
-                    .trim(),
-                  34,
-                ) || "Clip";
-        text.textContent = label;
-      }
+        return entry.type === "image"
+          ? (entry.label ?? "Image")
+          : entry.type === "file"
+            ? fileKind === "image"
+              ? "Image file"
+              : paths[0]
+                ? fileName(paths[0])
+                : "File"
+            : truncateText(
+                (entry.type === "html"
+                  ? stripHtml(entry.content)
+                  : entry.content)
+                  .replace(/\s+/g, " ")
+                  .trim(),
+                maxLen,
+              ) || "Clip";
+      };
 
-      host.append(icon, text);
+      if (isBlock) {
+        const header = document.createElement("span");
+        header.className = "clip-embed-block-header";
+        const hTitle = document.createElement("span");
+        hTitle.className = "clip-embed-block-title";
+        hTitle.textContent = getEntryLabel(60);
+        const hToggle = document.createElement("span");
+        hToggle.className = "clip-embed-toggle clip-embed-toggle--collapse";
+        hToggle.title = "Collapse embed";
+        hToggle.innerHTML = SVG_COLLAPSE;
+        header.append(mkIcon(entryIconSvg), hTitle, hToggle);
+
+        const body = document.createElement("span");
+        body.className = "clip-embed-block-body";
+        if (entry.type === "image") {
+          body.classList.add("clip-embed-block-body--image");
+          const wrapper = document.createElement("span");
+          wrapper.className = "clip-embed-image-resizable";
+          const img = document.createElement("img");
+          img.src = resolveImageSrc(entry.content, convertFileSrc);
+          img.alt = entry.label ?? "Image";
+          img.className = "clip-embed-block-image";
+          wrapper.append(img);
+          body.append(wrapper);
+        } else if (entry.type === "html") {
+          body.textContent = stripHtml(entry.content).replace(/\s+/g, " ").trim();
+        } else if (entry.type === "text") {
+          body.textContent = entry.content;
+        } else if (entry.type === "file") {
+          const paths = filePaths(entry.content);
+          body.textContent = paths[0] ? fileName(paths[0]) : "File attachment";
+        }
+
+        host.append(header, body);
+      } else {
+        const text = document.createElement("span");
+        text.className = "clip-embed-text";
+
+        if (!entry) {
+          text.textContent = "Missing clip";
+          text.classList.add("clip-embed-fallback");
+          host.append(mkIcon(SVG_MISSING), text);
+          return;
+        }
+
+        text.textContent = getEntryLabel(34);
+
+        const toggle = document.createElement("span");
+        toggle.className = "clip-embed-toggle";
+        toggle.title = "Expand embed";
+        toggle.innerHTML = SVG_EXPAND;
+
+        host.append(mkIcon(entryIconSvg), text, toggle);
+      }
+    },
+    [entries],
+  );
+
+  // Re-render all clip embeds whenever entries change.
+  useEffect(() => {
+    if (!editorRef.current) return;
+    editorRef.current.querySelectorAll("[data-clip-embed]").forEach((el) => {
+      renderClipEmbed(el as HTMLElement);
     });
-  });
+  }, [renderClipEmbed]);
 
   // Render group reference placeholders.
   useEffect(() => {
@@ -270,10 +397,16 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     editorRef.current.querySelectorAll("[data-group-ref]").forEach((el) => {
       const groupName = el.getAttribute("data-group-ref")!;
       const c = groupColor(groupName);
-      el.className = "group-embed";
-      (el as HTMLElement).style.background = c.bg;
-      (el as HTMLElement).style.color = c.fg;
-      el.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block;flex-shrink:0;opacity:0.8"></span>${groupName}`;
+      const host = el as HTMLElement;
+      host.className = "group-embed";
+      host.style.cssText = `background:${c.bg};color:${c.fg};`;
+      host.replaceChildren();
+      const dot = document.createElement("span");
+      dot.className = "group-embed-dot";
+      const label = document.createElement("span");
+      label.className = "group-embed-label";
+      label.textContent = groupName;
+      host.append(dot, label);
     });
   });
 
@@ -335,6 +468,22 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showEmbedPicker]);
+
+  // Close link picker on outside click.
+  useEffect(() => {
+    if (!showLinkPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        linkPickerRef.current &&
+        !linkPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowLinkPicker(false);
+        setLinkUrl("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showLinkPicker]);
 
   // Debounced auto-save.
   const scheduleSave = useCallback(() => {
@@ -410,32 +559,99 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     [scheduleSave],
   );
 
+  // Restore saved selection range into the editor and return true on success.
+  const restoreSavedRange = useCallback((): boolean => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    editor.focus();
+    const saved = savedRangeRef.current;
+    if (!saved) return false;
+    savedRangeRef.current = null;
+    const sel = window.getSelection();
+    if (!sel) return false;
+    sel.removeAllRanges();
+    sel.addRange(saved);
+    return true;
+  }, []);
+
+  const insertInlineSpan = useCallback(
+    (span: HTMLElement) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      // Restore the cursor that was saved when the picker opened; fall back to
+      // focusing the editor (Chromium will restore its last known cursor).
+      if (!restoreSavedRange()) editor.focus();
+      const sel = window.getSelection();
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        editor.contains(sel.getRangeAt(0).commonAncestorContainer)
+      ) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(span);
+        const space = document.createTextNode("\u00a0");
+        span.after(space);
+        range.setStart(space, 1);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        editor.appendChild(span);
+        editor.appendChild(document.createTextNode("\u00a0"));
+      }
+    },
+    [restoreSavedRange],
+  );
+
   const insertClipEmbed = useCallback(
     (id: string) => {
-      editorRef.current?.focus();
-      document.execCommand(
-        "insertHTML",
-        false,
-        `<span data-clip-embed="${id}" contenteditable="false">[clip:${id}]</span>&nbsp;`,
-      );
+      const span = document.createElement("span");
+      span.setAttribute("data-clip-embed", id);
+      span.setAttribute("contenteditable", "false");
+      span.textContent = `[clip:${id}]`;
+      insertInlineSpan(span);
       scheduleSave();
       setShowEmbedPicker(false);
     },
-    [scheduleSave],
+    [insertInlineSpan, scheduleSave],
   );
 
   const insertGroupEmbed = useCallback(
     (group: string) => {
-      editorRef.current?.focus();
-      document.execCommand(
-        "insertHTML",
-        false,
-        `<span data-group-ref="${group}" contenteditable="false">[#${group}]</span>&nbsp;`,
-      );
+      const span = document.createElement("span");
+      span.setAttribute("data-group-ref", group);
+      span.setAttribute("contenteditable", "false");
+      span.textContent = `[#${group}]`;
+      insertInlineSpan(span);
       scheduleSave();
       setShowEmbedPicker(false);
     },
-    [scheduleSave],
+    [insertInlineSpan, scheduleSave],
+  );
+
+  const insertLink = useCallback(
+    (url: string) => {
+      if (!url.trim()) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      if (!restoreSavedRange()) editor.focus();
+      const sel = window.getSelection();
+      const hasSelection = sel && !sel.isCollapsed;
+      if (hasSelection) {
+        document.execCommand("createLink", false, url.trim());
+      } else {
+        document.execCommand(
+          "insertHTML",
+          false,
+          `<a href="${url.trim()}" target="_blank" rel="noopener noreferrer">${url.trim()}</a>`,
+        );
+      }
+      scheduleSave();
+      setShowLinkPicker(false);
+      setLinkUrl("");
+    },
+    [restoreSavedRange, scheduleSave],
   );
 
   const toggleGroup = useCallback(
@@ -608,7 +824,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </button>
           <button
             className={`ns-fmt-btn${formatState.strikethrough ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => execCmd("strikethrough")}
+            onClick={() => execCmd("strikeThrough")}
             data-tooltip="Strikethrough"
             data-tooltip-pos="below"
           >
@@ -623,16 +839,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Heading 1"
             data-tooltip-pos="below"
           >
-            <HeadingIcon size={14} />
+            <Heading1Icon size={14} />
           </button>
           <button
             className="ns-fmt-btn"
             onClick={() => execCmd("formatBlock", "h2")}
             data-tooltip="Heading 2"
             data-tooltip-pos="below"
-            style={{ opacity: 0.7 }}
           >
-            <HeadingIcon size={11} />
+            <Heading2Icon size={14} />
           </button>
 
           <span className="ns-fmt-sep" />
@@ -664,15 +879,77 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
           <span className="ns-fmt-sep" />
 
+          {/* Link picker */}
+          <div className="ns-embed-wrap" ref={linkPickerRef}>
+            <button
+              className={`ns-fmt-btn${showLinkPicker ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                const sel = window.getSelection();
+                if (
+                  sel &&
+                  sel.rangeCount > 0 &&
+                  editorRef.current?.contains(
+                    sel.getRangeAt(0).commonAncestorContainer,
+                  )
+                )
+                  savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+                setShowLinkPicker((p) => !p);
+                setShowEmbedPicker(false);
+              }}
+              data-tooltip="Insert link"
+              data-tooltip-pos="below"
+            >
+              <LinkIcon size={12} />
+            </button>
+            {showLinkPicker && (
+              <div className="ns-embed-picker ns-link-picker">
+                <div className="ns-link-picker-row">
+                  <input
+                    className="ns-embed-search ns-link-input"
+                    placeholder="https://…"
+                    value={linkUrl}
+                    onChange={(e) => setLinkUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") insertLink(linkUrl);
+                      if (e.key === "Escape") {
+                        setShowLinkPicker(false);
+                        setLinkUrl("");
+                      }
+                    }}
+                    autoFocus
+                  />
+                  <button
+                    className="ns-link-insert-btn"
+                    onClick={() => insertLink(linkUrl)}
+                    disabled={!linkUrl.trim()}
+                  >
+                    Insert
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Embed picker */}
           <div className="ns-embed-wrap" ref={embedPickerRef}>
             <button
               className={`ns-fmt-btn${showEmbedPicker ? " ns-fmt-btn--active" : ""}`}
               onClick={() => {
+                // Save cursor position before focus moves to the search input.
+                const sel = window.getSelection();
+                if (
+                  sel &&
+                  sel.rangeCount > 0 &&
+                  editorRef.current?.contains(
+                    sel.getRangeAt(0).commonAncestorContainer,
+                  )
+                )
+                  savedRangeRef.current = sel.getRangeAt(0).cloneRange();
                 setShowEmbedPicker((p) => !p);
+                setShowLinkPicker(false);
                 setEmbedSearch("");
               }}
-              data-tooltip="Embed reference"
+              data-tooltip="Embed clipboard entry"
               data-tooltip-pos="below"
             >
               <EmbedClipIcon size={13} />
@@ -780,6 +1057,21 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             className="ns-richtext"
             contentEditable
             suppressContentEditableWarning
+            onClick={(e) => {
+              // Event delegation: handle embed toggle clicks inside contenteditable.
+              // Direct onclick on contenteditable=false spans is intercepted by Chromium.
+              const toggle = (e.target as HTMLElement).closest(".clip-embed-toggle");
+              if (toggle) {
+                e.preventDefault();
+                const host = toggle.closest("[data-clip-embed]") as HTMLElement | null;
+                if (host) {
+                  const cur = host.getAttribute("data-embed-mode") ?? "inline";
+                  host.setAttribute("data-embed-mode", cur === "block" ? "inline" : "block");
+                  renderClipEmbed(host);
+                  scheduleSave();
+                }
+              }
+            }}
             onInput={() => {
               scheduleSave();
               updateFormat();
@@ -787,6 +1079,28 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             onKeyUp={updateFormat}
             onMouseUp={updateFormat}
             onPaste={(e) => {
+              // Handle image paste (data URI stored inline).
+              const imageItem = Array.from(e.clipboardData.items).find((i) =>
+                i.type.startsWith("image/"),
+              );
+              if (imageItem) {
+                e.preventDefault();
+                const file = imageItem.getAsFile();
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    const src = ev.target?.result as string;
+                    document.execCommand(
+                      "insertHTML",
+                      false,
+                      `<img src="${src}" style="max-width:100%;border-radius:6px;display:block;margin:6px 0;" alt="Pasted image" />`,
+                    );
+                    scheduleSave();
+                  };
+                  reader.readAsDataURL(file);
+                }
+                return;
+              }
               e.preventDefault();
               const html =
                 e.clipboardData.getData("text/html") ||
@@ -1476,7 +1790,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                               .filter(Boolean)
                               .join(" ")}
                             dangerouslySetInnerHTML={{
-                              __html: sanitizeNotePreviewHtml(n.content),
+                              __html: sanitizeNotePreviewHtml(n.content, entries),
                             }}
                           />
                         )}
