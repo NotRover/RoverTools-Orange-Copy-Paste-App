@@ -2,7 +2,9 @@
 
 > **Created by Salman Tariq — DO NOT DELETE**
 
-A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, and multi-window popups.
+A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
+
+> **Cross-system context:** For how this app integrates with the FastAPI backend, see `docs/ARCHITECTURE.md` (workspace root). For backend internals, see `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
 
 ---
 
@@ -15,6 +17,8 @@ A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real
   - [Entry Point & Setup](#entry-point--setup)
   - [State Management](#state-management)
   - [Clipboard Module](#clipboard-module)
+  - [Notes Module](#notes-module)
+  - [Cloud Sync Module](#cloud-sync-module)
   - [Runtime Module](#runtime-module)
 - [Frontend](#frontend)
   - [Build & Entry Points](#build--entry-points)
@@ -26,46 +30,50 @@ A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real
 - [Data Flows](#data-flows)
 - [Persistence & Storage](#persistence--storage)
 - [Tauri Configuration & Permissions](#tauri-configuration--permissions)
+- [Cross-System Invariants](#cross-system-invariants)
 
 ---
 
 ## High-Level Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Tauri Process                         │
-│                                                         │
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────┐  │
-│  │  Clipboard   │   │   Hotkey     │   │  Popup     │  │
-│  │  Watcher     │   │   Handlers   │   │  Windows   │  │
-│  │  (220ms poll)│   │  Ctrl+Shift  │   │  copy/paste│  │
-│  └──────┬───────┘   └──────┬───────┘   └─────┬──────┘  │
-│         │                  │                  │         │
-│         └──────────┬───────┘                  │         │
-│                    ▼                          │         │
-│         ┌──────────────────┐                  │         │
-│         │   AppState       │                  │         │
-│         │  ┌─────────────┐ │                  │         │
-│         │  │ History     │ │◄─────────────────┘         │
-│         │  │ (Mutex)     │ │                            │
-│         │  └─────────────┘ │                            │
-│         │  suppress_flag   │                            │
-│         └────────┬─────────┘                            │
-│                  │                                      │
-│                  ▼ events + commands                    │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │              Tauri IPC Bridge                     │  │
-│  └───────────────────────────────────────────────────┘  │
-└──────────┬──────────────────┬──────────────┬────────────┘
-           ▼                  ▼              ▼
-   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-   │  Main Window │  │  Copy Popup  │  │ Paste Popup  │
-   │  (React SPA) │  │  (React SPA) │  │ (React SPA)  │
-   │  920×560     │  │  340×260     │  │ 340×460      │
-   └──────────────┘  └──────────────┘  └──────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         Tauri Process                            │
+│                                                                  │
+│  ┌──────────────┐   ┌──────────────┐   ┌────────────┐          │
+│  │  Clipboard   │   │   Hotkey     │   │  Popup     │          │
+│  │  Watcher     │   │   Handlers   │   │  Windows   │          │
+│  │  (220ms poll)│   │  Ctrl+Shift  │   │  copy/paste│          │
+│  └──────┬───────┘   └──────┬───────┘   └─────┬──────┘          │
+│         │                  │                  │                  │
+│         └──────────┬───────┘                  │                  │
+│                    ▼                          │                  │
+│         ┌──────────────────┐                  │                  │
+│         │   AppState       │                  │                  │
+│         │  ┌─────────────┐ │                  │                  │
+│         │  │ History     │ │◄─────────────────┘                  │
+│         │  │ (Mutex)     │ │                                     │
+│         │  └─────────────┘ │                                     │
+│         │  suppress_flag   │◄──────────────────────────────────┐ │
+│         └────────┬─────────┘                                   │ │
+│                  │                                             │ │
+│                  ▼ events + commands          ┌────────────────┴─┴──┐
+│  ┌───────────────────────────────────────┐   │   SyncClient         │
+│  │          Tauri IPC Bridge             │   │  (background runtime)│
+│  └───────────────────────────────────────┘   │  HTTP push/pull      │
+│                                              │  WebSocket listener  │
+└──────────┬──────────────┬──────────────┬─────│  crypto (AES/X25519) │
+           ▼              ▼              ▼     │  offline queue       │
+   ┌──────────────┐  ┌──────────┐  ┌────────┐ └──────────┬───────────┘
+   │  Main Window │  │ Copy Pop │  │ Paste  │            │ HTTPS+WSS
+   │  (React SPA) │  │ (React)  │  │ Popup  │            ▼
+   │  920×560     │  │ 340×260  │  │(React) │  ┌─────────────────────┐
+   └──────────────┘  └──────────┘  └────────┘  │  FastAPI Backend    │
+                                               │  (cloud, optional)  │
+                                               └─────────────────────┘
 ```
 
-The app runs as a single Tauri process with three webview windows. The Rust backend owns all clipboard operations, history storage, and OS integrations. The React frontends communicate via Tauri commands (request/response) and events (push notifications).
+The app runs as a single Tauri process with three webview windows. The Rust backend owns all clipboard operations, history storage, and OS integrations. The React frontends communicate via Tauri commands (request/response) and events (push notifications). The `SyncClient` runs in a dedicated background Tokio runtime and is entirely optional — the app is fully functional without it.
 
 ---
 
@@ -85,6 +93,12 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | parking_lot                  | 0.12    | Mutex without poisoning                                                        |
 | serde + serde_json           | 1       | Serialization for IPC and settings persistence                                 |
 | rmp-serde                    | 1       | MessagePack binary serialization for history persistence                       |
+| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — sync module only     |
+| tokio-tungstenite            | 0.23    | Async WebSocket client for realtime events — sync module only                  |
+| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — sync module only           |
+| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — sync module only                   |
+| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and group key wrapping               |
+| keyring                      | 2       | OS credential store for refresh token and device private key                   |
 
 ### Frontend
 
@@ -116,6 +130,14 @@ src-tauri/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_notes, create/update/delete, groups)
 │   │   └── store.rs            # Note model + MessagePack persistence
+│   ├── sync/                   # Cloud sync module (optional, Phase 6)
+│   │   ├── mod.rs              # SyncClient init, background Tokio runtime
+│   │   ├── client.rs           # reqwest HTTP client, token refresh middleware
+│   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
+│   │   ├── pending_queue.rs    # sync_pending.json read/write for offline accumulation
+│   │   ├── crypto.rs           # UMK derivation (Argon2id), AES-256-GCM, X25519 key exchange
+│   │   ├── commands.rs         # Tauri commands: sync_login, sync_logout, sync_now, etc.
+│   │   └── config.rs           # Server URL + sync-enabled flag (persisted in settings.json)
 │   ├── runtime/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── clipboard_watcher.rs # Background polling thread (220ms)
@@ -215,7 +237,8 @@ AppState
 ├── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries
 ├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
 ├── notes: Arc<Mutex<NoteStore>>            ← shared notes store
-└── notes_dirty: Arc<AtomicBool>            ← triggers periodic flush to notes.bin
+├── notes_dirty: Arc<AtomicBool>            ← triggers periodic flush to notes.bin
+└── sync_client: Option<Arc<SyncClient>>   ← None when sync disabled or not yet authed
 ```
 
 **`AppState`** is managed by Tauri and injected into every command handler via `State<'_, AppState>`. The same `Arc` references are also held by the clipboard watcher thread and the hotkey handler closures.
@@ -230,15 +253,20 @@ AppState
 
 ```
 ClipboardEntry {
-    id: String           ← monotonic counter (AtomicU64)
-    kind: EntryKind      ← Text | Image | File | Html
-    content: String      ← plain text / file path (images) / newline-delimited paths / html---PLAINTEXT---text
-    timestamp: u64       ← Unix ms
+    id: String            ← monotonic counter (AtomicU64); used as client_id in sync
+    kind: EntryKind       ← Text | Image | File | Html
+    content: String       ← plain text / file path (images) / newline-delimited paths / html---PLAINTEXT---text
+    timestamp: u64        ← Unix ms
     pinned: bool
-    groups: Vec<String>  ← user-defined group tags (e.g. "Saved")
+    groups: Vec<String>   ← user-defined group tags (e.g. "Saved")
     label: Option<String> ← display name (e.g. "Image Mar 17, 2:45 PM" for images)
+    // Sync fields — NOT persisted to history.bin; maintained in id_map.json by SyncClient
+    server_id: Option<String>   ← UUID assigned by server after first successful push
+    sync_status: SyncStatus     ← Synced | Pending | LocalOnly (default: LocalOnly)
 }
 ```
+
+> **Sync note:** `server_id` and `sync_status` are transient fields populated at runtime by the SyncClient from `id_map.json`. They are excluded from MessagePack serialization. Their sole purpose is UI display (cloud icon on entry cards) and push dedup logic.
 
 **`ClipboardHistory`** is a `Vec<ClipboardEntry>` with most-recent-first ordering:
 
@@ -288,24 +316,24 @@ ClipboardEntry {
 | `bulk_add_group`           | `(ids, group) → u32`          | Add a group to multiple entries                                                                      |
 | `bulk_remove_group`        | `(ids, group) → u32`          | Remove a group from multiple entries                                                                 |
 | `get_setting`              | `(key) → Option<Value>`       | Read a setting from `settings.json`                                                                  |
-| `set_setting`              | `(key, value) → bool`         | Write a setting; syncs in-memory caches for known keys                                               |
+| `set_setting`              | `(key, value) → bool`         | Write a setting; syncs in-memory caches for known keys (`sync_enabled`, `sync_server_url` included)  |
 | `get_image_file_preview`   | `(path) → Option<String>`     | Read image file → data-URL (max 12 MB)                                                               |
 | `get_video_file_preview`   | `(path) → Option<String>`     | Read video file → data-URL (max 36 MB)                                                               |
 | `check_missing_files`      | `(paths) → Vec<String>`       | Returns paths that do not exist (used by paste popup before paste)                                   |
 
 #### `notes/commands.rs` — Notes Command Handlers
 
-| Command                  | Signature                              | Description                                  |
-| ------------------------ | -------------------------------------- | -------------------------------------------- |
-| `get_notes`              | `() → Vec<Note>`                       | Return all notes                             |
-| `create_note`            | `() → Note`                            | Create a new blank note                      |
-| `update_note`            | `(id, title, content) → bool`          | Update note content/title                    |
-| `delete_note`            | `(id) → bool`                          | Delete a note by ID                          |
-| `pin_note`               | `(id) → bool`                          | Pin a note                                   |
-| `unpin_note`             | `(id) → bool`                          | Unpin a note                                 |
-| `set_note_groups`        | `(id, groups) → bool`                  | Replace note groups                          |
-| `purge_group_from_notes` | `(group) → ()`                         | Remove a group from all notes                |
-| `rename_group_in_notes`  | `(old_name, new_name) → ()`            | Rename a group across all notes              |
+| Command                  | Signature                     | Description                     |
+| ------------------------ | ----------------------------- | ------------------------------- |
+| `get_notes`              | `() → Vec<Note>`              | Return all notes                |
+| `create_note`            | `() → Note`                   | Create a new blank note         |
+| `update_note`            | `(id, title, content) → bool` | Update note content/title       |
+| `delete_note`            | `(id) → bool`                 | Delete a note by ID             |
+| `pin_note`               | `(id) → bool`                 | Pin a note                      |
+| `unpin_note`             | `(id) → bool`                 | Unpin a note                    |
+| `set_note_groups`        | `(id, groups) → bool`         | Replace note groups             |
+| `purge_group_from_notes` | `(group) → ()`                | Remove a group from all notes   |
+| `rename_group_in_notes`  | `(old_name, new_name) → ()`   | Rename a group across all notes |
 
 **Internal helpers:**
 
@@ -366,11 +394,138 @@ Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal pr
 
 Notes are sorted by `updated_at` descending, and a monotonic in-process counter is advanced on load to avoid ID collisions.
 
+Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sync_status: SyncStatus` fields (not persisted to `notes.bin`).
+
 #### Persistence Behavior
 
 - Note mutations set `notes_dirty = true`.
 - The shared background flush thread writes `notes.bin` every ~2s when dirty.
 - Notes are loaded during startup in `setup_runtime`.
+
+---
+
+### Cloud Sync Module
+
+> **Status:** Planned — Phase 6 of backend implementation.
+> **Location:** `src-tauri/src/sync/`
+> **Principle:** Additive only — no existing capture, storage, or popup logic changes.
+
+#### Overview
+
+The sync module runs entirely in a dedicated background Tokio runtime (separate from Tauri's internal runtime) so it can never block clipboard capture or the UI.
+
+```
+Clipboard capture (existing, unchanged)
+         │
+         ▼
+  history.push(entry)          ← plaintext, same as today
+         │
+         ├──► emit clipboard:new-entry   ← UI update (unchanged)
+         │
+         └──► SyncClient.on_new_entry(entry)   ← new side-effect
+                    │
+                    ├─ encrypt(UMK, content) → encrypted_entry
+                    ├─ online? → POST /sync/push immediately
+                    └─ offline? → append to sync_pending.json
+```
+
+#### `mod.rs` — SyncClient
+
+`SyncClient` is the public handle held in `AppState`. It exposes:
+
+- `on_new_entry(entry)` — called after every successful history push
+- `on_delete_entry(id)` — called from `delete_entry` command
+- `on_update_entry(entry)` — called from pin/group mutation commands
+- `flush_pending()` — manually trigger offline queue flush
+- `connect_ws()` / `disconnect_ws()` — WebSocket lifecycle
+
+On startup (when sync is enabled and a valid refresh token exists in the OS keychain):
+
+1. Authenticate: exchange refresh token → access token
+2. Pull delta: `GET /sync/pull?after_ts={last_cursor}` (paginated)
+3. Decrypt and merge remote entries into local store
+4. Flush `sync_pending.json`
+5. Open WebSocket connection
+
+#### `client.rs` — HTTP Client
+
+- Wraps `reqwest::Client` with base URL, default auth header, and automatic token refresh on 401
+- Refresh flow: intercepts 401 → `POST /auth/refresh` → retries original request transparently
+- All requests have a 10s timeout
+- Connection errors → logged, backed off (1s → 2s → 4s → max 60s exponential)
+
+#### `ws_listener.rs` — WebSocket Listener
+
+Maintains a persistent `tokio-tungstenite` WebSocket connection to `wss://{server}/ws?token=<access_token>`.
+
+On each received message, dispatches to:
+
+| Event                              | Action                                                                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync:entry`                       | Decrypt → check if `client_id` already local → insert or update in history/notes → emit `clipboard:new-entry` or `notes:updated` Tauri event → advance cursor |
+| `sync:delete`                      | Find entry by `server_id` → remove from local store → emit `clipboard:entry-deleted`                                                                          |
+| `device:online` / `device:offline` | Update sync status indicator via Tauri event                                                                                                                  |
+| `group:rekey`                      | Replace cached Group Key → decrypt future entries with new key                                                                                                |
+| `ping`                             | Respond with `pong`; refresh Redis presence TTL                                                                                                               |
+
+Connection drop → automatic reconnect after 5s backoff, then exponential up to 60s.
+
+#### `pending_queue.rs` — Offline Queue
+
+`sync_pending.json` lives in `{app_data}/sync_pending.json` and stores an ordered list of operations that need to be pushed:
+
+```jsonc
+[
+  { "op": "push",   "entry": { ...encrypted_entry } },
+  { "op": "delete", "client_id": "42", "entry_type": "clipboard" },
+  { "op": "update", "entry": { ...encrypted_entry } }
+]
+```
+
+On reconnect, the queue is flushed in order before pulling the delta. This ensures local-device ordering is preserved in the LWW (last-write-wins) conflict resolution.
+
+#### `crypto.rs` — Encryption Primitives
+
+All cryptography is performed here. Nothing outside this module touches raw key material.
+
+| Function                                                | Description                                             |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| `derive_umk(password, kdf_salt) → [u8; 32]`             | Argon2id(password, salt, m=65536, t=3, p=4)             |
+| `encrypt(key, plaintext, aad) → String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
+| `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
+| `generate_x25519_keypair() → (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |
+| `x25519_shared_secret(privkey, peer_pubkey) → [u8; 32]` | ECDH for device key handshake and group key wrapping    |
+| `wrap_key(wrapping_key, key_to_wrap) → String`          | AES-256-GCM encrypt key material                        |
+| `unwrap_key(wrapping_key, wrapped_b64) → [u8; 32]`      | Reverse of wrap_key                                     |
+
+**Encryption invariant:** The UMK is passed in at call time from the in-memory `SyncClient` state. It is never written to disk. `crypto.rs` receives it as a `&[u8; 32]` slice.
+
+**AAD (additional authenticated data)** = `client_id` of the entry — binds each ciphertext to its specific entry, preventing ciphertext transplanting attacks.
+
+#### `commands.rs` — New Tauri Commands
+
+| Command               | Signature                                           | Description                                                              |
+| --------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
+| `sync_login`          | `(email, password, device_name) → Result<SyncUser>` | Authenticate; derives UMK in memory; stores refresh token in OS keychain |
+| `sync_logout`         | `() → ()`                                           | Revoke device token; clear UMK; delete keychain entry                    |
+| `sync_get_user`       | `() → Option<SyncUser>`                             | Returns cached login info if authenticated                               |
+| `sync_get_status`     | `() → SyncStatus`                                   | `{ connected, last_synced_at, pending_count }`                           |
+| `sync_now`            | `() → ()`                                           | Trigger immediate pull + queue flush                                     |
+| `sync_set_enabled`    | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                 |
+| `sync_set_server_url` | `(url: String) → ()`                                | Override default server URL (self-hosted)                                |
+| `sync_get_groups`     | `() → Vec<SyncGroup>`                               | List joined shared groups                                                |
+| `sync_create_group`   | `(name: String) → SyncGroup`                        | Create group; generates Group Key; posts to server                       |
+| `sync_join_group`     | `(invite_code: String) → ()`                        | Join via invite code                                                     |
+| `sync_leave_group`    | `(group_id: String) → ()`                           | Leave group; removes local GK                                            |
+
+#### `config.rs` — Sync Settings
+
+Two settings are added to the existing `settings.json` store:
+
+| Key               | Type   | Default                             | Description                         |
+| ----------------- | ------ | ----------------------------------- | ----------------------------------- |
+| `sync_enabled`    | bool   | false                               | Master toggle for all sync behavior |
+| `sync_server_url` | string | `"https://api.orangeclipboard.app"` | API base URL (self-hosted override) |
 
 ### Runtime Module
 
@@ -467,12 +622,12 @@ Saves window position, size, and maximized state to `{app_data}/window-state.jso
 
 Vite is configured for a **multi-page build** (four separate HTML entry points → four separate JS bundles):
 
-| Window      | Entry HTML                                    | Entry Component  | Dimensions         |
-| ----------- | --------------------------------------------- | ---------------- | ------------------ |
-| main        | `src/components/app/index.html`               | `App.tsx`        | 920×560, resizable |
-| copy-popup  | `src/components/copy-popup/copy-popup.html`   | `CopyPopup.tsx`  | 340×260, frameless |
-| paste-popup | `src/components/paste-popup/paste-popup.html` | `PastePopup.tsx` | 340×460, frameless |
-| notification | `src/components/notifications/notification.html` | `Notification.tsx` | 220×72, frameless |
+| Window       | Entry HTML                                       | Entry Component    | Dimensions         |
+| ------------ | ------------------------------------------------ | ------------------ | ------------------ |
+| main         | `src/components/app/index.html`                  | `App.tsx`          | 920×560, resizable |
+| copy-popup   | `src/components/copy-popup/copy-popup.html`      | `CopyPopup.tsx`    | 340×260, frameless |
+| paste-popup  | `src/components/paste-popup/paste-popup.html`    | `PastePopup.tsx`   | 340×460, frameless |
+| notification | `src/components/notifications/notification.html` | `Notification.tsx` | 220×72, frameless  |
 
 Dev server runs on port 1420 (fixed for Tauri dev mode).
 
@@ -554,6 +709,12 @@ Renders a single `ClipboardEntry` with type-specific previews:
 
 **Footer chip overflow**: The chip bar (type, pinned, saved, in-clipboard, user groups) uses `flex-wrap` for graceful line wrapping. A dynamic measurement algorithm calculates how many group chips fit on the first row and renders a "+N" overflow button for the rest. When all groups fit, no overflow button is shown.
 
+**Cloud sync indicator** (Phase 6): A small cloud icon is shown on each card driven by `SyncStatus` in the entry:
+
+- Filled cloud ✓ — `Synced` (server_id exists and up-to-date)
+- Outline cloud — `Pending` (queued in sync_pending.json)
+- No icon — `LocalOnly` (sync disabled or entry predates sync enrollment)
+
 #### Settings Screen (`SettingsScreen.tsx`)
 
 - **Paste slots**: How many entries shown in the paste popup (3–10, default 3). Persisted to `localStorage.sc-paste-slots`.
@@ -561,6 +722,15 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Close to tray**: Hide to system tray on close instead of quitting. Stored in `settings.json`.
 - **Start minimized**: Launch hidden in tray. Stored in `settings.json`.
 - **Notifications**: Master toggle + individual checkboxes for copy and paste notifications. Stored in `settings.json`.
+
+**Cloud Sync section** (Phase 6 additions):
+
+- **Enable Cloud Sync** toggle → calls `sync_set_enabled`
+- **Server URL** input (default blank = official server; enter custom for self-hosted) → calls `sync_set_server_url`
+- **Login / Logout** form → calls `sync_login` / `sync_logout`
+- **Connected devices** list → fetched via `GET /api/v1/auth/devices`; shows current device highlighted
+- **Sync status indicator**: Synced ✓ / Syncing… / Offline / Re-login required → driven by `sync_get_status`
+- **Shared Groups** panel: list, create, invite link, leave → calls `sync_create_group`, `sync_join_group`, `sync_leave_group`
 
 #### Notes Screen (`NotesScreen.tsx`)
 
@@ -723,6 +893,65 @@ User presses Ctrl+Shift+V
                   React re-render
 ```
 
+### Cloud Sync — Push (Local Capture → Server)
+
+```
+capture_clipboard_change() → history.push(entry)
+         │
+         └──► SyncClient.on_new_entry(entry)   [background runtime]
+                    │
+                    ├─ crypto::encrypt(UMK, content, aad=client_id)
+                    ├─ crypto::encrypt(UMK, metadata_json, aad=client_id)
+                    │
+                    ├─ online? ──► POST /api/v1/sync/push [entry]
+                    │              Server assigns server_ts
+                    │              Server publishes to Redis
+                    │              Response: { server_id, server_ts }
+                    │              Update id_map.json, set sync_status=Synced
+                    │
+                    └─ offline? ─► append to sync_pending.json
+                                  sync_status stays Pending
+```
+
+### Cloud Sync — Pull (Server → Local)
+
+```
+On startup / reconnect:
+  GET /api/v1/sync/pull?after_ts={last_cursor}&limit=200
+         │
+         ▼ (for each entry in response)
+  crypto::decrypt(UMK, encrypted_content, aad=client_id) → plaintext
+  crypto::decrypt(UMK, encrypted_metadata) → { groups, label, pinned }
+         │
+         ├─ client_id already in local store?
+         │     └─ Yes → compare server_ts; apply if newer (LWW)
+         │     └─ No  → insert as new entry
+         │              assign local id, record in id_map.json
+         │
+         ├─ emit clipboard:new-entry (or notes:updated) → React re-render
+         └─ POST /api/v1/sync/cursor { last_server_ts }
+
+Repeat until next_cursor = null
+```
+
+### Cloud Sync — Realtime (WebSocket → Local)
+
+```
+WebSocket message received:
+  { "event": "sync:entry", "payload": { ...encrypted_entry } }
+         │
+         ▼
+  Same as Pull path above for the single entry
+  (skip if entry originated from this device_id)
+
+  { "event": "sync:delete", "payload": { "server_id": "...", "deleted_at": T } }
+         │
+         ▼
+  Find entry by server_id in id_map.json → local id
+  history.remove(local_id)
+  emit clipboard:entry-deleted → React removes from state
+```
+
 ---
 
 ## Persistence & Storage
@@ -738,24 +967,29 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 
 ### Storage Locations
 
-| What              | Location                               | Format                                                 | When Saved           | When Loaded        |
-| ----------------- | -------------------------------------- | ------------------------------------------------------ | -------------------- | ------------------ |
-| Pinned entries    | `{app_data}/pinned_entries.bin`        | MessagePack binary                                     | On pin/unpin/groups  | On startup         |
-| Full history      | `{app_data}/history.bin`               | MessagePack binary                                     | Every 2s when dirty  | On startup         |
-| Image files       | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)            | On push to history   | Via asset protocol |
-| Settings          | `{app_data}/settings.json`             | JSON object `{ key: value }`                           | On `set_setting`     | On startup         |
-| Notes             | `{app_data}/notes.bin`                 | MessagePack binary                                     | Every 2s when dirty  | On startup         |
-| Boot ID           | `{app_data}/boot_id.txt`               | Plain text (boot epoch seconds)                        | On startup           | On startup         |
-| Window geometry   | `{app_data}/window-state.json`         | `{ x, y, width, height, maximized }`                   | On every move/resize | On startup         |
-| Theme preference  | `localStorage.sc-theme`                | `"dark"` or `"light"`                                  | On toggle            | On mount           |
-| Layout preference | `localStorage.sc-layout`               | `"tiles"` or `"list"`                                  | On change            | On mount           |
-| Sort preference   | `localStorage.sc-sort`                 | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"` | On change            | On mount           |
-| Paste slot count  | `localStorage.sc-paste-slots`          | `"3"` – `"10"`                                         | On change            | On popup show      |
-| Group names       | `localStorage.sc-groups`               | JSON string array                                      | On group edits       | On mount           |
-| Group colors      | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                 | On color change      | On mount           |
-| Recent searches   | `localStorage.sc-recent-searches`      | JSON string array (max 8)                              | On search            | On mount           |
+| What               | Location                               | Format                                                           | When Saved               | When Loaded        |
+| ------------------ | -------------------------------------- | ---------------------------------------------------------------- | ------------------------ | ------------------ |
+| Pinned entries     | `{app_data}/pinned_entries.bin`        | MessagePack binary                                               | On pin/unpin/groups      | On startup         |
+| Full history       | `{app_data}/history.bin`               | MessagePack binary                                               | Every 2s when dirty      | On startup         |
+| Image files        | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)                      | On push to history       | Via asset protocol |
+| Settings           | `{app_data}/settings.json`             | JSON object `{ key: value }`                                     | On `set_setting`         | On startup         |
+| Notes              | `{app_data}/notes.bin`                 | MessagePack binary                                               | Every 2s when dirty      | On startup         |
+| Boot ID            | `{app_data}/boot_id.txt`               | Plain text (boot epoch seconds)                                  | On startup               | On startup         |
+| Window geometry    | `{app_data}/window-state.json`         | `{ x, y, width, height, maximized }`                             | On every move/resize     | On startup         |
+| Theme preference   | `localStorage.sc-theme`                | `"dark"` or `"light"`                                            | On toggle                | On mount           |
+| Layout preference  | `localStorage.sc-layout`               | `"tiles"` or `"list"`                                            | On change                | On mount           |
+| Sort preference    | `localStorage.sc-sort`                 | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"`           | On change                | On mount           |
+| Paste slot count   | `localStorage.sc-paste-slots`          | `"3"` – `"10"`                                                   | On change                | On popup show      |
+| Group names        | `localStorage.sc-groups`               | JSON string array                                                | On group edits           | On mount           |
+| Group colors       | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                           | On color change          | On mount           |
+| Recent searches    | `localStorage.sc-recent-searches`      | JSON string array (max 8)                                        | On search                | On mount           |
+| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id }`                         | After each pull          | On sync init       |
+| Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update ops (encrypted content) | On mutation when offline | On reconnect       |
+| ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", "note:7": "..." }`             | After each push          | On sync init       |
 
 **Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.bin` every 2 seconds.
+
+**Sync note**: `sync_pending.json` and `id_map.json` are safe to delete — loss triggers a re-sync (duplicate entries are deduped on next push). `sync_state.json` loss causes a full re-pull from the server on next startup.
 
 ---
 
@@ -763,12 +997,12 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 
 ### Windows (tauri.conf.json)
 
-| Window            | Size    | Properties                                                                                              |
-| ----------------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| main              | 920×560 | Resizable (min 640×440), frameless, initially hidden (shown by window-state restore), dark bg `#0e0e0e` |
-| copy-popup        | 340×260 | Frameless, transparent, no shadow, always-on-top, skip taskbar, not resizable                           |
-| paste-popup       | 340×460 | Same as copy-popup                                                                                      |
-| notification      | 220×72  | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
+| Window       | Size    | Properties                                                                                              |
+| ------------ | ------- | ------------------------------------------------------------------------------------------------------- |
+| main         | 920×560 | Resizable (min 640×440), frameless, initially hidden (shown by window-state restore), dark bg `#0e0e0e` |
+| copy-popup   | 340×260 | Frameless, transparent, no shadow, always-on-top, skip taskbar, not resizable                           |
+| paste-popup  | 340×460 | Same as copy-popup                                                                                      |
+| notification | 220×72  | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
 
 ### Permissions (capabilities/default.json)
 
@@ -785,3 +1019,22 @@ Applied to all three windows:
 - **Prod**: `bun run build` → `tsc && vite build` → `dist/`
 - **Bundle**: NSIS installer (Windows)
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped symbols
+
+---
+
+## Cross-System Invariants
+
+The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee. The canonical list lives in `docs/ARCHITECTURE.md` (workspace root, §13); this is the app-side view.
+
+| #   | Invariant                                      | App-side implication                                                                                                                                                |
+| --- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Local store is always plaintext**            | `history.bin` and `notes.bin` must never be encrypted. Encryption boundary = network only.                                                                          |
+| 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                         |
+| 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                    |
+| 4   | **UMK never leaves the device**                | `derive_umk()` output is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.       |
+| 5   | **Tombstones always propagate**                | `delete_entry` command must call `SyncClient.on_delete_entry(id)` even when offline. The delete must be queued in `sync_pending.json`.                              |
+| 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_entry` call happens after `history.push()`, as a post-commit side-effect.             |
+| 7   | **Suppress flag is respected**                 | `SyncClient.on_new_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                  |
+| 8   | **Sync runtime never blocks the main runtime** | All `SyncClient` methods are `async` and run in the dedicated background Tokio runtime. Use `Handle::current().spawn()` — never `block_on` from the Tauri runtime.  |
+| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                |
+| 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable — the server deduplicates by `client_id`. |
