@@ -28,7 +28,7 @@ Docs may be stale. Confirm behavior from current code before making assumptions.
 
 ## Root Docs Directory Policy
 
-- Root `docs/` is a shared project context area and may be updated periodically.
+- Root `docs/` is a shared project context area and may be updated periodically. It also contains shared architecture between rust app and web backend.
 - Treat `docs/` content as planning/context guidance, not executable truth.
 - If root docs conflict with implementation, trust current code and report the mismatch (don't update/read unless asked and/or necessary).
 

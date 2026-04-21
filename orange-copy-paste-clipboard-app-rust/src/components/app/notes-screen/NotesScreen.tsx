@@ -5,14 +5,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../types";
 import {
   classifyFileEntry,
   filePaths,
   groupColor,
-  isImageFile,
-  resolveImageSrc,
   timeAgo,
   truncateText,
 } from "../../../types";
@@ -103,7 +100,7 @@ function sanitizeNotePreviewHtml(html: string): string {
     const embedId = el.getAttribute("data-clip-embed") ?? "";
     const chip = document.createElement("span");
     chip.className = "ns-preview-embed-chip";
-    chip.textContent = embedId ? `Clip #${embedId}` : "Clip reference";
+    chip.textContent = embedId ? `#${embedId}` : "Clip";
     el.replaceWith(chip);
   });
 
@@ -222,127 +219,62 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // Render clipboard embed placeholders.
   useEffect(() => {
     if (!editorRef.current) return;
-    editorRef.current
-      .querySelectorAll("[data-clip-embed]:not([data-rendered])")
-      .forEach((el) => {
-        const embedId = el.getAttribute("data-clip-embed") ?? "";
-        const host = el as HTMLElement;
-        host.setAttribute("data-rendered", "1");
-        const entry = entries.find((e) => e.id === embedId);
-        host.className = entry
-          ? "clip-embed"
-          : "clip-embed clip-embed--missing";
-        host.onclick = null;
-        host.replaceChildren();
+    editorRef.current.querySelectorAll("[data-clip-embed]").forEach((el) => {
+      const embedId = el.getAttribute("data-clip-embed") ?? "";
+      const host = el as HTMLElement;
+      const entry = entries.find((e) => e.id === embedId);
+      host.className = entry ? "clip-embed" : "clip-embed clip-embed--missing";
+      host.onclick = null;
+      host.replaceChildren();
+      const icon = document.createElement("span");
+      icon.className = "clip-embed-dot";
 
-        const header = document.createElement("div");
-        header.className = "clip-embed-header";
+      const text = document.createElement("span");
+      text.className = "clip-embed-text";
 
-        const title = document.createElement("span");
-        title.className = "clip-embed-title";
+      if (!entry) {
+        text.textContent = embedId ? `Missing #${embedId}` : "Missing clip";
+        text.classList.add("clip-embed-fallback");
+      } else {
+        const paths = entry.type === "file" ? filePaths(entry.content) : [];
+        const fileKind =
+          entry.type === "file" ? classifyFileEntry(entry.content) : "file";
+        const label =
+          entry.type === "image"
+            ? (entry.label ?? "Image")
+            : entry.type === "file"
+              ? fileKind === "image"
+                ? "Image file"
+                : paths[0]
+                  ? fileName(paths[0])
+                  : "File"
+              : truncateText(
+                  (entry.type === "html"
+                    ? stripHtml(entry.content)
+                    : entry.content
+                  )
+                    .replace(/\s+/g, " ")
+                    .trim(),
+                  34,
+                ) || "Clip";
+        text.textContent = label;
+      }
 
-        const kind = document.createElement("span");
-        kind.className = "clip-embed-kind";
-
-        const ts = document.createElement("span");
-        ts.className = "clip-embed-time";
-
-        const body = document.createElement("div");
-        body.className = "clip-embed-body";
-
-        if (!entry) {
-          title.textContent = "Missing clipboard reference";
-          kind.textContent = "missing";
-          ts.textContent = "";
-          body.textContent = `Reference #${embedId} no longer exists in history.`;
-          body.classList.add("clip-embed-fallback");
-        } else {
-          const paths = entry.type === "file" ? filePaths(entry.content) : [];
-          const fileKind =
-            entry.type === "file" ? classifyFileEntry(entry.content) : "file";
-
-          title.textContent =
-            entry.label?.trim() ||
-            (entry.type === "image"
-              ? "Embedded image"
-              : entry.type === "file"
-                ? "Embedded file"
-                : "Embedded clip");
-
-          if (entry.type === "file" && fileKind === "image") {
-            kind.textContent = "image set";
-          } else {
-            kind.textContent = entry.type;
-          }
-          ts.textContent = timeAgo(entry.timestamp);
-
-          if (entry.type === "image") {
-            const img = document.createElement("img");
-            img.className = "clip-embed-image";
-            img.alt = title.textContent;
-            img.src = resolveImageSrc(entry.content, convertFileSrc);
-            img.addEventListener(
-              "error",
-              () => {
-                img.remove();
-                body.textContent = "Image preview unavailable.";
-                body.classList.add("clip-embed-fallback");
-              },
-              { once: true },
-            );
-            body.appendChild(img);
-          } else if (entry.type === "file") {
-            const firstImagePath = paths.find((p) => isImageFile(p));
-            if (fileKind === "image" && firstImagePath) {
-              const img = document.createElement("img");
-              img.className = "clip-embed-image";
-              img.alt = fileName(firstImagePath);
-              img.src = convertFileSrc(firstImagePath);
-              img.addEventListener(
-                "error",
-                () => {
-                  img.remove();
-                  body.textContent = "Image preview unavailable.";
-                  body.classList.add("clip-embed-fallback");
-                },
-                { once: true },
-              );
-              body.appendChild(img);
-            } else {
-              const firstPath = paths[0] ?? "";
-              body.textContent = firstPath
-                ? `${fileName(firstPath)}${paths.length > 1 ? ` (+${paths.length - 1} more)` : ""}`
-                : "File reference";
-              body.classList.add("clip-embed-path");
-            }
-          } else {
-            const source =
-              entry.type === "html" ? stripHtml(entry.content) : entry.content;
-            body.textContent =
-              truncateText(source.replace(/\s+/g, " ").trim(), 220) ||
-              "(Empty clip)";
-          }
-        }
-
-        header.append(title, kind, ts);
-        host.append(header, body);
-      });
+      host.append(icon, text);
+    });
   });
 
   // Render group reference placeholders.
   useEffect(() => {
     if (!editorRef.current) return;
-    editorRef.current
-      .querySelectorAll("[data-group-ref]:not([data-rendered])")
-      .forEach((el) => {
-        const groupName = el.getAttribute("data-group-ref")!;
-        el.setAttribute("data-rendered", "1");
-        const c = groupColor(groupName);
-        el.className = "group-embed";
-        (el as HTMLElement).style.background = c.bg;
-        (el as HTMLElement).style.color = c.fg;
-        el.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block;flex-shrink:0;opacity:0.8"></span>${groupName}`;
-      });
+    editorRef.current.querySelectorAll("[data-group-ref]").forEach((el) => {
+      const groupName = el.getAttribute("data-group-ref")!;
+      const c = groupColor(groupName);
+      el.className = "group-embed";
+      (el as HTMLElement).style.background = c.bg;
+      (el as HTMLElement).style.color = c.fg;
+      el.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block;flex-shrink:0;opacity:0.8"></span>${groupName}`;
+    });
   });
 
   // Load content when note changes.
@@ -484,7 +416,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       document.execCommand(
         "insertHTML",
         false,
-        `<div data-clip-embed="${id}" contenteditable="false">[clip:${id}]</div><p><br></p>`,
+        `<span data-clip-embed="${id}" contenteditable="false">[clip:${id}]</span>&nbsp;`,
       );
       scheduleSave();
       setShowEmbedPicker(false);

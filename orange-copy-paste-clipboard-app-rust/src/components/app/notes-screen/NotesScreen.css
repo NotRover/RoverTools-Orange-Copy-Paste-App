@@ -393,25 +393,26 @@
 .ns-card-preview--rich .ns-preview-group-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin: 0 4px 4px 0;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10.5px;
+  gap: 5px;
+  margin: 0 5px 5px 0;
+  padding: 2px 8px 2px 6px;
+  border-radius: 5px;
+  font-size: 10px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.1;
+  letter-spacing: 0.15px;
   vertical-align: middle;
 }
 
 .ns-card-preview--rich .ns-preview-embed-chip {
-  border: 1px solid color-mix(in srgb, var(--border-light) 88%, var(--accent));
-  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
-  color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
+  background: color-mix(in srgb, var(--surface) 94%, var(--bg));
+  color: var(--text-muted);
 }
 
 .ns-card-preview--rich .ns-preview-group-chip {
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
   color: var(--accent);
 }
 
@@ -1162,14 +1163,8 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 30px 36px;
-  background:
-    radial-gradient(
-      180% 100% at 50% -30%,
-      color-mix(in srgb, var(--accent) 10%, transparent) 0%,
-      transparent 62%
-    ),
-    var(--surface);
+  padding: 24px 32px;
+  background: var(--surface);
 }
 
 .ns-editor-content::-webkit-scrollbar {
@@ -1197,8 +1192,8 @@
 .ns-richtext {
   min-height: 100%;
   outline: none;
-  font-size: 15px;
-  line-height: 1.86;
+  font-size: 14px;
+  line-height: 1.72;
   max-width: 720px;
   margin: 0 auto;
   color: var(--text);
@@ -1285,92 +1280,54 @@
 /* ── Embedded references inside note content ─────────────────────── */
 
 .clip-embed {
-  display: block;
-  margin: 9px 0 11px;
-  padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--border) 86%, var(--accent));
-  border-left: 3px solid color-mix(in srgb, var(--accent) 78%, var(--border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
-  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 5px 5px 0;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, var(--accent));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 95%, var(--bg));
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.15px;
   cursor: default;
   user-select: none;
+  vertical-align: middle;
 }
 
 .clip-embed--missing {
-  border-left-color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--border) 86%, var(--text-muted));
   opacity: 0.8;
 }
 
-.clip-embed-header {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 5px;
+.clip-embed-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+  flex-shrink: 0;
 }
 
-.clip-embed-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text);
-  min-width: 0;
+.clip-embed-text {
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.clip-embed-kind {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.clip-embed-time {
-  font-size: 10px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.clip-embed-body {
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.clip-embed-image {
-  display: block;
-  width: 100%;
-  max-height: 190px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 90%, #000);
-}
-
-.clip-embed-path,
 .clip-embed-fallback {
-  color: var(--text-muted);
   font-style: italic;
 }
 
 .group-embed {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 6px 1px 5px;
-  border-radius: 4px;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 5px;
   font-size: 10.5px;
   font-weight: 600;
   vertical-align: middle;
