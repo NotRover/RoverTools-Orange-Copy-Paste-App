@@ -1,0 +1,301 @@
+/* ── Note card (matches .entry-card exactly) ─────────────────────── */
+
+.ns-card {
+  break-inside: avoid;
+  margin-bottom: 10px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+  animation: nsCardFadeIn 0.18s ease-out;
+}
+
+.ns-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: var(--border-light);
+}
+
+@keyframes nsCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Card body */
+.ns-card-body {
+  padding: 10px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ns-card-title {
+  font-size: 13.5px;
+  font-weight: 750;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.ns-card-preview {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  word-break: break-word;
+  display: block;
+  max-height: 196px;
+  position: relative;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, #000 0%, #000 82%, transparent 100%);
+}
+
+.ns-card-preview--rich {
+  display: block;
+  max-height: 220px;
+  line-height: 1.4;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  -webkit-box-orient: initial;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 84%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
+}
+
+.ns-card-preview--rich p,
+.ns-card-preview--rich div,
+.ns-card-preview--rich blockquote,
+.ns-card-preview--rich pre {
+  margin: 0 0 0.25em;
+}
+
+.ns-card-preview--rich ul,
+.ns-card-preview--rich ol {
+  margin: 0.2em 0 0.25em 1.1em;
+  padding: 0;
+}
+
+.ns-card-preview--rich img {
+  max-width: 100%;
+  max-height: 118px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.ns-card-preview--rich table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.ns-card-preview--expanded,
+.ns-grid--list .ns-card-preview--expanded {
+  max-height: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.ns-card-preview--rich th,
+.ns-card-preview--rich td {
+  border: 1px solid var(--border);
+  padding: 2px 4px;
+}
+
+.ns-card-preview--rich .ns-preview-embed-chip,
+.ns-card-preview--rich .ns-preview-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 5px 5px 0;
+  padding: 2px 8px 2px 6px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.15px;
+  vertical-align: middle;
+}
+
+.ns-card-preview--rich .ns-preview-embed-chip {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
+  background: color-mix(in srgb, var(--surface) 94%, var(--bg));
+  color: var(--text-muted);
+}
+
+.ns-card-preview--rich .ns-preview-group-chip {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  color: var(--accent);
+}
+
+.ns-card-preview--rich .ns-preview-embed-chip--missing {
+  opacity: 0.6;
+  border-style: dashed;
+  font-style: italic;
+}
+
+/* Card footer */
+.ns-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ns-card-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ns-card-time {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ns-card-time--pinned {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Type chip for note groups */
+.ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.ns-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ns-chip-label {
+  line-height: 1;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Delete button on card (appears on hover) */
+.ns-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.14s ease;
+  box-shadow: var(--shadow-sm);
+}
+.ns-card:hover .ns-card-delete {
+  opacity: 1;
+}
+.ns-card-delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* Selection styles */
+
+.ns-card--selectable {
+  cursor: pointer;
+}
+
+.ns-card--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.ns-card--selected:hover {
+  transform: none;
+}
+
+.ns-card-checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-light);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+  pointer-events: none;
+}
+
+.ns-card--selected .ns-card-checkbox {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ns-card-checkbox svg {
+  opacity: 0;
+  color: #fff;
+  transition: opacity 0.1s ease;
+}
+
+.ns-card--selected .ns-card-checkbox svg {
+  opacity: 1;
+}
