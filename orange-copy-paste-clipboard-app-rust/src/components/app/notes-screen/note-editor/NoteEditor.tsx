@@ -144,6 +144,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [linkUrl, setLinkUrl] = useState("");
   const linkPickerRef = useRef<HTMLDivElement>(null);
   const selectedEmbedRef = useRef<HTMLElement | null>(null);
+  const selectedEmbedsRef = useRef<Set<HTMLElement>>(new Set());
   const activeResizeCleanupRef = useRef<(() => void) | null>(null);
   // Saved cursor range — captured when a picker opens so we can restore it on insert.
   const savedRangeRef = useRef<Range | null>(null);
@@ -162,8 +163,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, []);
 
   const clearSelectedEmbed = useCallback(() => {
-    if (!selectedEmbedRef.current) return;
-    selectedEmbedRef.current.classList.remove("ns-embed--selected");
+    selectedEmbedsRef.current.forEach((el) =>
+      el.classList.remove("ns-embed--selected"),
+    );
+    selectedEmbedsRef.current.clear();
     selectedEmbedRef.current = null;
   }, []);
 
@@ -207,10 +210,28 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   );
 
   const selectEmbedHost = useCallback(
-    (host: HTMLElement) => {
-      clearSelectedEmbed();
-      host.classList.add("ns-embed--selected");
-      selectedEmbedRef.current = host;
+    (host: HTMLElement, additive: boolean) => {
+      if (additive) {
+        if (selectedEmbedsRef.current.has(host)) {
+          host.classList.remove("ns-embed--selected");
+          selectedEmbedsRef.current.delete(host);
+          if (selectedEmbedRef.current === host) {
+            selectedEmbedRef.current = null;
+            selectedEmbedsRef.current.forEach((el) => {
+              selectedEmbedRef.current = el;
+            });
+          }
+        } else {
+          host.classList.add("ns-embed--selected");
+          selectedEmbedsRef.current.add(host);
+          selectedEmbedRef.current = host;
+        }
+      } else {
+        clearSelectedEmbed();
+        host.classList.add("ns-embed--selected");
+        selectedEmbedsRef.current.add(host);
+        selectedEmbedRef.current = host;
+      }
 
       const sel = window.getSelection();
       if (!sel) return;
@@ -237,12 +258,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             ? "clip-embed--file"
             : "";
       const isBlock = embedMode === "block" && !!entry;
+      const isSelected = selectedEmbedsRef.current.has(host);
       host.className = ["clip-embed", typeClass, isBlock && "clip-embed--block"]
         .filter(Boolean)
         .join(" ");
+      if (isSelected) host.classList.add("ns-embed--selected");
       host.setAttribute("contenteditable", "false");
       applyEmbedDimensions(host);
       host.replaceChildren();
+      host.classList.remove("clip-embed--scrollable");
 
       const appendResizeHandle = () => {
         const handle = document.createElement("span");
@@ -329,6 +353,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
         host.append(header, body);
         appendResizeHandle();
+
+        requestAnimationFrame(() => {
+          const hasOverflow = body.scrollHeight > body.clientHeight + 1;
+          host.classList.toggle("clip-embed--scrollable", hasOverflow);
+        });
       } else {
         const text = document.createElement("span");
         text.className = "clip-embed-text";
@@ -358,6 +387,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     const groupName = host.getAttribute("data-group-ref") ?? "Group";
     const c = groupColor(groupName);
     host.className = "group-embed";
+    if (selectedEmbedsRef.current.has(host)) {
+      host.classList.add("ns-embed--selected");
+    }
     host.setAttribute("contenteditable", "false");
     host.style.setProperty("background", c.bg);
     host.style.setProperty("color", c.fg);
@@ -519,6 +551,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         host.style.height = `${heightPx}px`;
         host.setAttribute("data-embed-width", String(widthPx));
         host.setAttribute("data-embed-height", String(heightPx));
+
+        if (host.classList.contains("clip-embed--block")) {
+          const body = host.querySelector(
+            ".clip-embed-block-body",
+          ) as HTMLElement | null;
+          const hasOverflow =
+            !!body && body.scrollHeight > body.clientHeight + 1;
+          host.classList.toggle("clip-embed--scrollable", hasOverflow);
+        }
       };
 
       const cleanup = () => {
@@ -1132,7 +1173,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               ) as HTMLElement | null;
               if (host) {
                 e.preventDefault();
-                selectEmbedHost(host);
+                selectEmbedHost(host, e.ctrlKey || e.metaKey || e.shiftKey);
               } else {
                 clearSelectedEmbed();
               }
@@ -1159,25 +1200,48 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             }}
             onKeyDown={(e) => {
               if (
-                selectedEmbedRef.current &&
+                selectedEmbedsRef.current.size > 0 &&
                 (e.key === "ArrowLeft" || e.key === "ArrowRight")
               ) {
                 e.preventDefault();
+                let target = selectedEmbedRef.current;
+                if (!target) {
+                  selectedEmbedsRef.current.forEach((el) => {
+                    target = el;
+                  });
+                }
+
+                if (selectedEmbedsRef.current.size > 1 && editorRef.current) {
+                  const orderedHosts = Array.from(
+                    editorRef.current.querySelectorAll(
+                      "[data-clip-embed], [data-group-ref]",
+                    ),
+                  ) as HTMLElement[];
+                  const selectedHosts = orderedHosts.filter((el) =>
+                    selectedEmbedsRef.current.has(el),
+                  );
+                  target =
+                    e.key === "ArrowLeft"
+                      ? (selectedHosts[0] ?? target)
+                      : (selectedHosts[selectedHosts.length - 1] ?? target);
+                }
+
+                if (!target) return;
                 placeCaretNearEmbed(
-                  selectedEmbedRef.current,
+                  target,
                   e.key === "ArrowLeft" ? "before" : "after",
                 );
                 return;
               }
 
               if (
-                selectedEmbedRef.current &&
+                selectedEmbedsRef.current.size > 0 &&
                 (e.key === "Backspace" || e.key === "Delete")
               ) {
                 e.preventDefault();
-                const selected = selectedEmbedRef.current;
+                const selected = Array.from(selectedEmbedsRef.current);
                 clearSelectedEmbed();
-                selected.remove();
+                selected.forEach((el) => el.remove());
                 scheduleSave();
               }
             }}
