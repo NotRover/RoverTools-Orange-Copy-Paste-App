@@ -129,6 +129,10 @@
   }
 }
 
+.notes-screen-root--editing .ns-grid {
+  columns: 2;
+}
+
 /* ── Section labels (Pinned / Notes dividers) ────────────────────── */
 
 .ns-section-label {
@@ -353,7 +357,7 @@
 .ns-card-preview--rich div,
 .ns-card-preview--rich blockquote,
 .ns-card-preview--rich pre {
-  margin: 0 0 0.25em;
+  margin: 0 0 0.4em;
 }
 
 .ns-card-preview--rich ul,
@@ -394,7 +398,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin: 0 5px 5px 0;
+  margin: 0 4px 0 0;
   padding: 2px 8px 2px 6px;
   border-radius: 5px;
   font-size: 10px;
