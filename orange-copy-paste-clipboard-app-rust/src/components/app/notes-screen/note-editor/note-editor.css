@@ -727,6 +727,10 @@
   overflow: hidden;
 }
 
+.clip-embed--block.clip-embed--scrollable {
+  padding-bottom: 16px;
+}
+
 .clip-embed-block-header {
   display: flex;
   align-items: center;
@@ -755,9 +759,14 @@
   color: var(--text-secondary);
   max-height: 160px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   white-space: pre-wrap;
   word-break: break-word;
   letter-spacing: 0;
+}
+
+.clip-embed--block.clip-embed--scrollable .clip-embed-block-body {
+  margin-bottom: 4px;
 }
 
 .clip-embed-block-body--image {
@@ -929,9 +938,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow:
+  /* box-shadow:
     0 0 0 1px color-mix(in srgb, var(--surface) 90%, transparent),
-    0 1px 2px rgba(0, 0, 0, 0.24);
+    0 1px 2px rgba(0, 0, 0, 0.24); */
   transition:
     opacity 0.12s ease,
     transform 0.12s ease,
@@ -943,6 +952,10 @@
 .clip-embed--block .embed-resize-handle {
   right: 4px;
   bottom: 4px;
+}
+
+.clip-embed--block.clip-embed--scrollable .embed-resize-handle {
+  bottom: 2px;
 }
 
 .embed-resize-handle svg {
@@ -958,12 +971,12 @@
 .ns-embed--resizing .embed-resize-handle {
   opacity: 1;
   background: transparent;
-  border-color: color-mix(in srgb, var(--accent) 90%, currentColor 10%);
+  /* border-color: color-mix(in srgb, var(--accent) 90%, currentColor 10%); */
   color: color-mix(in srgb, var(--accent) 94%, var(--text));
-  box-shadow:
+  /* box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent),
-    0 1px 3px rgba(0, 0, 0, 0.28);
-  transform: translate(-1px, -1px) scale(1.04);
+    0 1px 3px rgba(0, 0, 0, 0.28); */
+  transform: scale(1.08);
 }
 
 .ns-richtext .ns-embed--selected {
