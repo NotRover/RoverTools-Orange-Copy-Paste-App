@@ -272,7 +272,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         const handle = document.createElement("span");
         handle.className = "embed-resize-handle";
         handle.setAttribute("data-embed-resize-handle", "true");
-        handle.title = "Drag to resize";
+        handle.setAttribute("data-tooltip", "Drag to resize");
+        handle.setAttribute("data-tooltip-pos", "left");
         handle.innerHTML = SVG_RESIZE_GRIP;
         host.append(handle);
       };
@@ -404,7 +405,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     const handle = document.createElement("span");
     handle.className = "embed-resize-handle";
     handle.setAttribute("data-embed-resize-handle", "true");
-    handle.title = "Drag to resize";
+    handle.setAttribute("data-tooltip", "Drag to resize");
+    handle.setAttribute("data-tooltip-pos", "left");
     handle.innerHTML = SVG_RESIZE_GRIP;
 
     host.append(dot, label, handle);
