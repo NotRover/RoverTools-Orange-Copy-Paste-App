@@ -760,9 +760,58 @@
   max-height: 160px;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: var(--border-light) var(--bg);
   white-space: pre-wrap;
   word-break: break-word;
   letter-spacing: 0;
+}
+
+.clip-embed-block-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.clip-embed-block-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.clip-embed-block-body::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
+.clip-embed-block-body::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
+.clip-embed-block-body::-webkit-scrollbar-button {
+  -webkit-appearance: none;
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.clip-embed-block-body::-webkit-scrollbar-button:single-button,
+.clip-embed-block-body::-webkit-scrollbar-button:vertical:decrement,
+.clip-embed-block-body::-webkit-scrollbar-button:vertical:increment,
+.clip-embed-block-body::-webkit-scrollbar-button:vertical:start:decrement,
+.clip-embed-block-body::-webkit-scrollbar-button:vertical:end:increment,
+.clip-embed-block-body::-webkit-scrollbar-button:horizontal:decrement,
+.clip-embed-block-body::-webkit-scrollbar-button:horizontal:increment,
+.clip-embed-block-body::-webkit-scrollbar-button:horizontal:start:decrement,
+.clip-embed-block-body::-webkit-scrollbar-button:horizontal:end:increment {
+  -webkit-appearance: none;
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.clip-embed-block-body::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .clip-embed--block.clip-embed--scrollable .clip-embed-block-body {
@@ -955,6 +1004,7 @@
 }
 
 .clip-embed--block.clip-embed--scrollable .embed-resize-handle {
+  right: 12px;
   bottom: 2px;
 }
 
