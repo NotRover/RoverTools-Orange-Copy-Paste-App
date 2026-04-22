@@ -65,6 +65,33 @@ function queryFormatState(): FormatState {
   };
 }
 
+const EMBED_MIN_WIDTH = 72;
+const EMBED_MIN_HEIGHT = 22;
+
+function parseEmbedDimension(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function applyEmbedDimensions(host: HTMLElement): void {
+  const width = parseEmbedDimension(host.getAttribute("data-embed-width"));
+  const height = parseEmbedDimension(host.getAttribute("data-embed-height"));
+
+  if (width) {
+    host.style.width = `${Math.round(width)}px`;
+  } else {
+    host.style.removeProperty("width");
+  }
+
+  if (height) {
+    host.style.height = `${Math.round(height)}px`;
+  } else {
+    host.style.removeProperty("height");
+  }
+}
+
 // ── Inline SVG strings for clip-embed type icons ─────────────────────
 
 const SVG_IMAGE = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/><path d="M21 15l-5-5L5 21"/></svg>`;
@@ -73,6 +100,7 @@ const SVG_TEXT = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stro
 const SVG_MISSING = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.5" fill="currentColor" stroke="none"/></svg>`;
 const SVG_EXPAND = `<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
 const SVG_COLLAPSE = `<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`;
+const SVG_RESIZE_GRIP = `<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 9L9 3"/><path d="M6 9L9 6"/><path d="M9 9L9 9"/></svg>`;
 
 // ── NoteEditor Component ────────────────────────────────────────────
 
@@ -115,6 +143,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showLinkPicker, setShowLinkPicker] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const linkPickerRef = useRef<HTMLDivElement>(null);
+  const selectedEmbedRef = useRef<HTMLElement | null>(null);
+  const activeResizeCleanupRef = useRef<(() => void) | null>(null);
   // Saved cursor range — captured when a picker opens so we can restore it on insert.
   const savedRangeRef = useRef<Range | null>(null);
   void onCopyEntry;
@@ -130,6 +160,67 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     document.addEventListener("selectionchange", update);
     return () => document.removeEventListener("selectionchange", update);
   }, []);
+
+  const clearSelectedEmbed = useCallback(() => {
+    if (!selectedEmbedRef.current) return;
+    selectedEmbedRef.current.classList.remove("ns-embed--selected");
+    selectedEmbedRef.current = null;
+  }, []);
+
+  const withPreservedEditorScroll = useCallback((fn: () => void) => {
+    const scrollHost = editorRef.current?.closest(
+      ".ns-editor-content",
+    ) as HTMLElement | null;
+    const prevTop = scrollHost?.scrollTop ?? 0;
+    const prevLeft = scrollHost?.scrollLeft ?? 0;
+    fn();
+    if (!scrollHost) return;
+    requestAnimationFrame(() => {
+      scrollHost.scrollTop = prevTop;
+      scrollHost.scrollLeft = prevLeft;
+    });
+  }, []);
+
+  const placeCaretNearEmbed = useCallback(
+    (host: HTMLElement, side: "before" | "after") => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const sel = window.getSelection();
+      if (!sel) return;
+
+      withPreservedEditorScroll(() => {
+        editor.focus({ preventScroll: true });
+        const range = document.createRange();
+        if (side === "before") {
+          range.setStartBefore(host);
+        } else {
+          range.setStartAfter(host);
+        }
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      });
+
+      clearSelectedEmbed();
+    },
+    [clearSelectedEmbed, withPreservedEditorScroll],
+  );
+
+  const selectEmbedHost = useCallback(
+    (host: HTMLElement) => {
+      clearSelectedEmbed();
+      host.classList.add("ns-embed--selected");
+      selectedEmbedRef.current = host;
+
+      const sel = window.getSelection();
+      if (!sel) return;
+      const range = document.createRange();
+      range.selectNode(host);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+    [clearSelectedEmbed],
+  );
 
   // Render a single clipboard embed host element (inline chip or block card).
   const renderClipEmbed = useCallback(
@@ -149,7 +240,18 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       host.className = ["clip-embed", typeClass, isBlock && "clip-embed--block"]
         .filter(Boolean)
         .join(" ");
+      host.setAttribute("contenteditable", "false");
+      applyEmbedDimensions(host);
       host.replaceChildren();
+
+      const appendResizeHandle = () => {
+        const handle = document.createElement("span");
+        handle.className = "embed-resize-handle";
+        handle.setAttribute("data-embed-resize-handle", "true");
+        handle.title = "Drag to resize";
+        handle.innerHTML = SVG_RESIZE_GRIP;
+        host.append(handle);
+      };
 
       const mkIcon = (svgStr: string): HTMLElement => {
         const s = document.createElement("span");
@@ -226,6 +328,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         }
 
         host.append(header, body);
+        appendResizeHandle();
       } else {
         const text = document.createElement("span");
         text.className = "clip-embed-text";
@@ -245,10 +348,35 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         toggle.innerHTML = SVG_EXPAND;
 
         host.append(mkIcon(entryIconSvg), text, toggle);
+        appendResizeHandle();
       }
     },
     [entries],
   );
+
+  const renderGroupEmbed = useCallback((host: HTMLElement) => {
+    const groupName = host.getAttribute("data-group-ref") ?? "Group";
+    const c = groupColor(groupName);
+    host.className = "group-embed";
+    host.setAttribute("contenteditable", "false");
+    host.style.setProperty("background", c.bg);
+    host.style.setProperty("color", c.fg);
+    applyEmbedDimensions(host);
+    host.replaceChildren();
+
+    const dot = document.createElement("span");
+    dot.className = "group-embed-dot";
+    const label = document.createElement("span");
+    label.className = "group-embed-label";
+    label.textContent = groupName;
+    const handle = document.createElement("span");
+    handle.className = "embed-resize-handle";
+    handle.setAttribute("data-embed-resize-handle", "true");
+    handle.title = "Drag to resize";
+    handle.innerHTML = SVG_RESIZE_GRIP;
+
+    host.append(dot, label, handle);
+  }, []);
 
   // Re-render all clip embeds whenever entries change.
   useEffect(() => {
@@ -256,26 +384,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     editorRef.current.querySelectorAll("[data-clip-embed]").forEach((el) => {
       renderClipEmbed(el as HTMLElement);
     });
-  }, [renderClipEmbed]);
+  }, [note.id, note.content, renderClipEmbed]);
 
   // Render group reference placeholders.
   useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.querySelectorAll("[data-group-ref]").forEach((el) => {
-      const groupName = el.getAttribute("data-group-ref")!;
-      const c = groupColor(groupName);
-      const host = el as HTMLElement;
-      host.className = "group-embed";
-      host.style.cssText = `background:${c.bg};color:${c.fg};`;
-      host.replaceChildren();
-      const dot = document.createElement("span");
-      dot.className = "group-embed-dot";
-      const label = document.createElement("span");
-      label.className = "group-embed-label";
-      label.textContent = groupName;
-      host.append(dot, label);
+      renderGroupEmbed(el as HTMLElement);
     });
-  });
+  }, [note.id, note.content, renderGroupEmbed]);
 
   // Load content when note changes.
   useEffect(() => {
@@ -369,12 +486,80 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     }, 500);
   }, [note.id, onUpdate]);
 
+  const beginEmbedResize = useCallback(
+    (host: HTMLElement, startEvent: React.MouseEvent<HTMLElement>) => {
+      if (activeResizeCleanupRef.current) {
+        activeResizeCleanupRef.current();
+      }
+      clearSelectedEmbed();
+
+      const rect = host.getBoundingClientRect();
+      const startX = startEvent.clientX;
+      const startY = startEvent.clientY;
+      const startWidth = Math.max(EMBED_MIN_WIDTH, rect.width);
+      const startHeight = Math.max(EMBED_MIN_HEIGHT, rect.height);
+      const minWidth = host.classList.contains("clip-embed--block")
+        ? 180
+        : EMBED_MIN_WIDTH;
+      const minHeight = host.classList.contains("clip-embed--block")
+        ? 44
+        : EMBED_MIN_HEIGHT;
+
+      host.classList.add("ns-embed--resizing");
+
+      const onMove = (e: MouseEvent) => {
+        const nextWidth = Math.max(minWidth, startWidth + e.clientX - startX);
+        const nextHeight = Math.max(
+          minHeight,
+          startHeight + e.clientY - startY,
+        );
+        const widthPx = Math.round(nextWidth);
+        const heightPx = Math.round(nextHeight);
+        host.style.width = `${widthPx}px`;
+        host.style.height = `${heightPx}px`;
+        host.setAttribute("data-embed-width", String(widthPx));
+        host.setAttribute("data-embed-height", String(heightPx));
+      };
+
+      const cleanup = () => {
+        host.classList.remove("ns-embed--resizing");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        if (activeResizeCleanupRef.current === cleanup) {
+          activeResizeCleanupRef.current = null;
+        }
+      };
+
+      const onUp = () => {
+        cleanup();
+        scheduleSave();
+      };
+
+      activeResizeCleanupRef.current = cleanup;
+      document.body.style.cursor = "nwse-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [clearSelectedEmbed, scheduleSave],
+  );
+
   useEffect(
     () => () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (activeResizeCleanupRef.current) {
+        activeResizeCleanupRef.current();
+      }
+      clearSelectedEmbed();
     },
-    [],
+    [clearSelectedEmbed],
   );
+
+  useEffect(() => {
+    clearSelectedEmbed();
+  }, [note.id, clearSelectedEmbed]);
 
   // Flush before leaving.
   useEffect(() => {
@@ -430,7 +615,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const restoreSavedRange = useCallback((): boolean => {
     const editor = editorRef.current;
     if (!editor) return false;
-    editor.focus();
+    editor.focus({ preventScroll: true });
     const saved = savedRangeRef.current;
     if (!saved) return false;
     savedRangeRef.current = null;
@@ -445,41 +630,44 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     (span: HTMLElement) => {
       const editor = editorRef.current;
       if (!editor) return;
-      if (!restoreSavedRange()) editor.focus();
-      const sel = window.getSelection();
-      if (
-        sel &&
-        sel.rangeCount > 0 &&
-        editor.contains(sel.getRangeAt(0).commonAncestorContainer)
-      ) {
-        const range = sel.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(span);
-        const space = document.createTextNode("\u00a0");
-        span.after(space);
-        range.setStart(space, 1);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } else {
-        editor.appendChild(span);
-        editor.appendChild(document.createTextNode("\u00a0"));
-      }
+      withPreservedEditorScroll(() => {
+        if (!restoreSavedRange()) editor.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        if (
+          sel &&
+          sel.rangeCount > 0 &&
+          editor.contains(sel.getRangeAt(0).commonAncestorContainer)
+        ) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(span);
+          const space = document.createTextNode("\u00a0");
+          span.after(space);
+          range.setStart(space, 1);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          editor.appendChild(span);
+          editor.appendChild(document.createTextNode("\u00a0"));
+        }
+      });
     },
-    [restoreSavedRange],
+    [restoreSavedRange, withPreservedEditorScroll],
   );
 
   const insertClipEmbed = useCallback(
     (id: string) => {
       const span = document.createElement("span");
       span.setAttribute("data-clip-embed", id);
+      span.setAttribute("data-embed-mode", "inline");
       span.setAttribute("contenteditable", "false");
-      span.textContent = `[clip:${id}]`;
+      renderClipEmbed(span);
       insertInlineSpan(span);
       scheduleSave();
       setShowEmbedPicker(false);
     },
-    [insertInlineSpan, scheduleSave],
+    [insertInlineSpan, renderClipEmbed, scheduleSave],
   );
 
   const insertGroupEmbed = useCallback(
@@ -487,12 +675,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       const span = document.createElement("span");
       span.setAttribute("data-group-ref", group);
       span.setAttribute("contenteditable", "false");
-      span.textContent = `[#${group}]`;
+      renderGroupEmbed(span);
       insertInlineSpan(span);
       scheduleSave();
       setShowEmbedPicker(false);
     },
-    [insertInlineSpan, scheduleSave],
+    [insertInlineSpan, renderGroupEmbed, scheduleSave],
   );
 
   const insertLink = useCallback(
@@ -500,23 +688,25 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       if (!url.trim()) return;
       const editor = editorRef.current;
       if (!editor) return;
-      if (!restoreSavedRange()) editor.focus();
-      const sel = window.getSelection();
-      const hasSelection = sel && !sel.isCollapsed;
-      if (hasSelection) {
-        document.execCommand("createLink", false, url.trim());
-      } else {
-        document.execCommand(
-          "insertHTML",
-          false,
-          `<a href="${url.trim()}" target="_blank" rel="noopener noreferrer">${url.trim()}</a>`,
-        );
-      }
+      withPreservedEditorScroll(() => {
+        if (!restoreSavedRange()) editor.focus({ preventScroll: true });
+        const sel = window.getSelection();
+        const hasSelection = sel && !sel.isCollapsed;
+        if (hasSelection) {
+          document.execCommand("createLink", false, url.trim());
+        } else {
+          document.execCommand(
+            "insertHTML",
+            false,
+            `<a href="${url.trim()}" target="_blank" rel="noopener noreferrer">${url.trim()}</a>`,
+          );
+        }
+      });
       scheduleSave();
       setShowLinkPicker(false);
       setLinkUrl("");
     },
-    [restoreSavedRange, scheduleSave],
+    [restoreSavedRange, scheduleSave, withPreservedEditorScroll],
   );
 
   const toggleGroup = useCallback(
@@ -921,6 +1111,32 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             className="ns-richtext"
             contentEditable
             suppressContentEditableWarning
+            onMouseDown={(e) => {
+              const target = e.target as HTMLElement;
+              const resizeHandle = target.closest("[data-embed-resize-handle]");
+              if (resizeHandle) {
+                const host = resizeHandle.closest(
+                  "[data-clip-embed], [data-group-ref]",
+                ) as HTMLElement | null;
+                if (host) {
+                  e.preventDefault();
+                  beginEmbedResize(host, e);
+                  return;
+                }
+              }
+
+              if (target.closest(".clip-embed-toggle")) return;
+
+              const host = target.closest(
+                "[data-clip-embed], [data-group-ref]",
+              ) as HTMLElement | null;
+              if (host) {
+                e.preventDefault();
+                selectEmbedHost(host);
+              } else {
+                clearSelectedEmbed();
+              }
+            }}
             onClick={(e) => {
               const toggle = (e.target as HTMLElement).closest(
                 ".clip-embed-toggle",
@@ -939,6 +1155,30 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   renderClipEmbed(host);
                   scheduleSave();
                 }
+              }
+            }}
+            onKeyDown={(e) => {
+              if (
+                selectedEmbedRef.current &&
+                (e.key === "ArrowLeft" || e.key === "ArrowRight")
+              ) {
+                e.preventDefault();
+                placeCaretNearEmbed(
+                  selectedEmbedRef.current,
+                  e.key === "ArrowLeft" ? "before" : "after",
+                );
+                return;
+              }
+
+              if (
+                selectedEmbedRef.current &&
+                (e.key === "Backspace" || e.key === "Delete")
+              ) {
+                e.preventDefault();
+                const selected = selectedEmbedRef.current;
+                clearSelectedEmbed();
+                selected.remove();
+                scheduleSave();
               }
             }}
             onInput={() => {
