@@ -1175,7 +1175,16 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               ) as HTMLElement | null;
               if (host) {
                 e.preventDefault();
-                selectEmbedHost(host, e.ctrlKey || e.metaKey || e.shiftKey);
+                // Left 22% → cursor before, right 22% → cursor after, middle → select
+                const rect = host.getBoundingClientRect();
+                const fraction = (e.clientX - rect.left) / rect.width;
+                if (fraction < 0.22) {
+                  placeCaretNearEmbed(host, "before");
+                } else if (fraction > 0.78) {
+                  placeCaretNearEmbed(host, "after");
+                } else {
+                  selectEmbedHost(host, e.ctrlKey || e.metaKey || e.shiftKey);
+                }
               } else {
                 clearSelectedEmbed();
               }

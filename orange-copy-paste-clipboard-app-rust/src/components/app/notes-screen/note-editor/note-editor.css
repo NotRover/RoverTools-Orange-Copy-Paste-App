@@ -619,8 +619,18 @@
   letter-spacing: -0.01em;
 }
 
+/* Default block created by contenteditable on Enter — same rhythm as p */
+.ns-richtext > div {
+  line-height: 1.72;
+  margin: 0;
+  min-height: 1.72em;
+  color: var(--text);
+}
+
 .ns-richtext p {
-  margin: 0 0 8px;
+  margin: 0;
+  line-height: 1.72;
+  min-height: 1.72em;
 }
 
 .ns-richtext ul,
@@ -630,6 +640,10 @@
 }
 .ns-richtext ul li::marker {
   color: var(--accent);
+}
+.ns-richtext li {
+  line-height: 1.72;
+  margin: 1px 0;
 }
 
 .ns-richtext blockquote {
@@ -759,55 +773,39 @@
   color: var(--text-secondary);
   max-height: 160px;
   overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-width: auto;
-  scrollbar-color: var(--border-light) var(--bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
   white-space: pre-wrap;
   word-break: break-word;
   letter-spacing: 0;
 }
 
 .clip-embed-block-body::-webkit-scrollbar {
-  width: 10px;
+  width: 6px;
 }
 
 .clip-embed-block-body::-webkit-scrollbar-track {
   background: transparent;
+  border-radius: 999px;
 }
 
 .clip-embed-block-body::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 999px;
-  border: 3px solid var(--bg);
+  border: 1px solid transparent;
   background-clip: padding-box;
 }
 
 .clip-embed-block-body::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
-  border: 3px solid var(--bg);
+  border: 1px solid transparent;
   background-clip: padding-box;
 }
 
 .clip-embed-block-body::-webkit-scrollbar-button {
-  -webkit-appearance: none;
   display: none;
-  width: 0;
   height: 0;
-}
-
-.clip-embed-block-body::-webkit-scrollbar-button:single-button,
-.clip-embed-block-body::-webkit-scrollbar-button:vertical:decrement,
-.clip-embed-block-body::-webkit-scrollbar-button:vertical:increment,
-.clip-embed-block-body::-webkit-scrollbar-button:vertical:start:decrement,
-.clip-embed-block-body::-webkit-scrollbar-button:vertical:end:increment,
-.clip-embed-block-body::-webkit-scrollbar-button:horizontal:decrement,
-.clip-embed-block-body::-webkit-scrollbar-button:horizontal:increment,
-.clip-embed-block-body::-webkit-scrollbar-button:horizontal:start:decrement,
-.clip-embed-block-body::-webkit-scrollbar-button:horizontal:end:increment {
-  -webkit-appearance: none;
-  display: none;
   width: 0;
-  height: 0;
 }
 
 .clip-embed-block-body::-webkit-scrollbar-corner {
