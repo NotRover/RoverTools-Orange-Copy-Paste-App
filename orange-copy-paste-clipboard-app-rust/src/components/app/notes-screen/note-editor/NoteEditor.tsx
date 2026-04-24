@@ -43,29 +43,23 @@ import {
   stripHtml,
 } from "../notes-utils";
 import { parseNote } from "../prose-engine";
-import type { Alignment, BlockType } from "../prose-engine";
+import type {
+  Alignment,
+  BlockType,
+  EditorFormatState,
+  NoteDoc,
+} from "../prose-engine";
 import BlockEditor, {
   type BlockEditorHandle,
 } from "../prose-engine/BlockEditor";
 import "./note-editor.css";
 
-// ── Format state ──────────────────────────────────────────────────────────
-
-interface FormatState {
-  bold: boolean;
-  italic: boolean;
-  underline: boolean;
-  strikethrough: boolean;
-}
-
-function queryFormatState(): FormatState {
-  return {
-    bold: document.queryCommandState("bold"),
-    italic: document.queryCommandState("italic"),
-    underline: document.queryCommandState("underline"),
-    strikethrough: document.queryCommandState("strikeThrough"),
-  };
-}
+const EMPTY_FORMAT_STATE: EditorFormatState = {
+  bold: false,
+  italic: false,
+  underline: false,
+  strikethrough: false,
+};
 
 // ── NoteEditor ────────────────────────────────────────────────────────────
 
@@ -96,7 +90,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const currentNoteIdRef = useRef(note.id);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [formatState, setFormatState] = useState<FormatState>(queryFormatState);
+  const [formatState, setFormatState] =
+    useState<EditorFormatState>(EMPTY_FORMAT_STATE);
   const [blockType, setBlockType] = useState<BlockType>("p");
   const [alignment, setAlignState] = useState<Alignment | null>(null);
 
@@ -131,7 +126,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   );
 
   const handleEditorChange = useCallback(
-    (doc: import("../prose-engine").NoteDoc) => {
+    (doc: NoteDoc) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         save(JSON.stringify(doc));
@@ -167,7 +162,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // Track format/block type/alignment on selection change
   useEffect(() => {
     const update = () => {
-      setFormatState(queryFormatState());
+      setFormatState(editorRef.current?.getFormatState() ?? EMPTY_FORMAT_STATE);
       if (editorRef.current) {
         setBlockType(editorRef.current.getBlockType());
         setAlignState(editorRef.current.getAlignment());
@@ -199,7 +194,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const execFmt = (cmd: string, value?: string) => {
     editorRef.current?.execFmt(cmd, value);
-    setTimeout(() => setFormatState(queryFormatState()), 0);
+    setTimeout(() => {
+      setFormatState(editorRef.current?.getFormatState() ?? EMPTY_FORMAT_STATE);
+    }, 0);
   };
 
   const changeBlockType = (type: BlockType) => {
