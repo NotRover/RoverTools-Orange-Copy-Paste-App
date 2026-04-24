@@ -5,37 +5,39 @@ import React, {
   useRef,
   useState,
 } from "react";
+import {
+  TextBolderIcon,
+  TextItalicIcon,
+  TextUnderlineIcon,
+  TextStrikethroughIcon,
+  TextHOneIcon,
+  TextHTwoIcon,
+  TextHThreeIcon,
+  QuotesIcon,
+  CodeBlockIcon,
+  CheckSquareOffsetIcon,
+  MinusIcon,
+  ListBulletsIcon,
+  ListNumbersIcon,
+  TextIndentIcon,
+  TextOutdentIcon,
+  TextAlignLeftIcon,
+  TextAlignCenterIcon,
+  TextAlignRightIcon,
+  TextAlignJustifyIcon,
+  LinkSimpleIcon,
+  ClipboardTextIcon,
+} from "@phosphor-icons/react";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../../types";
 import {
   CloseIcon,
   TrashIcon,
   PinIcon,
-  BoldIcon,
-  ItalicIcon,
-  UnderlineIcon,
-  StrikethroughIcon,
-  Heading1Icon,
-  Heading2Icon,
-  Heading3Icon,
-  BulletListIcon,
-  OrderedListIcon,
-  QuoteIcon,
-  AlignLeftIcon,
-  AlignCenterIcon,
-  AlignRightIcon,
-  AlignJustifyIcon,
-  IndentIcon,
-  OutdentIcon,
-  TodoCheckIcon,
-  CodeBlockIcon,
-  HrIcon,
-  EmbedClipIcon,
   CheckIcon,
   ImageIcon,
   FileIcon,
   ClipboardIcon,
-  LinkIcon,
 } from "../../../icons";
 import {
   deriveNoteTitle,
@@ -433,7 +435,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Bold (Ctrl+B)"
             data-tooltip-pos="below"
           >
-            <BoldIcon size={13} />
+            <TextBolderIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${formatState.italic ? " ns-fmt-btn--active" : ""}`}
@@ -441,7 +443,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Italic (Ctrl+I)"
             data-tooltip-pos="below"
           >
-            <ItalicIcon size={13} />
+            <TextItalicIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${formatState.underline ? " ns-fmt-btn--active" : ""}`}
@@ -449,7 +451,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Underline (Ctrl+U)"
             data-tooltip-pos="below"
           >
-            <UnderlineIcon size={13} />
+            <TextUnderlineIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${formatState.strikethrough ? " ns-fmt-btn--active" : ""}`}
@@ -457,7 +459,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Strikethrough"
             data-tooltip-pos="below"
           >
-            <StrikethroughIcon size={13} />
+            <TextStrikethroughIcon size={13} weight="bold" />
           </button>
 
           <span className="ns-fmt-sep" />
@@ -469,7 +471,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Heading 1"
             data-tooltip-pos="below"
           >
-            <Heading1Icon size={14} />
+            <TextHOneIcon size={14} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${blockType === "h2" ? " ns-fmt-btn--active" : ""}`}
@@ -477,7 +479,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Heading 2"
             data-tooltip-pos="below"
           >
-            <Heading2Icon size={14} />
+            <TextHTwoIcon size={14} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${blockType === "h3" ? " ns-fmt-btn--active" : ""}`}
@@ -485,7 +487,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Heading 3"
             data-tooltip-pos="below"
           >
-            <Heading3Icon size={14} />
+            <TextHThreeIcon size={14} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${blockType === "bq" ? " ns-fmt-btn--active" : ""}`}
@@ -493,7 +495,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Quote"
             data-tooltip-pos="below"
           >
-            <QuoteIcon size={13} />
+            <QuotesIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${blockType === "code" ? " ns-fmt-btn--active" : ""}`}
@@ -501,7 +503,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Code block"
             data-tooltip-pos="below"
           >
-            <CodeBlockIcon size={13} />
+            <CodeBlockIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${blockType === "todo" ? " ns-fmt-btn--active" : ""}`}
@@ -509,7 +511,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Checklist"
             data-tooltip-pos="below"
           >
-            <TodoCheckIcon size={13} />
+            <CheckSquareOffsetIcon size={13} weight="bold" />
           </button>
           <button
             className="ns-fmt-btn"
@@ -517,7 +519,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Horizontal rule"
             data-tooltip-pos="below"
           >
-            <HrIcon size={13} />
+            <MinusIcon size={13} weight="bold" />
           </button>
 
           <span className="ns-fmt-sep" />
@@ -529,7 +531,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Bullet list"
             data-tooltip-pos="below"
           >
-            <BulletListIcon size={13} />
+            <ListBulletsIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${blockType === "ol" ? " ns-fmt-btn--active" : ""}`}
@@ -537,7 +539,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Numbered list"
             data-tooltip-pos="below"
           >
-            <OrderedListIcon size={13} />
+            <ListNumbersIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${!isList ? " ns-fmt-btn--disabled" : ""}`}
@@ -546,7 +548,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip-pos="below"
             disabled={!isList}
           >
-            <IndentIcon size={13} />
+            <TextIndentIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${!isList ? " ns-fmt-btn--disabled" : ""}`}
@@ -555,7 +557,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip-pos="below"
             disabled={!isList}
           >
-            <OutdentIcon size={13} />
+            <TextOutdentIcon size={13} weight="bold" />
           </button>
 
           <span className="ns-fmt-sep" />
@@ -567,7 +569,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Align left"
             data-tooltip-pos="below"
           >
-            <AlignLeftIcon size={13} />
+            <TextAlignLeftIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${alignment === "center" ? " ns-fmt-btn--active" : ""}`}
@@ -575,7 +577,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Align center"
             data-tooltip-pos="below"
           >
-            <AlignCenterIcon size={13} />
+            <TextAlignCenterIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${alignment === "right" ? " ns-fmt-btn--active" : ""}`}
@@ -583,7 +585,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Align right"
             data-tooltip-pos="below"
           >
-            <AlignRightIcon size={13} />
+            <TextAlignRightIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${alignment === "justify" ? " ns-fmt-btn--active" : ""}`}
@@ -591,7 +593,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip="Justify"
             data-tooltip-pos="below"
           >
-            <AlignJustifyIcon size={13} />
+            <TextAlignJustifyIcon size={13} weight="bold" />
           </button>
 
           <span className="ns-fmt-sep" />
@@ -608,7 +610,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Insert link"
               data-tooltip-pos="below"
             >
-              <LinkIcon size={12} />
+              <LinkSimpleIcon size={12} weight="bold" />
             </button>
             {showLinkPicker && (
               <div className="ns-embed-picker ns-link-picker">
@@ -652,7 +654,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Embed clipboard entry"
               data-tooltip-pos="below"
             >
-              <EmbedClipIcon size={13} />
+              <ClipboardTextIcon size={13} weight="bold" />
             </button>
             {showEmbedPicker && (
               <div className="ns-embed-picker">
