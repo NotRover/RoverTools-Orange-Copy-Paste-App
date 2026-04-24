@@ -11,6 +11,11 @@ It provides:
 
 This directory is the source of truth for note document structure and editor behavior in the app.
 
+Boundary contract:
+
+- Prose Engine owns all editor-core behavior and editor-core styling.
+- Notes UI (`note-editor/NoteEditor.tsx`) should act as a visual shell and toolbar host only.
+
 ## Directory Layout
 
 - `types.ts`: Document AST and type guards
@@ -94,6 +99,7 @@ From `serialize.ts`:
 - default component: `BlockEditor`
 - `BlockEditorProps`
 - `BlockEditorHandle`
+- `EditorFormatState`
 
 ### Props
 
@@ -111,6 +117,7 @@ interface BlockEditorProps {
 ```ts
 interface BlockEditorHandle {
   execFmt(cmd: string, value?: string): void;
+  getFormatState(): EditorFormatState;
   setBlockType(type: BlockType): void;
   getBlockType(): BlockType;
   setAlignment(align: Alignment | null): void;
@@ -123,6 +130,13 @@ interface BlockEditorHandle {
   saveRange(): void;
   focus(): void;
   flush(): NoteDoc;
+}
+
+interface EditorFormatState {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
 }
 ```
 
@@ -172,6 +186,8 @@ Current consumers in Notes screen:
 - Todo and code presentation
 - Embed selection/resizing visuals
 - Placeholder behavior
+
+This includes embed chip/card visuals (`.clip-embed*`, `.group-embed*`) and resize handle styles.
 
 Keep style class names synchronized with `BlockEditor.tsx` markup and data attributes.
 
