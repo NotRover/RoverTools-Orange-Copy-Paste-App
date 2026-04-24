@@ -568,10 +568,31 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         }
       }
 
-      // Code block: Enter = newline; Shift+Enter = split
+      // Code block: Enter at end = new paragraph; Enter inside = newline; Escape = to paragraph
       if (type === "code") {
+        if (e.key === "Escape") {
+          e.preventDefault(); updateBlockType(key, "p"); return;
+        }
         if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault(); document.execCommand("insertText", false, "\n"); scheduleSave(); return;
+          e.preventDefault();
+          if (caretAtEnd(el)) {
+            setBlocks(current => {
+              const idx = current.findIndex(b => b.key === key);
+              if (idx < 0) return current;
+              const newKey = genKey();
+              const next: BlockState[] = [
+                ...current.slice(0, idx + 1),
+                { key: newKey, node: { type: "p", children: [] } },
+                ...current.slice(idx + 1),
+              ];
+              requestAnimationFrame(() => { blockRefs.current.get(newKey)?.focus({ preventScroll: true }); });
+              onChange({ v: 2, nodes: next.map(b => b.node) });
+              return next;
+            });
+          } else {
+            document.execCommand("insertText", false, "\n"); scheduleSave();
+          }
+          return;
         }
         if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); splitBlock(key); return; }
       }

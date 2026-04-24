@@ -1034,15 +1034,7 @@
   transform: scale(1.08);
 }
 
-.ns-richtext .ns-embed--selected {
-  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  outline-offset: 1px;
-}
-
-.ns-richtext .ns-embed--resizing {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  outline-offset: 1px;
-}
+/* embed selection/resizing rules live in block-editor.css */
 
 /* Footer */
 .ns-editor-footer {
