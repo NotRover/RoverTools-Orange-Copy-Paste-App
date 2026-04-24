@@ -1,7 +1,6 @@
-// ── WYSIWYG Engine — BlockEditor ─────────────────────────────────────────
-// Per-block contenteditable editor. Each block is an independent editable
-// element. The engine owns structural operations (split, merge, type-change)
-// via pure transforms; inline formatting is delegated to document.execCommand.
+// ── Prose Engine — BlockEditor ────────────────────────────────────────────
+// Per-block contenteditable editor. The engine owns structural operations
+// (split, merge, type-change, alignment). Inline marks use execCommand.
 
 import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
@@ -12,8 +11,10 @@ import {
   classifyFileEntry, filePaths, groupColor,
   resolveImageSrc, truncateText,
 } from "../../../../types";
-import type { NoteDoc, BlockNode, InlineNode, BlockType, ParaBlockType } from "./types";
-import { isParaBlock, isListBlock } from "./types";
+import type {
+  NoteDoc, BlockNode, InlineNode, BlockType, ParaBlockType, Alignment,
+} from "./types";
+import { isParaBlock, isListBlock, isAlignableBlock } from "./types";
 import {
   parseNote, parseInlines, parseBlockEl,
   getBlockHtml, emptyDoc,
@@ -33,18 +34,22 @@ const SVG_RESIZE  = `<svg width="10" height="10" viewBox="0 0 12 12" fill="none"
 
 const EMBED_MIN_W = 72, EMBED_MIN_H = 22;
 
-// ── Public handle exposed to NoteEditor shell ─────────────────────────────
+// ── Public handle ─────────────────────────────────────────────────────────
 
 export interface BlockEditorHandle {
-  execFmt: (cmd: string, value?: string) => void;
-  setBlockType: (type: BlockType) => void;
-  getBlockType: () => BlockType;
-  insertClipEmbed: (id: string) => void;
+  execFmt:          (cmd: string, value?: string) => void;
+  setBlockType:     (type: BlockType) => void;
+  getBlockType:     () => BlockType;
+  setAlignment:     (align: Alignment | null) => void;
+  getAlignment:     () => Alignment | null;
+  indent:           () => void;
+  outdent:          () => void;
+  insertClipEmbed:  (id: string)   => void;
   insertGroupEmbed: (name: string) => void;
-  insertLink: (url: string) => void;
-  saveRange: () => void;          // call before opening a picker
-  focus: () => void;
-  flush: () => NoteDoc;           // serialize current DOM → NoteDoc and return it
+  insertLink:       (url: string)  => void;
+  saveRange:        () => void;
+  focus:            () => void;
+  flush:            () => NoteDoc;
 }
 
 export interface BlockEditorProps {
@@ -59,31 +64,25 @@ export interface BlockEditorProps {
 function caretAtStart(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
-  const r = sel.getRangeAt(0);
-  const s = document.createRange();
-  s.selectNodeContents(el);
-  s.collapse(true);
+  const r = sel.getRangeAt(0), s = document.createRange();
+  s.selectNodeContents(el); s.collapse(true);
   return r.compareBoundaryPoints(Range.START_TO_START, s) <= 0;
 }
 
 function caretAtEnd(el: HTMLElement): boolean {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
-  const r = sel.getRangeAt(0);
-  const e = document.createRange();
-  e.selectNodeContents(el);
-  e.collapse(false);
+  const r = sel.getRangeAt(0), e = document.createRange();
+  e.selectNodeContents(el); e.collapse(false);
   return r.compareBoundaryPoints(Range.END_TO_END, e) >= 0;
 }
 
 function placeCursorAt(el: HTMLElement, end: boolean) {
   el.focus({ preventScroll: true });
   const r = document.createRange();
-  r.selectNodeContents(el);
-  r.collapse(!end);
+  r.selectNodeContents(el); r.collapse(!end);
   const sel = window.getSelection();
-  sel?.removeAllRanges();
-  sel?.addRange(r);
+  sel?.removeAllRanges(); sel?.addRange(r);
 }
 
 function splitDOMAtCursor(el: HTMLElement): [DocumentFragment, DocumentFragment] {
@@ -95,15 +94,10 @@ function splitDOMAtCursor(el: HTMLElement): [DocumentFragment, DocumentFragment]
   }
   const cur = sel.getRangeAt(0);
   cur.deleteContents();
-
   const before = document.createRange();
-  before.setStart(el, 0);
-  before.setEnd(cur.startContainer, cur.startOffset);
-
+  before.setStart(el, 0); before.setEnd(cur.startContainer, cur.startOffset);
   const after = document.createRange();
-  after.setStart(cur.startContainer, cur.startOffset);
-  after.setEnd(el, el.childNodes.length);
-
+  after.setStart(cur.startContainer, cur.startOffset); after.setEnd(el, el.childNodes.length);
   return [before.cloneContents(), after.cloneContents()];
 }
 
@@ -112,30 +106,28 @@ function splitDOMAtCursor(el: HTMLElement): [DocumentFragment, DocumentFragment]
 let _keyCounter = 0;
 const genKey = () => `b${++_keyCounter}`;
 
-interface BlockState {
-  key:  string;
-  node: BlockNode;
-}
+interface BlockState { key: string; node: BlockNode; }
 
 function docToStates(doc: NoteDoc): BlockState[] {
   return doc.nodes.map(node => ({ key: genKey(), node }));
 }
 
-// ── BlockEditor component ─────────────────────────────────────────────────
+// ── BlockEditor ───────────────────────────────────────────────────────────
 
 const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
   ({ noteId, initialDoc, entries, onChange }, ref) => {
     const [blocks, setBlocks] = useState<BlockState[]>(() => docToStates(initialDoc));
-    const blockRefs  = useRef<Map<string, HTMLElement>>(new Map());
-    const focusedKey = useRef<string | null>(null);
-    const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const savedRange = useRef<Range | null>(null);
-    const selectedEmbeds = useRef<Set<HTMLElement>>(new Set());
-    const activeResize   = useRef<(() => void) | null>(null);
-    const entriesRef     = useRef(entries);
-    entriesRef.current   = entries;
+    const blockRefs       = useRef<Map<string, HTMLElement>>(new Map());
+    const focusedKey      = useRef<string | null>(null);
+    const focusedTypeRef  = useRef<BlockType>("p");
+    const focusedAlignRef = useRef<Alignment | null>(null);
+    const saveTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const savedRange      = useRef<Range | null>(null);
+    const selectedEmbeds  = useRef<Set<HTMLElement>>(new Set());
+    const activeResize    = useRef<(() => void) | null>(null);
+    const entriesRef      = useRef(entries);
+    entriesRef.current    = entries;
 
-    // Reset when note changes
     useEffect(() => {
       setBlocks(docToStates(parseNote(initialDoc === undefined ? "" : JSON.stringify(initialDoc))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,26 +135,21 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
 
     // ── Serialise ──────────────────────────────────────────────────────────
 
-    const buildDoc = useCallback((bs: BlockState[]): NoteDoc => {
-      const nodes = bs.map(({ key, node }) => {
+    const buildDoc = useCallback((bs: BlockState[]): NoteDoc => ({
+      v: 2,
+      nodes: bs.map(({ key, node }) => {
         const el = blockRefs.current.get(key);
         return el ? parseBlockEl(el, node.type) : node;
-      });
-      return { v: 2, nodes };
-    }, []);
+      }),
+    }), []);
 
     const scheduleSave = useCallback((bs?: BlockState[]) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        setBlocks(current => {
-          const doc = buildDoc(bs ?? current);
-          onChange(doc);
-          return current;
-        });
+        setBlocks(current => { onChange(buildDoc(bs ?? current)); return current; });
       }, 400);
     }, [buildDoc, onChange]);
 
-    // Public flush — used by NoteEditor on unmount/close
     const flush = useCallback((): NoteDoc => {
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       let result!: NoteDoc;
@@ -181,16 +168,14 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       const id    = host.getAttribute("data-clip-embed") ?? "";
       const mode  = host.getAttribute("data-embed-mode") ?? "inline";
       const entry = entriesRef.current.find(e => e.id === id);
-
-      const isBlock    = mode === "block" && !!entry;
-      const typeClass  = !entry ? "clip-embed--missing"
+      const isBlock   = mode === "block" && !!entry;
+      const typeClass = !entry ? "clip-embed--missing"
         : entry.type === "image" ? "clip-embed--image"
         : entry.type === "file"  ? "clip-embed--file" : "";
-      const isSelected = selectedEmbeds.current.has(host);
 
       host.className = ["clip-embed", typeClass, isBlock && "clip-embed--block"]
         .filter(Boolean).join(" ");
-      if (isSelected) host.classList.add("ns-embed--selected");
+      if (selectedEmbeds.current.has(host)) host.classList.add("ns-embed--selected");
       host.setAttribute("contenteditable", "false");
       host.replaceChildren();
       host.classList.remove("clip-embed--scrollable");
@@ -204,8 +189,7 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       applyDims();
 
       const mkIcon = (svg: string) => {
-        const s = document.createElement("span");
-        s.className = "clip-embed-icon"; s.innerHTML = svg; return s;
+        const s = document.createElement("span"); s.className = "clip-embed-icon"; s.innerHTML = svg; return s;
       };
       const mkResizeHandle = () => {
         const h = document.createElement("span");
@@ -234,23 +218,16 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       };
 
       if (isBlock) {
-        const header = document.createElement("span");
-        header.className = "clip-embed-block-header";
-        const hTitle  = document.createElement("span");
-        hTitle.className = "clip-embed-block-title";
-        hTitle.textContent = getLabel(60);
-        const hToggle = document.createElement("span");
-        hToggle.className = "clip-embed-toggle clip-embed-toggle--collapse";
-        hToggle.title = "Collapse embed"; hToggle.innerHTML = SVG_COLLAPSE;
+        const header = document.createElement("span"); header.className = "clip-embed-block-header";
+        const hTitle = document.createElement("span"); hTitle.className = "clip-embed-block-title"; hTitle.textContent = getLabel(60);
+        const hToggle = document.createElement("span"); hToggle.className = "clip-embed-toggle clip-embed-toggle--collapse"; hToggle.title = "Collapse embed"; hToggle.innerHTML = SVG_COLLAPSE;
         header.append(mkIcon(iconSvg), hTitle, hToggle);
 
-        const body = document.createElement("span");
-        body.className = "clip-embed-block-body";
+        const body = document.createElement("span"); body.className = "clip-embed-block-body";
         if (entry.type === "image") {
           body.classList.add("clip-embed-block-body--image");
-          const wrap = document.createElement("span");
-          wrap.className = "clip-embed-image-resizable";
-          const img  = document.createElement("img");
+          const wrap = document.createElement("span"); wrap.className = "clip-embed-image-resizable";
+          const img = document.createElement("img");
           img.src = resolveImageSrc(entry.content, convertFileSrc);
           img.alt = entry.label ?? "Image"; img.className = "clip-embed-block-image";
           wrap.append(img); body.append(wrap);
@@ -267,12 +244,13 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
           host.classList.toggle("clip-embed--scrollable", body.scrollHeight > body.clientHeight + 1);
         });
       } else {
-        const text = document.createElement("span");
-        text.className = "clip-embed-text";
-        if (!entry) { text.textContent = "Missing clip"; text.classList.add("clip-embed-fallback"); host.append(mkIcon(SVG_MISSING), text); return; }
+        const text = document.createElement("span"); text.className = "clip-embed-text";
+        if (!entry) {
+          text.textContent = "Missing clip"; text.classList.add("clip-embed-fallback");
+          host.append(mkIcon(SVG_MISSING), text); return;
+        }
         text.textContent = getLabel(34);
-        const toggle = document.createElement("span");
-        toggle.className = "clip-embed-toggle"; toggle.title = "Expand"; toggle.innerHTML = SVG_EXPAND;
+        const toggle = document.createElement("span"); toggle.className = "clip-embed-toggle"; toggle.title = "Expand"; toggle.innerHTML = SVG_EXPAND;
         host.append(mkIcon(iconSvg), text, toggle, mkResizeHandle());
       }
     }, []);
@@ -299,20 +277,18 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       el.querySelectorAll("[data-group-ref]").forEach(h  => renderGroupEmbed(h as HTMLElement));
     }, [renderClipEmbed, renderGroupEmbed]);
 
-    // Re-render embeds when entries change
     useEffect(() => {
       blockRefs.current.forEach(el => renderEmbedsIn(el));
     }, [entries, renderEmbedsIn]);
 
-    // ── Resize logic ───────────────────────────────────────────────────────
+    // ── Resize ─────────────────────────────────────────────────────────────
 
     const beginResize = useCallback((host: HTMLElement, startEv: React.MouseEvent) => {
       activeResize.current?.();
       clearSelectedEmbeds();
       const rect = host.getBoundingClientRect();
       const sx = startEv.clientX, sy = startEv.clientY;
-      const sw = Math.max(EMBED_MIN_W, rect.width);
-      const sh = Math.max(EMBED_MIN_H, rect.height);
+      const sw = Math.max(EMBED_MIN_W, rect.width), sh = Math.max(EMBED_MIN_H, rect.height);
       const minW = host.classList.contains("clip-embed--block") ? 180 : EMBED_MIN_W;
       const minH = host.classList.contains("clip-embed--block") ? 44  : EMBED_MIN_H;
       host.classList.add("ns-embed--resizing");
@@ -320,9 +296,8 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       const onMove = (e: MouseEvent) => {
         const w = Math.round(Math.max(minW, sw + e.clientX - sx));
         const h = Math.round(Math.max(minH, sh + e.clientY - sy));
-        host.style.width  = `${w}px`; host.style.height = `${h}px`;
-        host.setAttribute("data-embed-width",  String(w));
-        host.setAttribute("data-embed-height", String(h));
+        host.style.width = `${w}px`; host.style.height = `${h}px`;
+        host.setAttribute("data-embed-width", String(w)); host.setAttribute("data-embed-height", String(h));
         if (host.classList.contains("clip-embed--block")) {
           const body = host.querySelector(".clip-embed-block-body") as HTMLElement | null;
           host.classList.toggle("clip-embed--scrollable", !!body && body.scrollHeight > body.clientHeight + 1);
@@ -331,17 +306,14 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       const cleanup = () => {
         host.classList.remove("ns-embed--resizing");
         document.body.style.cursor = document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
         if (activeResize.current === cleanup) activeResize.current = null;
         scheduleSave();
       };
       const onUp = () => cleanup();
       activeResize.current = cleanup;
-      document.body.style.cursor = "nwse-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      document.body.style.cursor = "nwse-resize"; document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
     }, [clearSelectedEmbeds, scheduleSave]);
 
     // ── Structural operations ─────────────────────────────────────────────
@@ -352,32 +324,35 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         if (idx < 0) return current;
         const { node } = current[idx];
         if (!isParaBlock(node)) return current;
-
         const el = blockRefs.current.get(key);
         if (!el) return current;
 
-        const [beforeFrag, afterFrag] = splitDOMAtCursor(el);
-        const tmpBefore = document.createElement("div"); tmpBefore.append(beforeFrag);
-        const tmpAfter  = document.createElement("div"); tmpAfter.append(afterFrag);
+        const [bf, af] = splitDOMAtCursor(el);
+        const tmpB = document.createElement("div"); tmpB.append(bf);
+        const tmpA = document.createElement("div"); tmpA.append(af);
+        const beforeInlines = parseInlines(tmpB);
+        const afterInlines  = parseInlines(tmpA);
+        const align = ("align" in node ? (node as any).align : undefined) as Alignment | undefined;
 
-        const beforeInlines = parseInlines(tmpBefore);
-        const afterInlines  = parseInlines(tmpAfter);
+        const firstNode: BlockNode = node.type === "todo"
+          ? { type: "todo", children: beforeInlines, checked: node.checked, ...(align ? { align } : {}) }
+          : isAlignableBlock(node)
+            ? { type: node.type, children: beforeInlines, ...(align ? { align } : {}) } as BlockNode
+            : { type: node.type, children: beforeInlines } as BlockNode;
+
+        const secondNode: BlockNode = node.type === "todo"
+          ? { type: "todo", children: afterInlines, checked: false }
+          : { type: "p", children: afterInlines };
 
         const k1 = genKey(), k2 = genKey();
         const next: BlockState[] = [
           ...current.slice(0, idx),
-          { key: k1, node: { type: "p", children: beforeInlines } },
-          { key: k2, node: { type: "p", children: afterInlines  } },
+          { key: k1, node: firstNode },
+          { key: k2, node: secondNode },
           ...current.slice(idx + 1),
         ];
-
-        requestAnimationFrame(() => {
-          const newEl = blockRefs.current.get(k2);
-          if (newEl) placeCursorAt(newEl, false);
-        });
-
-        const doc: NoteDoc = { v: 2, nodes: next.map(b => b.node) };
-        onChange(doc);
+        requestAnimationFrame(() => { const e2 = blockRefs.current.get(k2); if (e2) placeCursorAt(e2, false); });
+        onChange({ v: 2, nodes: next.map(b => b.node) });
         return next;
       });
     }, [onChange]);
@@ -386,9 +361,7 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       setBlocks(current => {
         const idx = current.findIndex(b => b.key === key);
         if (idx <= 0) return current;
-
-        const prev = current[idx - 1];
-        const cur  = current[idx];
+        const prev = current[idx - 1], cur = current[idx];
         if (!isParaBlock(prev.node)) return current;
 
         const prevEl = blockRefs.current.get(prev.key);
@@ -397,39 +370,33 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         const curInlines  = curEl  ? parseInlines(curEl)  : (isParaBlock(cur.node)  ? cur.node.children  : []);
 
         const mergedKey = genKey();
-        const mergedNode: BlockNode = { type: prev.node.type as ParaBlockType, children: [...prevInlines, ...curInlines] };
+        const mergedNode: BlockNode = prev.node.type === "todo"
+          ? { type: "todo", children: [...prevInlines, ...curInlines], checked: prev.node.checked }
+          : { type: prev.node.type as ParaBlockType, children: [...prevInlines, ...curInlines] } as BlockNode;
 
         const next: BlockState[] = [
           ...current.slice(0, idx - 1),
           { key: mergedKey, node: mergedNode },
           ...current.slice(idx + 1),
         ];
-
-        // Focus merged block at the join point
-        const joinOffset = prevInlines.reduce((sum, n) => sum + (n.type === "text" ? n.text.length : 1), 0);
+        const joinOffset = prevInlines.reduce((s, n) => s + (n.type === "text" ? n.text.length : 1), 0);
         requestAnimationFrame(() => {
           const el = blockRefs.current.get(mergedKey);
           if (!el) return;
           el.focus({ preventScroll: true });
-          // Walk to the join offset and place cursor there
           let remaining = joinOffset;
           const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-          let textNode: Text | null = null;
-          while ((textNode = walker.nextNode() as Text | null)) {
-            if (remaining <= textNode.length) break;
-            remaining -= textNode.length;
+          let tn: Text | null = null;
+          while ((tn = walker.nextNode() as Text | null)) {
+            if (remaining <= tn.length) break;
+            remaining -= tn.length;
           }
-          if (textNode) {
-            const r = document.createRange();
-            r.setStart(textNode, remaining);
-            r.collapse(true);
-            window.getSelection()?.removeAllRanges();
-            window.getSelection()?.addRange(r);
+          if (tn) {
+            const r = document.createRange(); r.setStart(tn, remaining); r.collapse(true);
+            window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(r);
           }
         });
-
-        const doc: NoteDoc = { v: 2, nodes: next.map(b => b.node) };
-        onChange(doc);
+        onChange({ v: 2, nodes: next.map(b => b.node) });
         return next;
       });
     }, [onChange]);
@@ -443,65 +410,82 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         const inlines: InlineNode[] = el
           ? parseInlines(el)
           : isParaBlock(curNode) ? curNode.children
-          : isListBlock(curNode) ? curNode.items[0] ?? []
+          : isListBlock(curNode) ? (curNode.items[0] ?? [])
           : [];
 
         let newNode: BlockNode;
-        if (newType === "ul" || newType === "ol") {
-          newNode = { type: newType, items: [inlines] };
-        } else if (newType === "hr") {
-          newNode = { type: "hr" };
-        } else {
-          newNode = { type: newType, children: inlines } as BlockNode;
-        }
+        if (newType === "ul" || newType === "ol") newNode = { type: newType, items: [inlines] };
+        else if (newType === "hr")   newNode = { type: "hr" };
+        else if (newType === "todo") newNode = { type: "todo", children: inlines, checked: false };
+        else if (newType === "code") newNode = { type: "code", children: inlines };
+        else newNode = { type: newType, children: inlines } as BlockNode;
 
-        const newKey  = genKey();
+        focusedTypeRef.current = newType;
+        const newKey = genKey();
         const next = current.map((b, i) => i === idx ? { key: newKey, node: newNode } : b);
-        requestAnimationFrame(() => {
-          const newEl = blockRefs.current.get(newKey);
-          if (newEl) placeCursorAt(newEl, true);
-        });
-
-        const doc: NoteDoc = { v: 2, nodes: next.map(b => b.node) };
-        onChange(doc);
+        requestAnimationFrame(() => { const e2 = blockRefs.current.get(newKey); if (e2) placeCursorAt(e2, true); });
+        onChange({ v: 2, nodes: next.map(b => b.node) });
         return next;
       });
     }, [onChange]);
 
-    // ── Imperative handle ─────────────────────────────────────────────────
+    const toggleTodo = useCallback((key: string) => {
+      setBlocks(current => {
+        const idx = current.findIndex(b => b.key === key);
+        if (idx < 0) return current;
+        const old = current[idx].node;
+        if (old.type !== "todo") return current;
+        const updated: BlockNode = { ...old, checked: !old.checked };
+        const newKey = genKey();
+        const next = current.map((b, i) => i === idx ? { key: newKey, node: updated } : b);
+        scheduleSave(next);
+        return next;
+      });
+    }, [scheduleSave]);
+
+    const setAlignment = useCallback((align: Alignment | null) => {
+      const key = focusedKey.current;
+      if (!key) return;
+      focusedAlignRef.current = align;
+      setBlocks(current => {
+        const idx = current.findIndex(b => b.key === key);
+        if (idx < 0) return current;
+        const old = current[idx].node;
+        if (!isAlignableBlock(old)) return current;
+        const updated = { ...old, align: align ?? undefined } as BlockNode;
+        const next = current.map((b, i) => i === idx ? { ...b, node: updated } : b);
+        scheduleSave(next);
+        return next;
+      });
+    }, [scheduleSave]);
+
+    // ── Inline insert ─────────────────────────────────────────────────────
 
     const insertInlineSpan = useCallback((span: HTMLElement) => {
       const key = focusedKey.current;
       const el  = key ? blockRefs.current.get(key) : null;
       if (!el) return;
-
-      const restore = () => {
-        el.focus({ preventScroll: true });
-        if (savedRange.current) {
-          const sel = window.getSelection();
-          sel?.removeAllRanges();
-          sel?.addRange(savedRange.current);
-          savedRange.current = null;
-        }
-      };
-      restore();
-
+      el.focus({ preventScroll: true });
+      if (savedRange.current) {
+        const sel = window.getSelection();
+        sel?.removeAllRanges(); sel?.addRange(savedRange.current);
+        savedRange.current = null;
+      }
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).commonAncestorContainer)) {
         const r = sel.getRangeAt(0);
-        r.deleteContents();
-        r.insertNode(span);
-        const space = document.createTextNode(" ");
-        span.after(space);
-        r.setStart(space, 1); r.collapse(true);
+        r.deleteContents(); r.insertNode(span);
+        const space = document.createTextNode(" ");
+        span.after(space); r.setStart(space, 1); r.collapse(true);
         sel.removeAllRanges(); sel.addRange(r);
       } else {
-        el.appendChild(span);
-        el.appendChild(document.createTextNode(" "));
+        el.appendChild(span); el.appendChild(document.createTextNode(" "));
       }
       renderClipEmbed(span);
       scheduleSave();
     }, [renderClipEmbed, scheduleSave]);
+
+    // ── Imperative handle ─────────────────────────────────────────────────
 
     useImperativeHandle(ref, () => ({
       execFmt: (cmd, value) => {
@@ -509,34 +493,29 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         const el  = key ? blockRefs.current.get(key) : null;
         if (el) { el.focus({ preventScroll: true }); document.execCommand(cmd, false, value); scheduleSave(); }
       },
-      setBlockType: (type) => {
+      setBlockType: (type) => { const key = focusedKey.current; if (key) updateBlockType(key, type); },
+      getBlockType: () => focusedTypeRef.current,
+      setAlignment,
+      getAlignment: () => focusedAlignRef.current,
+      indent: () => {
         const key = focusedKey.current;
-        if (key) updateBlockType(key, type);
+        const el  = key ? blockRefs.current.get(key) : null;
+        if (el) { el.focus({ preventScroll: true }); document.execCommand("indent"); scheduleSave(); }
       },
-      getBlockType: () => {
+      outdent: () => {
         const key = focusedKey.current;
-        if (!key) return "p";
-        let result: BlockType = "p";
-        setBlocks(current => {
-          const b = current.find(b => b.key === key);
-          if (b) result = b.node.type as BlockType;
-          return current;
-        });
-        return result;
+        const el  = key ? blockRefs.current.get(key) : null;
+        if (el) { el.focus({ preventScroll: true }); document.execCommand("outdent"); scheduleSave(); }
       },
       insertClipEmbed: (id) => {
         const span = document.createElement("span");
-        span.setAttribute("data-clip-embed", id);
-        span.setAttribute("data-embed-mode", "inline");
-        span.setAttribute("contenteditable", "false");
+        span.setAttribute("data-clip-embed", id); span.setAttribute("data-embed-mode", "inline"); span.setAttribute("contenteditable", "false");
         insertInlineSpan(span);
       },
       insertGroupEmbed: (name) => {
         const span = document.createElement("span");
-        span.setAttribute("data-group-ref", name);
-        span.setAttribute("contenteditable", "false");
-        renderGroupEmbed(span);
-        insertInlineSpan(span);
+        span.setAttribute("data-group-ref", name); span.setAttribute("contenteditable", "false");
+        renderGroupEmbed(span); insertInlineSpan(span);
       },
       insertLink: (url) => {
         const key = focusedKey.current;
@@ -545,30 +524,22 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         el.focus({ preventScroll: true });
         if (savedRange.current) {
           const sel = window.getSelection();
-          sel?.removeAllRanges(); sel?.addRange(savedRange.current);
-          savedRange.current = null;
+          sel?.removeAllRanges(); sel?.addRange(savedRange.current); savedRange.current = null;
         }
         const sel = window.getSelection();
-        if (sel && !sel.isCollapsed) {
-          document.execCommand("createLink", false, url);
-        } else {
-          document.execCommand("insertHTML", false,
-            `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
-        }
+        if (sel && !sel.isCollapsed) document.execCommand("createLink", false, url);
+        else document.execCommand("insertHTML", false, `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
         scheduleSave();
       },
       saveRange: () => {
         const sel = window.getSelection();
         if (sel && sel.rangeCount > 0) savedRange.current = sel.getRangeAt(0).cloneRange();
       },
-      focus: () => {
-        const first = blocks[0]?.key;
-        if (first) { const el = blockRefs.current.get(first); el?.focus(); }
-      },
+      focus: () => { const first = blocks[0]?.key; if (first) blockRefs.current.get(first)?.focus(); },
       flush,
-    }), [blocks, flush, insertInlineSpan, renderGroupEmbed, scheduleSave, updateBlockType]);
+    }), [blocks, flush, insertInlineSpan, renderGroupEmbed, scheduleSave, setAlignment, updateBlockType]);
 
-    // ── Block keydown handler ─────────────────────────────────────────────
+    // ── Block keydown ─────────────────────────────────────────────────────
 
     const handleBlockKeyDown = useCallback((
       e: React.KeyboardEvent<HTMLElement>,
@@ -578,49 +549,56 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       const el = blockRefs.current.get(key);
       if (!el) return;
 
-      // Embed selection — arrow and delete
       if (selectedEmbeds.current.size > 0) {
         if (e.key === "Backspace" || e.key === "Delete") {
           e.preventDefault();
           const sel = Array.from(selectedEmbeds.current);
-          clearSelectedEmbeds();
-          sel.forEach(h => h.remove());
-          scheduleSave();
-          return;
+          clearSelectedEmbeds(); sel.forEach(h => h.remove()); scheduleSave(); return;
         }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           e.preventDefault();
           const host = Array.from(selectedEmbeds.current)[0];
           if (host) {
             clearSelectedEmbeds();
-            placeCursorAt(el, false);
-            // Place caret near embed
             const r = document.createRange();
             if (e.key === "ArrowLeft") r.setStartBefore(host); else r.setStartAfter(host);
-            r.collapse(true);
-            window.getSelection()?.removeAllRanges();
-            window.getSelection()?.addRange(r);
+            r.collapse(true); window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(r);
           }
           return;
         }
       }
 
-      // Enter — split para/heading/blockquote blocks; let browser handle lists
-      if (e.key === "Enter" && !e.shiftKey && (type === "p" || type === "h1" || type === "h2" || type === "bq")) {
+      // Code block: Enter = newline; Shift+Enter = split
+      if (type === "code") {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault(); document.execCommand("insertText", false, "\n"); scheduleSave(); return;
+        }
+        if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); splitBlock(key); return; }
+      }
+
+      // Todo: Enter on empty → convert to p; else split (new todo)
+      if (e.key === "Enter" && !e.shiftKey && type === "todo") {
         e.preventDefault();
-        splitBlock(key);
+        const clone = el.cloneNode(true) as HTMLElement;
+        clone.querySelector("[data-todo-check]")?.remove();
+        if (!clone.textContent?.trim()) updateBlockType(key, "p");
+        else splitBlock(key);
         return;
       }
 
-      // Enter in list — exit list on empty trailing item
+      // Para/heading/bq: Enter splits
+      if (e.key === "Enter" && !e.shiftKey &&
+          (type === "p" || type === "h1" || type === "h2" || type === "h3" || type === "bq")) {
+        e.preventDefault(); splitBlock(key); return;
+      }
+
+      // List: Enter on empty trailing item → new paragraph
       if (e.key === "Enter" && !e.shiftKey && (type === "ul" || type === "ol")) {
         const sel = window.getSelection();
         if (sel && sel.rangeCount > 0) {
           const li = (sel.getRangeAt(0).startContainer as Node).parentElement?.closest("li");
           if (li && !li.textContent?.trim() && !li.nextElementSibling) {
-            e.preventDefault();
-            li.remove();
-            // Add a new paragraph block after this list block
+            e.preventDefault(); li.remove();
             setBlocks(current => {
               const idx = current.findIndex(b => b.key === key);
               if (idx < 0) return current;
@@ -630,12 +608,8 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
                 { key: newKey, node: { type: "p", children: [] } },
                 ...current.slice(idx + 1),
               ];
-              requestAnimationFrame(() => {
-                const newEl = blockRefs.current.get(newKey);
-                if (newEl) { newEl.focus({ preventScroll: true }); }
-              });
-              const doc: NoteDoc = { v: 2, nodes: next.map(b => b.node) };
-              onChange(doc);
+              requestAnimationFrame(() => { blockRefs.current.get(newKey)?.focus({ preventScroll: true }); });
+              onChange({ v: 2, nodes: next.map(b => b.node) });
               return next;
             });
           }
@@ -643,22 +617,18 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         return;
       }
 
-      // Backspace at start of block — merge with previous
+      // Backspace at start → merge with previous
       if (e.key === "Backspace" && caretAtStart(el) && isParaBlock({ type, children: [] } as BlockNode)) {
         setBlocks(current => {
           const idx = current.findIndex(b => b.key === key);
           if (idx <= 0) return current;
-          const prev = current[idx - 1];
-          // Only merge if prev is a para-like block
-          if (!isParaBlock(prev.node)) return current;
-          e.preventDefault();
-          return current; // mergeWithPrev handles the actual state update
+          if (!isParaBlock(current[idx - 1].node)) return current;
+          e.preventDefault(); return current;
         });
-        mergeWithPrev(key);
-        return;
+        mergeWithPrev(key); return;
       }
 
-      // ArrowUp at start — move focus to previous block
+      // Arrow navigation
       if (e.key === "ArrowUp" && caretAtStart(el)) {
         setBlocks(current => {
           const idx = current.findIndex(b => b.key === key);
@@ -666,11 +636,8 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
           const prevEl = blockRefs.current.get(current[idx - 1].key);
           if (prevEl) { e.preventDefault(); placeCursorAt(prevEl, true); }
           return current;
-        });
-        return;
+        }); return;
       }
-
-      // ArrowDown at end — move focus to next block
       if (e.key === "ArrowDown" && caretAtEnd(el)) {
         setBlocks(current => {
           const idx = current.findIndex(b => b.key === key);
@@ -678,18 +645,17 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
           const nextEl = blockRefs.current.get(current[idx + 1].key);
           if (nextEl) { e.preventDefault(); placeCursorAt(nextEl, false); }
           return current;
-        });
-        return;
+        }); return;
       }
-    }, [clearSelectedEmbeds, mergeWithPrev, onChange, scheduleSave, splitBlock]);
+    }, [clearSelectedEmbeds, mergeWithPrev, onChange, scheduleSave, splitBlock, updateBlockType]);
 
-    // ── Embed click / resize within blocks ────────────────────────────────
+    // ── Mouse handlers ────────────────────────────────────────────────────
 
-    const handleEditorMouseDown = useCallback((
-      e: React.MouseEvent<HTMLElement>,
-      key: string,
-    ) => {
+    const handleEditorMouseDown = useCallback((e: React.MouseEvent<HTMLElement>, key: string) => {
       const target = e.target as HTMLElement;
+
+      if (target.closest("[data-todo-check]")) { e.preventDefault(); toggleTodo(key); return; }
+
       const resizeHandle = target.closest("[data-embed-resize-handle]");
       if (resizeHandle) {
         const host = resizeHandle.closest("[data-clip-embed],[data-group-ref]") as HTMLElement | null;
@@ -703,30 +669,24 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         const rect = host.getBoundingClientRect();
         const frac = (e.clientX - rect.left) / rect.width;
         if (frac < 0.22 || frac > 0.78) {
-          // Edge zones → cursor placement
           clearSelectedEmbeds();
           const el = blockRefs.current.get(key);
           if (el) {
             el.focus({ preventScroll: true });
             const r = document.createRange();
             if (frac < 0.22) r.setStartBefore(host); else r.setStartAfter(host);
-            r.collapse(true);
-            window.getSelection()?.removeAllRanges();
-            window.getSelection()?.addRange(r);
+            r.collapse(true); window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(r);
           }
         } else {
-          // Centre → select embed
-          const additive = e.ctrlKey || e.metaKey || e.shiftKey;
-          if (!additive) clearSelectedEmbeds();
-          host.classList.add("ns-embed--selected");
-          selectedEmbeds.current.add(host);
+          if (!e.ctrlKey && !e.metaKey && !e.shiftKey) clearSelectedEmbeds();
+          host.classList.add("ns-embed--selected"); selectedEmbeds.current.add(host);
           const r = document.createRange(); r.selectNode(host);
           window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(r);
         }
       } else {
         clearSelectedEmbeds();
       }
-    }, [beginResize, clearSelectedEmbeds]);
+    }, [beginResize, clearSelectedEmbeds, toggleTodo]);
 
     const handleToggleEmbedMode = useCallback((e: React.MouseEvent, _key: string) => {
       const toggle = (e.target as HTMLElement).closest(".clip-embed-toggle");
@@ -736,19 +696,17 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       if (!host) return;
       const cur = host.getAttribute("data-embed-mode") ?? "inline";
       host.setAttribute("data-embed-mode", cur === "block" ? "inline" : "block");
-      renderClipEmbed(host);
-      scheduleSave();
+      renderClipEmbed(host); scheduleSave();
     }, [renderClipEmbed, scheduleSave]);
 
     // ── Cleanup ────────────────────────────────────────────────────────────
 
     useEffect(() => () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      activeResize.current?.();
-      clearSelectedEmbeds();
+      activeResize.current?.(); clearSelectedEmbeds();
     }, [clearSelectedEmbeds]);
 
-    // ── Block component ────────────────────────────────────────────────────
+    // ── Render ─────────────────────────────────────────────────────────────
 
     return (
       <div className="ns-be">
@@ -762,14 +720,16 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
             onKeyDown={(e) => handleBlockKeyDown(e, key, node.type)}
             onMouseDown={(e) => handleEditorMouseDown(e, key)}
             onClick={(e) => handleToggleEmbedMode(e, key)}
-            onFocus={() => { focusedKey.current = key; }}
+            onFocus={() => {
+              focusedKey.current      = key;
+              focusedTypeRef.current  = node.type as BlockType;
+              focusedAlignRef.current = ("align" in node ? (node as any).align : null) ?? null;
+            }}
             onInput={() => scheduleSave()}
           />
         ))}
-        {/* Empty-state placeholder shown when only one empty paragraph */}
-        {blocks.length === 1 &&
-          blocks[0].node.type === "p" &&
-          (isParaBlock(blocks[0].node) && blocks[0].node.children.length === 0) && (
+        {blocks.length === 1 && blocks[0].node.type === "p" &&
+          isParaBlock(blocks[0].node) && blocks[0].node.children.length === 0 && (
           <div className="ns-be-placeholder" aria-hidden>Start writing…</div>
         )}
       </div>
@@ -780,18 +740,18 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
 BlockEditor.displayName = "BlockEditor";
 export default BlockEditor;
 
-// ── BlockEl — individual editable block ───────────────────────────────────
+// ── BlockEl ───────────────────────────────────────────────────────────────
 
 interface BlockElProps {
-  bKey: string;
-  node: BlockNode;
-  blockRefs: React.MutableRefObject<Map<string, HTMLElement>>;
+  bKey:  string;
+  node:  BlockNode;
+  blockRefs:      React.MutableRefObject<Map<string, HTMLElement>>;
   renderEmbedsIn: (el: HTMLElement) => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void;
+  onKeyDown:   (e: React.KeyboardEvent<HTMLElement>) => void;
   onMouseDown: (e: React.MouseEvent<HTMLElement>) => void;
-  onClick: (e: React.MouseEvent) => void;
-  onFocus: () => void;
-  onInput: () => void;
+  onClick:     (e: React.MouseEvent) => void;
+  onFocus:     () => void;
+  onInput:     () => void;
 }
 
 const BlockEl: React.FC<BlockElProps> = ({
@@ -800,8 +760,7 @@ const BlockEl: React.FC<BlockElProps> = ({
 }) => {
   const elRef = useRef<HTMLDivElement>(null);
 
-  // Mount: set innerHTML and render embeds. Only re-runs when the block is
-  // structurally replaced (new React key), not during typing.
+  // Only re-runs on structural remount (key change), not during typing.
   useEffect(() => {
     const el = elRef.current;
     if (!el) return;
@@ -809,27 +768,33 @@ const BlockEl: React.FC<BlockElProps> = ({
     el.innerHTML = getBlockHtml(node);
     renderEmbedsIn(el);
     return () => { blockRefs.current.delete(bKey); };
-  // bKey changes only on structural ops — intentionally excludes node object
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bKey]);
-
-  const tag = node.type === "ul" ? "ul"
-    : node.type === "ol" ? "ol"
-    : node.type === "h1" ? "h1"
-    : node.type === "h2" ? "h2"
-    : node.type === "bq" ? "blockquote"
-    : "div";
 
   if (node.type === "hr") {
     return <div className="ns-be-block ns-be-hr"><hr /></div>;
   }
 
+  const tag = node.type === "ul"   ? "ul"
+    : node.type === "ol"   ? "ol"
+    : node.type === "h1"   ? "h1"
+    : node.type === "h2"   ? "h2"
+    : node.type === "h3"   ? "h3"
+    : node.type === "bq"   ? "blockquote"
+    : node.type === "code" ? "pre"
+    : "div";
+
+  const align      = ("align" in node ? (node as any).align : null) as Alignment | null;
+  const alignClass = align ? ` ns-be-align-${align}` : "";
+  const todoClass  = node.type === "todo" && node.checked ? " ns-be-todo--checked" : "";
+
   return React.createElement(tag, {
     ref: elRef,
-    className: `ns-be-block ns-be-${node.type}`,
+    className:   `ns-be-block ns-be-${node.type}${alignClass}${todoClass}`,
     contentEditable: true,
     suppressContentEditableWarning: true,
     "data-be-block": "true",
+    "data-align":    align ?? undefined,
     onKeyDown,
     onMouseDown,
     onClick,

@@ -339,6 +339,13 @@
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }
 
+.ns-fmt-btn--disabled,
+.ns-fmt-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .ns-fmt-sep {
   width: 1px;
   height: 18px;

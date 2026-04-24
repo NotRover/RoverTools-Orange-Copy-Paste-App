@@ -6,14 +6,18 @@ import { groupColor, timeAgo, truncateText } from "../../../../types";
 import {
   CloseIcon, TrashIcon, PinIcon,
   BoldIcon, ItalicIcon, UnderlineIcon, StrikethroughIcon,
-  Heading1Icon, Heading2Icon, BulletListIcon, OrderedListIcon,
-  QuoteIcon, EmbedClipIcon, CheckIcon, ImageIcon, FileIcon,
+  Heading1Icon, Heading2Icon, Heading3Icon,
+  BulletListIcon, OrderedListIcon, QuoteIcon,
+  AlignLeftIcon, AlignCenterIcon, AlignRightIcon, AlignJustifyIcon,
+  IndentIcon, OutdentIcon,
+  TodoCheckIcon, CodeBlockIcon, HrIcon,
+  EmbedClipIcon, CheckIcon, ImageIcon, FileIcon,
   ClipboardIcon, LinkIcon,
 } from "../../../icons";
-import { deriveNoteTitle, hasMeaningfulContent } from "../notes-utils";
-import { parseNote } from "../wysiwyg";
-import BlockEditor, { type BlockEditorHandle } from "../wysiwyg/BlockEditor";
-import { stripHtml } from "../notes-utils";
+import { deriveNoteTitle, hasMeaningfulContent, stripHtml } from "../notes-utils";
+import { parseNote } from "../prose";
+import type { Alignment, BlockType } from "../prose";
+import BlockEditor, { type BlockEditorHandle } from "../prose/BlockEditor";
 import "./note-editor.css";
 
 // ── Format state ──────────────────────────────────────────────────────────
@@ -23,8 +27,6 @@ interface FormatState {
   italic:        boolean;
   underline:     boolean;
   strikethrough: boolean;
-  unorderedList: boolean;
-  orderedList:   boolean;
 }
 
 function queryFormatState(): FormatState {
@@ -33,8 +35,6 @@ function queryFormatState(): FormatState {
     italic:        document.queryCommandState("italic"),
     underline:     document.queryCommandState("underline"),
     strikethrough: document.queryCommandState("strikeThrough"),
-    unorderedList: document.queryCommandState("insertUnorderedList"),
-    orderedList:   document.queryCommandState("insertOrderedList"),
   };
 }
 
@@ -56,29 +56,31 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   note, entries, availableGroups,
   onUpdate, onDelete, onPin, onSetGroups, onBack,
 }) => {
-  const titleRef          = useRef<HTMLInputElement>(null);
-  const editorRef         = useRef<BlockEditorHandle>(null);
-  const currentNoteIdRef  = useRef(note.id);
-  const saveTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleRef         = useRef<HTMLInputElement>(null);
+  const editorRef        = useRef<BlockEditorHandle>(null);
+  const currentNoteIdRef = useRef(note.id);
+  const saveTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [formatState, setFormatState] = useState<FormatState>(queryFormatState);
+  const [blockType,   setBlockType]   = useState<BlockType>("p");
+  const [alignment,   setAlignState]  = useState<Alignment | null>(null);
+
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
-  const groupDropdownRef  = useRef<HTMLDivElement>(null);
+  const groupDropdownRef = useRef<HTMLDivElement>(null);
+
   const [showEmbedPicker, setShowEmbedPicker] = useState(false);
-  const [embedSearch, setEmbedSearch] = useState("");
-  const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
-  const embedPickerRef    = useRef<HTMLDivElement>(null);
+  const [embedSearch,     setEmbedSearch]     = useState("");
+  const [embedTab,        setEmbedTab]        = useState<"entries" | "groups">("entries");
+  const embedPickerRef = useRef<HTMLDivElement>(null);
+
   const [showLinkPicker, setShowLinkPicker] = useState(false);
-  const [linkUrl, setLinkUrl] = useState("");
-  const linkPickerRef     = useRef<HTMLDivElement>(null);
+  const [linkUrl,        setLinkUrl]        = useState("");
+  const linkPickerRef = useRef<HTMLDivElement>(null);
 
-  const initialDoc = useMemo(() => parseNote(note.content), [note.id]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const initialDoc   = useMemo(() => parseNote(note.content), [note.id]); // eslint-disable-line
+  const initialTitle = useMemo(() => deriveNoteTitle(note.title, note.content), [note.id]); // eslint-disable-line
 
-  const initialTitle = useMemo(
-    () => deriveNoteTitle(note.title, note.content),
-    [note.id],  // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  // ── Save helpers ──────────────────────────────────────────────────────
+  // ── Save ──────────────────────────────────────────────────────────────
 
   const save = useCallback((content: string) => {
     const title = deriveNoteTitle(titleRef.current?.value ?? "", content);
@@ -86,14 +88,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     onUpdate(note.id, title, content);
   }, [note.id, onUpdate]);
 
-  const handleEditorChange = useCallback((doc: import("../wysiwyg").NoteDoc) => {
+  const handleEditorChange = useCallback((doc: import("../prose").NoteDoc) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      save(JSON.stringify(doc));
-    }, 400);
+    saveTimerRef.current = setTimeout(() => { save(JSON.stringify(doc)); }, 400);
   }, [save]);
 
-  // Flush on unmount / note change
   useEffect(() => {
     currentNoteIdRef.current = note.id;
     return () => {
@@ -106,34 +105,35 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     };
   }, [note.id, save]);
 
-  // Focus empty new notes
   useEffect(() => {
-    if (!note.title && !note.content) {
-      setTimeout(() => titleRef.current?.focus(), 50);
-    }
+    if (!note.title && !note.content) setTimeout(() => titleRef.current?.focus(), 50);
   }, [note.id]);
 
-  // Normalise untitled notes
   useEffect(() => {
-    if (!titleRef.current) return;
-    if (titleRef.current.value.trim()) return;
+    if (!titleRef.current || titleRef.current.value.trim()) return;
     const nextTitle = deriveNoteTitle(note.title, note.content);
     titleRef.current.value = nextTitle;
     onUpdate(note.id, nextTitle, note.content);
   }, [note.id, note.title, note.content, onUpdate]);
 
-  // Update format state on selection change
+  // Track format/block type/alignment on selection change
   useEffect(() => {
-    const update = () => setFormatState(queryFormatState());
+    const update = () => {
+      setFormatState(queryFormatState());
+      if (editorRef.current) {
+        setBlockType(editorRef.current.getBlockType());
+        setAlignState(editorRef.current.getAlignment());
+      }
+    };
     document.addEventListener("selectionchange", update);
     return () => document.removeEventListener("selectionchange", update);
   }, []);
 
-  // ── Close editor ──────────────────────────────────────────────────────
+  // ── Close ─────────────────────────────────────────────────────────────
 
   const handleClose = useCallback(() => {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    const doc = editorRef.current?.flush();
+    const doc     = editorRef.current?.flush();
     const content = doc ? JSON.stringify(doc) : note.content;
     if (!hasMeaningfulContent(content)) { onDelete(note.id); onBack(); return; }
     save(content);
@@ -145,6 +145,16 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const execFmt = (cmd: string, value?: string) => {
     editorRef.current?.execFmt(cmd, value);
     setTimeout(() => setFormatState(queryFormatState()), 0);
+  };
+
+  const changeBlockType = (type: BlockType) => {
+    editorRef.current?.setBlockType(type);
+    setBlockType(type);
+  };
+
+  const changeAlignment = (align: Alignment | null) => {
+    editorRef.current?.setAlignment(align);
+    setAlignState(align);
   };
 
   // ── Group toggle ──────────────────────────────────────────────────────
@@ -160,31 +170,21 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   useEffect(() => {
     if (!showGroupDropdown) return;
-    const h = (e: MouseEvent) => {
-      if (groupDropdownRef.current && !groupDropdownRef.current.contains(e.target as Node))
-        setShowGroupDropdown(false);
-    };
+    const h = (e: MouseEvent) => { if (groupDropdownRef.current && !groupDropdownRef.current.contains(e.target as Node)) setShowGroupDropdown(false); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [showGroupDropdown]);
 
   useEffect(() => {
     if (!showEmbedPicker) return;
-    const h = (e: MouseEvent) => {
-      if (embedPickerRef.current && !embedPickerRef.current.contains(e.target as Node))
-        setShowEmbedPicker(false);
-    };
+    const h = (e: MouseEvent) => { if (embedPickerRef.current && !embedPickerRef.current.contains(e.target as Node)) setShowEmbedPicker(false); };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [showEmbedPicker]);
 
   useEffect(() => {
     if (!showLinkPicker) return;
-    const h = (e: MouseEvent) => {
-      if (linkPickerRef.current && !linkPickerRef.current.contains(e.target as Node)) {
-        setShowLinkPicker(false); setLinkUrl("");
-      }
-    };
+    const h = (e: MouseEvent) => { if (linkPickerRef.current && !linkPickerRef.current.contains(e.target as Node)) { setShowLinkPicker(false); setLinkUrl(""); } };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [showLinkPicker]);
@@ -227,6 +227,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, [availableGroups, embedSearch]);
 
   // ── Render ────────────────────────────────────────────────────────────
+
+  const isList = blockType === "ul" || blockType === "ol";
 
   return (
     <div className="ns-editor-shell">
@@ -307,31 +309,117 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Formatting toolbar */}
         <div className="ns-format-bar">
-          <button className={`ns-fmt-btn${formatState.bold ? " ns-fmt-btn--active" : ""}`} onClick={() => execFmt("bold")} data-tooltip="Bold (Ctrl+B)" data-tooltip-pos="below"><BoldIcon size={13} /></button>
-          <button className={`ns-fmt-btn${formatState.italic ? " ns-fmt-btn--active" : ""}`} onClick={() => execFmt("italic")} data-tooltip="Italic (Ctrl+I)" data-tooltip-pos="below"><ItalicIcon size={13} /></button>
-          <button className={`ns-fmt-btn${formatState.underline ? " ns-fmt-btn--active" : ""}`} onClick={() => execFmt("underline")} data-tooltip="Underline (Ctrl+U)" data-tooltip-pos="below"><UnderlineIcon size={13} /></button>
-          <button className={`ns-fmt-btn${formatState.strikethrough ? " ns-fmt-btn--active" : ""}`} onClick={() => execFmt("strikeThrough")} data-tooltip="Strikethrough" data-tooltip-pos="below"><StrikethroughIcon size={13} /></button>
+
+          {/* Inline marks */}
+          <button className={`ns-fmt-btn${formatState.bold ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => execFmt("bold")} data-tooltip="Bold (Ctrl+B)" data-tooltip-pos="below">
+            <BoldIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${formatState.italic ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => execFmt("italic")} data-tooltip="Italic (Ctrl+I)" data-tooltip-pos="below">
+            <ItalicIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${formatState.underline ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => execFmt("underline")} data-tooltip="Underline (Ctrl+U)" data-tooltip-pos="below">
+            <UnderlineIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${formatState.strikethrough ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => execFmt("strikeThrough")} data-tooltip="Strikethrough" data-tooltip-pos="below">
+            <StrikethroughIcon size={13} />
+          </button>
+
           <span className="ns-fmt-sep" />
-          <button className="ns-fmt-btn" onClick={() => editorRef.current?.setBlockType("h1")} data-tooltip="Heading 1" data-tooltip-pos="below"><Heading1Icon size={14} /></button>
-          <button className="ns-fmt-btn" onClick={() => editorRef.current?.setBlockType("h2")} data-tooltip="Heading 2" data-tooltip-pos="below"><Heading2Icon size={14} /></button>
+
+          {/* Block types */}
+          <button className={`ns-fmt-btn${blockType === "h1" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("h1")} data-tooltip="Heading 1" data-tooltip-pos="below">
+            <Heading1Icon size={14} />
+          </button>
+          <button className={`ns-fmt-btn${blockType === "h2" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("h2")} data-tooltip="Heading 2" data-tooltip-pos="below">
+            <Heading2Icon size={14} />
+          </button>
+          <button className={`ns-fmt-btn${blockType === "h3" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("h3")} data-tooltip="Heading 3" data-tooltip-pos="below">
+            <Heading3Icon size={14} />
+          </button>
+          <button className={`ns-fmt-btn${blockType === "bq" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("bq")} data-tooltip="Quote" data-tooltip-pos="below">
+            <QuoteIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${blockType === "code" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("code")} data-tooltip="Code block" data-tooltip-pos="below">
+            <CodeBlockIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${blockType === "todo" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("todo")} data-tooltip="Checklist" data-tooltip-pos="below">
+            <TodoCheckIcon size={13} />
+          </button>
+          <button className="ns-fmt-btn"
+            onClick={() => changeBlockType("hr")} data-tooltip="Horizontal rule" data-tooltip-pos="below">
+            <HrIcon size={13} />
+          </button>
+
           <span className="ns-fmt-sep" />
-          <button className={`ns-fmt-btn${formatState.unorderedList ? " ns-fmt-btn--active" : ""}`} onClick={() => editorRef.current?.setBlockType("ul")} data-tooltip="Bullet list" data-tooltip-pos="below"><BulletListIcon size={13} /></button>
-          <button className={`ns-fmt-btn${formatState.orderedList ? " ns-fmt-btn--active" : ""}`} onClick={() => editorRef.current?.setBlockType("ol")} data-tooltip="Numbered list" data-tooltip-pos="below"><OrderedListIcon size={13} /></button>
-          <button className="ns-fmt-btn" onClick={() => editorRef.current?.setBlockType("bq")} data-tooltip="Quote" data-tooltip-pos="below"><QuoteIcon size={13} /></button>
+
+          {/* Lists */}
+          <button className={`ns-fmt-btn${blockType === "ul" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("ul")} data-tooltip="Bullet list" data-tooltip-pos="below">
+            <BulletListIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${blockType === "ol" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeBlockType("ol")} data-tooltip="Numbered list" data-tooltip-pos="below">
+            <OrderedListIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${!isList ? " ns-fmt-btn--disabled" : ""}`}
+            onClick={() => editorRef.current?.indent()} data-tooltip="Indent" data-tooltip-pos="below"
+            disabled={!isList}>
+            <IndentIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${!isList ? " ns-fmt-btn--disabled" : ""}`}
+            onClick={() => editorRef.current?.outdent()} data-tooltip="Outdent" data-tooltip-pos="below"
+            disabled={!isList}>
+            <OutdentIcon size={13} />
+          </button>
+
+          <span className="ns-fmt-sep" />
+
+          {/* Alignment */}
+          <button className={`ns-fmt-btn${alignment === "left" || alignment === null ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeAlignment(null)} data-tooltip="Align left" data-tooltip-pos="below">
+            <AlignLeftIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${alignment === "center" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeAlignment("center")} data-tooltip="Align center" data-tooltip-pos="below">
+            <AlignCenterIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${alignment === "right" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeAlignment("right")} data-tooltip="Align right" data-tooltip-pos="below">
+            <AlignRightIcon size={13} />
+          </button>
+          <button className={`ns-fmt-btn${alignment === "justify" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => changeAlignment("justify")} data-tooltip="Justify" data-tooltip-pos="below">
+            <AlignJustifyIcon size={13} />
+          </button>
+
           <span className="ns-fmt-sep" />
 
           {/* Link picker */}
           <div className="ns-embed-wrap" ref={linkPickerRef}>
             <button className={`ns-fmt-btn${showLinkPicker ? " ns-fmt-btn--active" : ""}`}
               onClick={() => { editorRef.current?.saveRange(); setShowLinkPicker(p => !p); setShowEmbedPicker(false); }}
-              data-tooltip="Insert link" data-tooltip-pos="below"
-            ><LinkIcon size={12} /></button>
+              data-tooltip="Insert link" data-tooltip-pos="below">
+              <LinkIcon size={12} />
+            </button>
             {showLinkPicker && (
               <div className="ns-embed-picker ns-link-picker">
                 <div className="ns-link-picker-row">
                   <input className="ns-embed-search ns-link-input" placeholder="https://…"
                     value={linkUrl} onChange={e => setLinkUrl(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") insertLink(linkUrl); if (e.key === "Escape") { setShowLinkPicker(false); setLinkUrl(""); } }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") insertLink(linkUrl);
+                      if (e.key === "Escape") { setShowLinkPicker(false); setLinkUrl(""); }
+                    }}
                     autoFocus
                   />
                   <button className="ns-link-insert-btn" onClick={() => insertLink(linkUrl)} disabled={!linkUrl.trim()}>Insert</button>
@@ -344,8 +432,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           <div className="ns-embed-wrap" ref={embedPickerRef}>
             <button className={`ns-fmt-btn${showEmbedPicker ? " ns-fmt-btn--active" : ""}`}
               onClick={() => { editorRef.current?.saveRange(); setShowEmbedPicker(p => !p); setShowLinkPicker(false); setEmbedSearch(""); }}
-              data-tooltip="Embed clipboard entry" data-tooltip-pos="below"
-            ><EmbedClipIcon size={13} /></button>
+              data-tooltip="Embed clipboard entry" data-tooltip-pos="below">
+              <EmbedClipIcon size={13} />
+            </button>
             {showEmbedPicker && (
               <div className="ns-embed-picker">
                 <div className="ns-embed-picker-tabs">
@@ -392,6 +481,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
+
         </div>
 
         {/* Editor content area */}
@@ -409,6 +499,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         <div className="ns-editor-footer">
           <span className="ns-editor-footer-text">Updated {timeAgo(note.updated_at)}</span>
         </div>
+
       </div>
     </div>
   );
