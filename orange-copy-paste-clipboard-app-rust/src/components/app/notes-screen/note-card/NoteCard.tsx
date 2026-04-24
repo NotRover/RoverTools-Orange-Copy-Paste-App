@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useMemo } from "react";
 import type { Note } from "../../../../types";
 import { groupColor, timeAgo } from "../../../../types";
 import { CheckIcon, PinIcon, TrashIcon } from "../../../icons";
-import { deriveNoteTitle, sanitizeNotePreviewHtml } from "../notes-utils";
+import { deriveNoteTitle } from "../notes-utils";
+import { parseNote } from "../note-doc";
+import NotePreview from "../NotePreview";
 import "./note-card.css";
 
 interface NoteCardProps {
@@ -28,6 +30,8 @@ const NoteCard: React.FC<NoteCardProps> = ({
   onDelete,
   onContextMenu,
 }) => {
+  const doc = useMemo(() => parseNote(note.content), [note.content]);
+
   return (
     <div
       className={[
@@ -59,15 +63,13 @@ const NoteCard: React.FC<NoteCardProps> = ({
           <div
             className={[
               "ns-card-preview",
-              "ns-card-preview--rich",
               isExpanded && "ns-card-preview--expanded",
             ]
               .filter(Boolean)
               .join(" ")}
-            dangerouslySetInnerHTML={{
-              __html: sanitizeNotePreviewHtml(note.content, entries),
-            }}
-          />
+          >
+            <NotePreview doc={doc} entries={entries} />
+          </div>
         )}
         <div className="ns-card-footer">
           <div className="ns-card-chips">
