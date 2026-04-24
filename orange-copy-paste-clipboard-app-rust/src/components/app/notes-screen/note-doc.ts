@@ -1,2 +1,2 @@
-// Backward-compat shim — all engine logic lives in wysiwyg/
-export * from "./wysiwyg/index";
+// Prose engine public API
+export * from "./prose/index";

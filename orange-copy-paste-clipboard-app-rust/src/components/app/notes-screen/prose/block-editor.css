@@ -1,0 +1,209 @@
+/* ── Prose Engine — Block Editor ─────────────────────────────────────────── */
+
+.ns-be {
+  position: relative;
+  min-height: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  color: var(--text);
+  font-size: 14px;
+}
+
+/* ── Base block ──────────────────────────────────────────────────────────── */
+
+.ns-be-block {
+  display: block;
+  outline: none;
+  width: 100%;
+  word-break: break-word;
+  caret-color: var(--accent);
+  user-select: text;
+  -webkit-user-select: text;
+  line-height: 1.72;
+  min-height: 1.72em;
+  color: var(--text);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  list-style: none;
+}
+
+/* ── Paragraph ───────────────────────────────────────────────────────────── */
+
+.ns-be-p { margin: 0; }
+
+/* ── Headings ────────────────────────────────────────────────────────────── */
+
+.ns-be-h1 {
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+  margin: 16px 0 6px;
+}
+
+.ns-be-h2 {
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.28;
+  letter-spacing: -0.01em;
+  margin: 12px 0 4px;
+}
+
+.ns-be-h3 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.36;
+  letter-spacing: -0.005em;
+  margin: 10px 0 3px;
+}
+
+/* ── Lists — block IS the ul/ol ──────────────────────────────────────────── */
+
+.ns-be-ul,
+.ns-be-ol {
+  padding-left: 22px;
+  margin: 4px 0;
+  list-style: revert;
+}
+
+.ns-be-ul { list-style-type: disc; }
+.ns-be-ul li::marker { color: var(--accent); }
+.ns-be-ol { list-style-type: decimal; }
+
+/* ── Blockquote ──────────────────────────────────────────────────────────── */
+
+.ns-be-bq {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 62%, var(--border));
+  padding: 8px 14px;
+  margin: 10px 0;
+  background: color-mix(in srgb, var(--surface) 86%, var(--bg));
+  border-radius: 0 6px 6px 0;
+  color: var(--text-secondary);
+}
+
+/* ── Code block ──────────────────────────────────────────────────────────── */
+
+.ns-be-code {
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  background: color-mix(in srgb, var(--surface) 90%, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  color: var(--text);
+  tab-size: 2;
+}
+
+/* ── Todo / checklist ────────────────────────────────────────────────────── */
+
+.ns-be-todo {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0;
+}
+
+.ns-be-todo-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  top: 2px;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.ns-be-todo-check:hover {
+  border-color: var(--accent);
+}
+
+.ns-be-todo--checked .ns-be-todo-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ns-be-todo--checked .ns-be-todo-check::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 5px;
+  border-left: 1.8px solid #fff;
+  border-bottom: 1.8px solid #fff;
+  transform: rotate(-45deg) translate(1px, -1px);
+}
+
+.ns-be-todo--checked {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-muted) 60%, transparent);
+}
+
+/* ── HR ──────────────────────────────────────────────────────────────────── */
+
+.ns-be-hr { padding: 4px 0; }
+.ns-be-hr hr { border: none; border-top: 1px solid var(--border); }
+
+/* ── Alignment ───────────────────────────────────────────────────────────── */
+
+.ns-be-align-left    { text-align: left; }
+.ns-be-align-center  { text-align: center; }
+.ns-be-align-right   { text-align: right; }
+.ns-be-align-justify { text-align: justify; }
+
+/* ── Inline formatting ───────────────────────────────────────────────────── */
+
+.ns-be-block strong, .ns-be-block b { font-weight: 700; }
+.ns-be-block em,     .ns-be-block i { font-style: italic; }
+.ns-be-block u                      { text-decoration: underline; }
+.ns-be-block s, .ns-be-block strike { text-decoration: line-through; color: var(--text-muted); }
+
+.ns-be-block code {
+  font-family: "Cascadia Code", "Fira Code", monospace;
+  font-size: 11.5px;
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.ns-be-block a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ns-be-block a:hover { opacity: 0.8; }
+
+.ns-be-block img {
+  max-width: 100%;
+  border-radius: 6px;
+  display: block;
+  margin: 6px 0;
+}
+
+/* ── Placeholder ─────────────────────────────────────────────────────────── */
+
+.ns-be-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.72;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Embed styles shared with NoteEditor (rules live in note-editor.css) ── */

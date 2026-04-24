@@ -1,14 +1,13 @@
-// ── WYSIWYG Engine — Public API ───────────────────────────────────────────
+// ── Prose Engine — Public API ─────────────────────────────────────────────
 export type {
   NoteDoc, BlockNode, InlineNode,
   TextNode, ClipEmbedNode, GroupRefNode, LinkNode, ImageNode,
-  BlockType, ParaBlockType, ListBlockType,
+  BlockType, ParaBlockType, ListBlockType, Alignment,
 } from "./types";
-export { isParaBlock, isListBlock } from "./types";
+export { isParaBlock, isListBlock, isAlignableBlock } from "./types";
 
 export {
   parseNote, emptyDoc, docPlainText,
-  htmlToDoc, docToHtml,
   inlinesToHtml, parseInlines, getBlockHtml, parseBlockEl,
 } from "./serialize";
 

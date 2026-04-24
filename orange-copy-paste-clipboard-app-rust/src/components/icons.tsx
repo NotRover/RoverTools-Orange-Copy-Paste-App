@@ -1313,3 +1313,89 @@ export const EmbedClipIcon: React.FC<IconProps> = ({
     <path d="M13 16h2" />
   </svg>
 );
+
+/* ── Notes editor extras ── */
+
+export const Heading3Icon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M4 12h8M4 5v14M12 5v14" />
+    <path d="M17 10c2 0 3 .9 3 2s-1 2-3 2c2 0 3 .9 3 2s-1 2-3 2" />
+  </svg>
+);
+
+export const AlignLeftIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3" y1="6"  x2="21" y2="6" />
+    <line x1="3" y1="12" x2="15" y2="12" />
+    <line x1="3" y1="18" x2="18" y2="18" />
+  </svg>
+);
+
+export const AlignCenterIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3" y1="6"  x2="21" y2="6" />
+    <line x1="6" y1="12" x2="18" y2="12" />
+    <line x1="4" y1="18" x2="20" y2="18" />
+  </svg>
+);
+
+export const AlignRightIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3" y1="6"  x2="21" y2="6" />
+    <line x1="9" y1="12" x2="21" y2="12" />
+    <line x1="6" y1="18" x2="21" y2="18" />
+  </svg>
+);
+
+export const AlignJustifyIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3" y1="6"  x2="21" y2="6" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <line x1="3" y1="18" x2="21" y2="18" />
+  </svg>
+);
+
+export const IndentIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3" y1="6"  x2="21" y2="6" />
+    <line x1="3" y1="18" x2="21" y2="18" />
+    <polyline points="7 8 11 12 7 16" />
+    <line x1="11" y1="12" x2="21" y2="12" />
+  </svg>
+);
+
+export const OutdentIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3" y1="6"  x2="21" y2="6" />
+    <line x1="3" y1="18" x2="21" y2="18" />
+    <polyline points="11 8 7 12 11 16" />
+    <line x1="7" y1="12" x2="21" y2="12" />
+  </svg>
+);
+
+export const TodoCheckIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="3" y="5" width="13" height="13" rx="2" />
+    <polyline points="6 12 9 15 14 9" />
+    <line x1="19" y1="8"  x2="22" y2="8" />
+    <line x1="19" y1="12" x2="22" y2="12" />
+    <line x1="19" y1="16" x2="22" y2="16" />
+  </svg>
+);
+
+export const CodeBlockIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <polyline points="16 18 22 12 16 6" />
+    <polyline points="8 6 2 12 8 18" />
+  </svg>
+);
+
+export const HrIcon: React.FC<IconProps> = ({ size = 14, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <line x1="3"  y1="12" x2="21" y2="12" />
+    <line x1="3"  y1="6"  x2="9"  y2="6" />
+    <line x1="15" y1="6"  x2="21" y2="6" />
+    <line x1="3"  y1="18" x2="9"  y2="18" />
+    <line x1="15" y1="18" x2="21" y2="18" />
+  </svg>
+);
