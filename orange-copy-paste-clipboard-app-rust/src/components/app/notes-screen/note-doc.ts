@@ -1,2 +1,2 @@
 // Prose engine public API
-export * from "./prose/index";
+export * from "./prose-engine/index";

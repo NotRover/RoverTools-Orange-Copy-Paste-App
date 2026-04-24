@@ -128,12 +128,12 @@
   border-color: var(--accent);
 }
 
-.ns-be-todo--checked .ns-be-todo-check {
+.ns-be-todo-check[data-checked="true"] {
   background: var(--accent);
   border-color: var(--accent);
 }
 
-.ns-be-todo--checked .ns-be-todo-check::after {
+.ns-be-todo-check[data-checked="true"]::after {
   content: "";
   display: block;
   width: 8px;
@@ -206,4 +206,14 @@
   user-select: none;
 }
 
-/* ── Embed styles shared with NoteEditor (rules live in note-editor.css) ── */
+/* ── Embed selection / resizing ───────────────────────────────────────────── */
+
+.ns-be .ns-embed--selected {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.ns-be .ns-embed--resizing {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
