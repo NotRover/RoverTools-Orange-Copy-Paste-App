@@ -7,16 +7,21 @@ export interface NoteDoc {
   nodes: BlockNode[];
 }
 
+export interface ListItem {
+  children: InlineNode[];
+  level?: number;
+}
+
 export type BlockNode =
-  | { type: "p";    children: InlineNode[]; align?: Alignment }
-  | { type: "h1";   children: InlineNode[]; align?: Alignment }
-  | { type: "h2";   children: InlineNode[]; align?: Alignment }
-  | { type: "h3";   children: InlineNode[]; align?: Alignment }
-  | { type: "bq";   children: InlineNode[] }
-  | { type: "todo"; children: InlineNode[]; checked: boolean; align?: Alignment }
+  | { type: "p";    children: InlineNode[]; align?: Alignment; indent?: number }
+  | { type: "h1";   children: InlineNode[]; align?: Alignment; indent?: number }
+  | { type: "h2";   children: InlineNode[]; align?: Alignment; indent?: number }
+  | { type: "h3";   children: InlineNode[]; align?: Alignment; indent?: number }
+  | { type: "bq";   children: InlineNode[]; indent?: number }
+  | { type: "todo"; children: InlineNode[]; checked: boolean; align?: Alignment; indent?: number }
   | { type: "code"; children: InlineNode[] }
-  | { type: "ul";   items: InlineNode[][] }
-  | { type: "ol";   items: InlineNode[][] }
+  | { type: "ul";   items: ListItem[] }
+  | { type: "ol";   items: ListItem[] }
   | { type: "hr" };
 
 export type InlineNode =
@@ -67,17 +72,24 @@ export type ParaBlockType = "p" | "h1" | "h2" | "h3" | "bq" | "todo" | "code";
 export type ListBlockType  = "ul" | "ol";
 export type BlockType      = ParaBlockType | ListBlockType | "hr";
 
+export const MAX_INDENT = 6;
+
 export function isParaBlock(node: BlockNode): node is Extract<BlockNode, { children: InlineNode[] }> {
   return node.type === "p"    || node.type === "h1"   || node.type === "h2"
       || node.type === "h3"   || node.type === "bq"   || node.type === "todo"
       || node.type === "code";
 }
 
-export function isListBlock(node: BlockNode): node is { type: ListBlockType; items: InlineNode[][] } {
+export function isListBlock(node: BlockNode): node is { type: ListBlockType; items: ListItem[] } {
   return node.type === "ul" || node.type === "ol";
 }
 
 export function isAlignableBlock(node: BlockNode): node is Extract<BlockNode, { align?: Alignment }> {
   return node.type === "p"  || node.type === "h1" || node.type === "h2"
       || node.type === "h3" || node.type === "todo";
+}
+
+export function isIndentableBlock(node: BlockNode): node is Extract<BlockNode, { indent?: number }> {
+  return node.type === "p"  || node.type === "h1" || node.type === "h2"
+      || node.type === "h3" || node.type === "bq" || node.type === "todo";
 }

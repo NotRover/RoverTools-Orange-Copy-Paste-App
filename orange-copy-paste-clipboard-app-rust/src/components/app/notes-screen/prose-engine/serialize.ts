@@ -3,10 +3,10 @@
 // parseNote() accepts JSON v2 only; non-JSON input returns an empty doc.
 
 import type {
-  NoteDoc, BlockNode, InlineNode, Alignment,
+  NoteDoc, BlockNode, InlineNode, Alignment, ListItem,
   ClipEmbedNode, GroupRefNode, ImageNode, LinkNode,
 } from "./types";
-import { isParaBlock, isListBlock } from "./types";
+import { isParaBlock, isListBlock, MAX_INDENT } from "./types";
 
 // ── Storage ───────────────────────────────────────────────────────────────
 
@@ -18,22 +18,62 @@ export function parseNote(raw: string): NoteDoc {
   if (!raw || !raw.trim()) return emptyDoc();
   try {
     const p = JSON.parse(raw);
-    if (p?.v === 2 && Array.isArray(p.nodes)) return p as NoteDoc;
+    if (p?.v === 2 && Array.isArray(p.nodes)) {
+      const nodes = p.nodes.map(normalizeBlock).filter(Boolean) as BlockNode[];
+      return { v: 2, nodes: nodes.length ? nodes : [{ type: "p", children: [] }] };
+    }
   } catch {}
   return emptyDoc();
+}
+
+function clampIndent(n: unknown): number {
+  const v = typeof n === "number" ? n : 0;
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(MAX_INDENT, Math.floor(v));
+}
+
+function normalizeBlock(node: any): BlockNode | null {
+  if (!node || typeof node !== "object") return null;
+  if (node.type === "ul" || node.type === "ol") {
+    const items = Array.isArray(node.items) ? node.items : [];
+    const norm: ListItem[] = items.map((it: any) =>
+      Array.isArray(it)
+        ? { children: it as InlineNode[], level: 0 }
+        : {
+            children: Array.isArray(it?.children) ? (it.children as InlineNode[]) : [],
+            level: clampIndent(it?.level),
+          }
+    );
+    return { type: node.type, items: norm.length ? norm : [{ children: [], level: 0 }] };
+  }
+  if (node.type === "hr") return { type: "hr" };
+  if (!isParaBlock(node)) return null;
+  const out: any = { type: node.type, children: Array.isArray(node.children) ? node.children : [] };
+  if (node.type === "todo") out.checked = !!node.checked;
+  const anyNode = node as any;
+  if (anyNode.align) out.align = anyNode.align;
+  if (anyNode.indent) out.indent = clampIndent(anyNode.indent);
+  return out as BlockNode;
 }
 
 export function docPlainText(doc: NoteDoc): string {
   const parts: string[] = [];
   for (const node of doc.nodes) {
     if (node.type === "hr") continue;
-    const inlines: InlineNode[] = isListBlock(node) ? node.items.flat() : node.children;
-    for (const n of inlines) {
-      if (n.type === "text" && n.text) parts.push(n.text);
-      else if (n.type === "link" && n.text) parts.push(n.text);
+    if (isListBlock(node)) {
+      for (const it of node.items) inlineText(it.children, parts);
+    } else {
+      inlineText(node.children, parts);
     }
   }
   return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function inlineText(inlines: InlineNode[], parts: string[]): void {
+  for (const n of inlines) {
+    if (n.type === "text" && n.text) parts.push(n.text);
+    else if (n.type === "link" && n.text) parts.push(n.text);
+  }
 }
 
 // ── Inline DOM → AST ─────────────────────────────────────────────────────
@@ -72,7 +112,6 @@ export function parseInlines(
     const elem = node as Element;
     const tag  = elem.tagName.toLowerCase();
 
-    // Skip the todo checkbox span
     if ((elem as HTMLElement).hasAttribute("data-todo-check")) continue;
 
     if (elem.hasAttribute("data-clip-embed")) {
@@ -130,30 +169,34 @@ export function parseInlines(
 
 export function parseBlockEl(el: HTMLElement, type: BlockNode["type"]): BlockNode {
   const align = (el.getAttribute("data-align") || undefined) as Alignment | undefined;
+  const indent = clampIndent(parseInt(el.getAttribute("data-indent") ?? "0", 10));
 
   if (type === "ul" || type === "ol") {
-    const items = Array.from(el.querySelectorAll(":scope > li")).map(li =>
-      parseInlines(li as HTMLElement)
-    );
-    return { type, items: items.length ? items : [[]] };
+    const items: ListItem[] = Array.from(el.querySelectorAll(":scope > li")).map(li => {
+      const level = clampIndent(parseInt((li as HTMLElement).getAttribute("data-level") ?? "0", 10));
+      return { children: parseInlines(li as HTMLElement), level };
+    });
+    return { type, items: items.length ? items : [{ children: [], level: 0 }] };
   }
 
   if (type === "hr") return { type: "hr" };
 
   if (type === "todo") {
     const checked = el.querySelector("[data-todo-check]")?.getAttribute("data-checked") === "true";
-    const node: BlockNode = { type: "todo", children: parseInlines(el), checked };
-    if (align) (node as any).align = align;
-    return node;
+    const node: any = { type: "todo", children: parseInlines(el), checked };
+    if (align) node.align = align;
+    if (indent) node.indent = indent;
+    return node as BlockNode;
   }
 
   if (type === "code") {
     return { type: "code", children: parseInlines(el) };
   }
 
-  const node = { type, children: parseInlines(el) } as BlockNode;
-  if (align) (node as any).align = align;
-  return node;
+  const node: any = { type, children: parseInlines(el) };
+  if (align) node.align = align;
+  if (indent) node.indent = indent;
+  return node as BlockNode;
 }
 
 // ── AST → HTML (for contenteditable) ─────────────────────────────────────
@@ -190,9 +233,13 @@ export function inlinesToHtml(nodes: InlineNode[]): string {
 }
 
 export function getBlockHtml(node: BlockNode): string {
-  // List blocks: the element IS the ul/ol, so set just the li children
-  if (node.type === "ul") return node.items.map(i => `<li>${inlinesToHtml(i)}</li>`).join("");
-  if (node.type === "ol") return node.items.map(i => `<li>${inlinesToHtml(i)}</li>`).join("");
+  if (node.type === "ul" || node.type === "ol") {
+    return node.items.map(it => {
+      const lvl = clampIndent(it.level);
+      const cls = `ns-be-li ns-be-li-l${lvl}`;
+      return `<li class="${cls}" data-level="${lvl}">${inlinesToHtml(it.children)}</li>`;
+    }).join("");
+  }
   if (node.type === "hr") return "";
   if (node.type === "todo") {
     const chk = `<span data-todo-check="true" contenteditable="false" class="ns-be-todo-check" data-checked="${node.checked}" aria-label="${node.checked ? "Checked" : "Unchecked"}"></span>`;

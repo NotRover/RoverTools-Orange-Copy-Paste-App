@@ -141,21 +141,27 @@ function BlockEl({
     case "ul":
       return (
         <ul className="ns-pv-ul">
-          {node.items.map((item, i) => (
-            <li key={i} className="ns-pv-li">
-              <InlineList nodes={item} entries={entries} />
-            </li>
-          ))}
+          {node.items.map((item, i) => {
+            const lvl = item.level ?? 0;
+            return (
+              <li key={i} className={`ns-pv-li ns-pv-li-l${lvl}`} data-level={lvl}>
+                <InlineList nodes={item.children} entries={entries} />
+              </li>
+            );
+          })}
         </ul>
       );
     case "ol":
       return (
         <ol className="ns-pv-ol">
-          {node.items.map((item, i) => (
-            <li key={i} className="ns-pv-li">
-              <InlineList nodes={item} entries={entries} />
-            </li>
-          ))}
+          {node.items.map((item, i) => {
+            const lvl = item.level ?? 0;
+            return (
+              <li key={i} className={`ns-pv-li ns-pv-li-l${lvl}`} data-level={lvl}>
+                <InlineList nodes={item.children} entries={entries} />
+              </li>
+            );
+          })}
         </ol>
       );
     case "bq":
