@@ -756,15 +756,36 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
 
         setFocusedType(newType);
         const newKey = genKey();
+        // HR is non-editable; ensure a paragraph follows so the cursor lands somewhere usable
+        const tailKey = newType === "hr" ? genKey() : null;
         setBlocks((current) => {
           const i = current.findIndex((b) => b.key === key);
           if (i < 0) return current;
-          const next = current.map((b, j) =>
-            j === i ? { key: newKey, node: newNode } : b,
-          );
+          const replaced: BlockState[] = [{ key: newKey, node: newNode }];
+          if (tailKey) {
+            // Don't add a tail paragraph if the next block is already a paragraph-like one
+            const after = current[i + 1];
+            if (!after || !isParaBlock(after.node)) {
+              replaced.push({
+                key: tailKey,
+                node: { type: "p", children: [] } as BlockNode,
+              });
+            }
+          }
+          const next: BlockState[] = [
+            ...current.slice(0, i),
+            ...replaced,
+            ...current.slice(i + 1),
+          ];
           requestAnimationFrame(() => {
-            const e2 = blockRefs.current.get(newKey);
-            if (e2) placeCursorAt(e2, true);
+            const focusKey =
+              newType === "hr"
+                ? (tailKey && blockRefs.current.has(tailKey)
+                    ? tailKey
+                    : next[Math.min(i + 1, next.length - 1)].key)
+                : newKey;
+            const e2 = blockRefs.current.get(focusKey);
+            if (e2) placeCursorAt(e2, newType === "hr" ? false : true);
           });
           onChange({ v: 2, nodes: next.map((b) => b.node) });
           return next;
@@ -1025,6 +1046,20 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
             sel?.addRange(savedRange.current);
             savedRange.current = null;
           }
+          // Refuse to operate if the current selection isn't inside this editor —
+          // prevents execCommand from inserting HTML at the document root.
+          const sel = window.getSelection();
+          if (
+            !sel ||
+            !sel.rangeCount ||
+            !container.contains(sel.getRangeAt(0).commonAncestorContainer)
+          ) {
+            // Place cursor at end of last block to provide a valid target.
+            const last = blocksRef.current[blocksRef.current.length - 1];
+            const lastEl = last && blockRefs.current.get(last.key);
+            if (lastEl) placeCursorAt(lastEl, true);
+            else return;
+          }
           document.execCommand(cmd, false, value);
           scheduleSave();
         },
@@ -1067,7 +1102,7 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         },
         insertLink: (url) => {
           const container = containerRef.current;
-          if (!container) return;
+          if (!container || !url) return;
           container.focus({ preventScroll: true });
           if (savedRange.current) {
             const sel = window.getSelection();
@@ -1075,15 +1110,40 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
             sel?.addRange(savedRange.current);
             savedRange.current = null;
           }
-          const sel = window.getSelection();
+          let sel = window.getSelection();
+          if (
+            !sel ||
+            !sel.rangeCount ||
+            !container.contains(sel.getRangeAt(0).commonAncestorContainer)
+          ) {
+            // Place cursor at end of last block so the link lands somewhere safe.
+            const last = blocksRef.current[blocksRef.current.length - 1];
+            const lastEl = last && blockRefs.current.get(last.key);
+            if (!lastEl) return;
+            placeCursorAt(lastEl, true);
+            sel = window.getSelection();
+          }
           if (sel && !sel.isCollapsed)
             document.execCommand("createLink", false, url);
-          else
-            document.execCommand(
-              "insertHTML",
-              false,
-              `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
-            );
+          else {
+            // Build the anchor manually instead of insertHTML (avoids execCommand
+            // inserting under the wrong root if focus is fragile).
+            const a = document.createElement("a");
+            a.href = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = url;
+            const r = sel?.getRangeAt(0);
+            if (r) {
+              r.insertNode(a);
+              const space = document.createTextNode(" ");
+              a.after(space);
+              r.setStart(space, 1);
+              r.collapse(true);
+              sel?.removeAllRanges();
+              sel?.addRange(r);
+            }
+          }
           scheduleSave();
         },
         saveRange: () => {
@@ -1181,41 +1241,42 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
         const { el, key, state } = cb;
         const type = state.node.type;
 
-        // Code block: Enter at end → new paragraph; Enter inside → newline; Escape → to paragraph
-        if (type === "code") {
+        // Code & blockquote share Enter behavior:
+        //   Enter            → soft newline within block
+        //   Shift+Enter @end → exit to a new paragraph below
+        //   Escape           → convert block back to paragraph
+        if (type === "code" || type === "bq") {
           if (e.key === "Escape") {
             e.preventDefault();
             updateBlockType(key, "p");
             return;
           }
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key === "Enter" && e.shiftKey && caretAtEnd(el)) {
             e.preventDefault();
-            if (caretAtEnd(el)) {
-              const newKey = genKey();
-              setBlocks((current) => {
-                const idx = current.findIndex((b) => b.key === key);
-                if (idx < 0) return current;
-                const next: BlockState[] = [
-                  ...current.slice(0, idx + 1),
-                  { key: newKey, node: { type: "p", children: [] } },
-                  ...current.slice(idx + 1),
-                ];
-                requestAnimationFrame(() => {
-                  const e2 = blockRefs.current.get(newKey);
-                  if (e2) placeCursorAt(e2, false);
-                });
-                onChange({ v: 2, nodes: next.map((b) => b.node) });
-                return next;
+            const newKey = genKey();
+            setBlocks((current) => {
+              const idx = current.findIndex((b) => b.key === key);
+              if (idx < 0) return current;
+              const next: BlockState[] = [
+                ...current.slice(0, idx + 1),
+                { key: newKey, node: { type: "p", children: [] } },
+                ...current.slice(idx + 1),
+              ];
+              requestAnimationFrame(() => {
+                const e2 = blockRefs.current.get(newKey);
+                if (e2) placeCursorAt(e2, false);
               });
-            } else {
-              document.execCommand("insertText", false, "\n");
-              scheduleSave();
-            }
+              onChange({ v: 2, nodes: next.map((b) => b.node) });
+              return next;
+            });
             return;
           }
-          if (e.key === "Enter" && e.shiftKey) {
+          if (e.key === "Enter") {
             e.preventDefault();
-            splitAtCursor(key);
+            if (type === "code")
+              document.execCommand("insertText", false, "\n");
+            else document.execCommand("insertLineBreak");
+            scheduleSave();
             return;
           }
         }
@@ -1253,15 +1314,11 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
           return;
         }
 
-        // Para/heading/bq: Enter splits
+        // Para/heading: Enter splits
         if (
           e.key === "Enter" &&
           !e.shiftKey &&
-          (type === "p" ||
-            type === "h1" ||
-            type === "h2" ||
-            type === "h3" ||
-            type === "bq")
+          (type === "p" || type === "h1" || type === "h2" || type === "h3")
         ) {
           e.preventDefault();
           splitAtCursor(key);
@@ -1321,13 +1378,12 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
             }
           }
 
-          // Backspace at start of first <li> with no content and no level → exit list to paragraph
-          if (
-            e.key === "Backspace" &&
-            li &&
-            caretAtStart(li) &&
-            !li.previousElementSibling
-          ) {
+          // Backspace at start of an <li>:
+          //  - if level > 0 → outdent
+          //  - else if first li → exit the list (this li becomes a paragraph,
+          //    remaining items stay as a list below)
+          //  - else (mid-list) → merge with previous li (let browser handle)
+          if (e.key === "Backspace" && li && caretAtStart(li)) {
             const lvl = parseInt(li.getAttribute("data-level") ?? "0", 10) || 0;
             if (lvl > 0) {
               e.preventDefault();
@@ -1335,9 +1391,49 @@ const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
               scheduleSave();
               return;
             }
-            if (!hasNonEmptyContent(li)) {
+            if (!li.previousElementSibling) {
               e.preventDefault();
-              updateBlockType(key, "p");
+              const exitInlines = parseInlines(li);
+              const remainingLis = Array.from(
+                el.querySelectorAll(":scope > li"),
+              ).slice(1) as HTMLElement[];
+              const remainingItems = remainingLis.map((rli) => ({
+                children: parseInlines(rli),
+                level:
+                  parseInt(rli.getAttribute("data-level") ?? "0", 10) || 0,
+              }));
+              const newKey = genKey();
+              const tailKey = remainingItems.length ? genKey() : null;
+              setBlocks((current) => {
+                const idx = current.findIndex((b) => b.key === key);
+                if (idx < 0) return current;
+                const replacements: BlockState[] = [
+                  {
+                    key: newKey,
+                    node: { type: "p", children: exitInlines } as BlockNode,
+                  },
+                ];
+                if (tailKey) {
+                  replacements.push({
+                    key: tailKey,
+                    node: {
+                      type: type as "ul" | "ol",
+                      items: remainingItems,
+                    } as BlockNode,
+                  });
+                }
+                const next: BlockState[] = [
+                  ...current.slice(0, idx),
+                  ...replacements,
+                  ...current.slice(idx + 1),
+                ];
+                requestAnimationFrame(() => {
+                  const e2 = blockRefs.current.get(newKey);
+                  if (e2) placeCursorAt(e2, false);
+                });
+                onChange({ v: 2, nodes: next.map((b) => b.node) });
+                return next;
+              });
               return;
             }
           }
@@ -1553,12 +1649,16 @@ const BlockEl: React.FC<BlockElProps> = ({
   const elRef = useRef<HTMLElement>(null);
 
   // Only re-runs on structural remount (key change), not during typing.
+  // Skip innerHTML for blocks whose children are React-owned (hr) so React's
+  // reconciliation doesn't crash trying to remove DOM nodes we wiped.
   useEffect(() => {
     const el = elRef.current;
     if (!el) return;
     blockRefs.current.set(bKey, el);
-    el.innerHTML = getBlockHtml(node);
-    renderEmbedsIn(el);
+    if (node.type !== "hr") {
+      el.innerHTML = getBlockHtml(node);
+      renderEmbedsIn(el);
+    }
     return () => {
       blockRefs.current.delete(bKey);
     };
