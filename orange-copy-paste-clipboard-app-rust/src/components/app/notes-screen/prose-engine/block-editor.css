@@ -7,6 +7,13 @@
   margin: 0 auto;
   color: var(--text);
   font-size: 14px;
+  outline: none;
+  caret-color: var(--accent);
+}
+
+.ns-be:focus,
+.ns-be:focus-visible {
+  outline: none;
 }
 
 /* ── Base block ──────────────────────────────────────────────────────────── */
@@ -79,6 +86,40 @@
 .ns-be-ol {
   list-style-type: decimal;
 }
+
+/* ── List nesting levels ─────────────────────────────────────────────────── */
+
+.ns-be-li-l1 { margin-left: 22px; }
+.ns-be-li-l2 { margin-left: 44px; }
+.ns-be-li-l3 { margin-left: 66px; }
+.ns-be-li-l4 { margin-left: 88px; }
+.ns-be-li-l5 { margin-left: 110px; }
+.ns-be-li-l6 { margin-left: 132px; }
+
+.ns-be-ul .ns-be-li-l0 { list-style-type: disc; }
+.ns-be-ul .ns-be-li-l1 { list-style-type: circle; }
+.ns-be-ul .ns-be-li-l2 { list-style-type: square; }
+.ns-be-ul .ns-be-li-l3 { list-style-type: disc; }
+.ns-be-ul .ns-be-li-l4 { list-style-type: circle; }
+.ns-be-ul .ns-be-li-l5 { list-style-type: square; }
+.ns-be-ul .ns-be-li-l6 { list-style-type: disc; }
+
+.ns-be-ol .ns-be-li-l0 { list-style-type: decimal; }
+.ns-be-ol .ns-be-li-l1 { list-style-type: lower-alpha; }
+.ns-be-ol .ns-be-li-l2 { list-style-type: lower-roman; }
+.ns-be-ol .ns-be-li-l3 { list-style-type: decimal; }
+.ns-be-ol .ns-be-li-l4 { list-style-type: lower-alpha; }
+.ns-be-ol .ns-be-li-l5 { list-style-type: lower-roman; }
+.ns-be-ol .ns-be-li-l6 { list-style-type: decimal; }
+
+/* ── Block indent (paragraphs / headings / blockquote / todo) ────────────── */
+
+.ns-be-indent-1 { padding-left: 28px; }
+.ns-be-indent-2 { padding-left: 56px; }
+.ns-be-indent-3 { padding-left: 84px; }
+.ns-be-indent-4 { padding-left: 112px; }
+.ns-be-indent-5 { padding-left: 140px; }
+.ns-be-indent-6 { padding-left: 168px; }
 
 /* ── Blockquote ──────────────────────────────────────────────────────────── */
 
