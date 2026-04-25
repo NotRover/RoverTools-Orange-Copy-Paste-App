@@ -125,11 +125,13 @@
 
 .ns-be-bq {
   border-left: 2px solid color-mix(in srgb, var(--accent) 62%, var(--border));
-  padding: 8px 14px;
+  padding: 10px 14px;
   margin: 10px 0;
   background: color-mix(in srgb, var(--surface) 86%, var(--bg));
   border-radius: 0 6px 6px 0;
   color: var(--text-secondary);
+  min-height: calc(1.72em + 20px);
+  white-space: pre-wrap;
 }
 
 /* ── Code block ──────────────────────────────────────────────────────────── */
@@ -146,6 +148,7 @@
   margin: 8px 0;
   color: var(--text);
   tab-size: 2;
+  min-height: calc(1.6em + 20px);
 }
 
 /* ── Todo / checklist ────────────────────────────────────────────────────── */
@@ -154,7 +157,9 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin: 2px 0;
+  margin: 4px 0;
+  min-height: 1.72em;
+  padding: 2px 0;
 }
 
 .ns-be-todo-check {
