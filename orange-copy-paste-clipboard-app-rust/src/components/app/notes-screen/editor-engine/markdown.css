@@ -40,19 +40,28 @@
   line-height: 1.3;
 }
 .ee-rich.ProseMirror h1 {
-  font-size: 1.85em;
+  font-size: 2.25em;
+  font-weight: 800;
 }
 .ee-rich.ProseMirror h2 {
-  font-size: 1.65em;
+  font-size: 1.8em;
+  font-weight: 760;
 }
 .ee-rich.ProseMirror h3 {
   font-size: 1.45em;
+  font-weight: 720;
 }
 .ee-rich.ProseMirror h4 {
-  font-size: 1.3em;
+  font-size: 1.25em;
+  font-weight: 680;
 }
 .ee-rich.ProseMirror h5 {
-  font-size: 1.18em;
+  font-size: 1.08em;
+  font-weight: 640;
+}
+.ee-rich.ProseMirror h6 {
+  font-size: 0.9em;
+  font-weight: 600;
 }
 
 .ee-rich.ProseMirror p {
@@ -71,6 +80,43 @@
 }
 .ee-rich.ProseMirror li {
   margin: 0.15em 0;
+}
+.ee-rich.ProseMirror ul:not([data-type="taskList"]) {
+  list-style: none;
+  padding-left: 1.4em;
+}
+.ee-rich.ProseMirror ul:not([data-type="taskList"]) > li {
+  position: relative;
+}
+.ee-rich.ProseMirror ul:not([data-type="taskList"]) > li::before {
+  content: "";
+  position: absolute;
+  left: -0.95em;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ee-rich.ProseMirror ol {
+  list-style: none;
+  counter-reset: ee-ol;
+  padding-left: 1.6em;
+}
+.ee-rich.ProseMirror ol > li {
+  counter-increment: ee-ol;
+  position: relative;
+}
+.ee-rich.ProseMirror ol > li::before {
+  content: counter(ee-ol) ".";
+  position: absolute;
+  left: -1.5em;
+  top: 0;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.2em;
+  text-align: right;
 }
 
 .ee-rich.ProseMirror ul[data-type="taskList"] {
@@ -94,9 +140,40 @@
   margin: 0;
 }
 .ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
   margin: 0;
-  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
+  position: relative;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"]:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.ee-rich.ProseMirror
+  ul[data-type="taskList"]
+  input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--bg, #fff);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 .ee-rich.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
   color: var(--text-muted);
@@ -224,6 +301,47 @@
   color: var(--text);
 }
 
+/* Block handle (drag + add on left of each block — Tiptap DragHandle) */
+.ee-block-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  z-index: 215;
+  opacity: 0.85;
+  transition: opacity 0.12s ease;
+}
+.ee-block-handle:hover {
+  opacity: 1;
+}
+.ee-block-handle-btn {
+  width: 18px;
+  height: 18px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.ee-block-handle-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+.ee-block-handle-grip {
+  cursor: grab;
+}
+.ee-block-handle-grip:active {
+  cursor: grabbing;
+}
+
+/* Text alignment */
+.ee-rich.ProseMirror :is(p, h1, h2, h3, h4, h5)[style*="text-align"] {
+  /* honor the inline text-align attribute set by the extension */
+}
+
 .ee-rich.ProseMirror img {
   max-width: 100%;
   height: auto;
@@ -289,19 +407,28 @@
   color: var(--text);
 }
 .ee-preview h1 {
-  font-size: 1.85em;
+  font-size: 2.25em;
+  font-weight: 800;
 }
 .ee-preview h2 {
-  font-size: 1.65em;
+  font-size: 1.8em;
+  font-weight: 760;
 }
 .ee-preview h3 {
   font-size: 1.45em;
+  font-weight: 720;
 }
 .ee-preview h4 {
-  font-size: 1.3em;
+  font-size: 1.25em;
+  font-weight: 680;
 }
 .ee-preview h5 {
-  font-size: 1.18em;
+  font-size: 1.08em;
+  font-weight: 640;
+}
+.ee-preview h6 {
+  font-size: 0.9em;
+  font-weight: 600;
 }
 
 .ee-preview p {

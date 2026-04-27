@@ -8,6 +8,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -21,10 +22,21 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Placeholder } from "@tiptap/extension-placeholder";
+import { TextAlign } from "@tiptap/extension-text-align";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Color } from "@tiptap/extension-color";
+import { Highlight } from "@tiptap/extension-highlight";
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { Markdown } from "tiptap-markdown";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
-import type { EditorCommand, ActiveState, BlockKind } from "./types";
+import type {
+  EditorCommand,
+  ActiveState,
+  BlockKind,
+  AlignValue,
+} from "./types";
+import { DotsSixVerticalIcon, PlusIcon } from "@phosphor-icons/react";
 
 export interface RichEditorHandle {
   applyCommand: (cmd: EditorCommand) => void;
@@ -57,6 +69,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
       rowX: 0,
       rowY: 0,
     });
+    const dragHandleNodePosRef = useRef<number | null>(null);
 
     const updateTableHandlePos = useCallback(
       (nextEditor: ReturnType<typeof useEditor> | null) => {
@@ -137,6 +150,14 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         TableHeader,
         TableCell,
         Placeholder.configure({ placeholder: placeholder ?? "Start writing…" }),
+        TextAlign.configure({
+          types: ["heading", "paragraph"],
+          alignments: ["left", "center", "right", "justify"],
+          defaultAlignment: "left",
+        }),
+        TextStyle,
+        Color,
+        Highlight.configure({ multicolor: true }),
         Markdown.configure({
           html: true,
           tightLists: true,
@@ -164,6 +185,21 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         onSelectionChange?.();
       },
     });
+
+    const handleAddBlockBelow = useCallback(() => {
+      if (!editor) return;
+      const pos = dragHandleNodePosRef.current;
+      if (pos == null) return;
+      const node = editor.state.doc.nodeAt(pos);
+      if (!node) return;
+      const insertAt = pos + node.nodeSize;
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(insertAt, { type: "paragraph" })
+        .setTextSelection(insertAt + 1)
+        .run();
+    }, [editor]);
 
     const runTableCommand = useCallback(
       (cmd: "addRow" | "addCol" | "delRow" | "delCol") => {
@@ -223,8 +259,36 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
             case "hr":
               c.setHorizontalRule().run();
               break;
-            case "link":
-              c.extendMarkRange("link").setLink({ href: cmd.url }).run();
+            case "link": {
+              const { empty } = editor.state.selection;
+              if (empty) {
+                const text = (cmd.text && cmd.text.trim()) || cmd.url;
+                c.insertContent({
+                  type: "text",
+                  text,
+                  marks: [{ type: "link", attrs: { href: cmd.url } }],
+                }).run();
+              } else if (cmd.text && cmd.text.trim()) {
+                c.insertContent({
+                  type: "text",
+                  text: cmd.text,
+                  marks: [{ type: "link", attrs: { href: cmd.url } }],
+                }).run();
+              } else {
+                c.extendMarkRange("link").setLink({ href: cmd.url }).run();
+              }
+              break;
+            }
+            case "align":
+              c.setTextAlign(cmd.value).run();
+              break;
+            case "textColor":
+              if (cmd.value == null) c.unsetColor().run();
+              else c.setColor(cmd.value).run();
+              break;
+            case "highlight":
+              if (cmd.value == null) c.unsetHighlight().run();
+              else c.setHighlight({ color: cmd.value }).run();
               break;
             case "insertTable":
               c.insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
@@ -290,6 +354,31 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
     return (
       <>
         <EditorContent editor={editor} className="ee-rich-shell" />
+        {editor && (
+          <DragHandle
+            editor={editor}
+            className="ee-block-handle"
+            onNodeChange={({ pos }) => {
+              dragHandleNodePosRef.current = pos;
+            }}
+          >
+            <button
+              type="button"
+              className="ee-block-handle-btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleAddBlockBelow}
+              title="Add block below"
+            >
+              <PlusIcon size={11} weight="bold" />
+            </button>
+            <span
+              className="ee-block-handle-btn ee-block-handle-grip"
+              title="Drag to move"
+            >
+              <DotsSixVerticalIcon size={11} weight="bold" />
+            </span>
+          </DragHandle>
+        )}
         {tableHandlePos.visible && (
           <>
             <div
@@ -364,6 +453,15 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
   else if (editor.isActive("bulletList")) blockKind = "ul";
   else if (editor.isActive("orderedList")) blockKind = "ol";
   else if (editor.isActive("codeBlock")) blockKind = "code";
+  let align: AlignValue | undefined;
+  for (const a of ["left", "center", "right", "justify"] as AlignValue[]) {
+    if (editor.isActive({ textAlign: a })) {
+      align = a;
+      break;
+    }
+  }
+  const colorAttr = editor.getAttributes("textStyle")?.color;
+  const highlightAttr = editor.getAttributes("highlight")?.color;
   return {
     bold: editor.isActive("bold"),
     italic: editor.isActive("italic"),
@@ -371,5 +469,8 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
     code: editor.isActive("code"),
     inTable: editor.isActive("table"),
     blockKind,
+    align,
+    textColor: typeof colorAttr === "string" ? colorAttr : undefined,
+    highlight: typeof highlightAttr === "string" ? highlightAttr : undefined,
   };
 }
