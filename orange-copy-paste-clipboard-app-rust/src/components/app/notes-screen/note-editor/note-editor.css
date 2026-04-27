@@ -229,6 +229,11 @@
   background: var(--accent-dim);
 }
 
+.ns-add-group-btn svg {
+  display: block;
+  flex: 0 0 auto;
+}
+
 /* Group dropdown */
 .ns-group-dropdown {
   position: absolute;
