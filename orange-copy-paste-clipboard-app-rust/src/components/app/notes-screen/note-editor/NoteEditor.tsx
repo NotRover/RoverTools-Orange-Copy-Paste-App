@@ -44,7 +44,6 @@ import {
 } from "../notes-utils";
 import {
   MarkdownEditor,
-  parseNoteContent,
   type MarkdownEditorHandle,
   type EditorMode,
   type EditorCommand,
@@ -95,7 +94,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [linkUrl, setLinkUrl] = useState("");
   const linkPickerRef = useRef<HTMLDivElement>(null);
 
-  const initialMarkdown = useMemo(() => parseNoteContent(note.content), [note.id]); // eslint-disable-line
+  const initialMarkdown = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
   const initialTitle = useMemo(
     () => deriveNoteTitle(note.title, note.content),
     [note.id], // eslint-disable-line

@@ -1,18 +1,13 @@
 // ── Editor Engine — Public API ────────────────────────────────────────────
 
 export type {
-  NoteContent,
   EditorMode,
   EditorCommand,
   FormatAction,
   BlockKind,
   ActiveState,
 } from "./types";
-export {
-  emptyContent,
-  parseNoteContent,
-  markdownToPlainText,
-} from "./markdown";
+export { markdownToPlainText } from "./markdown";
 export {
   applyAction,
   commandToAction,
