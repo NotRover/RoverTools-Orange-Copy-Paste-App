@@ -27,6 +27,8 @@ import {
   LinkSimpleIcon,
   ClipboardTextIcon,
   CaretDownIcon,
+  MarkdownLogoIcon,
+  TextTIcon,
   TextAlignLeftIcon,
   TextAlignCenterIcon,
   TextAlignRightIcon,
@@ -125,6 +127,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const headingDropdownRef = useRef<HTMLDivElement>(null);
   const [preferredHeadingLevel, setPreferredHeadingLevel] =
     useState<HeadingLevel>(1);
+
+  const [showStructureDropdown, setShowStructureDropdown] = useState(false);
+  const structureDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [showAlignDropdown, setShowAlignDropdown] = useState(false);
+  const alignDropdownRef = useRef<HTMLDivElement>(null);
 
   const [showEmbedPicker, setShowEmbedPicker] = useState(false);
   const [embedSearch, setEmbedSearch] = useState("");
@@ -277,6 +285,32 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, [showHeadingDropdown]);
 
   useEffect(() => {
+    if (!showStructureDropdown) return;
+    const h = (e: MouseEvent) => {
+      if (
+        structureDropdownRef.current &&
+        !structureDropdownRef.current.contains(e.target as Node)
+      )
+        setShowStructureDropdown(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showStructureDropdown]);
+
+  useEffect(() => {
+    if (!showAlignDropdown) return;
+    const h = (e: MouseEvent) => {
+      if (
+        alignDropdownRef.current &&
+        !alignDropdownRef.current.contains(e.target as Node)
+      )
+        setShowAlignDropdown(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showAlignDropdown]);
+
+  useEffect(() => {
     if (!showEmbedPicker) return;
     const h = (e: MouseEvent) => {
       if (
@@ -377,6 +411,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // ── Render ────────────────────────────────────────────────────────────
 
   const bk = active.blockKind;
+  const structureActive = bk === "ul" || bk === "ol";
+  const alignValue = active.align ?? "left";
 
   const applyHeadingLevel = useCallback(
     (level: HeadingLevel) => {
@@ -503,7 +539,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Formatting toolbar */}
         <div className="ns-format-bar">
-          {/* Mode segmented switch */}
+          {/* Mode switch */}
           <div
             className="ns-mode-switch"
             role="tablist"
@@ -512,18 +548,24 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               role="tab"
               aria-selected={mode === "normal"}
-              className={`ns-mode-tab${mode === "normal" ? " ns-mode-tab--active" : ""}`}
+              aria-label="Normal mode"
+              className={`ns-mode-tab ns-mode-tab--icon${mode === "normal" ? " ns-mode-tab--active" : ""}`}
               onClick={() => switchMode("normal")}
+              data-tooltip="Normal editor"
+              data-tooltip-pos="below"
             >
-              Normal
+              <TextTIcon size={13} weight="bold" />
             </button>
             <button
               role="tab"
               aria-selected={mode === "markdown"}
-              className={`ns-mode-tab${mode === "markdown" ? " ns-mode-tab--active" : ""}`}
+              aria-label="Markdown mode"
+              className={`ns-mode-tab ns-mode-tab--icon${mode === "markdown" ? " ns-mode-tab--active" : ""}`}
               onClick={() => switchMode("markdown")}
+              data-tooltip="Markdown editor"
+              data-tooltip-pos="below"
             >
-              Markdown
+              <MarkdownLogoIcon size={13} weight="bold" />
             </button>
           </div>
 
@@ -565,14 +607,114 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
           <span className="ns-fmt-sep" />
 
+          {/* Text color */}
+          <div className="ns-toolbar-wrap" ref={colorPickerRef}>
+            <button
+              className={`ns-fmt-btn${active.textColor ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowColorPicker((p) => !p);
+                setShowHighlightPicker(false);
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
+              }}
+              data-tooltip="Text color"
+              data-tooltip-pos="below"
+              style={active.textColor ? { color: active.textColor } : undefined}
+            >
+              <PaletteIcon size={13} weight="bold" />
+            </button>
+            {showColorPicker && (
+              <div className="ns-embed-picker ns-color-picker">
+                <div className="ns-color-grid">
+                  {TEXT_COLORS.map((c) => (
+                    <button
+                      key={c.value ?? "none"}
+                      className="ns-color-swatch"
+                      style={{
+                        background: c.value ?? "transparent",
+                        border: c.value
+                          ? "1px solid var(--border)"
+                          : "1px dashed var(--border)",
+                      }}
+                      title={c.label}
+                      onClick={() => {
+                        dispatch({ kind: "textColor", value: c.value });
+                        setShowColorPicker(false);
+                      }}
+                    >
+                      {c.value == null && (
+                        <span className="ns-color-swatch-none">×</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Highlight color */}
+          <div className="ns-toolbar-wrap" ref={highlightPickerRef}>
+            <button
+              className={`ns-fmt-btn${active.highlight ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowHighlightPicker((p) => !p);
+                setShowColorPicker(false);
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
+              }}
+              data-tooltip="Highlight"
+              data-tooltip-pos="below"
+              style={
+                active.highlight ? { background: active.highlight } : undefined
+              }
+            >
+              <HighlighterIcon size={13} weight="bold" />
+            </button>
+            {showHighlightPicker && (
+              <div className="ns-embed-picker ns-color-picker">
+                <div className="ns-color-grid">
+                  {HIGHLIGHT_COLORS.map((c) => (
+                    <button
+                      key={c.value ?? "none"}
+                      className="ns-color-swatch"
+                      style={{
+                        background: c.value ?? "transparent",
+                        border: c.value
+                          ? "1px solid var(--border)"
+                          : "1px dashed var(--border)",
+                      }}
+                      title={c.label}
+                      onClick={() => {
+                        dispatch({ kind: "highlight", value: c.value });
+                        setShowHighlightPicker(false);
+                      }}
+                    >
+                      {c.value == null && (
+                        <span className="ns-color-swatch-none">×</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <span className="ns-fmt-sep" />
+
           {/* Block types */}
           <div className="ns-heading-wrap" ref={headingDropdownRef}>
             <button
               className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "h1" || bk === "h2" || bk === "h3" || bk === "h4" || bk === "h5" ? " ns-fmt-btn--active" : ""}`}
               onClick={() => {
                 setShowHeadingDropdown((p) => !p);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
                 setShowEmbedPicker(false);
                 setShowLinkPicker(false);
+                setShowColorPicker(false);
+                setShowHighlightPicker(false);
               }}
               data-tooltip="Heading size"
               data-tooltip-pos="below"
@@ -644,6 +786,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
+
           <button
             className={`ns-fmt-btn${bk === "bq" ? " ns-fmt-btn--active" : ""}`}
             onClick={() => dispatch({ kind: "blockquote" })}
@@ -669,6 +812,14 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             <CheckSquareOffsetIcon size={13} weight="bold" />
           </button>
           <button
+            className={`ns-fmt-btn${active.inTable ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "insertTable" })}
+            data-tooltip="Insert table"
+            data-tooltip-pos="below"
+          >
+            <TableIcon size={13} weight="bold" />
+          </button>
+          <button
             className="ns-fmt-btn"
             onClick={() => dispatch({ kind: "hr" })}
             data-tooltip="Horizontal rule"
@@ -679,160 +830,129 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
           <span className="ns-fmt-sep" />
 
-          {/* Lists & table */}
-          <button
-            className={`ns-fmt-btn${bk === "ul" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "bulletList" })}
-            data-tooltip="Bullet list"
-            data-tooltip-pos="below"
-          >
-            <ListBulletsIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${bk === "ol" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "orderedList" })}
-            data-tooltip="Numbered list"
-            data-tooltip-pos="below"
-          >
-            <ListNumbersIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.inTable ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "insertTable" })}
-            data-tooltip="Insert table"
-            data-tooltip-pos="below"
-          >
-            <TableIcon size={13} weight="bold" />
-          </button>
-
-          <span className="ns-fmt-sep" />
-
-          {/* Text alignment */}
-          <button
-            className={`ns-fmt-btn${active.align === "left" || !active.align ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "align", value: "left" })}
-            data-tooltip="Align left"
-            data-tooltip-pos="below"
-          >
-            <TextAlignLeftIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.align === "center" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "align", value: "center" })}
-            data-tooltip="Align center"
-            data-tooltip-pos="below"
-          >
-            <TextAlignCenterIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.align === "right" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "align", value: "right" })}
-            data-tooltip="Align right"
-            data-tooltip-pos="below"
-          >
-            <TextAlignRightIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.align === "justify" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "align", value: "justify" })}
-            data-tooltip="Justify"
-            data-tooltip-pos="below"
-          >
-            <TextAlignJustifyIcon size={13} weight="bold" />
-          </button>
-
-          <span className="ns-fmt-sep" />
-
-          {/* Text color */}
-          <div className="ns-embed-wrap" ref={colorPickerRef}>
+          <div className="ns-toolbar-wrap" ref={structureDropdownRef}>
             <button
-              className={`ns-fmt-btn${active.textColor ? " ns-fmt-btn--active" : ""}`}
+              className={`ns-fmt-btn ns-fmt-btn--dropdown${structureActive ? " ns-fmt-btn--active" : ""}`}
               onClick={() => {
-                setShowColorPicker((p) => !p);
+                setShowStructureDropdown((p) => !p);
+                setShowHeadingDropdown(false);
+                setShowAlignDropdown(false);
+                setShowEmbedPicker(false);
+                setShowLinkPicker(false);
+                setShowColorPicker(false);
                 setShowHighlightPicker(false);
               }}
-              data-tooltip="Text color"
+              data-tooltip="Lists"
               data-tooltip-pos="below"
-              style={
-                active.textColor
-                  ? { color: active.textColor }
-                  : undefined
-              }
             >
-              <PaletteIcon size={13} weight="bold" />
+              <ListBulletsIcon size={13} weight="bold" />
+              <CaretDownIcon
+                size={11}
+                weight="bold"
+                className={`ns-fmt-btn-caret${showStructureDropdown ? " ns-fmt-btn-caret--open" : ""}`}
+              />
             </button>
-            {showColorPicker && (
-              <div className="ns-embed-picker ns-color-picker">
-                <div className="ns-color-grid">
-                  {TEXT_COLORS.map((c) => (
-                    <button
-                      key={c.value ?? "none"}
-                      className="ns-color-swatch"
-                      style={{
-                        background: c.value ?? "transparent",
-                        border: c.value
-                          ? "1px solid var(--border)"
-                          : "1px dashed var(--border)",
-                      }}
-                      title={c.label}
-                      onClick={() => {
-                        dispatch({ kind: "textColor", value: c.value });
-                        setShowColorPicker(false);
-                      }}
-                    >
-                      {c.value == null && (
-                        <span className="ns-color-swatch-none">×</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+            {showStructureDropdown && (
+              <div className="ns-toolbar-dropdown">
+                <button
+                  className={`ns-toolbar-dropdown-item${bk === "ul" ? " ns-toolbar-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    dispatch({ kind: "bulletList" });
+                    setShowStructureDropdown(false);
+                  }}
+                >
+                  <ListBulletsIcon size={13} weight="bold" />
+                  Bullet list
+                </button>
+                <button
+                  className={`ns-toolbar-dropdown-item${bk === "ol" ? " ns-toolbar-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    dispatch({ kind: "orderedList" });
+                    setShowStructureDropdown(false);
+                  }}
+                >
+                  <ListNumbersIcon size={13} weight="bold" />
+                  Numbered list
+                </button>
               </div>
             )}
           </div>
 
-          {/* Highlight color */}
-          <div className="ns-embed-wrap" ref={highlightPickerRef}>
+          <span className="ns-fmt-sep" />
+
+          {/* Text alignment */}
+          <div className="ns-toolbar-wrap" ref={alignDropdownRef}>
             <button
-              className={`ns-fmt-btn${active.highlight ? " ns-fmt-btn--active" : ""}`}
+              className={`ns-fmt-btn ns-fmt-btn--dropdown${active.align ? " ns-fmt-btn--active" : ""}`}
               onClick={() => {
-                setShowHighlightPicker((p) => !p);
+                setShowAlignDropdown((p) => !p);
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowEmbedPicker(false);
+                setShowLinkPicker(false);
                 setShowColorPicker(false);
+                setShowHighlightPicker(false);
               }}
-              data-tooltip="Highlight"
+              data-tooltip="Alignment"
               data-tooltip-pos="below"
-              style={
-                active.highlight
-                  ? { background: active.highlight }
-                  : undefined
-              }
             >
-              <HighlighterIcon size={13} weight="bold" />
+              {alignValue === "center" ? (
+                <TextAlignCenterIcon size={13} weight="bold" />
+              ) : alignValue === "right" ? (
+                <TextAlignRightIcon size={13} weight="bold" />
+              ) : alignValue === "justify" ? (
+                <TextAlignJustifyIcon size={13} weight="bold" />
+              ) : (
+                <TextAlignLeftIcon size={13} weight="bold" />
+              )}
+              <CaretDownIcon
+                size={11}
+                weight="bold"
+                className={`ns-fmt-btn-caret${showAlignDropdown ? " ns-fmt-btn-caret--open" : ""}`}
+              />
             </button>
-            {showHighlightPicker && (
-              <div className="ns-embed-picker ns-color-picker">
-                <div className="ns-color-grid">
-                  {HIGHLIGHT_COLORS.map((c) => (
-                    <button
-                      key={c.value ?? "none"}
-                      className="ns-color-swatch"
-                      style={{
-                        background: c.value ?? "transparent",
-                        border: c.value
-                          ? "1px solid var(--border)"
-                          : "1px dashed var(--border)",
-                      }}
-                      title={c.label}
-                      onClick={() => {
-                        dispatch({ kind: "highlight", value: c.value });
-                        setShowHighlightPicker(false);
-                      }}
-                    >
-                      {c.value == null && (
-                        <span className="ns-color-swatch-none">×</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+            {showAlignDropdown && (
+              <div className="ns-toolbar-dropdown ns-toolbar-dropdown--right">
+                <button
+                  className={`ns-toolbar-dropdown-item${alignValue === "left" ? " ns-toolbar-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    dispatch({ kind: "align", value: "left" });
+                    setShowAlignDropdown(false);
+                  }}
+                >
+                  <TextAlignLeftIcon size={13} weight="bold" />
+                  Align left
+                </button>
+                <button
+                  className={`ns-toolbar-dropdown-item${alignValue === "center" ? " ns-toolbar-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    dispatch({ kind: "align", value: "center" });
+                    setShowAlignDropdown(false);
+                  }}
+                >
+                  <TextAlignCenterIcon size={13} weight="bold" />
+                  Align center
+                </button>
+                <button
+                  className={`ns-toolbar-dropdown-item${alignValue === "right" ? " ns-toolbar-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    dispatch({ kind: "align", value: "right" });
+                    setShowAlignDropdown(false);
+                  }}
+                >
+                  <TextAlignRightIcon size={13} weight="bold" />
+                  Align right
+                </button>
+                <button
+                  className={`ns-toolbar-dropdown-item${alignValue === "justify" ? " ns-toolbar-dropdown-item--active" : ""}`}
+                  onClick={() => {
+                    dispatch({ kind: "align", value: "justify" });
+                    setShowAlignDropdown(false);
+                  }}
+                >
+                  <TextAlignJustifyIcon size={13} weight="bold" />
+                  Justify
+                </button>
               </div>
             )}
           </div>
@@ -840,13 +960,21 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           <span className="ns-fmt-sep" />
 
           {/* Link picker */}
-          <div className="ns-embed-wrap" ref={linkPickerRef}>
+          <div
+            className="ns-embed-wrap ns-embed-wrap--push"
+            ref={linkPickerRef}
+          >
             <button
               className={`ns-fmt-btn${showLinkPicker ? " ns-fmt-btn--active" : ""}`}
               onClick={() => {
                 editorRef.current?.saveRange();
                 setShowLinkPicker((p) => !p);
                 setShowEmbedPicker(false);
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
+                setShowColorPicker(false);
+                setShowHighlightPicker(false);
               }}
               data-tooltip="Insert link"
               data-tooltip-pos="below"
@@ -908,6 +1036,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 setShowEmbedPicker((p) => !p);
                 setShowLinkPicker(false);
                 setEmbedSearch("");
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
+                setShowColorPicker(false);
+                setShowHighlightPicker(false);
               }}
               data-tooltip="Embed clipboard entry"
               data-tooltip-pos="below"
