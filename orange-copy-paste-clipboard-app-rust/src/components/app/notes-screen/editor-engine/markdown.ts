@@ -1,19 +1,8 @@
 // ── Editor Engine — Markdown utilities ────────────────────────────────────
-// `note.content` is plain markdown. These helpers provide a plain-text
-// projection for titles / search and a tiny constructor for empty notes.
+// `note.content` is plain markdown. This module provides a plain-text
+// projection used for note titles, search, and previews.
 
-import type { NoteContent } from "./types";
-
-export function emptyContent(): NoteContent {
-  return { v: 3, markdown: "" };
-}
-
-/** Read raw note content into a markdown string. */
-export function parseNoteContent(raw: string): string {
-  return raw ?? "";
-}
-
-/** Strip markdown to plain text for titles, search, previews. */
+/** Strip markdown to plain text. */
 export function markdownToPlainText(md: string): string {
   if (!md) return "";
   let s = md;
@@ -32,4 +21,3 @@ export function markdownToPlainText(md: string): string {
   s = s.replace(/~~(.*?)~~/g, "$1");
   return s.replace(/\s+/g, " ").trim();
 }
-

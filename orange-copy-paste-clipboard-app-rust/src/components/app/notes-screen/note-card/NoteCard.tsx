@@ -1,9 +1,8 @@
-import React, { useMemo } from "react";
+import React from "react";
 import type { Note } from "../../../../types";
 import { groupColor, timeAgo } from "../../../../types";
 import { CheckIcon, PinIcon, TrashIcon } from "../../../icons";
 import { deriveNoteTitle } from "../notes-utils";
-import { parseNoteContent } from "../editor-engine";
 import NotePreview from "../NotePreview";
 import "./note-card.css";
 
@@ -30,7 +29,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
   onDelete,
   onContextMenu,
 }) => {
-  const markdown = useMemo(() => parseNoteContent(note.content), [note.content]);
+  const markdown = note.content ?? "";
 
   return (
     <div

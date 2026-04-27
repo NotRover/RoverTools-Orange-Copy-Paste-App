@@ -1,10 +1,5 @@
 // ── Editor Engine — Types ─────────────────────────────────────────────────
 
-export interface NoteContent {
-  v: 3;
-  markdown: string;
-}
-
 /** Two visible modes. Both are editable; both round-trip to the same markdown. */
 export type EditorMode = "normal" | "markdown";
 
