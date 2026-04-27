@@ -301,41 +301,6 @@
   color: var(--text);
 }
 
-/* Block handle (drag + add on left of each block — Tiptap DragHandle) */
-.ee-block-handle {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  z-index: 215;
-  opacity: 0.85;
-  transition: opacity 0.12s ease;
-}
-.ee-block-handle:hover {
-  opacity: 1;
-}
-.ee-block-handle-btn {
-  width: 18px;
-  height: 18px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-}
-.ee-block-handle-btn:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--text);
-}
-.ee-block-handle-grip {
-  cursor: grab;
-}
-.ee-block-handle-grip:active {
-  cursor: grabbing;
-}
 
 /* Text alignment */
 .ee-rich.ProseMirror :is(p, h1, h2, h3, h4, h5)[style*="text-align"] {
