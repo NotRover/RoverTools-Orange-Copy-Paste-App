@@ -28,14 +28,26 @@ export type EditorCommand =
   | { kind: "hr" }
   | { kind: "link"; url: string; text?: string }
   | { kind: "insertTable" }
+  | { kind: "tableAddRowAfter" }
+  | { kind: "tableAddColumnAfter" }
+  | { kind: "tableDeleteRow" }
+  | { kind: "tableDeleteColumn" }
   | { kind: "insertText"; text: string }
   | { kind: "clipEmbed"; id: string }
   | { kind: "groupEmbed"; name: string };
 
 export type BlockKind =
-  | "p" | "h1" | "h2" | "h3"
-  | "bq" | "todo" | "todoChecked"
-  | "ul" | "ol" | "code" | "hr";
+  | "p"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "bq"
+  | "todo"
+  | "todoChecked"
+  | "ul"
+  | "ol"
+  | "code"
+  | "hr";
 
 /** Toolbar-facing active state. Inline marks are best-effort in markdown mode. */
 export interface ActiveState {
@@ -43,5 +55,6 @@ export interface ActiveState {
   italic?: boolean;
   strike?: boolean;
   code?: boolean;
+  inTable?: boolean;
   blockKind: BlockKind;
 }

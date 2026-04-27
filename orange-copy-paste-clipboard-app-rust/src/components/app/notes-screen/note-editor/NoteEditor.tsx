@@ -172,16 +172,22 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // ── Toolbar dispatch ──────────────────────────────────────────────────
 
-  const dispatch = useCallback((cmd: EditorCommand) => {
-    editorRef.current?.applyCommand(cmd);
-    setTimeout(refreshActive, 0);
-  }, [refreshActive]);
+  const dispatch = useCallback(
+    (cmd: EditorCommand) => {
+      editorRef.current?.applyCommand(cmd);
+      setTimeout(refreshActive, 0);
+    },
+    [refreshActive],
+  );
 
-  const switchMode = useCallback((next: EditorMode) => {
-    if (next === mode) return;
-    editorRef.current?.setMode(next);
-    setMode(next);
-  }, [mode]);
+  const switchMode = useCallback(
+    (next: EditorMode) => {
+      if (next === mode) return;
+      editorRef.current?.setMode(next);
+      setMode(next);
+    },
+    [mode],
+  );
 
   // ── Group toggle ──────────────────────────────────────────────────────
 
@@ -200,7 +206,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   useEffect(() => {
     if (!showGroupDropdown) return;
     const h = (e: MouseEvent) => {
-      if (groupDropdownRef.current && !groupDropdownRef.current.contains(e.target as Node))
+      if (
+        groupDropdownRef.current &&
+        !groupDropdownRef.current.contains(e.target as Node)
+      )
         setShowGroupDropdown(false);
     };
     document.addEventListener("mousedown", h);
@@ -210,7 +219,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   useEffect(() => {
     if (!showEmbedPicker) return;
     const h = (e: MouseEvent) => {
-      if (embedPickerRef.current && !embedPickerRef.current.contains(e.target as Node))
+      if (
+        embedPickerRef.current &&
+        !embedPickerRef.current.contains(e.target as Node)
+      )
         setShowEmbedPicker(false);
     };
     document.addEventListener("mousedown", h);
@@ -220,7 +232,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   useEffect(() => {
     if (!showLinkPicker) return;
     const h = (e: MouseEvent) => {
-      if (linkPickerRef.current && !linkPickerRef.current.contains(e.target as Node)) {
+      if (
+        linkPickerRef.current &&
+        !linkPickerRef.current.contains(e.target as Node)
+      ) {
         setShowLinkPicker(false);
         setLinkUrl("");
       }
@@ -255,7 +270,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     const list = q
       ? entries.filter((e) => {
           const text = e.type === "html" ? stripHtml(e.content) : e.content;
-          return text.toLowerCase().includes(q) || (e.label ?? "").toLowerCase().includes(q);
+          return (
+            text.toLowerCase().includes(q) ||
+            (e.label ?? "").toLowerCase().includes(q)
+          );
         })
       : entries;
     return list.slice(0, 50);
@@ -263,7 +281,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const filteredGroups = useMemo(() => {
     const q = embedSearch.trim().toLowerCase();
-    return q ? availableGroups.filter((g) => g.toLowerCase().includes(q)) : availableGroups;
+    return q
+      ? availableGroups.filter((g) => g.toLowerCase().includes(q))
+      : availableGroups;
   }, [availableGroups, embedSearch]);
 
   // ── Render ────────────────────────────────────────────────────────────
@@ -308,7 +328,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             </button>
             <button
               className="ns-tb-btn ns-tb-btn--danger"
-              onClick={() => { onDelete(note.id); onBack(); }}
+              onClick={() => {
+                onDelete(note.id);
+                onBack();
+              }}
               data-tooltip="Delete"
               data-tooltip-pos="below"
             >
@@ -345,7 +368,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             {showGroupDropdown && (
               <div className="ns-group-dropdown">
                 {availableGroups.length === 0 ? (
-                  <div className="ns-group-dropdown-item" style={{ color: "var(--text-muted)", cursor: "default" }}>
+                  <div
+                    className="ns-group-dropdown-item"
+                    style={{ color: "var(--text-muted)", cursor: "default" }}
+                  >
                     No groups yet
                   </div>
                 ) : (
@@ -358,9 +384,17 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                         className="ns-group-dropdown-item"
                         onClick={() => toggleGroup(g)}
                       >
-                        <span className="ns-group-dropdown-dot" style={{ background: c.fg }} />
+                        <span
+                          className="ns-group-dropdown-dot"
+                          style={{ background: c.fg }}
+                        />
                         {g}
-                        {isIn && <CheckIcon size={11} className="ns-group-dropdown-check" />}
+                        {isIn && (
+                          <CheckIcon
+                            size={11}
+                            className="ns-group-dropdown-check"
+                          />
+                        )}
                       </button>
                     );
                   })
@@ -373,7 +407,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         {/* Formatting toolbar */}
         <div className="ns-format-bar">
           {/* Mode segmented switch */}
-          <div className="ns-mode-switch" role="tablist" aria-label="Editor mode">
+          <div
+            className="ns-mode-switch"
+            role="tablist"
+            aria-label="Editor mode"
+          >
             <button
               role="tab"
               aria-selected={mode === "normal"}
@@ -395,28 +433,126 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           <span className="ns-fmt-sep" />
 
           {/* Inline marks */}
-          <button className={`ns-fmt-btn${active.bold   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "bold"   })} data-tooltip="Bold (Ctrl+B)"        data-tooltip-pos="below"><TextBolderIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "italic" })} data-tooltip="Italic (Ctrl+I)"      data-tooltip-pos="below"><TextItalicIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "strike" })} data-tooltip="Strikethrough"        data-tooltip-pos="below"><TextStrikethroughIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${active.code   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "code"   })} data-tooltip="Inline code (Ctrl+E)" data-tooltip-pos="below"><CodeIcon size={13} weight="bold" /></button>
+          <button
+            className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "bold" })}
+            data-tooltip="Bold (Ctrl+B)"
+            data-tooltip-pos="below"
+          >
+            <TextBolderIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "italic" })}
+            data-tooltip="Italic (Ctrl+I)"
+            data-tooltip-pos="below"
+          >
+            <TextItalicIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "strike" })}
+            data-tooltip="Strikethrough"
+            data-tooltip-pos="below"
+          >
+            <TextStrikethroughIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.code ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "code" })}
+            data-tooltip="Inline code (Ctrl+E)"
+            data-tooltip-pos="below"
+          >
+            <CodeIcon size={13} weight="bold" />
+          </button>
 
           <span className="ns-fmt-sep" />
 
           {/* Block types */}
-          <button className={`ns-fmt-btn${bk === "h1"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "heading", level: 1 })} data-tooltip="Heading 1"       data-tooltip-pos="below"><TextHOneIcon size={14} weight="bold" /></button>
-          <button className={`ns-fmt-btn${bk === "h2"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "heading", level: 2 })} data-tooltip="Heading 2"       data-tooltip-pos="below"><TextHTwoIcon size={14} weight="bold" /></button>
-          <button className={`ns-fmt-btn${bk === "h3"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "heading", level: 3 })} data-tooltip="Heading 3"       data-tooltip-pos="below"><TextHThreeIcon size={14} weight="bold" /></button>
-          <button className={`ns-fmt-btn${bk === "bq"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "blockquote" })}        data-tooltip="Quote"           data-tooltip-pos="below"><QuotesIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "codeBlock" })}         data-tooltip="Code block"      data-tooltip-pos="below"><CodeBlockIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${bk === "todo" || bk === "todoChecked" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "taskList" })} data-tooltip="Checklist" data-tooltip-pos="below"><CheckSquareOffsetIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={() => dispatch({ kind: "hr" })} data-tooltip="Horizontal rule" data-tooltip-pos="below"><MinusIcon size={13} weight="bold" /></button>
+          <button
+            className={`ns-fmt-btn${bk === "h1" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "heading", level: 1 })}
+            data-tooltip="Heading 1"
+            data-tooltip-pos="below"
+          >
+            <TextHOneIcon size={14} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${bk === "h2" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "heading", level: 2 })}
+            data-tooltip="Heading 2"
+            data-tooltip-pos="below"
+          >
+            <TextHTwoIcon size={14} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${bk === "h3" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "heading", level: 3 })}
+            data-tooltip="Heading 3"
+            data-tooltip-pos="below"
+          >
+            <TextHThreeIcon size={14} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${bk === "bq" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "blockquote" })}
+            data-tooltip="Quote"
+            data-tooltip-pos="below"
+          >
+            <QuotesIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "codeBlock" })}
+            data-tooltip="Code block"
+            data-tooltip-pos="below"
+          >
+            <CodeBlockIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${bk === "todo" || bk === "todoChecked" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "taskList" })}
+            data-tooltip="Checklist"
+            data-tooltip-pos="below"
+          >
+            <CheckSquareOffsetIcon size={13} weight="bold" />
+          </button>
+          <button
+            className="ns-fmt-btn"
+            onClick={() => dispatch({ kind: "hr" })}
+            data-tooltip="Horizontal rule"
+            data-tooltip-pos="below"
+          >
+            <MinusIcon size={13} weight="bold" />
+          </button>
 
           <span className="ns-fmt-sep" />
 
           {/* Lists & table */}
-          <button className={`ns-fmt-btn${bk === "ul" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "bulletList"   })} data-tooltip="Bullet list"   data-tooltip-pos="below"><ListBulletsIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${bk === "ol" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "orderedList"  })} data-tooltip="Numbered list" data-tooltip-pos="below"><ListNumbersIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={() => dispatch({ kind: "insertTable" })} data-tooltip="Insert table" data-tooltip-pos="below"><TableIcon size={13} weight="bold" /></button>
+          <button
+            className={`ns-fmt-btn${bk === "ul" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "bulletList" })}
+            data-tooltip="Bullet list"
+            data-tooltip-pos="below"
+          >
+            <ListBulletsIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${bk === "ol" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "orderedList" })}
+            data-tooltip="Numbered list"
+            data-tooltip-pos="below"
+          >
+            <ListNumbersIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.inTable ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "insertTable" })}
+            data-tooltip="Insert table"
+            data-tooltip-pos="below"
+          >
+            <TableIcon size={13} weight="bold" />
+          </button>
 
           <span className="ns-fmt-sep" />
 
@@ -444,7 +580,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                     onChange={(e) => setLinkUrl(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") insertLink(linkUrl);
-                      if (e.key === "Escape") { setShowLinkPicker(false); setLinkUrl(""); }
+                      if (e.key === "Escape") {
+                        setShowLinkPicker(false);
+                        setLinkUrl("");
+                      }
                     }}
                     autoFocus
                   />
@@ -493,7 +632,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 </div>
                 <input
                   className="ns-embed-search"
-                  placeholder={embedTab === "entries" ? "Search entries…" : "Search groups…"}
+                  placeholder={
+                    embedTab === "entries"
+                      ? "Search entries…"
+                      : "Search groups…"
+                  }
                   value={embedSearch}
                   onChange={(e) => setEmbedSearch(e.target.value)}
                   autoFocus
@@ -508,7 +651,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                           entry.type === "image"
                             ? (entry.label ?? "Image")
                             : truncateText(
-                                entry.type === "html" ? stripHtml(entry.content) : entry.content,
+                                entry.type === "html"
+                                  ? stripHtml(entry.content)
+                                  : entry.content,
                                 72,
                               );
                         return (
@@ -518,12 +663,18 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                             onClick={() => insertClipEmbed(entry.id)}
                           >
                             <span className="ns-embed-item-icon">
-                              {entry.type === "image" ? <ImageIcon size={10} /> :
-                               entry.type === "file"  ? <FileIcon  size={10} /> :
-                                                        <ClipboardIcon size={10} />}
+                              {entry.type === "image" ? (
+                                <ImageIcon size={10} />
+                              ) : entry.type === "file" ? (
+                                <FileIcon size={10} />
+                              ) : (
+                                <ClipboardIcon size={10} />
+                              )}
                             </span>
                             <span className="ns-embed-item-text">{text}</span>
-                            <span className="ns-embed-item-time">{timeAgo(entry.timestamp)}</span>
+                            <span className="ns-embed-item-time">
+                              {timeAgo(entry.timestamp)}
+                            </span>
                           </button>
                         );
                       })
@@ -543,7 +694,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                             className="ns-embed-item-group"
                             style={{ background: c.bg, color: c.fg }}
                           >
-                            <span className="ns-embed-group-dot" style={{ background: c.fg }} />
+                            <span
+                              className="ns-embed-group-dot"
+                              style={{ background: c.fg }}
+                            />
                             {group}
                           </span>
                         </button>

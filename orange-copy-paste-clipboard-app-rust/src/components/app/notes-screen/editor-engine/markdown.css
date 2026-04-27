@@ -39,11 +39,23 @@
   font-weight: 600;
   line-height: 1.3;
 }
-.ee-rich.ProseMirror h1 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
-.ee-rich.ProseMirror h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: 0.18em; }
-.ee-rich.ProseMirror h3 { font-size: 1.18em; }
+.ee-rich.ProseMirror h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.2em;
+}
+.ee-rich.ProseMirror h2 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.18em;
+}
+.ee-rich.ProseMirror h3 {
+  font-size: 1.18em;
+}
 
-.ee-rich.ProseMirror p { margin: 0.55em 0; }
+.ee-rich.ProseMirror p {
+  margin: 0.55em 0;
+}
 
 .ee-rich.ProseMirror a {
   color: var(--accent);
@@ -55,7 +67,9 @@
   margin: 0.4em 0;
   padding-left: 1.4em;
 }
-.ee-rich.ProseMirror li { margin: 0.15em 0; }
+.ee-rich.ProseMirror li {
+  margin: 0.15em 0;
+}
 
 .ee-rich.ProseMirror ul[data-type="taskList"] {
   list-style: none;
@@ -63,17 +77,22 @@
 }
 .ee-rich.ProseMirror ul[data-type="taskList"] li {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.55em;
 }
 .ee-rich.ProseMirror ul[data-type="taskList"] li > label {
-  margin-top: 0.18em;
+  display: inline-flex;
+  align-items: center;
   user-select: none;
 }
 .ee-rich.ProseMirror ul[data-type="taskList"] li > div {
   flex: 1 1 auto;
 }
+.ee-rich.ProseMirror ul[data-type="taskList"] li > div > p {
+  margin: 0;
+}
 .ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+  margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
 }
@@ -92,7 +111,8 @@
 }
 
 .ee-rich.ProseMirror code {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   font-size: 0.92em;
   padding: 1px 5px;
   background: var(--surface-2, rgba(255, 255, 255, 0.05));
@@ -108,10 +128,14 @@
   overflow-x: auto;
   font-size: 12.5px;
   line-height: 1.55;
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
 }
 .ee-rich.ProseMirror pre code {
-  padding: 0; background: transparent; border: none; border-radius: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .ee-rich.ProseMirror hr {
@@ -128,10 +152,14 @@
 }
 .ee-rich.ProseMirror :is(th, td) {
   border: 1px solid var(--border);
-  padding: 5px 9px;
+  padding: 3px 7px;
   text-align: left;
   vertical-align: top;
+  line-height: 1.35;
   position: relative;
+}
+.ee-rich.ProseMirror :is(th, td) > p {
+  margin: 0;
 }
 .ee-rich.ProseMirror th {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
@@ -139,6 +167,59 @@
 }
 .ee-rich.ProseMirror .selectedCell {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.ee-table-controls {
+  position: fixed;
+  z-index: 220;
+  display: inline-flex;
+  gap: 2px;
+  padding: 1px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.ee-table-controls--col {
+  flex-direction: column;
+  transform: translate(0, -50%);
+}
+
+.ee-table-controls--row {
+  transform: translate(-50%, 0);
+}
+
+.ee-table-handle-btn {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.ee-table-handle-btn:hover {
+  background: var(
+    --surface-hover,
+    color-mix(in srgb, var(--surface) 88%, var(--bg))
+  );
+}
+
+.ee-table-handle-btn--danger {
+  color: var(--text);
+}
+
+.ee-table-handle-btn--danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--text);
 }
 
 .ee-rich.ProseMirror img {
@@ -162,8 +243,9 @@
   outline: none;
   background: transparent;
   color: var(--text);
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code",
-               Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas,
+    monospace;
   font-size: 13px;
   line-height: 1.65;
   padding: 14px 16px 24px;
@@ -204,12 +286,26 @@
   line-height: 1.3;
   color: var(--text);
 }
-.ee-preview h1 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
-.ee-preview h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: 0.18em; }
-.ee-preview h3 { font-size: 1.18em; }
-.ee-preview h4 { font-size: 1.05em; }
+.ee-preview h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.2em;
+}
+.ee-preview h2 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.18em;
+}
+.ee-preview h3 {
+  font-size: 1.18em;
+}
+.ee-preview h4 {
+  font-size: 1.05em;
+}
 
-.ee-preview p { margin: 0.55em 0; }
+.ee-preview p {
+  margin: 0.55em 0;
+}
 
 .ee-preview a {
   color: var(--accent);
@@ -225,18 +321,29 @@
   margin: 0.4em 0;
   padding-left: 1.4em;
 }
-.ee-preview li { margin: 0.15em 0; }
-.ee-preview li > p { margin: 0.15em 0; }
+.ee-preview li {
+  margin: 0.15em 0;
+}
+.ee-preview li > p {
+  margin: 0.15em 0;
+}
 
 .ee-preview ul li.task-list-item,
 .ee-preview ul li:has(input[type="checkbox"]) {
   list-style: none;
   margin-left: -1.2em;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.ee-preview ul li.task-list-item > p,
+.ee-preview ul li:has(input[type="checkbox"]) > p {
+  margin: 0;
 }
 .ee-preview input[type="checkbox"] {
-  margin-right: 0.5em;
+  margin: 0;
   accent-color: var(--accent);
-  vertical-align: -2px;
+  flex: 0 0 auto;
 }
 
 .ee-preview blockquote {
@@ -249,7 +356,9 @@
 }
 
 .ee-preview code {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas,
+    monospace;
   font-size: 0.92em;
   padding: 1px 5px;
   background: var(--surface-2, rgba(255, 255, 255, 0.05));
@@ -288,8 +397,13 @@
 .ee-preview th,
 .ee-preview td {
   border: 1px solid var(--border);
-  padding: 5px 9px;
+  padding: 3px 7px;
   text-align: left;
+  vertical-align: top;
+  line-height: 1.35;
+}
+.ee-preview :is(th, td) > p {
+  margin: 0;
 }
 .ee-preview th {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
