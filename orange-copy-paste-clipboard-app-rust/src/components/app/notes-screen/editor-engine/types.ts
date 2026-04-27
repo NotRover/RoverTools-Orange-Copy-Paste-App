@@ -18,7 +18,7 @@ export type EditorCommand =
   | { kind: "italic" }
   | { kind: "strike" }
   | { kind: "code" }
-  | { kind: "heading"; level: 1 | 2 | 3 }
+  | { kind: "heading"; level: 1 | 2 | 3 | 4 | 5 }
   | { kind: "paragraph" }
   | { kind: "blockquote" }
   | { kind: "bulletList" }
@@ -41,6 +41,8 @@ export type BlockKind =
   | "h1"
   | "h2"
   | "h3"
+  | "h4"
+  | "h5"
   | "bq"
   | "todo"
   | "todoChecked"

@@ -15,6 +15,8 @@ import {
   TextHOneIcon,
   TextHTwoIcon,
   TextHThreeIcon,
+  TextHFourIcon,
+  TextHFiveIcon,
   QuotesIcon,
   CodeBlockIcon,
   CheckSquareOffsetIcon,
@@ -24,6 +26,7 @@ import {
   TableIcon,
   LinkSimpleIcon,
   ClipboardTextIcon,
+  CaretDownIcon,
 } from "@phosphor-icons/react";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../../types";
@@ -52,6 +55,8 @@ import {
 import "./note-editor.css";
 
 const EMPTY_ACTIVE: ActiveState = { blockKind: "p" };
+
+type HeadingLevel = 1 | 2 | 3 | 4 | 5;
 
 interface NoteEditorProps {
   note: Note;
@@ -84,6 +89,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
   const groupDropdownRef = useRef<HTMLDivElement>(null);
+
+  const [showHeadingDropdown, setShowHeadingDropdown] = useState(false);
+  const headingDropdownRef = useRef<HTMLDivElement>(null);
+  const [preferredHeadingLevel, setPreferredHeadingLevel] =
+    useState<HeadingLevel>(1);
 
   const [showEmbedPicker, setShowEmbedPicker] = useState(false);
   const [embedSearch, setEmbedSearch] = useState("");
@@ -217,6 +227,19 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, [showGroupDropdown]);
 
   useEffect(() => {
+    if (!showHeadingDropdown) return;
+    const h = (e: MouseEvent) => {
+      if (
+        headingDropdownRef.current &&
+        !headingDropdownRef.current.contains(e.target as Node)
+      )
+        setShowHeadingDropdown(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showHeadingDropdown]);
+
+  useEffect(() => {
     if (!showEmbedPicker) return;
     const h = (e: MouseEvent) => {
       if (
@@ -289,6 +312,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // ── Render ────────────────────────────────────────────────────────────
 
   const bk = active.blockKind;
+
+  const applyHeadingLevel = useCallback(
+    (level: HeadingLevel) => {
+      setPreferredHeadingLevel(level);
+      dispatch({ kind: "heading", level });
+      setShowHeadingDropdown(false);
+    },
+    [dispatch],
+  );
 
   return (
     <div className="ns-editor-shell">
@@ -469,30 +501,84 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           <span className="ns-fmt-sep" />
 
           {/* Block types */}
-          <button
-            className={`ns-fmt-btn${bk === "h1" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "heading", level: 1 })}
-            data-tooltip="Heading 1"
-            data-tooltip-pos="below"
-          >
-            <TextHOneIcon size={14} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${bk === "h2" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "heading", level: 2 })}
-            data-tooltip="Heading 2"
-            data-tooltip-pos="below"
-          >
-            <TextHTwoIcon size={14} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${bk === "h3" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "heading", level: 3 })}
-            data-tooltip="Heading 3"
-            data-tooltip-pos="below"
-          >
-            <TextHThreeIcon size={14} weight="bold" />
-          </button>
+          <div className="ns-heading-wrap" ref={headingDropdownRef}>
+            <button
+              className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "h1" || bk === "h2" || bk === "h3" || bk === "h4" || bk === "h5" ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowHeadingDropdown((p) => !p);
+                setShowEmbedPicker(false);
+                setShowLinkPicker(false);
+              }}
+              data-tooltip="Heading size"
+              data-tooltip-pos="below"
+            >
+              {preferredHeadingLevel === 2 ? (
+                <TextHTwoIcon size={14} weight="bold" />
+              ) : preferredHeadingLevel === 3 ? (
+                <TextHThreeIcon size={14} weight="bold" />
+              ) : preferredHeadingLevel === 4 ? (
+                <TextHFourIcon size={14} weight="bold" />
+              ) : preferredHeadingLevel === 5 ? (
+                <TextHFiveIcon size={14} weight="bold" />
+              ) : (
+                <TextHOneIcon size={14} weight="bold" />
+              )}
+              <CaretDownIcon
+                size={11}
+                weight="bold"
+                className={`ns-fmt-btn-caret${showHeadingDropdown ? " ns-fmt-btn-caret--open" : ""}`}
+              />
+            </button>
+            {showHeadingDropdown && (
+              <div className="ns-heading-dropdown">
+                <button
+                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 1 ? " ns-heading-dropdown-item--active" : ""}`}
+                  onClick={() => applyHeadingLevel(1)}
+                >
+                  <TextHOneIcon size={15} weight="bold" />
+                  <span className="ns-heading-size-text ns-heading-size-text--h1">
+                    Heading 1
+                  </span>
+                </button>
+                <button
+                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 2 ? " ns-heading-dropdown-item--active" : ""}`}
+                  onClick={() => applyHeadingLevel(2)}
+                >
+                  <TextHTwoIcon size={13} weight="bold" />
+                  <span className="ns-heading-size-text ns-heading-size-text--h2">
+                    Heading 2
+                  </span>
+                </button>
+                <button
+                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 3 ? " ns-heading-dropdown-item--active" : ""}`}
+                  onClick={() => applyHeadingLevel(3)}
+                >
+                  <TextHThreeIcon size={13} weight="bold" />
+                  <span className="ns-heading-size-text ns-heading-size-text--h3">
+                    Heading 3
+                  </span>
+                </button>
+                <button
+                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 4 ? " ns-heading-dropdown-item--active" : ""}`}
+                  onClick={() => applyHeadingLevel(4)}
+                >
+                  <TextHFourIcon size={12} weight="bold" />
+                  <span className="ns-heading-size-text ns-heading-size-text--h4">
+                    Heading 4
+                  </span>
+                </button>
+                <button
+                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 5 ? " ns-heading-dropdown-item--active" : ""}`}
+                  onClick={() => applyHeadingLevel(5)}
+                >
+                  <TextHFiveIcon size={11} weight="bold" />
+                  <span className="ns-heading-size-text ns-heading-size-text--h5">
+                    Heading 5
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className={`ns-fmt-btn${bk === "bq" ? " ns-fmt-btn--active" : ""}`}
             onClick={() => dispatch({ kind: "blockquote" })}
