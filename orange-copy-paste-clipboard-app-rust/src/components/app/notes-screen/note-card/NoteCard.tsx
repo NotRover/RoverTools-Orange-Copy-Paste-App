@@ -3,7 +3,7 @@ import type { Note } from "../../../../types";
 import { groupColor, timeAgo } from "../../../../types";
 import { CheckIcon, PinIcon, TrashIcon } from "../../../icons";
 import { deriveNoteTitle } from "../notes-utils";
-import { parseNote } from "../note-doc";
+import { parseNoteContent } from "../editor-engine";
 import NotePreview from "../NotePreview";
 import "./note-card.css";
 
@@ -30,7 +30,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
   onDelete,
   onContextMenu,
 }) => {
-  const doc = useMemo(() => parseNote(note.content), [note.content]);
+  const markdown = useMemo(() => parseNoteContent(note.content), [note.content]);
 
   return (
     <div
@@ -68,7 +68,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
               .filter(Boolean)
               .join(" ")}
           >
-            <NotePreview doc={doc} entries={entries} />
+            <NotePreview markdown={markdown} entries={entries} />
           </div>
         )}
         <div className="ns-card-footer">

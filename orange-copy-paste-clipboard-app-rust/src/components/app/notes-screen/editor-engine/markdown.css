@@ -1,0 +1,218 @@
+/* ── Editor Engine — Styles ──────────────────────────────────────────── */
+
+.ee-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── Source mode (textarea) ─────────────────────────────────────────── */
+
+.ee-textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code",
+               Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 14px 16px 24px;
+  tab-size: 2;
+  caret-color: var(--accent);
+}
+.ee-textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+.ee-textarea::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* ── Preview mode (rendered markdown) ───────────────────────────────── */
+
+.ee-preview {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 14px 18px 24px;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.ee-preview--full {
+  height: 100%;
+}
+
+.ee-preview h1,
+.ee-preview h2,
+.ee-preview h3,
+.ee-preview h4,
+.ee-preview h5,
+.ee-preview h6 {
+  margin: 1em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+}
+.ee-preview h1 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+.ee-preview h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: 0.18em; }
+.ee-preview h3 { font-size: 1.18em; }
+.ee-preview h4 { font-size: 1.05em; }
+
+.ee-preview p { margin: 0.55em 0; }
+
+.ee-preview a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.ee-preview a:hover {
+  border-bottom-style: solid;
+}
+
+.ee-preview ul,
+.ee-preview ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.ee-preview li { margin: 0.15em 0; }
+.ee-preview li > p { margin: 0.15em 0; }
+
+.ee-preview ul li.task-list-item,
+.ee-preview ul li:has(input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.2em;
+}
+.ee-preview input[type="checkbox"] {
+  margin-right: 0.5em;
+  accent-color: var(--accent);
+  vertical-align: -2px;
+}
+
+.ee-preview blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.85em;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  border-radius: 0 4px 4px 0;
+}
+
+.ee-preview code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  padding: 1px 5px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.ee-preview pre {
+  margin: 0.6em 0;
+  padding: 10px 12px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.ee-preview pre code {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.ee-preview hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+.ee-preview table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  width: 100%;
+}
+.ee-preview th,
+.ee-preview td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: left;
+}
+.ee-preview th {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-weight: 600;
+}
+
+.ee-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 6px 0;
+}
+
+.ee-preview details {
+  margin: 0.5em 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.ee-preview summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.ee-preview kbd {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.85em;
+  padding: 1px 5px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+}
+
+/* ── Embed chips (clip & group) ─────────────────────────────────────── */
+
+.ee-clip-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  margin: 0 1px;
+  font-size: 0.85em;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  color: var(--text);
+  vertical-align: baseline;
+}
+.ee-clip-chip--missing {
+  background: rgba(220, 80, 80, 0.12);
+  border-color: rgba(220, 80, 80, 0.4);
+  color: rgba(220, 80, 80, 0.95);
+}
+
+.ee-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 9px;
+  margin: 0 1px;
+  font-size: 0.85em;
+  border-radius: 999px;
+  vertical-align: baseline;
+}
+.ee-group-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
