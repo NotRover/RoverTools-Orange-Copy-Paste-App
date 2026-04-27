@@ -1,4 +1,4 @@
-// ── Note Editor — Markdown dual-mode (source / preview) ───────────────────
+// ── Note Editor — dual-mode (normal / markdown), markdown source-of-truth ─
 
 import React, {
   useCallback,
@@ -24,8 +24,6 @@ import {
   TableIcon,
   LinkSimpleIcon,
   ClipboardTextIcon,
-  PencilSimpleIcon,
-  EyeIcon,
 } from "@phosphor-icons/react";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../../types";
@@ -49,12 +47,12 @@ import {
   parseNoteContent,
   type MarkdownEditorHandle,
   type EditorMode,
-  type FormatAction,
-  type BlockKind,
+  type EditorCommand,
+  type ActiveState,
 } from "../editor-engine";
 import "./note-editor.css";
 
-// ── NoteEditor ────────────────────────────────────────────────────────────
+const EMPTY_ACTIVE: ActiveState = { blockKind: "p" };
 
 interface NoteEditorProps {
   note: Note;
@@ -82,8 +80,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [mode, setMode] = useState<EditorMode>("source");
-  const [blockKind, setBlockKind] = useState<BlockKind>("p");
+  const [mode, setMode] = useState<EditorMode>("normal");
+  const [active, setActive] = useState<ActiveState>(EMPTY_ACTIVE);
 
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
   const groupDropdownRef = useRef<HTMLDivElement>(null);
@@ -139,17 +137,22 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       setTimeout(() => titleRef.current?.focus(), 50);
   }, [note.id]); // eslint-disable-line
 
-  // Track block kind under caret for toolbar active state.
-  const refreshBlockKind = useCallback(() => {
-    if (mode === "source") setBlockKind(editorRef.current?.getBlockKind() ?? "p");
-  }, [mode]);
+  // Toolbar active state.
+  const refreshActive = useCallback(() => {
+    setActive(editorRef.current?.getActiveState() ?? EMPTY_ACTIVE);
+  }, []);
 
   useEffect(() => {
-    if (mode !== "source") return;
-    const handler = () => refreshBlockKind();
+    const handler = () => refreshActive();
     document.addEventListener("selectionchange", handler);
     return () => document.removeEventListener("selectionchange", handler);
-  }, [mode, refreshBlockKind]);
+  }, [refreshActive]);
+
+  // Refresh active state shortly after a mode switch (so the new surface is mounted).
+  useEffect(() => {
+    const t = setTimeout(refreshActive, 50);
+    return () => clearTimeout(t);
+  }, [mode, refreshActive]);
 
   // ── Close ─────────────────────────────────────────────────────────────
 
@@ -168,55 +171,18 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     onBack();
   }, [note.id, note.content, onDelete, onBack, save]);
 
-  // ── Toolbar actions ───────────────────────────────────────────────────
+  // ── Toolbar dispatch ──────────────────────────────────────────────────
 
-  const apply = useCallback((action: FormatAction) => {
-    if (mode !== "source") setMode("source");
-    requestAnimationFrame(() => editorRef.current?.applyFormat(action));
+  const dispatch = useCallback((cmd: EditorCommand) => {
+    editorRef.current?.applyCommand(cmd);
+    setTimeout(refreshActive, 0);
+  }, [refreshActive]);
+
+  const switchMode = useCallback((next: EditorMode) => {
+    if (next === mode) return;
+    editorRef.current?.setMode(next);
+    setMode(next);
   }, [mode]);
-
-  const inline = (before: string, after = before, placeholder = "") =>
-    apply({ kind: "wrap", before, after, placeholder });
-
-  const setHeading = (n: 1 | 2 | 3) => {
-    const prefix = "#".repeat(n) + " ";
-    apply({
-      kind: "linePrefix",
-      prefix,
-      togglePrefixes: ["# ", "## ", "### ", "> ", "- [ ] ", "- [x] ", "- ", "* ", "+ "],
-    });
-  };
-
-  const toggleQuote = () => apply({
-    kind: "linePrefix",
-    prefix: "> ",
-    togglePrefixes: ["> ", "# ", "## ", "### "],
-  });
-
-  const toggleBullet = () => apply({
-    kind: "linePrefix",
-    prefix: "- ",
-    togglePrefixes: ["- ", "* ", "+ ", "- [ ] ", "- [x] "],
-  });
-
-  const toggleNumbered = () => apply({
-    kind: "linePrefix",
-    prefix: "1. ",
-    togglePrefixes: ["- ", "* ", "+ ", "- [ ] ", "- [x] "],
-  });
-
-  const toggleTodo = () => apply({
-    kind: "linePrefix",
-    prefix: "- [ ] ",
-    togglePrefixes: ["- [ ] ", "- [x] ", "- ", "* ", "+ "],
-  });
-
-  const insertCodeBlock = () => apply({ kind: "fence" });
-  const insertHr = () => apply({ kind: "insert", text: "\n\n---\n\n" });
-  const insertTable = () => apply({
-    kind: "insert",
-    text: "\n\n| Column 1 | Column 2 |\n| --- | --- |\n| value | value |\n\n",
-  });
 
   // ── Group toggle ──────────────────────────────────────────────────────
 
@@ -267,24 +233,21 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // ── Embed / link insert ───────────────────────────────────────────────
 
   const insertClipEmbed = useCallback((id: string) => {
-    if (mode !== "source") setMode("source");
-    requestAnimationFrame(() => editorRef.current?.insertClipEmbed(id));
+    editorRef.current?.insertClipEmbed(id);
     setShowEmbedPicker(false);
-  }, [mode]);
+  }, []);
 
   const insertGroupEmbed = useCallback((name: string) => {
-    if (mode !== "source") setMode("source");
-    requestAnimationFrame(() => editorRef.current?.insertGroupEmbed(name));
+    editorRef.current?.insertGroupEmbed(name);
     setShowEmbedPicker(false);
-  }, [mode]);
+  }, []);
 
   const insertLink = useCallback((url: string) => {
     if (!url.trim()) return;
-    if (mode !== "source") setMode("source");
-    requestAnimationFrame(() => editorRef.current?.insertLink(url.trim()));
+    editorRef.current?.insertLink(url.trim());
     setShowLinkPicker(false);
     setLinkUrl("");
-  }, [mode]);
+  }, []);
 
   // ── Picker entry lists ────────────────────────────────────────────────
 
@@ -306,8 +269,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // ── Render ────────────────────────────────────────────────────────────
 
-  const isPreview = mode === "preview";
-  const fmtDisabled = isPreview;
+  const bk = active.blockKind;
 
   return (
     <div className="ns-editor-shell">
@@ -337,14 +299,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             }}
           />
           <div className="ns-editor-actions">
-            <button
-              className={`ns-tb-btn${isPreview ? " ns-tb-btn--active" : ""}`}
-              onClick={() => setMode(isPreview ? "source" : "preview")}
-              data-tooltip={isPreview ? "Edit markdown" : "Preview"}
-              data-tooltip-pos="below"
-            >
-              {isPreview ? <PencilSimpleIcon size={12} weight="bold" /> : <EyeIcon size={12} weight="bold" />}
-            </button>
             <button
               className={`ns-tb-btn${note.pinned ? " ns-tb-btn--active" : ""}`}
               onClick={() => onPin(note.id, !note.pinned)}
@@ -418,30 +372,52 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
 
         {/* Formatting toolbar */}
-        <div className={`ns-format-bar${fmtDisabled ? " ns-format-bar--disabled" : ""}`}>
+        <div className="ns-format-bar">
+          {/* Mode segmented switch */}
+          <div className="ns-mode-switch" role="tablist" aria-label="Editor mode">
+            <button
+              role="tab"
+              aria-selected={mode === "normal"}
+              className={`ns-mode-tab${mode === "normal" ? " ns-mode-tab--active" : ""}`}
+              onClick={() => switchMode("normal")}
+            >
+              Normal
+            </button>
+            <button
+              role="tab"
+              aria-selected={mode === "markdown"}
+              className={`ns-mode-tab${mode === "markdown" ? " ns-mode-tab--active" : ""}`}
+              onClick={() => switchMode("markdown")}
+            >
+              Markdown
+            </button>
+          </div>
+
+          <span className="ns-fmt-sep" />
+
           {/* Inline marks */}
-          <button className="ns-fmt-btn" onClick={() => inline("**", "**", "bold")}    data-tooltip="Bold (Ctrl+B)" data-tooltip-pos="below" disabled={fmtDisabled}><TextBolderIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={() => inline("*",  "*",  "italic")}  data-tooltip="Italic (Ctrl+I)" data-tooltip-pos="below" disabled={fmtDisabled}><TextItalicIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={() => inline("~~", "~~", "strike")}  data-tooltip="Strikethrough" data-tooltip-pos="below" disabled={fmtDisabled}><TextStrikethroughIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={() => inline("`",  "`",  "code")}    data-tooltip="Inline code (Ctrl+E)" data-tooltip-pos="below" disabled={fmtDisabled}><CodeIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${active.bold   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "bold"   })} data-tooltip="Bold (Ctrl+B)"        data-tooltip-pos="below"><TextBolderIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "italic" })} data-tooltip="Italic (Ctrl+I)"      data-tooltip-pos="below"><TextItalicIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "strike" })} data-tooltip="Strikethrough"        data-tooltip-pos="below"><TextStrikethroughIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${active.code   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "code"   })} data-tooltip="Inline code (Ctrl+E)" data-tooltip-pos="below"><CodeIcon size={13} weight="bold" /></button>
 
           <span className="ns-fmt-sep" />
 
           {/* Block types */}
-          <button className={`ns-fmt-btn${blockKind === "h1" ? " ns-fmt-btn--active" : ""}`} onClick={() => setHeading(1)} data-tooltip="Heading 1" data-tooltip-pos="below" disabled={fmtDisabled}><TextHOneIcon size={14} weight="bold" /></button>
-          <button className={`ns-fmt-btn${blockKind === "h2" ? " ns-fmt-btn--active" : ""}`} onClick={() => setHeading(2)} data-tooltip="Heading 2" data-tooltip-pos="below" disabled={fmtDisabled}><TextHTwoIcon size={14} weight="bold" /></button>
-          <button className={`ns-fmt-btn${blockKind === "h3" ? " ns-fmt-btn--active" : ""}`} onClick={() => setHeading(3)} data-tooltip="Heading 3" data-tooltip-pos="below" disabled={fmtDisabled}><TextHThreeIcon size={14} weight="bold" /></button>
-          <button className={`ns-fmt-btn${blockKind === "bq" ? " ns-fmt-btn--active" : ""}`} onClick={toggleQuote} data-tooltip="Quote" data-tooltip-pos="below" disabled={fmtDisabled}><QuotesIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${blockKind === "code" ? " ns-fmt-btn--active" : ""}`} onClick={insertCodeBlock} data-tooltip="Code block" data-tooltip-pos="below" disabled={fmtDisabled}><CodeBlockIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${blockKind === "todo" || blockKind === "todoChecked" ? " ns-fmt-btn--active" : ""}`} onClick={toggleTodo} data-tooltip="Checklist" data-tooltip-pos="below" disabled={fmtDisabled}><CheckSquareOffsetIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={insertHr} data-tooltip="Horizontal rule" data-tooltip-pos="below" disabled={fmtDisabled}><MinusIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "h1"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "heading", level: 1 })} data-tooltip="Heading 1"       data-tooltip-pos="below"><TextHOneIcon size={14} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "h2"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "heading", level: 2 })} data-tooltip="Heading 2"       data-tooltip-pos="below"><TextHTwoIcon size={14} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "h3"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "heading", level: 3 })} data-tooltip="Heading 3"       data-tooltip-pos="below"><TextHThreeIcon size={14} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "bq"   ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "blockquote" })}        data-tooltip="Quote"           data-tooltip-pos="below"><QuotesIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "codeBlock" })}         data-tooltip="Code block"      data-tooltip-pos="below"><CodeBlockIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "todo" || bk === "todoChecked" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "taskList" })} data-tooltip="Checklist" data-tooltip-pos="below"><CheckSquareOffsetIcon size={13} weight="bold" /></button>
+          <button className="ns-fmt-btn" onClick={() => dispatch({ kind: "hr" })} data-tooltip="Horizontal rule" data-tooltip-pos="below"><MinusIcon size={13} weight="bold" /></button>
 
           <span className="ns-fmt-sep" />
 
           {/* Lists & table */}
-          <button className={`ns-fmt-btn${blockKind === "ul" ? " ns-fmt-btn--active" : ""}`} onClick={toggleBullet}   data-tooltip="Bullet list"   data-tooltip-pos="below" disabled={fmtDisabled}><ListBulletsIcon size={13} weight="bold" /></button>
-          <button className={`ns-fmt-btn${blockKind === "ol" ? " ns-fmt-btn--active" : ""}`} onClick={toggleNumbered} data-tooltip="Numbered list" data-tooltip-pos="below" disabled={fmtDisabled}><ListNumbersIcon size={13} weight="bold" /></button>
-          <button className="ns-fmt-btn" onClick={insertTable} data-tooltip="Insert table" data-tooltip-pos="below" disabled={fmtDisabled}><TableIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "ul" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "bulletList"   })} data-tooltip="Bullet list"   data-tooltip-pos="below"><ListBulletsIcon size={13} weight="bold" /></button>
+          <button className={`ns-fmt-btn${bk === "ol" ? " ns-fmt-btn--active" : ""}`} onClick={() => dispatch({ kind: "orderedList"  })} data-tooltip="Numbered list" data-tooltip-pos="below"><ListNumbersIcon size={13} weight="bold" /></button>
+          <button className="ns-fmt-btn" onClick={() => dispatch({ kind: "insertTable" })} data-tooltip="Insert table" data-tooltip-pos="below"><TableIcon size={13} weight="bold" /></button>
 
           <span className="ns-fmt-sep" />
 
@@ -456,7 +432,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               }}
               data-tooltip="Insert link"
               data-tooltip-pos="below"
-              disabled={fmtDisabled}
             >
               <LinkSimpleIcon size={12} weight="bold" />
             </button>
@@ -498,7 +473,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               }}
               data-tooltip="Embed clipboard entry"
               data-tooltip-pos="below"
-              disabled={fmtDisabled}
             >
               <ClipboardTextIcon size={13} weight="bold" />
             </button>
@@ -589,17 +563,18 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             ref={editorRef}
             noteId={note.id}
             initialMarkdown={initialMarkdown}
+            initialMode={mode}
             entries={entries}
-            mode={mode}
             onChange={handleEditorChange}
-            onSelectionChange={refreshBlockKind}
+            onModeChange={(m) => setMode(m)}
+            onSelectionChange={refreshActive}
           />
         </div>
 
         {/* Footer */}
         <div className="ns-editor-footer">
           <span className="ns-editor-footer-text">
-            {isPreview ? "Preview · " : "Markdown · "}
+            {mode === "markdown" ? "Markdown · " : "Normal · "}
             Updated {timeAgo(note.updated_at)}
           </span>
         </div>

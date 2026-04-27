@@ -301,6 +301,40 @@
   color: var(--accent);
 }
 
+/* ── Mode segmented switch ───────────────────────────────────────── */
+
+.ns-mode-switch {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
+  margin-right: 4px;
+}
+.ns-mode-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  letter-spacing: 0.01em;
+}
+.ns-mode-tab:hover {
+  color: var(--text);
+}
+.ns-mode-tab--active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 /* ── Formatting toolbar ──────────────────────────────────────────── */
 
 .ns-format-bar {
