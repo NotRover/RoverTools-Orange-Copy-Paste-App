@@ -136,10 +136,40 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
       if (e.key === "Tab") {
         e.preventDefault();
         const sel = taSelection();
+        const indent = "  ";
+        const lineStart =
+          sel.value.lastIndexOf("\n", Math.max(0, sel.selStart - 1)) + 1;
+        const nl = sel.value.indexOf("\n", sel.selEnd);
+        const lineEnd = nl === -1 ? sel.value.length : nl;
+        const block = sel.value.slice(lineStart, lineEnd);
+        const lines = block.split("\n");
+        const isList = (ln: string) =>
+          /^(\s*)([-*+]\s|\d+\.\s)/.test(ln);
+        if (e.shiftKey) {
+          const next = lines
+            .map((ln) => (ln.startsWith(indent) ? ln.slice(indent.length) : ln))
+            .join("\n");
+          const delta = block.length - next.length;
+          applyTaResult({
+            value: sel.value.slice(0, lineStart) + next + sel.value.slice(lineEnd),
+            selStart: Math.max(lineStart, sel.selStart - indent.length),
+            selEnd: Math.max(lineStart, sel.selEnd - delta),
+          });
+          return;
+        }
+        if (lines.some(isList) || lines.length > 1) {
+          const next = lines.map((ln) => (ln.length ? indent + ln : ln)).join("\n");
+          applyTaResult({
+            value: sel.value.slice(0, lineStart) + next + sel.value.slice(lineEnd),
+            selStart: sel.selStart + indent.length,
+            selEnd: sel.selEnd + (next.length - block.length),
+          });
+          return;
+        }
         applyTaResult({
-          value: sel.value.slice(0, sel.selStart) + "  " + sel.value.slice(sel.selEnd),
-          selStart: sel.selStart + 2,
-          selEnd: sel.selStart + 2,
+          value: sel.value.slice(0, sel.selStart) + indent + sel.value.slice(sel.selEnd),
+          selStart: sel.selStart + indent.length,
+          selEnd: sel.selStart + indent.length,
         });
         return;
       }

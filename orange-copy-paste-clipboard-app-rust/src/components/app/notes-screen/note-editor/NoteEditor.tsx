@@ -27,6 +27,12 @@ import {
   LinkSimpleIcon,
   ClipboardTextIcon,
   CaretDownIcon,
+  TextAlignLeftIcon,
+  TextAlignCenterIcon,
+  TextAlignRightIcon,
+  TextAlignJustifyIcon,
+  PaletteIcon,
+  HighlighterIcon,
 } from "@phosphor-icons/react";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../../types";
@@ -55,6 +61,31 @@ import {
 import "./note-editor.css";
 
 const EMPTY_ACTIVE: ActiveState = { blockKind: "p" };
+
+const TEXT_COLORS: { label: string; value: string | null }[] = [
+  { label: "Default", value: null },
+  { label: "Red", value: "#e5484d" },
+  { label: "Orange", value: "#f76808" },
+  { label: "Amber", value: "#ffba18" },
+  { label: "Green", value: "#46a758" },
+  { label: "Teal", value: "#12a594" },
+  { label: "Blue", value: "#3b82f6" },
+  { label: "Purple", value: "#8e4ec6" },
+  { label: "Pink", value: "#e93d82" },
+  { label: "Gray", value: "#8d8d8d" },
+];
+
+const HIGHLIGHT_COLORS: { label: string; value: string | null }[] = [
+  { label: "None", value: null },
+  { label: "Yellow", value: "#fff3a8" },
+  { label: "Lime", value: "#d6f5b8" },
+  { label: "Mint", value: "#bdf0d6" },
+  { label: "Sky", value: "#bee3f8" },
+  { label: "Lavender", value: "#dcd2ff" },
+  { label: "Pink", value: "#ffd2e6" },
+  { label: "Peach", value: "#ffd9b4" },
+  { label: "Gray", value: "#e2e2e2" },
+];
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5;
 
@@ -102,7 +133,13 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const [showLinkPicker, setShowLinkPicker] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
+  const [linkText, setLinkText] = useState("");
   const linkPickerRef = useRef<HTMLDivElement>(null);
+
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const colorPickerRef = useRef<HTMLDivElement>(null);
+  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
+  const highlightPickerRef = useRef<HTMLDivElement>(null);
 
   const initialMarkdown = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
   const initialTitle = useMemo(
@@ -253,6 +290,32 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, [showEmbedPicker]);
 
   useEffect(() => {
+    if (!showColorPicker) return;
+    const h = (e: MouseEvent) => {
+      if (
+        colorPickerRef.current &&
+        !colorPickerRef.current.contains(e.target as Node)
+      )
+        setShowColorPicker(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showColorPicker]);
+
+  useEffect(() => {
+    if (!showHighlightPicker) return;
+    const h = (e: MouseEvent) => {
+      if (
+        highlightPickerRef.current &&
+        !highlightPickerRef.current.contains(e.target as Node)
+      )
+        setShowHighlightPicker(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showHighlightPicker]);
+
+  useEffect(() => {
     if (!showLinkPicker) return;
     const h = (e: MouseEvent) => {
       if (
@@ -261,6 +324,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       ) {
         setShowLinkPicker(false);
         setLinkUrl("");
+        setLinkText("");
       }
     };
     document.addEventListener("mousedown", h);
@@ -279,11 +343,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     setShowEmbedPicker(false);
   }, []);
 
-  const insertLink = useCallback((url: string) => {
+  const insertLink = useCallback((url: string, text?: string) => {
     if (!url.trim()) return;
-    editorRef.current?.insertLink(url.trim());
+    editorRef.current?.insertLink(url.trim(), text?.trim() || undefined);
     setShowLinkPicker(false);
     setLinkUrl("");
+    setLinkText("");
   }, []);
 
   // ── Picker entry lists ────────────────────────────────────────────────
@@ -642,6 +707,138 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
           <span className="ns-fmt-sep" />
 
+          {/* Text alignment */}
+          <button
+            className={`ns-fmt-btn${active.align === "left" || !active.align ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "align", value: "left" })}
+            data-tooltip="Align left"
+            data-tooltip-pos="below"
+          >
+            <TextAlignLeftIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.align === "center" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "align", value: "center" })}
+            data-tooltip="Align center"
+            data-tooltip-pos="below"
+          >
+            <TextAlignCenterIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.align === "right" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "align", value: "right" })}
+            data-tooltip="Align right"
+            data-tooltip-pos="below"
+          >
+            <TextAlignRightIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.align === "justify" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "align", value: "justify" })}
+            data-tooltip="Justify"
+            data-tooltip-pos="below"
+          >
+            <TextAlignJustifyIcon size={13} weight="bold" />
+          </button>
+
+          <span className="ns-fmt-sep" />
+
+          {/* Text color */}
+          <div className="ns-embed-wrap" ref={colorPickerRef}>
+            <button
+              className={`ns-fmt-btn${active.textColor ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowColorPicker((p) => !p);
+                setShowHighlightPicker(false);
+              }}
+              data-tooltip="Text color"
+              data-tooltip-pos="below"
+              style={
+                active.textColor
+                  ? { color: active.textColor }
+                  : undefined
+              }
+            >
+              <PaletteIcon size={13} weight="bold" />
+            </button>
+            {showColorPicker && (
+              <div className="ns-embed-picker ns-color-picker">
+                <div className="ns-color-grid">
+                  {TEXT_COLORS.map((c) => (
+                    <button
+                      key={c.value ?? "none"}
+                      className="ns-color-swatch"
+                      style={{
+                        background: c.value ?? "transparent",
+                        border: c.value
+                          ? "1px solid var(--border)"
+                          : "1px dashed var(--border)",
+                      }}
+                      title={c.label}
+                      onClick={() => {
+                        dispatch({ kind: "textColor", value: c.value });
+                        setShowColorPicker(false);
+                      }}
+                    >
+                      {c.value == null && (
+                        <span className="ns-color-swatch-none">×</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Highlight color */}
+          <div className="ns-embed-wrap" ref={highlightPickerRef}>
+            <button
+              className={`ns-fmt-btn${active.highlight ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowHighlightPicker((p) => !p);
+                setShowColorPicker(false);
+              }}
+              data-tooltip="Highlight"
+              data-tooltip-pos="below"
+              style={
+                active.highlight
+                  ? { background: active.highlight }
+                  : undefined
+              }
+            >
+              <HighlighterIcon size={13} weight="bold" />
+            </button>
+            {showHighlightPicker && (
+              <div className="ns-embed-picker ns-color-picker">
+                <div className="ns-color-grid">
+                  {HIGHLIGHT_COLORS.map((c) => (
+                    <button
+                      key={c.value ?? "none"}
+                      className="ns-color-swatch"
+                      style={{
+                        background: c.value ?? "transparent",
+                        border: c.value
+                          ? "1px solid var(--border)"
+                          : "1px dashed var(--border)",
+                      }}
+                      title={c.label}
+                      onClick={() => {
+                        dispatch({ kind: "highlight", value: c.value });
+                        setShowHighlightPicker(false);
+                      }}
+                    >
+                      {c.value == null && (
+                        <span className="ns-color-swatch-none">×</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <span className="ns-fmt-sep" />
+
           {/* Link picker */}
           <div className="ns-embed-wrap" ref={linkPickerRef}>
             <button
@@ -661,21 +858,38 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 <div className="ns-link-picker-row">
                   <input
                     className="ns-embed-search ns-link-input"
+                    placeholder="Display text (optional)"
+                    value={linkText}
+                    onChange={(e) => setLinkText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") insertLink(linkUrl, linkText);
+                      if (e.key === "Escape") {
+                        setShowLinkPicker(false);
+                        setLinkUrl("");
+                        setLinkText("");
+                      }
+                    }}
+                  />
+                </div>
+                <div className="ns-link-picker-row">
+                  <input
+                    className="ns-embed-search ns-link-input"
                     placeholder="https://…"
                     value={linkUrl}
                     onChange={(e) => setLinkUrl(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") insertLink(linkUrl);
+                      if (e.key === "Enter") insertLink(linkUrl, linkText);
                       if (e.key === "Escape") {
                         setShowLinkPicker(false);
                         setLinkUrl("");
+                        setLinkText("");
                       }
                     }}
                     autoFocus
                   />
                   <button
                     className="ns-link-insert-btn"
-                    onClick={() => insertLink(linkUrl)}
+                    onClick={() => insertLink(linkUrl, linkText)}
                     disabled={!linkUrl.trim()}
                   >
                     Insert

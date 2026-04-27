@@ -131,6 +131,10 @@ export function commandToAction(cmd: EditorCommand): FormatAction | null {
         kind: "insert",
         text: `<span data-group-ref="${escAttr(cmd.name)}"></span>`,
       };
+    case "align":
+    case "textColor":
+    case "highlight":
+      return null;
   }
 }
 

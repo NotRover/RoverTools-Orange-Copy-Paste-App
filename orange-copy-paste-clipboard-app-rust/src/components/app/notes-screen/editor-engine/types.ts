@@ -34,7 +34,12 @@ export type EditorCommand =
   | { kind: "tableDeleteColumn" }
   | { kind: "insertText"; text: string }
   | { kind: "clipEmbed"; id: string }
-  | { kind: "groupEmbed"; name: string };
+  | { kind: "groupEmbed"; name: string }
+  | { kind: "align"; value: "left" | "center" | "right" | "justify" }
+  | { kind: "textColor"; value: string | null }
+  | { kind: "highlight"; value: string | null };
+
+export type AlignValue = "left" | "center" | "right" | "justify";
 
 export type BlockKind =
   | "p"
@@ -59,4 +64,7 @@ export interface ActiveState {
   code?: boolean;
   inTable?: boolean;
   blockKind: BlockKind;
+  align?: AlignValue;
+  textColor?: string;
+  highlight?: string;
 }

@@ -744,3 +744,33 @@
   color: var(--text-muted);
   letter-spacing: 0.2px;
 }
+
+.ns-color-picker {
+  padding: 6px;
+  width: auto;
+  min-width: 0;
+}
+.ns-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+.ns-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease;
+}
+.ns-color-swatch:hover {
+  transform: scale(1.12);
+}
+.ns-color-swatch-none {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1;
+}
