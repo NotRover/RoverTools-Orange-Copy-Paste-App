@@ -47,6 +47,8 @@ const ALL_LINE_PREFIXES = [
   "# ",
   "## ",
   "### ",
+  "#### ",
+  "##### ",
   "> ",
   "- [ ] ",
   "- [x] ",
@@ -81,7 +83,7 @@ export function commandToAction(cmd: EditorCommand): FormatAction | null {
       return {
         kind: "linePrefix",
         prefix: "> ",
-        togglePrefixes: ["> ", "# ", "## ", "### "],
+        togglePrefixes: ["> ", "# ", "## ", "### ", "#### ", "##### "],
       };
     case "bulletList":
       return {
@@ -241,6 +243,8 @@ export function detectBlockKind(value: string, caret: number): BlockKind {
   const { lineStart, lineEnd } = expandToLines(value, caret, caret);
   const line = value.slice(lineStart, lineEnd);
   if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) return "hr";
+  if (/^##### /.test(line)) return "h5";
+  if (/^#### /.test(line)) return "h4";
   if (/^### /.test(line)) return "h3";
   if (/^## /.test(line)) return "h2";
   if (/^# /.test(line)) return "h1";

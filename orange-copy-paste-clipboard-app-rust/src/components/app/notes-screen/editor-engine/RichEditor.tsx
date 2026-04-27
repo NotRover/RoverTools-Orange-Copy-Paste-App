@@ -357,6 +357,8 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
   if (editor.isActive("heading", { level: 1 })) blockKind = "h1";
   else if (editor.isActive("heading", { level: 2 })) blockKind = "h2";
   else if (editor.isActive("heading", { level: 3 })) blockKind = "h3";
+  else if (editor.isActive("heading", { level: 4 })) blockKind = "h4";
+  else if (editor.isActive("heading", { level: 5 })) blockKind = "h5";
   else if (editor.isActive("blockquote")) blockKind = "bq";
   else if (editor.isActive("taskItem")) blockKind = "todo";
   else if (editor.isActive("bulletList")) blockKind = "ul";
