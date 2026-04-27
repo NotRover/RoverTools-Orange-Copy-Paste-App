@@ -4,6 +4,7 @@
 // modes preserves the current content without needing a parent re-render.
 
 import React, {
+  Component,
   forwardRef,
   useCallback,
   useEffect,
@@ -11,6 +12,22 @@ import React, {
   useRef,
   useState,
 } from "react";
+
+// ── Error boundary — prevents a Tiptap crash from blanking the entire screen
+class RichEditorBoundary extends Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: unknown) { console.error("[RichEditor]", err); }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
 import type { ClipboardEntry } from "../../../../types";
 import {
   applyAction,
@@ -283,14 +300,22 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
       <div className="ee-shell" data-mode={mode}>
         <EmbedContextProvider entries={entries}>
           {mode === "normal" ? (
-            <RichEditor
-              key={noteId}
-              ref={richRef}
-              initialMarkdown={valueRef.current}
-              onChange={handleRichChange}
-              onSelectionChange={onSelectionChange}
-              placeholder="Start writing…"
-            />
+            <RichEditorBoundary
+              fallback={
+                <div style={{ padding: "14px 18px", color: "var(--text-muted)", fontSize: 13 }}>
+                  Editor failed to load. Switch to Markdown mode to continue editing.
+                </div>
+              }
+            >
+              <RichEditor
+                key={noteId}
+                ref={richRef}
+                initialMarkdown={valueRef.current}
+                onChange={handleRichChange}
+                onSelectionChange={onSelectionChange}
+                placeholder="Start writing…"
+              />
+            </RichEditorBoundary>
           ) : (
             <textarea
               ref={textareaRef}

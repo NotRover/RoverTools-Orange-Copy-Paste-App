@@ -8,9 +8,9 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
-  useRef,
   useState,
 } from "react";
+// Note: @tiptap/extension-drag-handle-react intentionally not used — it crashes on mode switch.
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
@@ -26,7 +26,6 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
-import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { Markdown } from "tiptap-markdown";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
@@ -36,7 +35,6 @@ import type {
   BlockKind,
   AlignValue,
 } from "./types";
-import { DotsSixVerticalIcon, PlusIcon } from "@phosphor-icons/react";
 
 export interface RichEditorHandle {
   applyCommand: (cmd: EditorCommand) => void;
@@ -69,8 +67,6 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
       rowX: 0,
       rowY: 0,
     });
-    const dragHandleNodePosRef = useRef<number | null>(null);
-
     const updateTableHandlePos = useCallback(
       (nextEditor: ReturnType<typeof useEditor> | null) => {
         if (!nextEditor || !nextEditor.isActive("table")) {
@@ -186,20 +182,6 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
       },
     });
 
-    const handleAddBlockBelow = useCallback(() => {
-      if (!editor) return;
-      const pos = dragHandleNodePosRef.current;
-      if (pos == null) return;
-      const node = editor.state.doc.nodeAt(pos);
-      if (!node) return;
-      const insertAt = pos + node.nodeSize;
-      editor
-        .chain()
-        .focus()
-        .insertContentAt(insertAt, { type: "paragraph" })
-        .setTextSelection(insertAt + 1)
-        .run();
-    }, [editor]);
 
     const runTableCommand = useCallback(
       (cmd: "addRow" | "addCol" | "delRow" | "delCol") => {
@@ -354,31 +336,6 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
     return (
       <>
         <EditorContent editor={editor} className="ee-rich-shell" />
-        {editor && (
-          <DragHandle
-            editor={editor}
-            className="ee-block-handle"
-            onNodeChange={({ pos }) => {
-              dragHandleNodePosRef.current = pos;
-            }}
-          >
-            <button
-              type="button"
-              className="ee-block-handle-btn"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleAddBlockBelow}
-              title="Add block below"
-            >
-              <PlusIcon size={11} weight="bold" />
-            </button>
-            <span
-              className="ee-block-handle-btn ee-block-handle-grip"
-              title="Drag to move"
-            >
-              <DotsSixVerticalIcon size={11} weight="bold" />
-            </span>
-          </DragHandle>
-        )}
         {tableHandlePos.visible && (
           <>
             <div
