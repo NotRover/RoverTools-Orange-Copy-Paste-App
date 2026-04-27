@@ -18,6 +18,38 @@ string and a read-only renderer used by note cards.
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Quick context (human + LLM)
+
+If you only need the mental model, keep these points:
+
+1. `note.content` is always markdown text. No editor JSON is persisted.
+2. `MarkdownEditor` is a host with two surfaces:
+
+- `RichEditor` (Tiptap WYSIWYG, mode = `"normal"`)
+- `<textarea>` (raw markdown, mode = `"markdown"`)
+
+3. Toolbar buttons do not directly call Tiptap. They dispatch
+   `EditorCommand`, and each surface interprets the same command.
+4. Clip/group embeds are inline `<span data-*>` nodes in markdown:
+
+- clip: `<span data-clip-embed="CLIP_ID"></span>`
+- group: `<span data-group-ref="Group Name"></span>`
+
+5. Preview rendering allows GFM + safe inline HTML. It is sanitized before
+   rendering.
+
+## Where this engine is consumed
+
+- `notes-screen/note-editor/NoteEditor.tsx`
+  - Main note editing experience (toolbar + mode switch + editor handle).
+- `notes-screen/NotePreview.tsx`
+  - Read-only markdown rendering in note cards.
+- `notes-screen/notes-utils.ts`
+  - Uses `markdownToPlainText` for title/summary/search helpers.
+
+If you are changing command behavior, embeds, or markdown sanitization,
+these files are the first integration points to re-check.
+
 ## Key principles
 
 1. **Markdown is canonical.** Everything serializes to / parses from a plain
@@ -57,19 +89,33 @@ editor-engine/
 
 ## Public API (`index.ts`)
 
-| export                           | what it is                                                          |
-|----------------------------------|---------------------------------------------------------------------|
-| `MarkdownEditor`                 | The dual-mode editor component. The thing you mount.                |
-| `MarkdownEditorHandle`           | Ref handle: `applyCommand`, `getMarkdown`, `setMode`, `focus`, …    |
-| `MarkdownPreview`                | Read-only markdown renderer (note cards / list views).              |
-| `RichEditor` / `RichEditorHandle`| The Tiptap surface, exported in case you want it standalone.        |
-| `EditorMode`                     | `"normal" \| "markdown"`                                            |
-| `EditorCommand`                  | Mode-agnostic toolbar command (see below).                          |
-| `FormatAction`                   | Low-level textarea op (used by markdown mode internally).           |
-| `BlockKind` / `ActiveState`      | Toolbar feedback (current heading, list, marks under caret, …).     |
-| `markdownToPlainText`            | Strip markdown to plain text — for titles, search, etc.             |
-| `applyAction` / `commandToAction`| Pure helpers if you ever need to manipulate markdown without a DOM. |
-| `detectBlockKind` / `detectActiveState` | Caret-state detection in markdown mode.                      |
+| export                                  | what it is                                                          |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| `MarkdownEditor`                        | The dual-mode editor component. The thing you mount.                |
+| `MarkdownEditorHandle`                  | Ref handle: `applyCommand`, `getMarkdown`, `setMode`, `focus`, …    |
+| `MarkdownPreview`                       | Read-only markdown renderer (note cards / list views).              |
+| `RichEditor` / `RichEditorHandle`       | The Tiptap surface, exported in case you want it standalone.        |
+| `EditorMode`                            | `"normal" \| "markdown"`                                            |
+| `EditorCommand`                         | Mode-agnostic toolbar command (see below).                          |
+| `FormatAction`                          | Low-level textarea op (used by markdown mode internally).           |
+| `BlockKind` / `ActiveState`             | Toolbar feedback (current heading, list, marks under caret, …).     |
+| `markdownToPlainText`                   | Strip markdown to plain text — for titles, search, etc.             |
+| `applyAction` / `commandToAction`       | Pure helpers if you ever need to manipulate markdown without a DOM. |
+| `detectBlockKind` / `detectActiveState` | Caret-state detection in markdown mode.                             |
+
+### Handle contract (`MarkdownEditorHandle`)
+
+`MarkdownEditor` exposes an imperative handle used by the surrounding
+toolbar/workflow:
+
+- formatting and insertions: `applyCommand`, `insertText`, `insertLink`,
+  `insertClipEmbed`, `insertGroupEmbed`
+- mode control: `setMode`, `getMode`
+- state queries: `getMarkdown`, `getActiveState`, `getBlockKind`
+- focus/selection helpers: `focus`, `saveRange`
+
+When adding new editor affordances, prefer extending this handle so the host
+screen stays mode-agnostic.
 
 ## How the host (`MarkdownEditor`) works
 
@@ -95,7 +141,7 @@ State flow:
    new one with `defaultValue={valueRef.current}` — so the new surface
    boots from the fresh value.
 4. The handle's `applyCommand(cmd)` routes to the active surface:
-   - normal  → `RichEditor.applyCommand(cmd)` → Tiptap chain
+   - normal → `RichEditor.applyCommand(cmd)` → Tiptap chain
    - markdown → `commandToAction(cmd)` → `applyAction(state, action)` → textarea mutation
 
 ## Toolbar commands
@@ -105,13 +151,23 @@ new toolbar action you add a `kind` here, then implement it in two places:
 
 ```ts
 type EditorCommand =
-  | { kind: "bold" } | { kind: "italic" } | { kind: "strike" } | { kind: "code" }
-  | { kind: "heading"; level: 1 | 2 | 3 } | { kind: "paragraph" }
-  | { kind: "blockquote" } | { kind: "bulletList" } | { kind: "orderedList" }
-  | { kind: "taskList" } | { kind: "codeBlock" } | { kind: "hr" }
-  | { kind: "link"; url: string; text?: string } | { kind: "insertTable" }
+  | { kind: "bold" }
+  | { kind: "italic" }
+  | { kind: "strike" }
+  | { kind: "code" }
+  | { kind: "heading"; level: 1 | 2 | 3 }
+  | { kind: "paragraph" }
+  | { kind: "blockquote" }
+  | { kind: "bulletList" }
+  | { kind: "orderedList" }
+  | { kind: "taskList" }
+  | { kind: "codeBlock" }
+  | { kind: "hr" }
+  | { kind: "link"; url: string; text?: string }
+  | { kind: "insertTable" }
   | { kind: "insertText"; text: string }
-  | { kind: "clipEmbed"; id: string } | { kind: "groupEmbed"; name: string };
+  | { kind: "clipEmbed"; id: string }
+  | { kind: "groupEmbed"; name: string };
 ```
 
 Implementing a new command:
@@ -172,18 +228,28 @@ To add a new render-only feature (math, mermaid, callouts, etc.):
 no migration. If you need to differentiate empty notes, check
 `hasMeaningfulContent(rawContent)` from `notes-utils.ts`.
 
+## Invariants (do not break)
+
+1. Markdown remains the sole persisted source of truth.
+2. Mode switches must preserve user content and current selection behavior.
+3. A toolbar command should map consistently in both modes.
+4. Embed nodes must round-trip as stable `<span data-*>` HTML markers.
+5. Preview sanitation must continue to block unsafe HTML while allowing
+   required embed attributes and local asset protocols.
+6. Missing clip IDs must render gracefully as "Missing clip" (no crash).
+
 ## Adding plugins / extending — quick reference
 
-| You want…                          | Where to change                                           |
-|------------------------------------|-----------------------------------------------------------|
-| New toolbar button                 | `EditorCommand` (types.ts) + RichEditor + commandToAction + NoteEditor toolbar JSX |
-| Syntax-highlighted code blocks     | Replace `codeBlock` in StarterKit with `CodeBlockLowlight`; add highlighter for preview |
-| Math / Mermaid / Footnotes         | `remark-*` plugin in MarkdownPreview; configure Markdown extension in RichEditor if needed |
-| Inline mention / wiki-link / tag   | New Tiptap node (mirror ClipEmbed) + render mapping in MarkdownPreview |
-| Slash command menu                 | `RichEditor.tsx` — Tiptap suggestion utility; or intercept in MarkdownEditor `onKeyDown` |
-| New keyboard shortcut              | Markdown mode: `MarkdownEditor.handleTextareaKeyDown`; Normal mode: Tiptap `addKeyboardShortcuts()` on the relevant extension |
-| Allow a new HTML tag in preview    | `MarkdownPreview.tsx` sanitize `schema` |
-| New storage attribute on a node    | Add to node's `addAttributes()` and update `parseHTML`/`renderHTML` so it survives the markdown round-trip |
+| You want…                        | Where to change                                                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| New toolbar button               | `EditorCommand` (types.ts) + RichEditor + commandToAction + NoteEditor toolbar JSX                                            |
+| Syntax-highlighted code blocks   | Replace `codeBlock` in StarterKit with `CodeBlockLowlight`; add highlighter for preview                                       |
+| Math / Mermaid / Footnotes       | `remark-*` plugin in MarkdownPreview; configure Markdown extension in RichEditor if needed                                    |
+| Inline mention / wiki-link / tag | New Tiptap node (mirror ClipEmbed) + render mapping in MarkdownPreview                                                        |
+| Slash command menu               | `RichEditor.tsx` — Tiptap suggestion utility; or intercept in MarkdownEditor `onKeyDown`                                      |
+| New keyboard shortcut            | Markdown mode: `MarkdownEditor.handleTextareaKeyDown`; Normal mode: Tiptap `addKeyboardShortcuts()` on the relevant extension |
+| Allow a new HTML tag in preview  | `MarkdownPreview.tsx` sanitize `schema`                                                                                       |
+| New storage attribute on a node  | Add to node's `addAttributes()` and update `parseHTML`/`renderHTML` so it survives the markdown round-trip                    |
 
 ## Dependencies
 
@@ -207,3 +273,46 @@ no migration. If you need to differentiate empty notes, check
   vocabulary for safety.
 - **Atomic embed nodes**: `ClipEmbed` and `GroupRef` are atoms. They can be
   selected/deleted as a unit but cannot contain text — by design.
+
+## Change checklist
+
+Use this checklist when touching the engine:
+
+1. API/contract changes:
+
+- update `types.ts` and `index.ts`
+- update toolbar caller in `note-editor/NoteEditor.tsx` if needed
+
+2. Command changes:
+
+- `RichEditor.tsx` (`applyCommand` switch)
+- `format-actions.ts` (`commandToAction`)
+
+3. New embed node:
+
+- add extension in `extensions/`
+- register in `RichEditor.tsx` extensions array
+- map render in `MarkdownPreview.tsx` components
+
+4. Preview HTML feature:
+
+- add plugin(s) in `MarkdownPreview.tsx`
+- update sanitize schema tag/attribute/protocol allow-list
+
+5. Styling changes for chips/editor text:
+
+- update `markdown.css`
+- verify final cascade with notes screen CSS (screen-level styles can
+  override editor styles if selectors collide)
+
+## Verification (recommended)
+
+From `orange-copy-paste-clipboard-app-rust/`:
+
+1. `bun run build`
+2. Manual smoke checks in notes UI:
+
+- switch modes with unsaved edits in both directions
+- use toolbar commands in both modes (bold/list/link/code/table/hr)
+- insert clip/group embeds and confirm labels/chips in editor + preview
+- confirm missing clip ID degrades to "Missing clip"
