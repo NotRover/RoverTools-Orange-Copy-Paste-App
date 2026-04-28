@@ -14,6 +14,7 @@ import {
 import { EditorContent, useEditor } from "@tiptap/react";
 import { Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { Underline } from "@tiptap/extension-underline";
 import { Link } from "@tiptap/extension-link";
 import { TaskList } from "@tiptap/extension-task-list";
@@ -31,6 +32,10 @@ import { Image } from "@tiptap/extension-image";
 import { Markdown } from "tiptap-markdown";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
+import {
+  AlignAwareParagraph,
+  AlignAwareHeading,
+} from "./extensions/AlignAware";
 import type {
   EditorCommand,
   ActiveState,
@@ -180,7 +185,11 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
       extensions: [
         StarterKit.configure({
           codeBlock: { HTMLAttributes: { class: "ee-codeblock" } },
+          paragraph: false,
+          heading: false,
         }),
+        AlignAwareParagraph,
+        AlignAwareHeading.configure({ levels: [1, 2, 3, 4, 5] }),
         Underline,
         Link.configure({ openOnClick: false, autolink: true }),
         TaskList,
@@ -223,17 +232,17 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
           event.preventDefault();
           const file = imageItem.getAsFile();
           if (!file) return true;
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const src = e.target?.result as string;
-            if (src)
-              view.dispatch(
-                view.state.tr.replaceSelectionWith(
-                  view.state.schema.nodes.image.create({ src }),
-                ),
-              );
-          };
-          reader.readAsDataURL(file);
+          insertImageFromFile(view, file);
+          return true;
+        },
+        handleDrop: (view, event) => {
+          const dt = (event as DragEvent).dataTransfer;
+          const file = Array.from(dt?.files ?? []).find((f) =>
+            f.type.startsWith("image/"),
+          );
+          if (!file) return false;
+          event.preventDefault();
+          insertImageFromFile(view, file);
           return true;
         },
       },
@@ -337,6 +346,15 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
               if (cmd.value == null) c.unsetHighlight().run();
               else c.setHighlight({ color: cmd.value }).run();
               break;
+            case "image": {
+              const imageNode = editor.schema.nodes.image;
+              if (!imageNode) break;
+              c.insertContent({
+                type: "image",
+                attrs: { src: cmd.src, alt: cmd.alt ?? null },
+              }).run();
+              break;
+            }
             case "insertTable":
               c.insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
               break;
@@ -497,6 +515,37 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
     textColor: typeof colorAttr === "string" ? colorAttr : undefined,
     highlight: typeof highlightAttr === "string" ? highlightAttr : undefined,
   };
+}
+
+// Persist a pasted/dropped image file to disk via Tauri, then insert it as a
+// regular `<img>` node referencing a `tauri-asset:` URL. This avoids stuffing
+// huge base64 data URLs into the markdown source (which made round-tripping
+// between rich and markdown modes flaky).
+function insertImageFromFile(
+  view: import("@tiptap/pm/view").EditorView,
+  file: File,
+): void {
+  const mime = (file.type || "image/png").toLowerCase();
+  const extFromMime = mime.split("/")[1] ?? "png";
+  const extFromName = file.name.includes(".")
+    ? file.name.split(".").pop() ?? extFromMime
+    : extFromMime;
+  const ext = (extFromName || extFromMime).toLowerCase();
+  file
+    .arrayBuffer()
+    .then(async (buf) => {
+      const bytes = Array.from(new Uint8Array(buf));
+      const path = await invoke<string>("save_note_image", { bytes, ext });
+      const src = convertFileSrc(path);
+      const imageNode = view.state.schema.nodes.image;
+      if (!imageNode) return;
+      view.dispatch(
+        view.state.tr.replaceSelectionWith(imageNode.create({ src })),
+      );
+    })
+    .catch((err) => {
+      console.error("[notes] failed to save pasted image", err);
+    });
 }
 
 function normalizeIndentMarkdown(markdown: string): string {

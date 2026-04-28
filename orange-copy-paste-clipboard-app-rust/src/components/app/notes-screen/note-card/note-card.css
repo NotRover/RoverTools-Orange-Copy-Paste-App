@@ -71,6 +71,119 @@
   mask-image: linear-gradient(to bottom, #000 0%, #000 82%, transparent 100%);
 }
 
+/* ── Card preview overrides ─────────────────────────────────────────────
+   The preview reuses .ee-preview from the editor engine, which has editor-
+   sized padding/typography. Inside a card we want a compact rendering that
+   still mirrors what the editor shows: alignment, color, highlight, images,
+   tables, and embeds all preserved — just smaller. */
+
+.ns-card-preview-md.ee-preview {
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow: visible;
+}
+
+.ns-card-preview-md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.4em 0 0.2em;
+  line-height: 1.25;
+  color: var(--text);
+}
+.ns-card-preview-md h1 {
+  font-size: 1.45em;
+}
+.ns-card-preview-md h2 {
+  font-size: 1.25em;
+}
+.ns-card-preview-md h3 {
+  font-size: 1.1em;
+}
+.ns-card-preview-md h4,
+.ns-card-preview-md h5,
+.ns-card-preview-md h6 {
+  font-size: 1em;
+}
+
+.ns-card-preview-md p,
+.ns-card-preview-md blockquote,
+.ns-card-preview-md pre {
+  margin: 0 0 0.3em;
+}
+
+.ns-card-preview-md ul,
+.ns-card-preview-md ol {
+  margin: 0.2em 0 0.3em;
+  padding-left: 1.2em;
+}
+.ns-card-preview-md li {
+  margin: 0.1em 0;
+}
+
+.ns-card-preview-md blockquote {
+  padding: 0.1em 0.6em;
+  border-left-width: 2px;
+}
+
+.ns-card-preview-md pre {
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.ns-card-preview-md code {
+  font-size: 0.92em;
+  padding: 0 4px;
+}
+
+.ns-card-preview-md hr {
+  margin: 0.5em 0;
+}
+
+.ns-card-preview-md img {
+  max-width: 100%;
+  max-height: 140px;
+  object-fit: cover;
+  border-radius: 5px;
+  display: block;
+  margin: 4px 0;
+}
+
+.ns-card-preview-md table {
+  font-size: 11px;
+  margin: 0.3em 0;
+}
+.ns-card-preview-md :is(th, td) {
+  padding: 2px 5px;
+  line-height: 1.3;
+}
+
+.ns-card-preview-md details {
+  margin: 0.25em 0;
+  padding: 4px 7px;
+}
+
+.ns-card-preview-md kbd {
+  font-size: 0.82em;
+  padding: 0 4px;
+}
+
+/* Honor inline alignment / color / highlight HTML emitted by the editor so
+   the card faithfully reflects the note. */
+.ns-card-preview-md [style*="text-align"] {
+  /* inline style wins; this rule exists only to document intent */
+}
+.ns-card-preview-md mark {
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+/* Embed chips already styled by markdown.css (.ee-clip-chip, .ee-group-chip);
+   shrink them slightly so they fit in the card. */
+.ns-card-preview-md :is(.ee-clip-chip, .ee-group-chip) {
+  font-size: 0.78em;
+  padding: 0 6px;
+}
+
 .ns-card-preview--rich {
   display: block;
   max-height: 220px;

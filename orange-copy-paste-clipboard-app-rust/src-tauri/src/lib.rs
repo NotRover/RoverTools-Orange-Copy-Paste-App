@@ -373,6 +373,8 @@ pub fn run() {
             crate::notes::commands::set_note_groups,
             crate::notes::commands::purge_group_from_notes,
             crate::notes::commands::rename_group_in_notes,
+            crate::notes::commands::save_note_image,
+            crate::notes::commands::save_note_file,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
