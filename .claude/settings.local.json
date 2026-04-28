@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx tsc:*)",
       "Bash(npx vite:*)",
-      "Bash(bun run *)"
+      "Bash(bun run *)",
+      "Bash(node -e ' *)"
     ]
   }
 }
