@@ -239,7 +239,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
       },
       onUpdate: ({ editor }) => {
         const md = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
-        onChange(md);
+        onChange(normalizeIndentMarkdown(md));
         updateTableHandlePos(editor);
       },
       onSelectionUpdate: ({ editor }) => {
@@ -369,8 +369,10 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
               break;
           }
         },
-        getMarkdown: () =>
-          (editor?.storage as any)?.markdown?.getMarkdown?.() ?? "",
+        getMarkdown: () => {
+          const md = (editor?.storage as any)?.markdown?.getMarkdown?.() ?? "";
+          return normalizeIndentMarkdown(md);
+        },
         getActiveState: () => activeStateFor(editor),
         focus: () => editor?.commands.focus(),
       }),
@@ -495,4 +497,25 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
     textColor: typeof colorAttr === "string" ? colorAttr : undefined,
     highlight: typeof highlightAttr === "string" ? highlightAttr : undefined,
   };
+}
+
+function normalizeIndentMarkdown(markdown: string): string {
+  if (!markdown.includes("    ")) return markdown;
+  const lines = markdown.split("\n");
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^```|^~~~/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = /^( {4})+/.exec(line);
+    if (!match) continue;
+    if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
+    const count = match[0].length;
+    const nbsp = "\u00A0".repeat(count);
+    lines[i] = nbsp + line.slice(count);
+  }
+  return lines.join("\n");
 }

@@ -5,6 +5,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  --ee-editor-font: "Segoe UI", "Inter", "Cascadia Code", sans-serif;
 }
 
 /* ── Normal mode (Tiptap / ProseMirror) ─────────────────────────────── */
@@ -23,6 +24,7 @@
   color: var(--text);
   min-height: 100%;
   caret-color: var(--accent);
+  font-family: var(--ee-editor-font);
 }
 
 .ee-rich.ProseMirror p.is-editor-empty:first-child::before {
@@ -301,7 +303,6 @@
   color: var(--text);
 }
 
-
 /* Text alignment */
 .ee-rich.ProseMirror :is(p, h1, h2, h3, h4, h5)[style*="text-align"] {
   /* honor the inline text-align attribute set by the extension */
@@ -328,11 +329,9 @@
   outline: none;
   background: transparent;
   color: var(--text);
-  font-family:
-    ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas,
-    monospace;
-  font-size: 13px;
-  line-height: 1.65;
+  font-family: var(--ee-editor-font);
+  font-size: 13.5px;
+  line-height: 1.6;
   padding: 14px 16px 24px;
   tab-size: 2;
   caret-color: var(--accent);
