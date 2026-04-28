@@ -22,8 +22,12 @@ class RichEditorBoundary extends Component<
     super(props);
     this.state = { hasError: false };
   }
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(err: unknown) { console.error("[RichEditor]", err); }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.error("[RichEditor]", err);
+  }
   render() {
     return this.state.hasError ? this.props.fallback : this.props.children;
   }
@@ -101,198 +105,283 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
 
     // ── Source-of-truth sync ────────────────────────────────────────────
 
-    const handleRichChange = useCallback((md: string) => {
-      valueRef.current = md;
-      onChange(md);
-    }, [onChange]);
+    const handleRichChange = useCallback(
+      (md: string) => {
+        valueRef.current = md;
+        onChange(md);
+      },
+      [onChange],
+    );
 
-    const handleTextareaChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      valueRef.current = e.target.value;
-      onChange(e.target.value);
-    }, [onChange]);
+    const handleTextareaChange = useCallback(
+      (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        valueRef.current = e.target.value;
+        onChange(e.target.value);
+      },
+      [onChange],
+    );
 
-    const switchMode = useCallback((next: EditorMode) => {
-      if (next === mode) return;
-      // Pull latest from the active surface so the new surface boots from it.
-      if (mode === "normal") {
-        const md = richRef.current?.getMarkdown();
-        if (md != null) valueRef.current = md;
-      } else {
-        const ta = textareaRef.current;
-        if (ta) valueRef.current = ta.value;
-      }
-      setModeState(next);
-      onModeChange?.(next);
-    }, [mode, onModeChange]);
+    const switchMode = useCallback(
+      (next: EditorMode) => {
+        if (next === mode) return;
+        // Pull latest from the active surface so the new surface boots from it.
+        if (mode === "normal") {
+          const md = richRef.current?.getMarkdown();
+          if (md != null) valueRef.current = md;
+        } else {
+          const ta = textareaRef.current;
+          if (ta) valueRef.current = normalizeIndentMarkdown(ta.value);
+        }
+        setModeState(next);
+        onModeChange?.(next);
+      },
+      [mode, onModeChange],
+    );
 
     // ── Markdown-mode helpers ───────────────────────────────────────────
 
     const taSelection = useCallback(() => {
       const ta = textareaRef.current;
       if (!ta) {
-        return { value: valueRef.current, selStart: valueRef.current.length, selEnd: valueRef.current.length };
+        return {
+          value: valueRef.current,
+          selStart: valueRef.current.length,
+          selEnd: valueRef.current.length,
+        };
       }
       if (document.activeElement !== ta && savedRangeRef.current) {
-        return { value: ta.value, selStart: savedRangeRef.current.start, selEnd: savedRangeRef.current.end };
+        return {
+          value: ta.value,
+          selStart: savedRangeRef.current.start,
+          selEnd: savedRangeRef.current.end,
+        };
       }
-      return { value: ta.value, selStart: ta.selectionStart ?? 0, selEnd: ta.selectionEnd ?? 0 };
+      return {
+        value: ta.value,
+        selStart: ta.selectionStart ?? 0,
+        selEnd: ta.selectionEnd ?? 0,
+      };
     }, []);
 
-    const applyTaResult = useCallback((r: { value: string; selStart: number; selEnd: number }) => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.value = r.value;
-      ta.setSelectionRange(r.selStart, r.selEnd);
-      valueRef.current = r.value;
-      onChange(r.value);
-      ta.focus();
-    }, [onChange]);
+    const applyTaResult = useCallback(
+      (r: { value: string; selStart: number; selEnd: number }) => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.value = r.value;
+        ta.setSelectionRange(r.selStart, r.selEnd);
+        valueRef.current = r.value;
+        onChange(r.value);
+        ta.focus();
+      },
+      [onChange],
+    );
 
     // Smart Enter / Tab in textarea.
-    const handleTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const sel = taSelection();
-        const indent = "  ";
-        const lineStart =
-          sel.value.lastIndexOf("\n", Math.max(0, sel.selStart - 1)) + 1;
-        const nl = sel.value.indexOf("\n", sel.selEnd);
-        const lineEnd = nl === -1 ? sel.value.length : nl;
-        const block = sel.value.slice(lineStart, lineEnd);
-        const lines = block.split("\n");
-        const isList = (ln: string) =>
-          /^(\s*)([-*+]\s|\d+\.\s)/.test(ln);
-        if (e.shiftKey) {
-          const next = lines
-            .map((ln) => (ln.startsWith(indent) ? ln.slice(indent.length) : ln))
-            .join("\n");
-          const delta = block.length - next.length;
-          applyTaResult({
-            value: sel.value.slice(0, lineStart) + next + sel.value.slice(lineEnd),
-            selStart: Math.max(lineStart, sel.selStart - indent.length),
-            selEnd: Math.max(lineStart, sel.selEnd - delta),
-          });
-          return;
-        }
-        if (lines.some(isList) || lines.length > 1) {
-          const next = lines.map((ln) => (ln.length ? indent + ln : ln)).join("\n");
-          applyTaResult({
-            value: sel.value.slice(0, lineStart) + next + sel.value.slice(lineEnd),
-            selStart: sel.selStart + indent.length,
-            selEnd: sel.selEnd + (next.length - block.length),
-          });
-          return;
-        }
-        applyTaResult({
-          value: sel.value.slice(0, sel.selStart) + indent + sel.value.slice(sel.selEnd),
-          selStart: sel.selStart + indent.length,
-          selEnd: sel.selStart + indent.length,
-        });
-        return;
-      }
-      if (e.ctrlKey || e.metaKey) {
-        const k = e.key.toLowerCase();
-        if (k === "b" || k === "i" || k === "e") {
+    const handleTextareaKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === "Tab") {
           e.preventDefault();
-          const cmd: EditorCommand =
-            k === "b" ? { kind: "bold" } : k === "i" ? { kind: "italic" } : { kind: "code" };
-          const action = commandToAction(cmd);
-          if (action) applyTaResult(applyAction(taSelection(), action));
+          const sel = taSelection();
+          const indent = "\u00A0\u00A0\u00A0\u00A0";
+          const plainIndent = "    ";
+          const lineStart =
+            sel.value.lastIndexOf("\n", Math.max(0, sel.selStart - 1)) + 1;
+          const nl = sel.value.indexOf("\n", sel.selEnd);
+          const lineEnd = nl === -1 ? sel.value.length : nl;
+          const block = sel.value.slice(lineStart, lineEnd);
+          const lines = block.split("\n");
+          const isList = (ln: string) => /^(\s*)([-*+]\s|\d+\.\s)/.test(ln);
+          const stripIndent = (ln: string) => {
+            if (ln.startsWith(indent)) return ln.slice(indent.length);
+            if (ln.startsWith(plainIndent)) return ln.slice(plainIndent.length);
+            return ln;
+          };
+          if (e.shiftKey) {
+            const next = lines.map(stripIndent).join("\n");
+            const delta = block.length - next.length;
+            applyTaResult({
+              value:
+                sel.value.slice(0, lineStart) + next + sel.value.slice(lineEnd),
+              selStart: Math.max(lineStart, sel.selStart - indent.length),
+              selEnd: Math.max(lineStart, sel.selEnd - delta),
+            });
+            return;
+          }
+          if (lines.some(isList) || lines.length > 1) {
+            const next = lines
+              .map((ln) => (ln.length ? indent + ln : ln))
+              .join("\n");
+            applyTaResult({
+              value:
+                sel.value.slice(0, lineStart) + next + sel.value.slice(lineEnd),
+              selStart: sel.selStart + indent.length,
+              selEnd: sel.selEnd + (next.length - block.length),
+            });
+            return;
+          }
+          applyTaResult({
+            value:
+              sel.value.slice(0, sel.selStart) +
+              indent +
+              sel.value.slice(sel.selEnd),
+            selStart: sel.selStart + indent.length,
+            selEnd: sel.selStart + indent.length,
+          });
           return;
         }
-      }
-      if (e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-      const ta = e.currentTarget;
-      const value = ta.value;
-      const caret = ta.selectionStart;
-      const lineStart = value.lastIndexOf("\n", caret - 1) + 1;
-      const line = value.slice(lineStart, caret);
-      const emptyTodo = /^(\s*)[-*+]\s\[[ xX]\]\s$/.exec(line);
-      const emptyBullet = /^(\s*)[-*+]\s$/.exec(line);
-      const emptyOrdered = /^(\s*)\d+\.\s$/.exec(line);
-      if (emptyTodo || emptyBullet || emptyOrdered) {
-        e.preventDefault();
-        applyTaResult({
-          value: value.slice(0, lineStart) + value.slice(caret),
-          selStart: lineStart, selEnd: lineStart,
-        });
-        return;
-      }
-      const todo = /^(\s*)([-*+])\s\[([ xX])\]\s/.exec(line);
-      if (todo) {
-        e.preventDefault();
-        const cont = `\n${todo[1]}${todo[2]} [ ] `;
-        applyTaResult({ value: value.slice(0, caret) + cont + value.slice(caret), selStart: caret + cont.length, selEnd: caret + cont.length });
-        return;
-      }
-      const bullet = /^(\s*)([-*+])\s/.exec(line);
-      if (bullet) {
-        e.preventDefault();
-        const cont = `\n${bullet[1]}${bullet[2]} `;
-        applyTaResult({ value: value.slice(0, caret) + cont + value.slice(caret), selStart: caret + cont.length, selEnd: caret + cont.length });
-        return;
-      }
-      const ordered = /^(\s*)(\d+)\.\s/.exec(line);
-      if (ordered) {
-        e.preventDefault();
-        const next = parseInt(ordered[2], 10) + 1;
-        const cont = `\n${ordered[1]}${next}. `;
-        applyTaResult({ value: value.slice(0, caret) + cont + value.slice(caret), selStart: caret + cont.length, selEnd: caret + cont.length });
-      }
-    }, [applyTaResult, taSelection]);
+        if (e.ctrlKey || e.metaKey) {
+          const k = e.key.toLowerCase();
+          if (k === "b" || k === "i" || k === "e") {
+            e.preventDefault();
+            const cmd: EditorCommand =
+              k === "b"
+                ? { kind: "bold" }
+                : k === "i"
+                  ? { kind: "italic" }
+                  : { kind: "code" };
+            const action = commandToAction(cmd);
+            if (action) applyTaResult(applyAction(taSelection(), action));
+            return;
+          }
+        }
+        if (e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
+        const ta = e.currentTarget;
+        const value = ta.value;
+        const caret = ta.selectionStart;
+        const lineStart = value.lastIndexOf("\n", caret - 1) + 1;
+        const line = value.slice(lineStart, caret);
+        const emptyTodo = /^(\s*)[-*+]\s\[[ xX]\]\s$/.exec(line);
+        const emptyBullet = /^(\s*)[-*+]\s$/.exec(line);
+        const emptyOrdered = /^(\s*)\d+\.\s$/.exec(line);
+        if (emptyTodo || emptyBullet || emptyOrdered) {
+          e.preventDefault();
+          applyTaResult({
+            value: value.slice(0, lineStart) + value.slice(caret),
+            selStart: lineStart,
+            selEnd: lineStart,
+          });
+          return;
+        }
+        const todo = /^(\s*)([-*+])\s\[([ xX])\]\s/.exec(line);
+        if (todo) {
+          e.preventDefault();
+          const cont = `\n${todo[1]}${todo[2]} [ ] `;
+          applyTaResult({
+            value: value.slice(0, caret) + cont + value.slice(caret),
+            selStart: caret + cont.length,
+            selEnd: caret + cont.length,
+          });
+          return;
+        }
+        const bullet = /^(\s*)([-*+])\s/.exec(line);
+        if (bullet) {
+          e.preventDefault();
+          const cont = `\n${bullet[1]}${bullet[2]} `;
+          applyTaResult({
+            value: value.slice(0, caret) + cont + value.slice(caret),
+            selStart: caret + cont.length,
+            selEnd: caret + cont.length,
+          });
+          return;
+        }
+        const ordered = /^(\s*)(\d+)\.\s/.exec(line);
+        if (ordered) {
+          e.preventDefault();
+          const next = parseInt(ordered[2], 10) + 1;
+          const cont = `\n${ordered[1]}${next}. `;
+          applyTaResult({
+            value: value.slice(0, caret) + cont + value.slice(caret),
+            selStart: caret + cont.length,
+            selEnd: caret + cont.length,
+          });
+        }
+      },
+      [applyTaResult, taSelection],
+    );
 
     // ── Imperative API ──────────────────────────────────────────────────
 
-    useImperativeHandle(ref, () => ({
-      applyCommand: (cmd) => {
-        if (mode === "normal") {
-          richRef.current?.applyCommand(cmd);
-        } else {
-          const action = commandToAction(cmd);
-          if (action) applyTaResult(applyAction(taSelection(), action));
-        }
-      },
-      insertText: (text) => {
-        if (mode === "normal") richRef.current?.applyCommand({ kind: "insertText", text });
-        else applyTaResult(applyAction(taSelection(), { kind: "insert", text }));
-      },
-      insertClipEmbed: (id) => {
-        if (mode === "normal") richRef.current?.applyCommand({ kind: "clipEmbed", id });
-        else applyTaResult(applyAction(taSelection(), commandToAction({ kind: "clipEmbed", id })!));
-      },
-      insertGroupEmbed: (name) => {
-        if (mode === "normal") richRef.current?.applyCommand({ kind: "groupEmbed", name });
-        else applyTaResult(applyAction(taSelection(), commandToAction({ kind: "groupEmbed", name })!));
-      },
-      insertLink: (url, text) => {
-        if (mode === "normal") richRef.current?.applyCommand({ kind: "link", url, text });
-        else applyTaResult(applyAction(taSelection(), { kind: "link", url, text }));
-      },
-      saveRange: () => {
-        const ta = textareaRef.current;
-        if (ta) savedRangeRef.current = { start: ta.selectionStart ?? 0, end: ta.selectionEnd ?? 0 };
-      },
-      getMarkdown: () => {
-        if (mode === "normal") return richRef.current?.getMarkdown() ?? valueRef.current;
-        return textareaRef.current?.value ?? valueRef.current;
-      },
-      getActiveState: () => {
-        if (mode === "normal") return richRef.current?.getActiveState() ?? { blockKind: "p" };
-        const sel = taSelection();
-        return detectActiveState(sel.value, sel.selStart, sel.selEnd);
-      },
-      getBlockKind: () => {
-        if (mode === "normal") return richRef.current?.getActiveState().blockKind ?? "p";
-        const sel = taSelection();
-        return detectBlockKind(sel.value, sel.selStart);
-      },
-      setMode: (m) => switchMode(m),
-      getMode: () => mode,
-      focus: () => {
-        if (mode === "normal") richRef.current?.focus();
-        else textareaRef.current?.focus();
-      },
-    }), [mode, applyTaResult, taSelection, switchMode]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        applyCommand: (cmd) => {
+          if (mode === "normal") {
+            richRef.current?.applyCommand(cmd);
+          } else {
+            const action = commandToAction(cmd);
+            if (action) applyTaResult(applyAction(taSelection(), action));
+          }
+        },
+        insertText: (text) => {
+          if (mode === "normal")
+            richRef.current?.applyCommand({ kind: "insertText", text });
+          else
+            applyTaResult(applyAction(taSelection(), { kind: "insert", text }));
+        },
+        insertClipEmbed: (id) => {
+          if (mode === "normal")
+            richRef.current?.applyCommand({ kind: "clipEmbed", id });
+          else
+            applyTaResult(
+              applyAction(
+                taSelection(),
+                commandToAction({ kind: "clipEmbed", id })!,
+              ),
+            );
+        },
+        insertGroupEmbed: (name) => {
+          if (mode === "normal")
+            richRef.current?.applyCommand({ kind: "groupEmbed", name });
+          else
+            applyTaResult(
+              applyAction(
+                taSelection(),
+                commandToAction({ kind: "groupEmbed", name })!,
+              ),
+            );
+        },
+        insertLink: (url, text) => {
+          if (mode === "normal")
+            richRef.current?.applyCommand({ kind: "link", url, text });
+          else
+            applyTaResult(
+              applyAction(taSelection(), { kind: "link", url, text }),
+            );
+        },
+        saveRange: () => {
+          const ta = textareaRef.current;
+          if (ta)
+            savedRangeRef.current = {
+              start: ta.selectionStart ?? 0,
+              end: ta.selectionEnd ?? 0,
+            };
+        },
+        getMarkdown: () => {
+          if (mode === "normal")
+            return richRef.current?.getMarkdown() ?? valueRef.current;
+          return textareaRef.current?.value ?? valueRef.current;
+        },
+        getActiveState: () => {
+          if (mode === "normal")
+            return richRef.current?.getActiveState() ?? { blockKind: "p" };
+          const sel = taSelection();
+          return detectActiveState(sel.value, sel.selStart, sel.selEnd);
+        },
+        getBlockKind: () => {
+          if (mode === "normal")
+            return richRef.current?.getActiveState().blockKind ?? "p";
+          const sel = taSelection();
+          return detectBlockKind(sel.value, sel.selStart);
+        },
+        setMode: (m) => switchMode(m),
+        getMode: () => mode,
+        focus: () => {
+          if (mode === "normal") richRef.current?.focus();
+          else textareaRef.current?.focus();
+        },
+      }),
+      [mode, applyTaResult, taSelection, switchMode],
+    );
 
     // ── Render ──────────────────────────────────────────────────────────
 
@@ -302,8 +391,15 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
           {mode === "normal" ? (
             <RichEditorBoundary
               fallback={
-                <div style={{ padding: "14px 18px", color: "var(--text-muted)", fontSize: 13 }}>
-                  Editor failed to load. Switch to Markdown mode to continue editing.
+                <div
+                  style={{
+                    padding: "14px 18px",
+                    color: "var(--text-muted)",
+                    fontSize: 13,
+                  }}
+                >
+                  Editor failed to load. Switch to Markdown mode to continue
+                  editing.
                 </div>
               }
             >
@@ -333,6 +429,27 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
     );
   },
 );
+
+function normalizeIndentMarkdown(markdown: string): string {
+  if (!markdown.includes("    ")) return markdown;
+  const lines = markdown.split("\n");
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^```|^~~~/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = /^( {4})+/.exec(line);
+    if (!match) continue;
+    if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
+    const count = match[0].length;
+    const nbsp = "\u00A0".repeat(count);
+    lines[i] = nbsp + line.slice(count);
+  }
+  return lines.join("\n");
+}
 
 MarkdownEditor.displayName = "MarkdownEditor";
 
