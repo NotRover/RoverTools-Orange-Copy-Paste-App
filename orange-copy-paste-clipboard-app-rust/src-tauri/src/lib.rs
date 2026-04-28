@@ -375,6 +375,7 @@ pub fn run() {
             crate::notes::commands::rename_group_in_notes,
             crate::notes::commands::save_note_image,
             crate::notes::commands::save_note_file,
+            crate::notes::commands::get_note_attachments_dirs,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {

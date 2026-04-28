@@ -22,3 +22,12 @@ export type {
 export { default as MarkdownPreview } from "./MarkdownPreview";
 export { default as RichEditor } from "./RichEditor";
 export type { RichEditorHandle } from "./RichEditor";
+export {
+  initAttachmentResolver,
+  resolveAttachmentUrl,
+  unresolveAttachmentUrl,
+  resolveMarkdown,
+  unresolveMarkdown,
+  imageAttachmentUrl,
+  fileAttachmentUrl,
+} from "./attachment-url";
