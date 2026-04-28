@@ -12,6 +12,7 @@ import {
 } from "react";
 // Note: @tiptap/extension-drag-handle-react intentionally not used — it crashes on mode switch.
 import { EditorContent, useEditor } from "@tiptap/react";
+import { Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
 import { Link } from "@tiptap/extension-link";
@@ -26,6 +27,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
+import { Image } from "@tiptap/extension-image";
 import { Markdown } from "tiptap-markdown";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
@@ -57,6 +59,48 @@ interface TableHandlePos {
   rowX: number;
   rowY: number;
 }
+
+// Tab/Shift-Tab: lists sink/lift; all other blocks insert/remove 4 spaces.
+const IndentExtension = Extension.create({
+  name: "indent",
+  addKeyboardShortcuts() {
+    const indent = "\u00A0\u00A0\u00A0\u00A0";
+    const plainIndent = "    ";
+    return {
+      Tab: () => {
+        const { editor } = this;
+        if (editor.can().sinkListItem("listItem"))
+          return editor.commands.sinkListItem("listItem");
+        if (editor.can().sinkListItem("taskItem"))
+          return editor.commands.sinkListItem("taskItem");
+        const { state, dispatch } = editor.view;
+        // Use non-breaking spaces so markdown doesn't reinterpret it as a block element.
+        dispatch(state.tr.insertText(indent));
+        return true;
+      },
+      "Shift-Tab": () => {
+        const { editor } = this;
+        if (editor.can().liftListItem("listItem"))
+          return editor.commands.liftListItem("listItem");
+        if (editor.can().liftListItem("taskItem"))
+          return editor.commands.liftListItem("taskItem");
+        const { state, dispatch } = editor.view;
+        const { from } = state.selection;
+        const start = Math.max(0, from - indent.length);
+        const textBefore = state.doc.textBetween(start, from);
+        if (textBefore.endsWith(indent)) {
+          dispatch(state.tr.delete(from - indent.length, from));
+          return true;
+        }
+        if (textBefore.endsWith(plainIndent)) {
+          dispatch(state.tr.delete(from - plainIndent.length, from));
+          return true;
+        }
+        return false;
+      },
+    };
+  },
+});
 
 const RichEditor = forwardRef<RichEditorHandle, Props>(
   ({ initialMarkdown, onChange, onSelectionChange, placeholder }, ref) => {
@@ -166,10 +210,32 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         }),
         ClipEmbed,
         GroupRef,
+        IndentExtension,
+        Image.configure({ inline: false, allowBase64: true }),
       ],
       content: initialMarkdown,
       editorProps: {
         attributes: { class: "ee-rich ProseMirror" },
+        handlePaste: (view, event) => {
+          const items = Array.from(event.clipboardData?.items ?? []);
+          const imageItem = items.find((it) => it.type.startsWith("image/"));
+          if (!imageItem) return false;
+          event.preventDefault();
+          const file = imageItem.getAsFile();
+          if (!file) return true;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const src = e.target?.result as string;
+            if (src)
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(
+                  view.state.schema.nodes.image.create({ src }),
+                ),
+              );
+          };
+          reader.readAsDataURL(file);
+          return true;
+        },
       },
       onUpdate: ({ editor }) => {
         const md = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
@@ -181,7 +247,6 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         onSelectionChange?.();
       },
     });
-
 
     const runTableCommand = useCallback(
       (cmd: "addRow" | "addCol" | "delRow" | "delCol") => {
