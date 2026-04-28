@@ -27,6 +27,7 @@ export type EditorCommand =
   | { kind: "codeBlock" }
   | { kind: "hr" }
   | { kind: "link"; url: string; text?: string }
+  | { kind: "image"; src: string; alt?: string }
   | { kind: "insertTable" }
   | { kind: "tableAddRowAfter" }
   | { kind: "tableAddColumnAfter" }

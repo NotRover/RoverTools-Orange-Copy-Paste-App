@@ -4,7 +4,8 @@
       "Bash(npx tsc:*)",
       "Bash(npx vite:*)",
       "Bash(bun run *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(cargo check *)"
     ]
   }
 }

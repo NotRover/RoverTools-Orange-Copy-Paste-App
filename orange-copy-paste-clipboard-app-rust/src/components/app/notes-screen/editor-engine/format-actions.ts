@@ -109,6 +109,11 @@ export function commandToAction(cmd: EditorCommand): FormatAction | null {
       return { kind: "hr" };
     case "link":
       return { kind: "link", url: cmd.url, text: cmd.text };
+    case "image":
+      return {
+        kind: "insert",
+        text: `\n![${(cmd.alt ?? "").replace(/[\[\]]/g, "")}](${cmd.src})\n`,
+      };
     case "insertTable":
       return {
         kind: "insert",

@@ -36,6 +36,7 @@ import {
   PaletteIcon,
   HighlighterIcon,
 } from "@phosphor-icons/react";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../../types";
 import {
@@ -384,6 +385,58 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     setLinkUrl("");
     setLinkText("");
   }, []);
+
+  // ── Attachment uploads ──────────────────────────────────────────────────
+  // Hidden <input type="file"> elements; one for images, one for any document.
+  // Files are persisted under app_data/note-attachments/{images,files}/ via the
+  // backend, then referenced as tauri-asset URLs so the markdown stays small
+  // and round-trips cleanly between rich and markdown modes.
+
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImagePick = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = ""; // allow re-selecting the same file
+      if (!file) return;
+      try {
+        const buf = await file.arrayBuffer();
+        const bytes = Array.from(new Uint8Array(buf));
+        const ext = (file.name.includes(".")
+          ? file.name.split(".").pop() ?? "png"
+          : (file.type.split("/")[1] ?? "png")
+        ).toLowerCase();
+        const path = await invoke<string>("save_note_image", { bytes, ext });
+        const src = convertFileSrc(path);
+        editorRef.current?.applyCommand({ kind: "image", src, alt: file.name });
+      } catch (err) {
+        console.error("[notes] image upload failed", err);
+      }
+    },
+    [],
+  );
+
+  const handleDocumentPick = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      try {
+        const buf = await file.arrayBuffer();
+        const bytes = Array.from(new Uint8Array(buf));
+        const path = await invoke<string>("save_note_file", {
+          bytes,
+          name: file.name,
+        });
+        const url = convertFileSrc(path);
+        editorRef.current?.insertLink(url, file.name);
+      } catch (err) {
+        console.error("[notes] document upload failed", err);
+      }
+    },
+    [],
+  );
 
   // ── Picker entry lists ────────────────────────────────────────────────
 
@@ -1026,6 +1079,39 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
+
+          {/* Image / file attachment buttons (sit next to Insert link). Both
+              use a hidden <input type="file"> trigger and route through the
+              backend save_note_{image,file} commands. */}
+          <button
+            className="ns-fmt-btn"
+            onClick={() => imageInputRef.current?.click()}
+            data-tooltip="Insert image"
+            data-tooltip-pos="below"
+          >
+            <ImageIcon size={12} />
+          </button>
+          <button
+            className="ns-fmt-btn"
+            onClick={() => fileInputRef.current?.click()}
+            data-tooltip="Attach document"
+            data-tooltip-pos="below"
+          >
+            <FileIcon size={12} />
+          </button>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={handleImagePick}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: "none" }}
+            onChange={handleDocumentPick}
+          />
 
           {/* Embed picker */}
           <div className="ns-embed-wrap" ref={embedPickerRef}>

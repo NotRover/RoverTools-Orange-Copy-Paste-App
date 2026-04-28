@@ -1,11 +1,27 @@
 /* ── Editor Engine — Styles ──────────────────────────────────────────── */
 
+/* One font stack shared by rich / textarea / preview so spacing, line-height
+   and metrics don't drift across modes. Defined on both .ee-shell (editor)
+   and .ee-preview (used standalone in note cards) so previews keep the same
+   typography. */
+.ee-shell,
+.ee-preview {
+  --ee-editor-font:
+    "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ee-editor-mono:
+    ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --ee-editor-pad: 14px 18px 24px;
+  --ee-editor-size: 13.5px;
+  --ee-editor-line: 1.6;
+}
+
 .ee-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  --ee-editor-font: "Segoe UI", "Inter", "Cascadia Code", sans-serif;
 }
 
 /* ── Normal mode (Tiptap / ProseMirror) ─────────────────────────────── */
@@ -18,13 +34,18 @@
 
 .ee-rich.ProseMirror {
   outline: none;
-  padding: 14px 18px 24px;
-  font-size: 13.5px;
-  line-height: 1.6;
+  padding: var(--ee-editor-pad);
+  font-size: var(--ee-editor-size);
+  line-height: var(--ee-editor-line);
   color: var(--text);
   min-height: 100%;
   caret-color: var(--accent);
   font-family: var(--ee-editor-font);
+  font-feature-settings:
+    "ss01" 1,
+    "kern" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .ee-rich.ProseMirror p.is-editor-empty:first-child::before {
@@ -192,8 +213,7 @@
 }
 
 .ee-rich.ProseMirror code {
-  font-family:
-    ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-family: var(--ee-editor-mono);
   font-size: 0.92em;
   padding: 1px 5px;
   background: var(--surface-2, rgba(255, 255, 255, 0.05));
@@ -209,8 +229,7 @@
   overflow-x: auto;
   font-size: 12.5px;
   line-height: 1.55;
-  font-family:
-    ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-family: var(--ee-editor-mono);
 }
 .ee-rich.ProseMirror pre code {
   padding: 0;
@@ -330,11 +349,16 @@
   background: transparent;
   color: var(--text);
   font-family: var(--ee-editor-font);
-  font-size: 13.5px;
-  line-height: 1.6;
-  padding: 14px 16px 24px;
+  font-size: var(--ee-editor-size);
+  line-height: var(--ee-editor-line);
+  padding: var(--ee-editor-pad);
   tab-size: 2;
   caret-color: var(--accent);
+  font-feature-settings:
+    "ss01" 1,
+    "kern" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 .ee-textarea::placeholder {
   color: var(--text-muted);
@@ -349,10 +373,16 @@
 .ee-preview {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 14px 18px 24px;
+  padding: var(--ee-editor-pad);
   color: var(--text);
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-family: var(--ee-editor-font);
+  font-size: var(--ee-editor-size);
+  line-height: var(--ee-editor-line);
+  font-feature-settings:
+    "ss01" 1,
+    "kern" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .ee-preview--full {
@@ -448,9 +478,7 @@
 }
 
 .ee-preview code {
-  font-family:
-    ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Menlo, Consolas,
-    monospace;
+  font-family: var(--ee-editor-mono);
   font-size: 0.92em;
   padding: 1px 5px;
   background: var(--surface-2, rgba(255, 255, 255, 0.05));
@@ -521,7 +549,7 @@
 }
 
 .ee-preview kbd {
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-family: var(--ee-editor-mono);
   font-size: 0.85em;
   padding: 1px 5px;
   background: var(--surface-2, rgba(255, 255, 255, 0.06));
