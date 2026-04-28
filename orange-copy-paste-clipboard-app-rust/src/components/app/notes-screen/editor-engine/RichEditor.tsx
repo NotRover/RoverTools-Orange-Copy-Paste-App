@@ -14,7 +14,11 @@ import {
 import { EditorContent, useEditor } from "@tiptap/react";
 import { Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  imageAttachmentUrl,
+  resolveAttachmentUrl,
+} from "./attachment-url";
 import { Underline } from "@tiptap/extension-underline";
 import { Link } from "@tiptap/extension-link";
 import { TaskList } from "@tiptap/extension-task-list";
@@ -400,9 +404,12 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
     // Reset when initial content changes (note switch).
     useEffect(() => {
       if (!editor) return;
-      const current = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
+      const currentRaw = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
+      const current = unresolveMarkdown(currentRaw);
       if (current !== initialMarkdown) {
-        editor.commands.setContent(initialMarkdown, { emitUpdate: false });
+        editor.commands.setContent(resolveMarkdown(initialMarkdown), {
+          emitUpdate: false,
+        });
       }
     }, [editor, initialMarkdown]);
 
@@ -535,8 +542,10 @@ function insertImageFromFile(
     .arrayBuffer()
     .then(async (buf) => {
       const bytes = Array.from(new Uint8Array(buf));
-      const path = await invoke<string>("save_note_image", { bytes, ext });
-      const src = convertFileSrc(path);
+      const filename = await invoke<string>("save_note_image", { bytes, ext });
+      // Store the clean scheme; the editor's content layer resolves it for
+      // display via the boundary transforms in setContent / getMarkdown.
+      const src = imageAttachmentUrl(filename);
       const imageNode = view.state.schema.nodes.image;
       if (!imageNode) return;
       view.dispatch(

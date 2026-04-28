@@ -9,11 +9,10 @@ use tauri::{Manager, State};
 /// Counter to disambiguate filenames generated within the same nanosecond.
 static IMAGE_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Persist a pasted/dropped image to `app_data/note-attachments/images/` and
-/// return the absolute file path. The frontend converts the path to a
-/// `tauri-asset:` URL via `convertFileSrc` and stores `![](…)` in the markdown
-/// — this avoids base64 round-trip breakage when switching between rich and
-/// markdown modes.
+/// Persist a pasted/dropped image to `app_data/note-attachments/images/`.
+/// Returns just the filename — the frontend turns
+/// `note-attachment://<filename>` into a real `tauri-asset:` URL at render
+/// time, keeping the markdown source clean and short.
 #[tauri::command]
 pub fn save_note_image(
     app: tauri::AppHandle,
@@ -38,14 +37,12 @@ pub fn save_note_image(
     let filepath = dir.join(&filename);
 
     std::fs::write(&filepath, &bytes).map_err(|e| e.to_string())?;
-    Ok(filepath.to_string_lossy().to_string())
+    Ok(filename)
 }
 
 /// Persist a non-image attachment (PDF, doc, zip, …) to
-/// `app_data/note-attachments/files/`. The original filename is preserved
-/// (after sanitization) and prefixed with a timestamp to keep collisions out
-/// of the way. Returns the absolute path; the frontend turns it into a
-/// `tauri-asset:` URL and inserts a markdown link `[name](url)`.
+/// `app_data/note-attachments/files/`. Returns just the filename; the
+/// frontend stores `note-file://<filename>` and resolves it for display.
 #[tauri::command]
 pub fn save_note_file(
     app: tauri::AppHandle,
@@ -77,7 +74,28 @@ pub fn save_note_file(
     let filepath = dir.join(&filename);
 
     std::fs::write(&filepath, &bytes).map_err(|e| e.to_string())?;
-    Ok(filepath.to_string_lossy().to_string())
+    Ok(filename)
+}
+
+/// Returns the absolute paths of the note-attachment directories so the
+/// frontend can build `tauri-asset:` URLs for files referenced in markdown
+/// via the `note-attachment://` and `note-file://` schemes.
+#[tauri::command]
+pub fn get_note_attachments_dirs(
+    app: tauri::AppHandle,
+) -> Result<NoteAttachmentDirs, String> {
+    let images = note_attachments_dir(&app, "images")?;
+    let files = note_attachments_dir(&app, "files")?;
+    Ok(NoteAttachmentDirs {
+        images: images.to_string_lossy().to_string(),
+        files: files.to_string_lossy().to_string(),
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct NoteAttachmentDirs {
+    pub images: String,
+    pub files: String,
 }
 
 fn note_attachments_dir(

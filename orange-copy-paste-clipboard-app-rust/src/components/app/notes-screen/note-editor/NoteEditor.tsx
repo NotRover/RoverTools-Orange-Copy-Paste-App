@@ -36,7 +36,7 @@ import {
   PaletteIcon,
   HighlighterIcon,
 } from "@phosphor-icons/react";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { groupColor, timeAgo, truncateText } from "../../../../types";
 import {
@@ -60,6 +60,8 @@ import {
   type EditorMode,
   type EditorCommand,
   type ActiveState,
+  imageAttachmentUrl,
+  fileAttachmentUrl,
 } from "../editor-engine";
 import "./note-editor.css";
 
@@ -407,9 +409,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           ? file.name.split(".").pop() ?? "png"
           : (file.type.split("/")[1] ?? "png")
         ).toLowerCase();
-        const path = await invoke<string>("save_note_image", { bytes, ext });
-        const src = convertFileSrc(path);
-        editorRef.current?.applyCommand({ kind: "image", src, alt: file.name });
+        const filename = await invoke<string>("save_note_image", { bytes, ext });
+        editorRef.current?.applyCommand({
+          kind: "image",
+          src: imageAttachmentUrl(filename),
+          alt: file.name,
+        });
       } catch (err) {
         console.error("[notes] image upload failed", err);
       }
@@ -425,12 +430,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       try {
         const buf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(buf));
-        const path = await invoke<string>("save_note_file", {
+        const filename = await invoke<string>("save_note_file", {
           bytes,
           name: file.name,
         });
-        const url = convertFileSrc(path);
-        editorRef.current?.insertLink(url, file.name);
+        editorRef.current?.insertLink(fileAttachmentUrl(filename), file.name);
       } catch (err) {
         console.error("[notes] document upload failed", err);
       }
