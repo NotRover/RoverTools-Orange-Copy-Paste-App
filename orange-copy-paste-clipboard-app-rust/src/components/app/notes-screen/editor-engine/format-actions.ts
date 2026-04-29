@@ -38,6 +38,15 @@ export function applyAction(
       return wrap(state, "[", `](${action.url})`, action.text ?? "link");
     case "hr":
       return insertAt(state, "\n\n---\n\n");
+    case "stripColor":
+      return stripInlineWrap(state, /<span\s+style="color:[^"]*">|<\/span>/gi);
+    case "stripHighlight":
+      return stripInlineWrap(
+        state,
+        /<mark\s+style="background-color:[^"]*">|<\/mark>/gi,
+      );
+    case "alignLine":
+      return alignLine(state, action.value);
   }
 }
 
@@ -136,10 +145,24 @@ export function commandToAction(cmd: EditorCommand): FormatAction | null {
         kind: "insert",
         text: `<span data-group-ref="${escAttr(cmd.name)}"></span>`,
       };
-    case "align":
     case "textColor":
+      if (cmd.value == null) return { kind: "stripColor" };
+      return {
+        kind: "wrap",
+        before: `<span style="color: ${cmd.value}">`,
+        after: "</span>",
+        placeholder: "text",
+      };
     case "highlight":
-      return null;
+      if (cmd.value == null) return { kind: "stripHighlight" };
+      return {
+        kind: "wrap",
+        before: `<mark style="background-color: ${cmd.value}">`,
+        after: "</mark>",
+        placeholder: "text",
+      };
+    case "align":
+      return { kind: "alignLine", value: cmd.value };
   }
 }
 
@@ -250,7 +273,12 @@ function insertAt(s: TextareaState, text: string): ApplyResult {
 
 export function detectBlockKind(value: string, caret: number): BlockKind {
   const { lineStart, lineEnd } = expandToLines(value, caret, caret);
-  const line = value.slice(lineStart, lineEnd);
+  let line = value.slice(lineStart, lineEnd);
+  // Peel off any HTML alignment wrapper so the underlying block kind shows
+  // through (e.g. an aligned heading still reports as h2, not p).
+  line = line
+    .replace(/^<(p|h[1-6])\s+style="text-align:\s*[a-z]+">\s*/i, "")
+    .replace(/<\/(p|h[1-6])>\s*$/i, "");
   if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) return "hr";
   if (/^##### /.test(line)) return "h5";
   if (/^#### /.test(line)) return "h4";
@@ -264,6 +292,51 @@ export function detectBlockKind(value: string, caret: number): BlockKind {
   if (/^\s*\d+\.\s/.test(line)) return "ol";
   if (insideFence(value, caret)) return "code";
   return "p";
+}
+
+/**
+ * Detect alignment / inline color / highlight at the caret by walking the
+ * surrounding HTML wrappers. The parsed result reflects whatever wrapper the
+ * caret sits *inside* — matches what the toolbar shows in rich mode.
+ */
+function detectInlineHtmlState(
+  value: string,
+  caret: number,
+): {
+  align?: ActiveState["align"];
+  textColor?: string;
+  highlight?: string;
+} {
+  const before = value.slice(0, caret);
+  const after = value.slice(caret);
+  const findWrap = (
+    openRe: RegExp,
+    closeRe: RegExp,
+  ): string | undefined => {
+    const opens = [...before.matchAll(openRe)];
+    if (opens.length === 0) return undefined;
+    const last = opens[opens.length - 1];
+    // Caret is inside the wrap only if no closing tag sits between the
+    // opening tag and the caret, AND a closing tag exists somewhere after.
+    const between = before.slice(last.index! + last[0].length);
+    if (closeRe.test(between)) return undefined;
+    if (!closeRe.test(after)) return undefined;
+    return last[1];
+  };
+  return {
+    align: findWrap(
+      /<(?:p|h[1-6])\s+style="text-align:\s*([a-z]+)">/gi,
+      /<\/(?:p|h[1-6])>/i,
+    ) as ActiveState["align"],
+    textColor: findWrap(
+      /<span\s+style="color:\s*([^"]+)">/gi,
+      /<\/span>/i,
+    ),
+    highlight: findWrap(
+      /<mark\s+style="background-color:\s*([^"]+)">/gi,
+      /<\/mark>/i,
+    ),
+  };
 }
 
 export function detectActiveState(
@@ -286,13 +359,21 @@ export function detectActiveState(
   const surrounded = (m: string) =>
     countOccurrences(lineBefore, m) % 2 === 1 &&
     countOccurrences(lineAfter, m) >= 1;
+  const inline = detectInlineHtmlState(value, caret);
+  // Best-effort table detection: caret sits on a pipe-delimited row.
+  const lineTextNow = value.slice(lineStart, lineStart + lineBefore.length + lineAfter.length);
+  const inTable =
+    /^\s*\|.*\|\s*$/.test(lineTextNow) && !insideFence(value, caret);
   return {
     bold: surrounded("**"),
     italic: surrounded("*") && !surrounded("**"),
     strike: surrounded("~~"),
     code: surrounded("`") && !insideFence(value, caret),
-    inTable: false,
+    inTable,
     blockKind,
+    align: inline.align,
+    textColor: inline.textColor,
+    highlight: inline.highlight,
   };
   // The selStart/selEnd pair is reserved for future range-aware checks.
   void selEnd;
@@ -330,6 +411,41 @@ function needsLeadingNewline(value: string, pos: number): boolean {
 
 function needsTrailingNewline(value: string, pos: number): boolean {
   return pos < value.length && value[pos] !== "\n";
+}
+
+function stripInlineWrap(s: TextareaState, pattern: RegExp): ApplyResult {
+  const start = s.selStart;
+  const end = s.selEnd === s.selStart ? s.value.length : s.selEnd;
+  const head = s.value.slice(0, start);
+  const middle = s.value.slice(start, end);
+  const tail = s.value.slice(end);
+  const stripped = middle.replace(pattern, "");
+  const value = head + stripped + tail;
+  return {
+    value,
+    selStart: start,
+    selEnd: start + stripped.length,
+  };
+}
+
+function alignLine(
+  s: TextareaState,
+  value: "left" | "center" | "right" | "justify",
+): ApplyResult {
+  const { lineStart, lineEnd } = expandToLines(s.value, s.selStart, s.selEnd);
+  const block = s.value.slice(lineStart, lineEnd);
+  // Drop any pre-existing alignment wrapper before reapplying.
+  const inner = block
+    .replace(/^<p\s+style="text-align:\s*[a-z]+">/i, "")
+    .replace(/<\/p>$/i, "");
+  const wrapped =
+    value === "left" ? inner : `<p style="text-align: ${value}">${inner}</p>`;
+  const next = s.value.slice(0, lineStart) + wrapped + s.value.slice(lineEnd);
+  return {
+    value: next,
+    selStart: lineStart,
+    selEnd: lineStart + wrapped.length,
+  };
 }
 
 function escAttr(s: string): string {
