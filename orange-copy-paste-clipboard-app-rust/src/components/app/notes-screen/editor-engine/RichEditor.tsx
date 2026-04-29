@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   imageAttachmentUrl,
   resolveAttachmentUrl,
+  subscribeAttachmentResolver,
 } from "./attachment-url";
 import { Underline } from "@tiptap/extension-underline";
 import { Link } from "@tiptap/extension-link";
@@ -33,6 +34,7 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
 import { Image } from "@tiptap/extension-image";
+import { mergeAttributes } from "@tiptap/core";
 import { Markdown } from "tiptap-markdown";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
@@ -68,6 +70,25 @@ interface TableHandlePos {
   rowX: number;
   rowY: number;
 }
+
+// Image and Link extensions resolve `note-attachment://` / `note-file://`
+// schemes at DOM render time only. The doc and serialized markdown keep the
+// clean scheme URL — only the rendered <img>/<a> get the asset URL.
+const ResolvedImage = Image.extend({
+  renderHTML({ HTMLAttributes }) {
+    const attrs = { ...HTMLAttributes };
+    if (typeof attrs.src === "string") attrs.src = resolveAttachmentUrl(attrs.src);
+    return ["img", mergeAttributes(attrs)];
+  },
+});
+
+const ResolvedLink = Link.extend({
+  renderHTML({ HTMLAttributes }) {
+    const attrs = { ...HTMLAttributes };
+    if (typeof attrs.href === "string") attrs.href = resolveAttachmentUrl(attrs.href);
+    return ["a", mergeAttributes(this.options.HTMLAttributes, attrs), 0];
+  },
+});
 
 // Tab/Shift-Tab: lists sink/lift; all other blocks insert/remove 4 spaces.
 const IndentExtension = Extension.create({
@@ -195,7 +216,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         AlignAwareParagraph,
         AlignAwareHeading.configure({ levels: [1, 2, 3, 4, 5] }),
         Underline,
-        Link.configure({ openOnClick: false, autolink: true }),
+        ResolvedLink.configure({ openOnClick: false, autolink: true }),
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: false }),
@@ -224,7 +245,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         ClipEmbed,
         GroupRef,
         IndentExtension,
-        Image.configure({ inline: false, allowBase64: true }),
+        ResolvedImage.configure({ inline: false, allowBase64: true }),
       ],
       content: initialMarkdown,
       editorProps: {
@@ -404,14 +425,21 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
     // Reset when initial content changes (note switch).
     useEffect(() => {
       if (!editor) return;
-      const currentRaw = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
-      const current = unresolveMarkdown(currentRaw);
+      const current = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
       if (current !== initialMarkdown) {
-        editor.commands.setContent(resolveMarkdown(initialMarkdown), {
-          emitUpdate: false,
-        });
+        editor.commands.setContent(initialMarkdown, { emitUpdate: false });
       }
     }, [editor, initialMarkdown]);
+
+    // Refresh image/link DOM once the attachment resolver finishes loading,
+    // so notes opened before init have their `note-attachment://` URLs rendered.
+    useEffect(() => {
+      if (!editor) return;
+      return subscribeAttachmentResolver(() => {
+        const md = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
+        editor.commands.setContent(md, { emitUpdate: false });
+      });
+    }, [editor]);
 
     useEffect(() => {
       if (!editor) return;

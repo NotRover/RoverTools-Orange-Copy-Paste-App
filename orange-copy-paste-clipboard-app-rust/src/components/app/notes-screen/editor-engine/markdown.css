@@ -12,9 +12,10 @@
   --ee-editor-mono:
     ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
-  --ee-editor-pad: 14px 18px 24px;
-  --ee-editor-size: 13.5px;
+  --ee-editor-pad: 14px 19px 24px;
+  --ee-editor-size: 14.25px;
   --ee-editor-line: 1.6;
+  --ee-caret-thickness: 2px;
 }
 
 .ee-shell {
