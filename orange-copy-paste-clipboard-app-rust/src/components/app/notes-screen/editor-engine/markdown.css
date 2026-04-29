@@ -13,6 +13,7 @@
     ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
   --ee-editor-pad: 14px 19px 24px;
+  --ee-editor-pad-edit: 14px 19px 35vh;
   --ee-editor-size: 14.25px;
   --ee-editor-line: 1.6;
   --ee-caret-thickness: 2px;
@@ -68,7 +69,7 @@
 
 .ee-rich.ProseMirror {
   outline: none;
-  padding: var(--ee-editor-pad);
+  padding: var(--ee-editor-pad-edit);
   font-size: var(--ee-editor-size);
   line-height: var(--ee-editor-line);
   color: var(--text);
@@ -385,7 +386,7 @@
   font-family: var(--ee-editor-font);
   font-size: var(--ee-editor-size);
   line-height: var(--ee-editor-line);
-  padding: var(--ee-editor-pad);
+  padding: var(--ee-editor-pad-edit);
   tab-size: 2;
   caret-color: var(--accent);
   font-feature-settings:
