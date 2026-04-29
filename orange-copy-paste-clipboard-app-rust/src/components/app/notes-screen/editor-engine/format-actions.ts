@@ -121,7 +121,7 @@ export function commandToAction(cmd: EditorCommand): FormatAction | null {
     case "image":
       return {
         kind: "insert",
-        text: `\n![${(cmd.alt ?? "").replace(/[\[\]]/g, "")}](${cmd.src})\n`,
+        text: `\n\n![${(cmd.alt ?? "").replace(/[\[\]]/g, "")}](${cmd.src})\n\n`,
       };
     case "insertTable":
       return {

@@ -615,7 +615,47 @@ function normalizeIndentMarkdown(markdown: string): string {
     if (isStructuralLine(prev) || isStructuralLine(next)) return full;
     return prev + "\n\n" + next;
   });
+  // Ensure standalone image lines have blank lines around them so the next
+  // line stays in its own paragraph instead of being absorbed into the image's.
+  out = ensureImageBlockSpacing(out);
   return out;
+}
+
+function ensureImageBlockSpacing(markdown: string): string {
+  const lines = markdown.split("\n");
+  const imageRe = /!\[[^\]]*\]\([^)]+\)/g;
+  const out: string[] = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^```|^~~~/.test(line)) inFence = !inFence;
+    if (inFence || !imageRe.test(line)) {
+      out.push(line);
+      continue;
+    }
+    imageRe.lastIndex = 0;
+    // Split this line into segments: before/after each image. Emit each image
+    // on its own line so adjacent images / trailing text don't fuse together.
+    const parts: string[] = [];
+    let lastIdx = 0;
+    let m: RegExpExecArray | null;
+    while ((m = imageRe.exec(line)) !== null) {
+      const before = line.slice(lastIdx, m.index);
+      if (before.trim() !== "") parts.push(before.replace(/\s+$/, ""));
+      parts.push(m[0]);
+      lastIdx = m.index + m[0].length;
+    }
+    const tail = line.slice(lastIdx);
+    if (tail.trim() !== "") parts.push(tail.replace(/^\s+/, ""));
+    if (out.length > 0 && out[out.length - 1].trim() !== "") out.push("");
+    for (let p = 0; p < parts.length; p += 1) {
+      out.push(parts[p]);
+      if (p < parts.length - 1) out.push("");
+    }
+    const next = lines[i + 1];
+    if (next !== undefined && next.trim() !== "") out.push("");
+  }
+  return out.join("\n");
 }
 
 function isStructuralLine(line: string): boolean {
