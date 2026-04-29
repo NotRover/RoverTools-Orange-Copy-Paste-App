@@ -606,11 +606,25 @@ function normalizeIndentMarkdown(markdown: string): string {
     }
     out = lines.join("\n");
   }
-  // tiptap-markdown's HTML fallback serializer (used for alignment, color,
-  // highlight, underline etc.) sometimes leaves a stray blank line around the
-  // wrapper, so the markdown output gets 3+ consecutive newlines where the
-  // user only entered one paragraph break. Collapse runs of empty lines to a
-  // single empty line \u2014 that's still a valid block separator.
-  out = out.replace(/\n{3,}/g, "\n\n");
+  // tiptap-markdown's HTML fallback serializer leaves stray blank lines
+  // around inline-HTML wrappers (alignment, color, highlight). Collapse runs
+  // of blank lines to a single blank line \u2014 but ONLY when neither neighbour
+  // is a list/quote/heading/code line, otherwise we'd merge two distinct
+  // lists or turn a loose list tight.
+  out = out.replace(/([^\n]*)\n\n{2,}([^\n]*)/g, (full, prev, next) => {
+    if (isStructuralLine(prev) || isStructuralLine(next)) return full;
+    return prev + "\n\n" + next;
+  });
   return out;
+}
+
+function isStructuralLine(line: string): boolean {
+  return (
+    /^\s*[-*+]\s/.test(line) ||
+    /^\s*\d+\.\s/.test(line) ||
+    /^\s*>\s?/.test(line) ||
+    /^\s*#{1,6}\s/.test(line) ||
+    /^```|^~~~/.test(line) ||
+    /^\s*\|/.test(line)
+  );
 }

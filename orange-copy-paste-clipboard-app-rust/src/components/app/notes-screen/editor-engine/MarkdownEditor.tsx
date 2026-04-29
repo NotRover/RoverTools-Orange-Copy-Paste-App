@@ -484,8 +484,22 @@ function normalizeIndentMarkdown(markdown: string): string {
     }
     out = lines.join("\n");
   }
-  out = out.replace(/\n{3,}/g, "\n\n");
+  out = out.replace(/([^\n]*)\n\n{2,}([^\n]*)/g, (full, prev, next) => {
+    if (isStructuralLine(prev) || isStructuralLine(next)) return full;
+    return prev + "\n\n" + next;
+  });
   return out;
+}
+
+function isStructuralLine(line: string): boolean {
+  return (
+    /^\s*[-*+]\s/.test(line) ||
+    /^\s*\d+\.\s/.test(line) ||
+    /^\s*>\s?/.test(line) ||
+    /^\s*#{1,6}\s/.test(line) ||
+    /^```|^~~~/.test(line) ||
+    /^\s*\|/.test(line)
+  );
 }
 
 MarkdownEditor.displayName = "MarkdownEditor";
