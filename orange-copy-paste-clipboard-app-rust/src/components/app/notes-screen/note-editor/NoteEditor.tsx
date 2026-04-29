@@ -405,11 +405,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       try {
         const buf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(buf));
-        const ext = (file.name.includes(".")
-          ? file.name.split(".").pop() ?? "png"
-          : (file.type.split("/")[1] ?? "png")
+        const ext = (
+          file.name.includes(".")
+            ? (file.name.split(".").pop() ?? "png")
+            : (file.type.split("/")[1] ?? "png")
         ).toLowerCase();
-        const filename = await invoke<string>("save_note_image", { bytes, ext });
+        const filename = await invoke<string>("save_note_image", {
+          bytes,
+          ext,
+        });
         editorRef.current?.applyCommand({
           kind: "image",
           src: imageAttachmentUrl(filename),
@@ -969,7 +973,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               />
             </button>
             {showAlignDropdown && (
-              <div className="ns-toolbar-dropdown ns-toolbar-dropdown--right">
+              <div className="ns-toolbar-dropdown ns-toolbar-dropdown--left">
                 <button
                   className={`ns-toolbar-dropdown-item${alignValue === "left" ? " ns-toolbar-dropdown-item--active" : ""}`}
                   onClick={() => {

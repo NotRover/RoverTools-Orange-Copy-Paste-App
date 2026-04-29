@@ -356,6 +356,8 @@
 .ns-format-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 4px;
   gap: 1px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
