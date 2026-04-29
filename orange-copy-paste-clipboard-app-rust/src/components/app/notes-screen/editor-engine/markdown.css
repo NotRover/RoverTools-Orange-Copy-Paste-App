@@ -33,6 +33,39 @@
   min-height: 0;
 }
 
+/* Slim scrollbars (match clipboard screen, no arrow buttons). Applied to all
+   scrollable editor surfaces. */
+.ee-rich-shell::-webkit-scrollbar,
+.ee-textarea::-webkit-scrollbar,
+.ee-preview::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.ee-rich-shell::-webkit-scrollbar-track,
+.ee-textarea::-webkit-scrollbar-track,
+.ee-preview::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ee-rich-shell::-webkit-scrollbar-thumb,
+.ee-textarea::-webkit-scrollbar-thumb,
+.ee-preview::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+.ee-rich-shell::-webkit-scrollbar-thumb:hover,
+.ee-textarea::-webkit-scrollbar-thumb:hover,
+.ee-preview::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+.ee-rich-shell::-webkit-scrollbar-button,
+.ee-textarea::-webkit-scrollbar-button,
+.ee-preview::-webkit-scrollbar-button,
+.ee-rich-shell::-webkit-scrollbar-corner,
+.ee-textarea::-webkit-scrollbar-corner,
+.ee-preview::-webkit-scrollbar-corner {
+  display: none;
+}
+
 .ee-rich.ProseMirror {
   outline: none;
   padding: var(--ee-editor-pad);
