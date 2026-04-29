@@ -451,16 +451,60 @@
   margin: 0.15em 0;
 }
 
-.ee-preview ul li.task-list-item,
-.ee-preview ul li:has(input[type="checkbox"]) {
+/* Match rich-editor bullets: accent dot for ul, accent number for ol. */
+.ee-preview ul {
   list-style: none;
-  margin-left: -1.2em;
+  padding-left: 1.4em;
+}
+.ee-preview ul > li {
+  position: relative;
+}
+.ee-preview ul > li::before {
+  content: "";
+  position: absolute;
+  left: -0.95em;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ee-preview ol {
+  list-style: none;
+  counter-reset: ee-ol;
+  padding-left: 1.6em;
+}
+.ee-preview ol > li {
+  counter-increment: ee-ol;
+  position: relative;
+}
+.ee-preview ol > li::before {
+  content: counter(ee-ol) ".";
+  position: absolute;
+  left: -1.5em;
+  top: 0;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.2em;
+  text-align: right;
+}
+
+/* Task list items already render an <input type=checkbox>, suppress the
+   bullet dot for those rows so the checkbox alone marks the line. */
+.ee-preview ul li.task-list-item,
+.ee-preview ul li:has(> input[type="checkbox"]) {
+  list-style: none;
   display: flex;
   align-items: center;
   gap: 0.5em;
 }
+.ee-preview ul li.task-list-item::before,
+.ee-preview ul li:has(> input[type="checkbox"])::before {
+  display: none;
+}
 .ee-preview ul li.task-list-item > p,
-.ee-preview ul li:has(input[type="checkbox"]) > p {
+.ee-preview ul li:has(> input[type="checkbox"]) > p {
   margin: 0;
 }
 .ee-preview input[type="checkbox"] {
