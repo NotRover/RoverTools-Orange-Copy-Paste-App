@@ -23,6 +23,16 @@ interface Resolver {
 
 let resolver: Resolver | null = null;
 let initPromise: Promise<void> | null = null;
+const listeners = new Set<() => void>();
+
+export function subscribeAttachmentResolver(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+export function isAttachmentResolverReady(): boolean {
+  return resolver !== null;
+}
 
 export function initAttachmentResolver(): Promise<void> {
   if (resolver) return Promise.resolve();
@@ -37,6 +47,9 @@ export function initAttachmentResolver(): Promise<void> {
         imagesAssetPrefix: assetDirPrefix(images),
         filesAssetPrefix: assetDirPrefix(files),
       };
+      listeners.forEach((fn) => {
+        try { fn(); } catch (e) { console.error(e); }
+      });
     })
     .catch((err) => {
       console.error("[notes] failed to init attachment resolver", err);

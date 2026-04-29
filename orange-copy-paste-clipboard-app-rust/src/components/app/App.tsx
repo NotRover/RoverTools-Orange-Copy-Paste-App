@@ -15,6 +15,7 @@ import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import NotesScreen from "./notes-screen/NotesScreen";
+import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import {
@@ -199,6 +200,10 @@ const App: React.FC = () => {
       localStorage.setItem("sc-theme", next);
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    initAttachmentResolver();
   }, []);
 
   useEffect(() => {

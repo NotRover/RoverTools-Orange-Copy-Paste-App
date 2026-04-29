@@ -5,7 +5,7 @@
 // applying a strict allow-list. Clip / group embeds round-trip as <span> tags
 // with data-* attributes — we resolve those at render time to chip nodes.
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -18,6 +18,10 @@ import {
   truncateText,
 } from "../../../../types";
 import { fileName } from "../notes-utils";
+import {
+  resolveAttachmentUrl,
+  subscribeAttachmentResolver,
+} from "./attachment-url";
 import "./markdown.css";
 
 // ── Sanitize schema — GitHub-ish allow-list ──────────────────────────────
@@ -56,8 +60,8 @@ const schema = {
   },
   protocols: {
     ...(defaultSchema.protocols ?? {}),
-    src:  ["http", "https", "data", "tauri-asset", "asset"],
-    href: ["http", "https", "mailto", "tel", "#", "/"],
+    src:  ["http", "https", "data", "tauri-asset", "asset", "note-attachment", "note-file"],
+    href: ["http", "https", "mailto", "tel", "#", "/", "note-attachment", "note-file"],
   },
 };
 
@@ -84,6 +88,11 @@ interface Props {
 }
 
 const MarkdownPreview: React.FC<Props> = ({ markdown, entries, className }) => {
+  const [, setVersion] = useState(0);
+  useEffect(
+    () => subscribeAttachmentResolver(() => setVersion((v) => v + 1)),
+    [],
+  );
   const components = useMemo(() => ({
     // Map our embed spans to chip nodes.
     span: (props: React.HTMLAttributes<HTMLSpanElement> & {
@@ -113,7 +122,18 @@ const MarkdownPreview: React.FC<Props> = ({ markdown, entries, className }) => {
       return <span {...props} />;
     },
     a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-      <a {...props} target="_blank" rel="noopener noreferrer" />
+      <a
+        {...props}
+        href={props.href ? resolveAttachmentUrl(props.href) : props.href}
+        target="_blank"
+        rel="noopener noreferrer"
+      />
+    ),
+    img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
+      <img
+        {...props}
+        src={props.src ? resolveAttachmentUrl(props.src) : props.src}
+      />
     ),
   }), [entries]);
 
