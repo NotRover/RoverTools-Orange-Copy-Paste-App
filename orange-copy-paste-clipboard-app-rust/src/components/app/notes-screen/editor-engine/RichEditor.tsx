@@ -586,22 +586,31 @@ function insertImageFromFile(
 }
 
 function normalizeIndentMarkdown(markdown: string): string {
-  if (!markdown.includes("    ")) return markdown;
-  const lines = markdown.split("\n");
-  let inFence = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^```|^~~~/.test(line)) {
-      inFence = !inFence;
-      continue;
+  let out = markdown;
+  if (out.includes("    ")) {
+    const lines = out.split("\n");
+    let inFence = false;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^```|^~~~/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      const match = /^( {4})+/.exec(line);
+      if (!match) continue;
+      if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
+      const count = match[0].length;
+      const nbsp = "\u00A0".repeat(count);
+      lines[i] = nbsp + line.slice(count);
     }
-    if (inFence) continue;
-    const match = /^( {4})+/.exec(line);
-    if (!match) continue;
-    if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
-    const count = match[0].length;
-    const nbsp = "\u00A0".repeat(count);
-    lines[i] = nbsp + line.slice(count);
+    out = lines.join("\n");
   }
-  return lines.join("\n");
+  // tiptap-markdown's HTML fallback serializer (used for alignment, color,
+  // highlight, underline etc.) sometimes leaves a stray blank line around the
+  // wrapper, so the markdown output gets 3+ consecutive newlines where the
+  // user only entered one paragraph break. Collapse runs of empty lines to a
+  // single empty line \u2014 that's still a valid block separator.
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
 }

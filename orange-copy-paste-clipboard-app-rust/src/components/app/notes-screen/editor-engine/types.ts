@@ -10,7 +10,10 @@ export type FormatAction =
   | { kind: "fence"; lang?: string }
   | { kind: "insert"; text: string }
   | { kind: "link"; url: string; text?: string }
-  | { kind: "hr" };
+  | { kind: "hr" }
+  | { kind: "stripColor" }
+  | { kind: "stripHighlight" }
+  | { kind: "alignLine"; value: AlignValue };
 
 /** Mode-agnostic command dispatched by the toolbar. Each mode interprets it. */
 export type EditorCommand =

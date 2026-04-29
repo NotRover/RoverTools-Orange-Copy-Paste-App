@@ -163,15 +163,48 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
       };
     }, []);
 
+    // Apply a computed (value, selection) to the textarea while preserving
+    // native browser undo. `execCommand("insertText")` is the only path that
+    // pushes the change onto the textarea's undo stack — direct `.value =`
+    // assignment wipes it. We compute the minimal diff between old and new
+    // values so each format becomes one undo step covering only the change.
     const applyTaResult = useCallback(
       (r: { value: string; selStart: number; selEnd: number }) => {
         const ta = textareaRef.current;
         if (!ta) return;
-        ta.value = r.value;
+        const old = ta.value;
+        ta.focus();
+        if (old !== r.value) {
+          let prefix = 0;
+          const minLen = Math.min(old.length, r.value.length);
+          while (prefix < minLen && old[prefix] === r.value[prefix]) prefix++;
+          let suffix = 0;
+          while (
+            suffix < old.length - prefix &&
+            suffix < r.value.length - prefix &&
+            old[old.length - 1 - suffix] === r.value[r.value.length - 1 - suffix]
+          ) {
+            suffix++;
+          }
+          const replaceStart = prefix;
+          const replaceEnd = old.length - suffix;
+          const insertText = r.value.slice(prefix, r.value.length - suffix);
+          ta.setSelectionRange(replaceStart, replaceEnd);
+          let ok = false;
+          try {
+            ok = document.execCommand("insertText", false, insertText);
+          } catch {
+            ok = false;
+          }
+          // Some browsers/contexts return false; fall back to direct write.
+          if (!ok || ta.value !== r.value) {
+            ta.value = r.value;
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
         ta.setSelectionRange(r.selStart, r.selEnd);
         valueRef.current = r.value;
         onChange(r.value);
-        ta.focus();
       },
       [onChange],
     );
@@ -431,24 +464,28 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
 );
 
 function normalizeIndentMarkdown(markdown: string): string {
-  if (!markdown.includes("    ")) return markdown;
-  const lines = markdown.split("\n");
-  let inFence = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^```|^~~~/.test(line)) {
-      inFence = !inFence;
-      continue;
+  let out = markdown;
+  if (out.includes("    ")) {
+    const lines = out.split("\n");
+    let inFence = false;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^```|^~~~/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      const match = /^( {4})+/.exec(line);
+      if (!match) continue;
+      if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
+      const count = match[0].length;
+      const nbsp = "\u00A0".repeat(count);
+      lines[i] = nbsp + line.slice(count);
     }
-    if (inFence) continue;
-    const match = /^( {4})+/.exec(line);
-    if (!match) continue;
-    if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
-    const count = match[0].length;
-    const nbsp = "\u00A0".repeat(count);
-    lines[i] = nbsp + line.slice(count);
+    out = lines.join("\n");
   }
-  return lines.join("\n");
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
 }
 
 MarkdownEditor.displayName = "MarkdownEditor";
