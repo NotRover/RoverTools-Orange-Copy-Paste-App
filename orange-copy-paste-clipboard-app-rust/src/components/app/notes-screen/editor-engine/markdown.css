@@ -850,6 +850,14 @@
   margin: 0 !important;
 }
 
+/* Reveal block boundaries while a block-drag is in progress so the user
+   can see all valid drop targets at a glance. */
+.ee-rich.ProseMirror.is-dragging-block > * {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .ee-block-drop-indicator {
   position: absolute;
   height: 1px;

@@ -614,18 +614,15 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           if (!(blockDom instanceof HTMLElement)) return;
           const br = blockDom.getBoundingClientRect();
           const sr = shell.getBoundingClientRect();
-          const insertBefore = ev.clientY < br.top + br.height / 2;
-          targetPos = insertBefore ? blockPos : blockPos + blockNode.nodeSize;
+          // Always insert after the hovered block so the indicator only ever
+          // appears between blocks (or after the last one) — never above the
+          // first block or floating at a top edge.
+          targetPos = blockPos + blockNode.nodeSize;
 
           indicator.style.display = "";
           indicator.style.left = `${br.left - sr.left + shell.scrollLeft}px`;
           indicator.style.width = `${br.width}px`;
-          indicator.style.top = `${
-            (insertBefore ? br.top : br.bottom) -
-            sr.top +
-            shell.scrollTop -
-            1
-          }px`;
+          indicator.style.top = `${br.bottom - sr.top + shell.scrollTop - 1}px`;
         };
 
         const cleanup = () => {
