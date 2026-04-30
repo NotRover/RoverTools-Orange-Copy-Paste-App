@@ -13,7 +13,7 @@
     ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
   --ee-editor-pad: 14px 19px 24px;
-  --ee-editor-pad-edit: 14px 19px 35vh 60px;
+  --ee-editor-pad-edit: 14px 19px 35vh 36px;
   --ee-editor-size: 14.25px;
   --ee-editor-line: 1.6;
   --ee-caret-thickness: 2px;
@@ -32,6 +32,10 @@
   flex: 1 1 auto;
   overflow: auto;
   min-height: 0;
+  /* Required: drag-handle plugin appends an absolutely-positioned wrapper
+     into this element. Without `position: relative` the handle anchors
+     against the document body and never lines up with blocks. */
+  position: relative;
 }
 
 /* Slim scrollbars (match clipboard screen, no arrow buttons). Applied to all
@@ -767,37 +771,27 @@
 .hljs-variable, .hljs-template-variable { color: #d97706; }
 .hljs-meta { color: #8d8d8d; }
 
-/* ── Drag-handle / block-insert ──────────────────────────────────────── */
+/* ── Block gutter (drag handle + insert button) ──────────────────────── */
 
-/* The DragHandle wrapper — Tiptap positions it absolutely. We only style the
-   horizontal offset (so it doesn't touch text) and the smooth movement. */
-.ee-drag-handle {
-  /* Floating-ui sets `top`/`left` inline. Animate them for graceful
-     movement between blocks. Editor reserves a left gutter via padding-left,
-     so we don't need a CSS transform offset here. */
-  transition: top 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              left 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              opacity 140ms ease;
-  will-change: top, left;
-  z-index: 5;
-}
-.ee-drag-handle[data-state="hidden"],
-.ee-drag-handle[hidden] {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.ee-block-handles {
-  display: flex;
+/* Custom React-managed widget portaled into .ee-rich-shell. Tracks the
+   block under the cursor via posAtCoords. .ee-rich-shell is position:relative,
+   so top/left here are in shell-content coords (scrolls with content). */
+.ee-block-gutter {
+  display: inline-flex;
   align-items: center;
-  gap: 1px;
-  padding-right: 6px; /* breathing room between handle and text */
+  gap: 0;
+  z-index: 5;
   pointer-events: auto;
+  user-select: none;
+  transition:
+    top 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    left 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 120ms ease;
 }
 
 .ee-block-handle {
-  width: 20px;
-  height: 22px;
+  width: 18px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -811,7 +805,7 @@
   opacity: 0.5;
   transition: background 120ms ease, opacity 120ms ease, color 120ms ease;
 }
-.ee-drag-handle:hover .ee-block-handle {
+.ee-block-gutter:hover .ee-block-handle {
   opacity: 0.85;
 }
 .ee-block-handle:hover {
@@ -833,5 +827,35 @@
 }
 .ee-block-handle--drag svg {
   display: block;
+}
+
+/* Manual block-drag visuals — ghost follows cursor, indicator shows drop. */
+.ee-block-drag-ghost {
+  font-family: var(--ee-editor-font);
+  font-size: var(--ee-editor-size);
+  line-height: var(--ee-editor-line);
+  color: var(--text);
+  background: var(--surface, #1a1a1a);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  opacity: 0.92;
+  max-width: 420px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ee-block-drag-ghost > * {
+  margin: 0 !important;
+}
+
+.ee-block-drop-indicator {
+  position: absolute;
+  height: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0.85;
 }
 
