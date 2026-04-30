@@ -7,8 +7,10 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import React from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
@@ -36,8 +38,6 @@ import {
 } from "@tiptap/extension-details";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
-import DragHandle from "@tiptap/extension-drag-handle-react";
-import { offset as floatingOffset } from "@floating-ui/dom";
 import { DotsSixVerticalIcon } from "@phosphor-icons/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import {
@@ -159,7 +159,17 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
       rowX: number;
       rowY: number;
     }>({ visible: false, colX: 0, colY: 0, rowX: 0, rowY: 0 });
-    const [hoverNode, setHoverNode] = useState<{ node: PMNode; pos: number } | null>(null);
+    const shellRef = useRef<HTMLDivElement | null>(null);
+    const [hover, setHover] = useState<
+      | {
+          pos: number;
+          node: PMNode;
+          top: number;
+          left: number;
+          height: number;
+        }
+      | null
+    >(null);
 
     const updateTableHandlePos = useCallback(
       (nextEditor: Editor | null) => {
@@ -496,42 +506,272 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
     }, [editor, updateTableHandlePos]);
 
     const insertBlockBelow = useCallback(() => {
-      if (!editor || !hoverNode) return;
-      const after = hoverNode.pos + hoverNode.node.nodeSize;
+      if (!editor || !hover) return;
+      const after = hover.pos + hover.node.nodeSize;
       editor
         .chain()
         .focus()
         .insertContentAt(after, { type: "paragraph" })
         .setTextSelection(after + 1)
         .run();
-    }, [editor, hoverNode]);
+    }, [editor, hover]);
+
+    // Manual drag — bypasses HTML5 drag/drop entirely (Tauri webview kept
+     // rejecting it). mousedown captures the source block, mousemove paints
+     // a drop indicator, mouseup performs the ProseMirror move via tr.delete
+     // + tr.insert. */
+    const onGripMouseDown = useCallback(
+      (e: React.MouseEvent) => {
+        if (e.button !== 0 || !editor || !hover || !shellRef.current) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const view = editor.view;
+        const srcPos = hover.pos;
+        const srcNode = hover.node;
+        const srcDom = view.nodeDOM(srcPos);
+        const shell = shellRef.current;
+
+        // Floating ghost (follows cursor)
+        const ghost = document.createElement("div");
+        ghost.className = "ee-block-drag-ghost";
+        if (srcDom instanceof HTMLElement) {
+          ghost.appendChild(srcDom.cloneNode(true));
+          ghost.style.maxWidth = `${Math.min(
+            srcDom.getBoundingClientRect().width,
+            420,
+          )}px`;
+        } else {
+          ghost.textContent =
+            srcNode.textContent || srcNode.type.name || "block";
+        }
+        ghost.style.position = "fixed";
+        ghost.style.left = `${e.clientX + 12}px`;
+        ghost.style.top = `${e.clientY + 8}px`;
+        ghost.style.pointerEvents = "none";
+        ghost.style.zIndex = "9999";
+        document.body.appendChild(ghost);
+
+        // Drop indicator (a horizontal line inside the shell)
+        const indicator = document.createElement("div");
+        indicator.className = "ee-block-drop-indicator";
+        shell.appendChild(indicator);
+
+        let targetPos = -1;
+        let started = false;
+        const startX = e.clientX;
+        const startY = e.clientY;
+
+        const prevUserSelect = document.body.style.userSelect;
+        const prevCursor = document.body.style.cursor;
+
+        const onMove = (ev: MouseEvent) => {
+          ghost.style.left = `${ev.clientX + 12}px`;
+          ghost.style.top = `${ev.clientY + 8}px`;
+
+          if (!started) {
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            if (dx * dx + dy * dy < 16) return; // 4px threshold
+            started = true;
+            document.body.style.userSelect = "none";
+            document.body.style.cursor = "grabbing";
+            (view.dom as HTMLElement).classList.add("is-dragging-block");
+            setHover(null);
+          }
+
+          if (editor.isDestroyed) return;
+          const editorEl = view.dom as HTMLElement;
+          const er = editorEl.getBoundingClientRect();
+          const probeX = Math.min(
+            Math.max(ev.clientX, er.left + 56),
+            er.right - 8,
+          );
+          const probeY = Math.min(
+            Math.max(ev.clientY, er.top + 4),
+            er.bottom - 4,
+          );
+          const posInfo = view.posAtCoords({ left: probeX, top: probeY });
+          if (!posInfo) {
+            indicator.style.display = "none";
+            targetPos = -1;
+            return;
+          }
+          const $p = view.state.doc.resolve(posInfo.pos);
+          if ($p.depth < 1) {
+            indicator.style.display = "none";
+            targetPos = -1;
+            return;
+          }
+          const blockPos = $p.before(1);
+          const blockNode = view.state.doc.nodeAt(blockPos);
+          if (!blockNode) {
+            indicator.style.display = "none";
+            targetPos = -1;
+            return;
+          }
+          const blockDom = view.nodeDOM(blockPos);
+          if (!(blockDom instanceof HTMLElement)) return;
+          const br = blockDom.getBoundingClientRect();
+          const sr = shell.getBoundingClientRect();
+          const insertBefore = ev.clientY < br.top + br.height / 2;
+          targetPos = insertBefore ? blockPos : blockPos + blockNode.nodeSize;
+
+          indicator.style.display = "";
+          indicator.style.left = `${br.left - sr.left + shell.scrollLeft}px`;
+          indicator.style.width = `${br.width}px`;
+          indicator.style.top = `${
+            (insertBefore ? br.top : br.bottom) -
+            sr.top +
+            shell.scrollTop -
+            1
+          }px`;
+        };
+
+        const cleanup = () => {
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+          window.removeEventListener("keydown", onKey);
+          ghost.remove();
+          indicator.remove();
+          document.body.style.userSelect = prevUserSelect;
+          document.body.style.cursor = prevCursor;
+          (view.dom as HTMLElement).classList.remove("is-dragging-block");
+        };
+
+        const onUp = () => {
+          const finalTarget = targetPos;
+          cleanup();
+
+          if (!started || finalTarget < 0 || editor.isDestroyed) return;
+          const state = view.state;
+          const srcEnd = srcPos + srcNode.nodeSize;
+          // No-op if dropping inside the source range
+          if (finalTarget >= srcPos && finalTarget <= srcEnd) return;
+
+          const slice = state.doc.slice(srcPos, srcEnd);
+          let tr = state.tr;
+          tr = tr.delete(srcPos, srcEnd);
+          const mappedTarget = tr.mapping.map(finalTarget);
+          tr = tr.insert(mappedTarget, slice.content);
+          view.dispatch(tr.scrollIntoView());
+        };
+
+        const onKey = (ev: KeyboardEvent) => {
+          if (ev.key === "Escape") {
+            targetPos = -1;
+            cleanup();
+          }
+        };
+
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        window.addEventListener("keydown", onKey);
+      },
+      [editor, hover],
+    );
+
+    // Track hovered block and project gutter position into editor scroll
+    // container coordinates. The widget portals into the shell so it scrolls
+    // with content automatically.
+    useEffect(() => {
+      const shell = shellRef.current;
+      if (!shell || !editor) return;
+
+      let raf: number | null = null;
+      let pending: { x: number; y: number } | null = null;
+
+      const compute = () => {
+        raf = null;
+        if (!pending) return;
+        const { x, y } = pending;
+        pending = null;
+        if (editor.isDestroyed) return;
+        const { view } = editor;
+        const editorEl = view.dom as HTMLElement;
+        const editorRect = editorEl.getBoundingClientRect();
+        // Probe past the editor's left padding so posAtCoords lands on real
+        // content even when the cursor is in the gutter lane on the left.
+        const probeX = Math.min(
+          Math.max(x, editorRect.left + 56),
+          editorRect.right - 8,
+        );
+        const probeY = Math.min(
+          Math.max(y, editorRect.top + 4),
+          editorRect.bottom - 4,
+        );
+        const posInfo = view.posAtCoords({ left: probeX, top: probeY });
+        // If lookup fails or resolves outside a block, keep the previous
+        // hover so the widget stays visible while the cursor crosses padding.
+        if (!posInfo) return;
+        const $pos = view.state.doc.resolve(posInfo.pos);
+        if ($pos.depth < 1) return;
+        const blockPos = $pos.before(1);
+        const node = view.state.doc.nodeAt(blockPos);
+        if (!node) return;
+        const dom = view.nodeDOM(blockPos);
+        if (!(dom instanceof HTMLElement)) return;
+        const blockRect = dom.getBoundingClientRect();
+        const shellRect = shell.getBoundingClientRect();
+        const top = blockRect.top - shellRect.top + shell.scrollTop;
+        const left = blockRect.left - shellRect.left + shell.scrollLeft;
+        setHover((prev) => {
+          if (
+            prev &&
+            prev.pos === blockPos &&
+            Math.abs(prev.top - top) < 0.5 &&
+            Math.abs(prev.left - left) < 0.5 &&
+            Math.abs(prev.height - blockRect.height) < 0.5
+          ) {
+            return prev;
+          }
+          return { pos: blockPos, node, top, left, height: blockRect.height };
+        });
+      };
+
+      const onMove = (e: MouseEvent) => {
+        // Don't recompute while a button is held — re-rendering the gutter
+        // during the browser's drag-detection window cancels the drag.
+        if (e.buttons !== 0) return;
+        const target = e.target as Element | null;
+        if (target && target.closest(".ee-block-gutter")) return;
+        pending = { x: e.clientX, y: e.clientY };
+        if (raf == null) raf = requestAnimationFrame(compute);
+      };
+      const onLeave = (e: MouseEvent) => {
+        const next = e.relatedTarget as Node | null;
+        if (next && shell.contains(next)) return;
+        setHover(null);
+      };
+
+      shell.addEventListener("mousemove", onMove);
+      shell.addEventListener("mouseleave", onLeave);
+      return () => {
+        shell.removeEventListener("mousemove", onMove);
+        shell.removeEventListener("mouseleave", onLeave);
+        if (raf != null) cancelAnimationFrame(raf);
+      };
+    }, [editor]);
 
     return (
       <>
-        <EditorContent editor={editor} className="ee-rich-shell" />
-        {editor && (
-          <DragHandle
-            editor={editor}
-            className="ee-drag-handle"
-            nested
-            computePositionConfig={{
-              placement: "left-start",
-              strategy: "absolute",
-              middleware: [floatingOffset({ mainAxis: 6, crossAxis: 2 })],
-            }}
-            onNodeChange={({ node, pos }) => {
-              if (node) setHoverNode({ node, pos });
-              else setHoverNode(null);
-            }}
-          >
-            <div className="ee-block-handles">
-              <span
-                className="ee-block-handle ee-block-handle--drag"
-                title="Drag to move block"
-                aria-label="Drag block"
-              >
-                <DotsSixVerticalIcon size={14} weight="bold" />
-              </span>
+        <EditorContent
+          editor={editor}
+          className="ee-rich-shell"
+          ref={shellRef}
+        />
+        {editor && hover && shellRef.current &&
+          createPortal(
+            <div
+              className="ee-block-gutter"
+              style={{
+                position: "absolute",
+                top: `${hover.top + 2}px`,
+                left: `${Math.max(hover.left - 36, 0)}px`,
+                height: `${Math.min(hover.height, 28)}px`,
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 className="ee-block-handle ee-block-handle--add"
@@ -549,9 +789,17 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
               >
                 +
               </button>
-            </div>
-          </DragHandle>
-        )}
+              <span
+                className="ee-block-handle ee-block-handle--drag"
+                onMouseDown={onGripMouseDown}
+                title="Drag to move block"
+                aria-label="Drag block"
+              >
+                <DotsSixVerticalIcon size={14} weight="bold" />
+              </span>
+            </div>,
+            shellRef.current,
+          )}
         {tableHandlePos.visible && (
           <>
             <div
