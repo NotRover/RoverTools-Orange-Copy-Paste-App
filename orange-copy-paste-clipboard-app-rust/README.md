@@ -53,8 +53,13 @@ It captures copied text/images/files into history, shows quick popups near the c
   - Syncs with main app's dark/light theme
 - **Popup screen-boundary clamping** — popups never render off-screen or clipped at monitor edges
 - **Notes screen**:
-  - Rich-text editor with formatting controls
-  - Clipboard embed references and group references
+  - **Dual-mode editor** — switch between a rich (WYSIWYG) Tiptap surface and a raw Markdown textarea; markdown is the source of truth and round-trips losslessly between modes
+  - **Markdown preview** for note cards and read-only views (markdown-it + remark-gfm + sanitized HTML)
+  - **Full formatting toolbar** working in both modes: headings, bold/italic/strike/code, bullet/ordered/task lists, blockquote, code block, link, horizontal rule, table, text color, highlight, alignment, image, clipboard embed, group reference
+  - **Attachments persisted to disk** — pasted/dropped images and picked files are saved to a per-app attachments folder; references in the markdown source use clean custom schemes (`note-attachment://filename`, `note-file://filename`) and are resolved to Tauri asset URLs only at render time
+  - **Native textarea undo** preserved in markdown mode via minimal-diff `execCommand("insertText")` edits
+  - **Indentation handling** — Tab/Shift-Tab sinks/lifts list items or inserts/removes 4-space indents; non-list indentation is normalized to non-breaking spaces so markdown doesn't reinterpret it
+  - Block-image spacing normalization so images inserted next to text don't fuse into the same paragraph on round-trip
   - Pin/unpin and group tagging
   - Search/filter and bulk actions
 - **Settings screen**:

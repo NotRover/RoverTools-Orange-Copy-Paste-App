@@ -1,7 +1,7 @@
 // ── Utility functions for notes processing and formatting ──────────────────
 
 import { truncateText } from "../../../types";
-import { markdownToPlainText } from "./editor-engine";
+import { extractPlainText } from "./editor-engine";
 
 export function stripHtml(html: string): string {
   const tmp = document.createElement("div");
@@ -9,9 +9,9 @@ export function stripHtml(html: string): string {
   return tmp.textContent ?? tmp.innerText ?? "";
 }
 
-/** Extract plain text from raw note content (markdown OR legacy NoteDoc JSON). */
+/** Extract plain text from raw note content (Tiptap JSON or legacy markdown). */
 export function contentPlainText(raw: string): string {
-  return markdownToPlainText(raw ?? "");
+  return extractPlainText(raw ?? "");
 }
 
 export function deriveNoteTitle(rawTitle: string, rawContent: string): string {

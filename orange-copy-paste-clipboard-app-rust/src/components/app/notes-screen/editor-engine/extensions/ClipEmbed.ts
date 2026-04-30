@@ -1,7 +1,7 @@
 // ── Tiptap node — Clip embed ──────────────────────────────────────────────
-// Inline atom that round-trips as <span data-clip-embed="ID"></span>. Inside
-// the editor it renders as a chip (label resolved against the entries list
-// supplied through React context).
+// Inline atom referencing a clipboard entry. Stored as a node in ProseMirror
+// JSON and rendered as a chip via React. Label is resolved against the
+// entries list supplied through React context.
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
@@ -33,23 +33,7 @@ export const ClipEmbed = Node.create({
     return ["span", mergeAttributes(HTMLAttributes), ""];
   },
 
-  addStorage() {
-    return {
-      markdown: {
-        serialize(state: any, node: any) {
-          const id = (node.attrs.id as string) ?? "";
-          state.write(`<span data-clip-embed="${escAttr(id)}"></span>`);
-        },
-        parse: { setup() {} },
-      },
-    };
-  },
-
   addNodeView() {
     return ReactNodeViewRenderer(ClipEmbedView);
   },
 });
-
-function escAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

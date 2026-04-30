@@ -1,4 +1,4 @@
-// ── Note Editor — dual-mode (normal / markdown), markdown source-of-truth ─
+// ── Note Editor — Notion-like Tiptap surface, JSON content storage ───────
 
 import React, {
   useCallback,
@@ -27,8 +27,9 @@ import {
   LinkSimpleIcon,
   ClipboardTextIcon,
   CaretDownIcon,
-  MarkdownLogoIcon,
-  TextTIcon,
+  TextUnderlineIcon,
+  CaretRightIcon,
+  LightbulbIcon,
   TextAlignLeftIcon,
   TextAlignCenterIcon,
   TextAlignRightIcon,
@@ -55,11 +56,11 @@ import {
   stripHtml,
 } from "../notes-utils";
 import {
-  MarkdownEditor,
-  type MarkdownEditorHandle,
-  type EditorMode,
+  NotionEditor,
+  type NotionEditorHandle,
   type EditorCommand,
   type ActiveState,
+  type CalloutTone,
   imageAttachmentUrl,
   fileAttachmentUrl,
 } from "../editor-engine";
@@ -117,11 +118,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   onBack,
 }) => {
   const titleRef = useRef<HTMLInputElement>(null);
-  const editorRef = useRef<MarkdownEditorHandle>(null);
+  const editorRef = useRef<NotionEditorHandle>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [mode, setMode] = useState<EditorMode>("normal");
   const [active, setActive] = useState<ActiveState>(EMPTY_ACTIVE);
+  const [showCalloutPicker, setShowCalloutPicker] = useState(false);
+  const calloutPickerRef = useRef<HTMLDivElement>(null);
 
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
   const groupDropdownRef = useRef<HTMLDivElement>(null);
@@ -152,7 +154,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
   const highlightPickerRef = useRef<HTMLDivElement>(null);
 
-  const initialMarkdown = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
+  const initialContent = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
   const initialTitle = useMemo(
     () => deriveNoteTitle(note.title, note.content),
     [note.id], // eslint-disable-line
@@ -171,9 +173,9 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   );
 
   const handleEditorChange = useCallback(
-    (markdown: string) => {
+    (content: string) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => save(markdown), 400);
+      saveTimerRef.current = setTimeout(() => save(content), 400);
     },
     [save],
   );
@@ -183,8 +185,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
-        const md = editorRef.current?.getMarkdown();
-        if (md != null) save(md);
+        const c = editorRef.current?.getContent();
+        if (c != null) save(c);
       }
     };
   }, [note.id, save]);
@@ -205,12 +207,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     return () => document.removeEventListener("selectionchange", handler);
   }, [refreshActive]);
 
-  // Refresh active state shortly after a mode switch (so the new surface is mounted).
-  useEffect(() => {
-    const t = setTimeout(refreshActive, 50);
-    return () => clearTimeout(t);
-  }, [mode, refreshActive]);
-
   // ── Close ─────────────────────────────────────────────────────────────
 
   const handleClose = useCallback(() => {
@@ -218,13 +214,13 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    const md = editorRef.current?.getMarkdown() ?? note.content;
-    if (!hasMeaningfulContent(md)) {
+    const c = editorRef.current?.getContent() ?? note.content;
+    if (!hasMeaningfulContent(c)) {
       onDelete(note.id);
       onBack();
       return;
     }
-    save(md);
+    save(c);
     onBack();
   }, [note.id, note.content, onDelete, onBack, save]);
 
@@ -236,15 +232,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       setTimeout(refreshActive, 0);
     },
     [refreshActive],
-  );
-
-  const switchMode = useCallback(
-    (next: EditorMode) => {
-      if (next === mode) return;
-      editorRef.current?.setMode(next);
-      setMode(next);
-    },
-    [mode],
   );
 
   // ── Group toggle ──────────────────────────────────────────────────────
@@ -351,6 +338,19 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [showHighlightPicker]);
+
+  useEffect(() => {
+    if (!showCalloutPicker) return;
+    const h = (e: MouseEvent) => {
+      if (
+        calloutPickerRef.current &&
+        !calloutPickerRef.current.contains(e.target as Node)
+      )
+        setShowCalloutPicker(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showCalloutPicker]);
 
   useEffect(() => {
     if (!showLinkPicker) return;
@@ -506,8 +506,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             onChange={() => {
               if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
               saveTimerRef.current = setTimeout(() => {
-                const md = editorRef.current?.getMarkdown();
-                if (md != null) save(md);
+                const c = editorRef.current?.getContent();
+                if (c != null) save(c);
               }, 400);
             }}
           />
@@ -600,38 +600,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Formatting toolbar */}
         <div className="ns-format-bar">
-          {/* Mode switch */}
-          <div
-            className="ns-mode-switch"
-            role="tablist"
-            aria-label="Editor mode"
-          >
-            <button
-              role="tab"
-              aria-selected={mode === "normal"}
-              aria-label="Normal mode"
-              className={`ns-mode-tab ns-mode-tab--icon${mode === "normal" ? " ns-mode-tab--active" : ""}`}
-              onClick={() => switchMode("normal")}
-              data-tooltip="Normal editor"
-              data-tooltip-pos="below"
-            >
-              <TextTIcon size={13} weight="bold" />
-            </button>
-            <button
-              role="tab"
-              aria-selected={mode === "markdown"}
-              aria-label="Markdown mode"
-              className={`ns-mode-tab ns-mode-tab--icon${mode === "markdown" ? " ns-mode-tab--active" : ""}`}
-              onClick={() => switchMode("markdown")}
-              data-tooltip="Markdown editor"
-              data-tooltip-pos="below"
-            >
-              <MarkdownLogoIcon size={13} weight="bold" />
-            </button>
-          </div>
-
-          <span className="ns-fmt-sep" />
-
           {/* Inline marks */}
           <button
             className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
@@ -648,6 +616,14 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip-pos="below"
           >
             <TextItalicIcon size={13} weight="bold" />
+          </button>
+          <button
+            className={`ns-fmt-btn${active.underline ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "underline" })}
+            data-tooltip="Underline (Ctrl+U)"
+            data-tooltip-pos="below"
+          >
+            <TextUnderlineIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`}
@@ -855,6 +831,65 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             data-tooltip-pos="below"
           >
             <QuotesIcon size={13} weight="bold" />
+          </button>
+          <div className="ns-toolbar-wrap" ref={calloutPickerRef}>
+            <button
+              className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "callout" ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowCalloutPicker((p) => !p);
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
+                setShowEmbedPicker(false);
+                setShowLinkPicker(false);
+                setShowColorPicker(false);
+                setShowHighlightPicker(false);
+              }}
+              data-tooltip="Callout"
+              data-tooltip-pos="below"
+            >
+              <LightbulbIcon size={13} weight="bold" />
+              <CaretDownIcon
+                size={11}
+                weight="bold"
+                className={`ns-fmt-btn-caret${showCalloutPicker ? " ns-fmt-btn-caret--open" : ""}`}
+              />
+            </button>
+            {showCalloutPicker && (
+              <div className="ns-toolbar-dropdown">
+                {(
+                  [
+                    { tone: "info", label: "Info" },
+                    { tone: "success", label: "Success" },
+                    { tone: "warning", label: "Warning" },
+                    { tone: "danger", label: "Danger" },
+                    { tone: "neutral", label: "Neutral" },
+                  ] as { tone: CalloutTone; label: string }[]
+                ).map((opt) => (
+                  <button
+                    key={opt.tone}
+                    className="ns-toolbar-dropdown-item"
+                    onClick={() => {
+                      dispatch({ kind: "callout", tone: opt.tone });
+                      setShowCalloutPicker(false);
+                    }}
+                  >
+                    <span
+                      className={`ns-callout-swatch ns-callout-swatch--${opt.tone}`}
+                    />
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            className={`ns-fmt-btn${bk === "toggle" ? " ns-fmt-btn--active" : ""}`}
+            onClick={() => dispatch({ kind: "toggle" })}
+            data-tooltip="Toggle list"
+            data-tooltip-pos="below"
+          >
+            <CaretRightIcon size={13} weight="bold" />
           </button>
           <button
             className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`}
@@ -1239,14 +1274,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Editor content area */}
         <div className="ns-editor-content">
-          <MarkdownEditor
+          <NotionEditor
             ref={editorRef}
             noteId={note.id}
-            initialMarkdown={initialMarkdown}
-            initialMode={mode}
+            initialContent={initialContent}
             entries={entries}
             onChange={handleEditorChange}
-            onModeChange={(m) => setMode(m)}
             onSelectionChange={refreshActive}
           />
         </div>
@@ -1254,7 +1287,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         {/* Footer */}
         <div className="ns-editor-footer">
           <span className="ns-editor-footer-text">
-            {mode === "markdown" ? "Markdown · " : "Normal · "}
             Updated {timeAgo(note.updated_at)}
           </span>
         </div>

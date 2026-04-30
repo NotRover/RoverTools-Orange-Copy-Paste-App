@@ -13,7 +13,7 @@
     ui-monospace, "Cascadia Code", "Cascadia Mono", "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
   --ee-editor-pad: 14px 19px 24px;
-  --ee-editor-pad-edit: 14px 19px 35vh;
+  --ee-editor-pad-edit: 14px 19px 35vh 60px;
   --ee-editor-size: 14.25px;
   --ee-editor-line: 1.6;
   --ee-caret-thickness: 2px;
@@ -673,3 +673,165 @@
   border-radius: 50%;
   flex: none;
 }
+
+/* ── Callout ────────────────────────────────────────────────────────── */
+
+.ee-callout {
+  position: relative;
+  margin: 10px 0;
+  padding: 10px 14px 10px 38px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2, rgba(127, 127, 127, 0.06));
+}
+.ee-callout::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+.ee-callout > :first-child { margin-top: 0; }
+.ee-callout > :last-child { margin-bottom: 0; }
+
+.ee-callout[data-callout="info"]    { color: #3b82f6; background: rgba(59,130,246,0.07); border-color: rgba(59,130,246,0.30); }
+.ee-callout[data-callout="success"] { color: #46a758; background: rgba(70,167,88,0.08); border-color: rgba(70,167,88,0.30); }
+.ee-callout[data-callout="warning"] { color: #d97706; background: rgba(217,119,6,0.08); border-color: rgba(217,119,6,0.30); }
+.ee-callout[data-callout="danger"]  { color: #e5484d; background: rgba(229,72,77,0.08); border-color: rgba(229,72,77,0.30); }
+.ee-callout[data-callout="neutral"] { color: var(--text-muted); background: rgba(127,127,127,0.06); border-color: var(--border); }
+.ee-callout * { color: var(--text); }
+
+/* ── Details / Toggle list ───────────────────────────────────────────── */
+
+.ee-details {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2, rgba(127, 127, 127, 0.04));
+}
+.ee-details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  padding: 4px 4px 4px 22px;
+  position: relative;
+  outline: none;
+}
+.ee-details > summary::-webkit-details-marker { display: none; }
+.ee-details > summary::before {
+  content: "▶";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  opacity: 0.6;
+  transition: transform 120ms ease;
+}
+.ee-details[open] > summary::before,
+.ee-details.is-open > summary::before {
+  transform: translateY(-50%) rotate(90deg);
+}
+.ee-details > div {
+  padding: 4px 4px 4px 22px;
+}
+.ee-details > div > :first-child { margin-top: 4px; }
+.ee-details > div > :last-child { margin-bottom: 4px; }
+
+/* ── Code block (lowlight) ───────────────────────────────────────────── */
+
+.ee-codeblock {
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.ee-codeblock code { background: transparent; padding: 0; font-size: inherit; }
+
+/* lowlight syntax highlight tokens */
+.hljs-comment, .hljs-quote { color: #8d8d8d; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #8e4ec6; }
+.hljs-string, .hljs-attr { color: #46a758; }
+.hljs-number, .hljs-literal { color: #f76808; }
+.hljs-title, .hljs-name, .hljs-section { color: #3b82f6; }
+.hljs-tag { color: #e5484d; }
+.hljs-variable, .hljs-template-variable { color: #d97706; }
+.hljs-meta { color: #8d8d8d; }
+
+/* ── Drag-handle / block-insert ──────────────────────────────────────── */
+
+/* The DragHandle wrapper — Tiptap positions it absolutely. We only style the
+   horizontal offset (so it doesn't touch text) and the smooth movement. */
+.ee-drag-handle {
+  /* Floating-ui sets `top`/`left` inline. Animate them for graceful
+     movement between blocks. Editor reserves a left gutter via padding-left,
+     so we don't need a CSS transform offset here. */
+  transition: top 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              left 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              opacity 140ms ease;
+  will-change: top, left;
+  z-index: 5;
+}
+.ee-drag-handle[data-state="hidden"],
+.ee-drag-handle[hidden] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ee-block-handles {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-right: 6px; /* breathing room between handle and text */
+  pointer-events: auto;
+}
+
+.ee-block-handle {
+  width: 20px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.5;
+  transition: background 120ms ease, opacity 120ms ease, color 120ms ease;
+}
+.ee-drag-handle:hover .ee-block-handle {
+  opacity: 0.85;
+}
+.ee-block-handle:hover {
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  opacity: 1 !important;
+  color: var(--text);
+}
+
+.ee-block-handle--add {
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 400;
+}
+.ee-block-handle--drag {
+  cursor: grab;
+}
+.ee-block-handle--drag:active {
+  cursor: grabbing;
+}
+.ee-block-handle--drag svg {
+  display: block;
+}
+

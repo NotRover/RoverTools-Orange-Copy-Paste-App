@@ -1,25 +1,20 @@
-// ── Editor Engine — Rich (WYSIWYG) surface ────────────────────────────────
-// Tiptap editor that round-trips to markdown via tiptap-markdown. Receives
-// commands from the toolbar through an imperative handle so the same toolbar
-// works in both modes.
+// ── Editor Engine — Notion-like Tiptap editor ────────────────────────────
+// Single editable surface. Storage is ProseMirror JSON serialised to a string.
 
 import {
-  useCallback,
+  Component,
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useState,
 } from "react";
-// Note: @tiptap/extension-drag-handle-react intentionally not used — it crashes on mode switch.
+import React from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { Extension } from "@tiptap/core";
+import type { Editor } from "@tiptap/react";
+import { Extension, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  imageAttachmentUrl,
-  resolveAttachmentUrl,
-  subscribeAttachmentResolver,
-} from "./attachment-url";
 import { Underline } from "@tiptap/extension-underline";
 import { Link } from "@tiptap/extension-link";
 import { TaskList } from "@tiptap/extension-task-list";
@@ -34,14 +29,28 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
 import { Image } from "@tiptap/extension-image";
-import { mergeAttributes } from "@tiptap/core";
-import { Markdown } from "tiptap-markdown";
+import {
+  Details,
+  DetailsContent,
+  DetailsSummary,
+} from "@tiptap/extension-details";
+import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
+import { createLowlight, common } from "lowlight";
+import DragHandle from "@tiptap/extension-drag-handle-react";
+import { offset as floatingOffset } from "@floating-ui/dom";
+import { DotsSixVerticalIcon } from "@phosphor-icons/react";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import {
+  imageAttachmentUrl,
+  resolveAttachmentUrl,
+  subscribeAttachmentResolver,
+} from "./attachment-url";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
-import {
-  AlignAwareParagraph,
-  AlignAwareHeading,
-} from "./extensions/AlignAware";
+import { Callout } from "./extensions/Callout";
+import { parseStoredContent, serializeDoc } from "./content-codec";
+import type { ClipboardEntry } from "../../../../types";
+import { EmbedContextProvider } from "./embed-context";
 import type {
   EditorCommand,
   ActiveState,
@@ -49,31 +58,54 @@ import type {
   AlignValue,
 } from "./types";
 
-export interface RichEditorHandle {
+const lowlight = createLowlight(common);
+
+export interface NotionEditorHandle {
   applyCommand: (cmd: EditorCommand) => void;
-  getMarkdown: () => string;
+  insertText: (text: string) => void;
+  insertClipEmbed: (id: string) => void;
+  insertGroupEmbed: (name: string) => void;
+  insertLink: (url: string, text?: string) => void;
+  saveRange: () => void;
+  getContent: () => string;
   getActiveState: () => ActiveState;
+  getBlockKind: () => BlockKind;
   focus: () => void;
 }
 
-interface Props {
-  initialMarkdown: string;
-  onChange: (markdown: string) => void;
+export interface NotionEditorProps {
+  noteId: string;
+  /** Stored content string — Tiptap JSON. */
+  initialContent: string;
+  entries: ClipboardEntry[];
+  /** Fires on every edit with the current content as a JSON string. */
+  onChange: (content: string) => void;
   onSelectionChange?: () => void;
-  placeholder?: string;
 }
 
-interface TableHandlePos {
-  visible: boolean;
-  colX: number;
-  colY: number;
-  rowX: number;
-  rowY: number;
+// ── Error boundary ───────────────────────────────────────────────────────
+
+class EditorBoundary extends Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.error("[NotionEditor]", err);
+  }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
 }
 
-// Image and Link extensions resolve `note-attachment://` / `note-file://`
-// schemes at DOM render time only. The doc and serialized markdown keep the
-// clean scheme URL — only the rendered <img>/<a> get the asset URL.
+// ── DOM-only attachment URL resolution for images / links ────────────────
+
 const ResolvedImage = Image.extend({
   renderHTML({ HTMLAttributes }) {
     const attrs = { ...HTMLAttributes };
@@ -85,17 +117,16 @@ const ResolvedImage = Image.extend({
 const ResolvedLink = Link.extend({
   renderHTML({ HTMLAttributes }) {
     const attrs = { ...HTMLAttributes };
-    if (typeof attrs.href === "string") attrs.href = resolveAttachmentUrl(attrs.href);
+    if (typeof attrs.href === "string")
+      attrs.href = resolveAttachmentUrl(attrs.href);
     return ["a", mergeAttributes(this.options.HTMLAttributes, attrs), 0];
   },
 });
 
-// Tab/Shift-Tab: lists sink/lift; all other blocks insert/remove 4 spaces.
+// Tab/Shift-Tab — sink/lift list items, otherwise insert/remove indent.
 const IndentExtension = Extension.create({
   name: "indent",
   addKeyboardShortcuts() {
-    const indent = "\u00A0\u00A0\u00A0\u00A0";
-    const plainIndent = "    ";
     return {
       Tab: () => {
         const { editor } = this;
@@ -103,10 +134,7 @@ const IndentExtension = Extension.create({
           return editor.commands.sinkListItem("listItem");
         if (editor.can().sinkListItem("taskItem"))
           return editor.commands.sinkListItem("taskItem");
-        const { state, dispatch } = editor.view;
-        // Use non-breaking spaces so markdown doesn't reinterpret it as a block element.
-        dispatch(state.tr.insertText(indent));
-        return true;
+        return false;
       },
       "Shift-Tab": () => {
         const { editor } = this;
@@ -114,42 +142,33 @@ const IndentExtension = Extension.create({
           return editor.commands.liftListItem("listItem");
         if (editor.can().liftListItem("taskItem"))
           return editor.commands.liftListItem("taskItem");
-        const { state, dispatch } = editor.view;
-        const { from } = state.selection;
-        const start = Math.max(0, from - indent.length);
-        const textBefore = state.doc.textBetween(start, from);
-        if (textBefore.endsWith(indent)) {
-          dispatch(state.tr.delete(from - indent.length, from));
-          return true;
-        }
-        if (textBefore.endsWith(plainIndent)) {
-          dispatch(state.tr.delete(from - plainIndent.length, from));
-          return true;
-        }
         return false;
       },
     };
   },
 });
 
-const RichEditor = forwardRef<RichEditorHandle, Props>(
-  ({ initialMarkdown, onChange, onSelectionChange, placeholder }, ref) => {
-    const [tableHandlePos, setTableHandlePos] = useState<TableHandlePos>({
-      visible: false,
-      colX: 0,
-      colY: 0,
-      rowX: 0,
-      rowY: 0,
-    });
+// ── Component ────────────────────────────────────────────────────────────
+
+const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
+  ({ noteId, initialContent, onChange, onSelectionChange }, ref) => {
+    const [tableHandlePos, setTableHandlePos] = useState<{
+      visible: boolean;
+      colX: number;
+      colY: number;
+      rowX: number;
+      rowY: number;
+    }>({ visible: false, colX: 0, colY: 0, rowX: 0, rowY: 0 });
+    const [hoverNode, setHoverNode] = useState<{ node: PMNode; pos: number } | null>(null);
+
     const updateTableHandlePos = useCallback(
-      (nextEditor: ReturnType<typeof useEditor> | null) => {
+      (nextEditor: Editor | null) => {
         if (!nextEditor || !nextEditor.isActive("table")) {
           setTableHandlePos((prev) =>
             prev.visible ? { ...prev, visible: false } : prev,
           );
           return;
         }
-
         const { anchor } = nextEditor.state.selection;
         const domAtPos = nextEditor.view.domAtPos(anchor);
         const baseEl =
@@ -167,40 +186,17 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
           );
           return;
         }
-
         const table = tableEl.getBoundingClientRect();
         const box = scrollEl.getBoundingClientRect();
         const clamp = (v: number, min: number, max: number) =>
           Math.min(Math.max(v, min), max);
         const edgeGap = 6;
-
-        const colX = clamp(
-          table.right + edgeGap,
-          box.left + 10,
-          box.right - 10,
-        );
-        const colY = clamp(
-          table.top + table.height / 2,
-          box.top + 22,
-          box.bottom - 22,
-        );
-        const rowX = clamp(
-          table.left + table.width / 2,
-          box.left + 22,
-          box.right - 22,
-        );
-        const rowY = clamp(
-          table.bottom + edgeGap,
-          box.top + 10,
-          box.bottom - 10,
-        );
-
         setTableHandlePos({
           visible: true,
-          colX,
-          colY,
-          rowX,
-          rowY,
+          colX: clamp(table.right + edgeGap, box.left + 10, box.right - 10),
+          colY: clamp(table.top + table.height / 2, box.top + 22, box.bottom - 22),
+          rowX: clamp(table.left + table.width / 2, box.left + 22, box.right - 22),
+          rowY: clamp(table.bottom + edgeGap, box.top + 10, box.bottom - 10),
         });
       },
       [],
@@ -209,12 +205,8 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
-          codeBlock: { HTMLAttributes: { class: "ee-codeblock" } },
-          paragraph: false,
-          heading: false,
+          codeBlock: false, // replaced by CodeBlockLowlight
         }),
-        AlignAwareParagraph,
-        AlignAwareHeading.configure({ levels: [1, 2, 3, 4, 5] }),
         Underline,
         ResolvedLink.configure({ openOnClick: false, autolink: true }),
         TaskList,
@@ -223,7 +215,16 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         TableRow,
         TableHeader,
         TableCell,
-        Placeholder.configure({ placeholder: placeholder ?? "Start writing…" }),
+        Placeholder.configure({
+          placeholder: ({ node }) => {
+            if (node.type.name === "heading") return "Heading";
+            if (node.type.name === "detailsSummary") return "Toggle title";
+            if (node.type.name === "codeBlock") return "";
+            return "Type something — or press Enter to start a new block";
+          },
+          showOnlyCurrent: false,
+          includeChildren: true,
+        }),
         TextAlign.configure({
           types: ["heading", "paragraph"],
           alignments: ["left", "center", "right", "justify"],
@@ -232,22 +233,24 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         TextStyle,
         Color,
         Highlight.configure({ multicolor: true }),
-        Markdown.configure({
-          html: true,
-          tightLists: true,
-          tightListClass: "tight",
-          bulletListMarker: "-",
-          linkify: true,
-          breaks: false,
-          transformPastedText: true,
-          transformCopiedText: true,
+        Details.configure({
+          persist: true,
+          openClassName: "is-open",
+          HTMLAttributes: { class: "ee-details" },
         }),
+        DetailsSummary,
+        DetailsContent,
+        CodeBlockLowlight.configure({
+          lowlight,
+          HTMLAttributes: { class: "ee-codeblock" },
+        }),
+        Callout,
         ClipEmbed,
         GroupRef,
         IndentExtension,
         ResolvedImage.configure({ inline: false, allowBase64: true }),
       ],
-      content: initialMarkdown,
+      content: parseStoredContent(initialContent),
       editorProps: {
         attributes: { class: "ee-rich ProseMirror" },
         handlePaste: (view, event) => {
@@ -272,8 +275,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
         },
       },
       onUpdate: ({ editor }) => {
-        const md = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
-        onChange(normalizeIndentMarkdown(md));
+        onChange(serializeDoc(editor.getJSON()));
         updateTableHandlePos(editor);
       },
       onSelectionUpdate: ({ editor }) => {
@@ -310,6 +312,9 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
             case "italic":
               c.toggleItalic().run();
               break;
+            case "underline":
+              c.toggleUnderline().run();
+              break;
             case "strike":
               c.toggleStrike().run();
               break;
@@ -325,6 +330,14 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
             case "blockquote":
               c.toggleBlockquote().run();
               break;
+            case "callout":
+              c.toggleCallout(cmd.tone ?? "info").run();
+              break;
+            case "toggle":
+              if (editor.isActive("details"))
+                c.unsetDetails().run();
+              else c.setDetails().run();
+              break;
             case "bulletList":
               c.toggleBulletList().run();
               break;
@@ -335,7 +348,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
               c.toggleTaskList().run();
               break;
             case "codeBlock":
-              c.toggleCodeBlock().run();
+              c.toggleCodeBlock(cmd.language ? { language: cmd.language } : undefined).run();
               break;
             case "hr":
               c.setHorizontalRule().run();
@@ -371,15 +384,12 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
               if (cmd.value == null) c.unsetHighlight().run();
               else c.setHighlight({ color: cmd.value }).run();
               break;
-            case "image": {
-              const imageNode = editor.schema.nodes.image;
-              if (!imageNode) break;
+            case "image":
               c.insertContent({
                 type: "image",
                 attrs: { src: cmd.src, alt: cmd.alt ?? null },
               }).run();
               break;
-            }
             case "insertTable":
               c.insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
               break;
@@ -399,45 +409,77 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
               c.insertContent(cmd.text).run();
               break;
             case "clipEmbed":
-              c.insertContent({
-                type: "clipEmbed",
-                attrs: { id: cmd.id },
-              }).run();
+              c.insertContent({ type: "clipEmbed", attrs: { id: cmd.id } }).run();
               break;
             case "groupEmbed":
-              c.insertContent({
-                type: "groupRef",
-                attrs: { name: cmd.name },
-              }).run();
+              c.insertContent({ type: "groupRef", attrs: { name: cmd.name } }).run();
               break;
           }
         },
-        getMarkdown: () => {
-          const md = (editor?.storage as any)?.markdown?.getMarkdown?.() ?? "";
-          return normalizeIndentMarkdown(md);
+        insertText: (text) =>
+          editor?.chain().focus().insertContent(text).run(),
+        insertClipEmbed: (id) =>
+          editor
+            ?.chain()
+            .focus()
+            .insertContent({ type: "clipEmbed", attrs: { id } })
+            .run(),
+        insertGroupEmbed: (name) =>
+          editor
+            ?.chain()
+            .focus()
+            .insertContent({ type: "groupRef", attrs: { name } })
+            .run(),
+        insertLink: (url, text) => {
+          if (!editor) return;
+          const { empty } = editor.state.selection;
+          const c = editor.chain().focus();
+          if (empty) {
+            const t = (text && text.trim()) || url;
+            c.insertContent({
+              type: "text",
+              text: t,
+              marks: [{ type: "link", attrs: { href: url } }],
+            }).run();
+          } else if (text && text.trim()) {
+            c.insertContent({
+              type: "text",
+              text,
+              marks: [{ type: "link", attrs: { href: url } }],
+            }).run();
+          } else {
+            c.extendMarkRange("link").setLink({ href: url }).run();
+          }
+        },
+        saveRange: () => {
+          // No-op: Tiptap restores its own selection on focus.
+        },
+        getContent: () => {
+          if (!editor) return initialContent ?? "";
+          return serializeDoc(editor.getJSON());
         },
         getActiveState: () => activeStateFor(editor),
+        getBlockKind: () => activeStateFor(editor).blockKind,
         focus: () => editor?.commands.focus(),
       }),
-      [editor],
+      [editor, initialContent],
     );
 
-    // Reset when initial content changes (note switch).
+    // Reset content when noteId changes.
     useEffect(() => {
       if (!editor) return;
-      const current = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
-      if (current !== initialMarkdown) {
-        editor.commands.setContent(initialMarkdown, { emitUpdate: false });
-      }
-    }, [editor, initialMarkdown]);
+      editor.commands.setContent(parseStoredContent(initialContent), {
+        emitUpdate: false,
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [noteId]);
 
-    // Refresh image/link DOM once the attachment resolver finishes loading,
-    // so notes opened before init have their `note-attachment://` URLs rendered.
+    // Refresh image/link DOM once the attachment resolver finishes loading.
     useEffect(() => {
       if (!editor) return;
       return subscribeAttachmentResolver(() => {
-        const md = (editor.storage as any).markdown?.getMarkdown?.() ?? "";
-        editor.commands.setContent(md, { emitUpdate: false });
+        const json = editor.getJSON();
+        editor.commands.setContent(json, { emitUpdate: false });
       });
     }, [editor]);
 
@@ -453,9 +495,63 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
       };
     }, [editor, updateTableHandlePos]);
 
+    const insertBlockBelow = useCallback(() => {
+      if (!editor || !hoverNode) return;
+      const after = hoverNode.pos + hoverNode.node.nodeSize;
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(after, { type: "paragraph" })
+        .setTextSelection(after + 1)
+        .run();
+    }, [editor, hoverNode]);
+
     return (
       <>
         <EditorContent editor={editor} className="ee-rich-shell" />
+        {editor && (
+          <DragHandle
+            editor={editor}
+            className="ee-drag-handle"
+            nested
+            computePositionConfig={{
+              placement: "left-start",
+              strategy: "absolute",
+              middleware: [floatingOffset({ mainAxis: 6, crossAxis: 2 })],
+            }}
+            onNodeChange={({ node, pos }) => {
+              if (node) setHoverNode({ node, pos });
+              else setHoverNode(null);
+            }}
+          >
+            <div className="ee-block-handles">
+              <span
+                className="ee-block-handle ee-block-handle--drag"
+                title="Drag to move block"
+                aria-label="Drag block"
+              >
+                <DotsSixVerticalIcon size={14} weight="bold" />
+              </span>
+              <button
+                type="button"
+                className="ee-block-handle ee-block-handle--add"
+                draggable={false}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  insertBlockBelow();
+                }}
+                title="Insert block below"
+                aria-label="Insert block"
+              >
+                +
+              </button>
+            </div>
+          </DragHandle>
+        )}
         {tableHandlePos.visible && (
           <>
             <div
@@ -510,14 +606,40 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(
     );
   },
 );
+NotionEditorInner.displayName = "NotionEditorInner";
 
-RichEditor.displayName = "RichEditor";
+const NotionEditor = forwardRef<NotionEditorHandle, NotionEditorProps>(
+  (props, ref) => {
+    return (
+      <div className="ee-shell">
+        <EmbedContextProvider entries={props.entries}>
+          <EditorBoundary
+            fallback={
+              <div
+                style={{
+                  padding: "14px 18px",
+                  color: "var(--text-muted)",
+                  fontSize: 13,
+                }}
+              >
+                Editor failed to load. Reopen the note to retry.
+              </div>
+            }
+          >
+            <NotionEditorInner {...props} ref={ref} key={props.noteId} />
+          </EditorBoundary>
+        </EmbedContextProvider>
+      </div>
+    );
+  },
+);
+NotionEditor.displayName = "NotionEditor";
 
-export default RichEditor;
+export default NotionEditor;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
+function activeStateFor(editor: Editor | null): ActiveState {
   if (!editor) return { blockKind: "p" };
   let blockKind: BlockKind = "p";
   if (editor.isActive("heading", { level: 1 })) blockKind = "h1";
@@ -525,6 +647,8 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
   else if (editor.isActive("heading", { level: 3 })) blockKind = "h3";
   else if (editor.isActive("heading", { level: 4 })) blockKind = "h4";
   else if (editor.isActive("heading", { level: 5 })) blockKind = "h5";
+  else if (editor.isActive("callout")) blockKind = "callout";
+  else if (editor.isActive("details")) blockKind = "toggle";
   else if (editor.isActive("blockquote")) blockKind = "bq";
   else if (editor.isActive("taskItem")) blockKind = "todo";
   else if (editor.isActive("bulletList")) blockKind = "ul";
@@ -542,6 +666,7 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
   return {
     bold: editor.isActive("bold"),
     italic: editor.isActive("italic"),
+    underline: editor.isActive("underline"),
     strike: editor.isActive("strike"),
     code: editor.isActive("code"),
     inTable: editor.isActive("table"),
@@ -552,10 +677,6 @@ function activeStateFor(editor: ReturnType<typeof useEditor>): ActiveState {
   };
 }
 
-// Persist a pasted/dropped image file to disk via Tauri, then insert it as a
-// regular `<img>` node referencing a `tauri-asset:` URL. This avoids stuffing
-// huge base64 data URLs into the markdown source (which made round-tripping
-// between rich and markdown modes flaky).
 function insertImageFromFile(
   view: import("@tiptap/pm/view").EditorView,
   file: File,
@@ -571,8 +692,6 @@ function insertImageFromFile(
     .then(async (buf) => {
       const bytes = Array.from(new Uint8Array(buf));
       const filename = await invoke<string>("save_note_image", { bytes, ext });
-      // Store the clean scheme; the editor's content layer resolves it for
-      // display via the boundary transforms in setContent / getMarkdown.
       const src = imageAttachmentUrl(filename);
       const imageNode = view.state.schema.nodes.image;
       if (!imageNode) return;
@@ -583,88 +702,4 @@ function insertImageFromFile(
     .catch((err) => {
       console.error("[notes] failed to save pasted image", err);
     });
-}
-
-function normalizeIndentMarkdown(markdown: string): string {
-  let out = markdown;
-  if (out.includes("    ")) {
-    const lines = out.split("\n");
-    let inFence = false;
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (/^```|^~~~/.test(line)) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) continue;
-      const match = /^( {4})+/.exec(line);
-      if (!match) continue;
-      if (/^( {4})+([>*+-]\s|\d+\.\s|#)/.test(line)) continue;
-      const count = match[0].length;
-      const nbsp = "\u00A0".repeat(count);
-      lines[i] = nbsp + line.slice(count);
-    }
-    out = lines.join("\n");
-  }
-  // tiptap-markdown's HTML fallback serializer leaves stray blank lines
-  // around inline-HTML wrappers (alignment, color, highlight). Collapse runs
-  // of blank lines to a single blank line \u2014 but ONLY when neither neighbour
-  // is a list/quote/heading/code line, otherwise we'd merge two distinct
-  // lists or turn a loose list tight.
-  out = out.replace(/([^\n]*)\n\n{2,}([^\n]*)/g, (full, prev, next) => {
-    if (isStructuralLine(prev) || isStructuralLine(next)) return full;
-    return prev + "\n\n" + next;
-  });
-  // Ensure standalone image lines have blank lines around them so the next
-  // line stays in its own paragraph instead of being absorbed into the image's.
-  out = ensureImageBlockSpacing(out);
-  return out;
-}
-
-function ensureImageBlockSpacing(markdown: string): string {
-  const lines = markdown.split("\n");
-  const imageRe = /!\[[^\]]*\]\([^)]+\)/g;
-  const out: string[] = [];
-  let inFence = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^```|^~~~/.test(line)) inFence = !inFence;
-    if (inFence || !imageRe.test(line)) {
-      out.push(line);
-      continue;
-    }
-    imageRe.lastIndex = 0;
-    // Split this line into segments: before/after each image. Emit each image
-    // on its own line so adjacent images / trailing text don't fuse together.
-    const parts: string[] = [];
-    let lastIdx = 0;
-    let m: RegExpExecArray | null;
-    while ((m = imageRe.exec(line)) !== null) {
-      const before = line.slice(lastIdx, m.index);
-      if (before.trim() !== "") parts.push(before.replace(/\s+$/, ""));
-      parts.push(m[0]);
-      lastIdx = m.index + m[0].length;
-    }
-    const tail = line.slice(lastIdx);
-    if (tail.trim() !== "") parts.push(tail.replace(/^\s+/, ""));
-    if (out.length > 0 && out[out.length - 1].trim() !== "") out.push("");
-    for (let p = 0; p < parts.length; p += 1) {
-      out.push(parts[p]);
-      if (p < parts.length - 1) out.push("");
-    }
-    const next = lines[i + 1];
-    if (next !== undefined && next.trim() !== "") out.push("");
-  }
-  return out.join("\n");
-}
-
-function isStructuralLine(line: string): boolean {
-  return (
-    /^\s*[-*+]\s/.test(line) ||
-    /^\s*\d+\.\s/.test(line) ||
-    /^\s*>\s?/.test(line) ||
-    /^\s*#{1,6}\s/.test(line) ||
-    /^```|^~~~/.test(line) ||
-    /^\s*\|/.test(line)
-  );
 }
