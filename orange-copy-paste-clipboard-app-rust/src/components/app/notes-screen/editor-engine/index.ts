@@ -1,33 +1,33 @@
 // ── Editor Engine — Public API ────────────────────────────────────────────
 
 export type {
-  EditorMode,
   EditorCommand,
-  FormatAction,
-  BlockKind,
   ActiveState,
+  BlockKind,
+  AlignValue,
+  CalloutTone,
+  EditorContent,
 } from "./types";
-export { markdownToPlainText } from "./markdown";
+
 export {
-  applyAction,
-  commandToAction,
-  detectBlockKind,
-  detectActiveState,
-} from "./format-actions";
-export { default as MarkdownEditor } from "./MarkdownEditor";
+  parseStoredContent,
+  serializeDoc,
+  emptyDoc,
+  extractPlainText,
+} from "./content-codec";
+
+export { default as NotionEditor } from "./NotionEditor";
 export type {
-  MarkdownEditorHandle,
-  MarkdownEditorProps,
-} from "./MarkdownEditor";
-export { default as MarkdownPreview } from "./MarkdownPreview";
-export { default as RichEditor } from "./RichEditor";
-export type { RichEditorHandle } from "./RichEditor";
+  NotionEditorHandle,
+  NotionEditorProps,
+} from "./NotionEditor";
+
+export { default as NotionPreview } from "./NotionPreview";
+
 export {
   initAttachmentResolver,
   resolveAttachmentUrl,
   unresolveAttachmentUrl,
-  resolveMarkdown,
-  unresolveMarkdown,
   imageAttachmentUrl,
   fileAttachmentUrl,
 } from "./attachment-url";

@@ -52,23 +52,8 @@ export const GroupRef = Node.create({
     return ["span", mergeAttributes(HTMLAttributes), ""];
   },
 
-  addStorage() {
-    return {
-      markdown: {
-        serialize(state: any, node: any) {
-          const name = (node.attrs.name as string) ?? "";
-          state.write(`<span data-group-ref="${escAttr(name)}"></span>`);
-        },
-        parse: { setup() {} },
-      },
-    };
-  },
-
   addNodeView() {
     return ReactNodeViewRenderer(GroupRefView);
   },
 });
 
-function escAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

@@ -1,0 +1,276 @@
+// ── Editor Engine — Read-only preview for note cards ─────────────────────
+// Walks Tiptap JSON and renders React elements directly. No editor instance.
+
+import React, { useEffect, useMemo, useState } from "react";
+import type { JSONContent } from "@tiptap/react";
+import type { ClipboardEntry } from "../../../../types";
+import {
+  classifyFileEntry,
+  filePaths,
+  groupColor,
+  truncateText,
+} from "../../../../types";
+import { fileName } from "../notes-utils";
+import {
+  resolveAttachmentUrl,
+  subscribeAttachmentResolver,
+} from "./attachment-url";
+import { parseStoredContent } from "./content-codec";
+import "./markdown.css";
+
+interface Props {
+  /** Stored content — Tiptap JSON string. */
+  content: string;
+  entries: ClipboardEntry[];
+  className?: string;
+}
+
+const NotionPreview: React.FC<Props> = ({ content, entries, className }) => {
+  const [, setVersion] = useState(0);
+  useEffect(
+    () => subscribeAttachmentResolver(() => setVersion((v) => v + 1)),
+    [],
+  );
+
+  const doc = useMemo(() => parseStoredContent(content), [content]);
+
+  return (
+    <div className={`ee-preview${className ? " " + className : ""}`}>
+      {renderChildren(doc.content, entries, "r")}
+    </div>
+  );
+};
+
+export default NotionPreview;
+
+// ── JSON renderer ────────────────────────────────────────────────────────
+
+function renderChildren(
+  nodes: JSONContent[] | undefined,
+  entries: ClipboardEntry[],
+  keyPrefix: string,
+): React.ReactNode {
+  if (!nodes) return null;
+  return nodes.map((n, i) => renderNode(n, entries, `${keyPrefix}.${i}`));
+}
+
+function renderNode(
+  node: JSONContent,
+  entries: ClipboardEntry[],
+  key: string,
+): React.ReactNode {
+  const align = (node.attrs?.textAlign as string) || undefined;
+  const style = align && align !== "left" ? { textAlign: align as any } : undefined;
+  switch (node.type) {
+    case "paragraph":
+      return (
+        <p key={key} style={style}>
+          {renderChildren(node.content, entries, key)}
+        </p>
+      );
+    case "heading": {
+      const level = (node.attrs?.level as number) || 1;
+      const Tag = `h${Math.min(Math.max(level, 1), 6)}` as any;
+      return (
+        <Tag key={key} style={style}>
+          {renderChildren(node.content, entries, key)}
+        </Tag>
+      );
+    }
+    case "blockquote":
+      return (
+        <blockquote key={key}>
+          {renderChildren(node.content, entries, key)}
+        </blockquote>
+      );
+    case "callout": {
+      const tone = (node.attrs?.tone as string) || "info";
+      return (
+        <div key={key} className="ee-callout" data-callout={tone}>
+          {renderChildren(node.content, entries, key)}
+        </div>
+      );
+    }
+    case "details":
+      return (
+        <details key={key} className="ee-details">
+          {renderChildren(node.content, entries, key)}
+        </details>
+      );
+    case "detailsSummary":
+      return (
+        <summary key={key}>
+          {renderChildren(node.content, entries, key)}
+        </summary>
+      );
+    case "detailsContent":
+      return <div key={key}>{renderChildren(node.content, entries, key)}</div>;
+    case "bulletList":
+      return <ul key={key}>{renderChildren(node.content, entries, key)}</ul>;
+    case "orderedList":
+      return <ol key={key}>{renderChildren(node.content, entries, key)}</ol>;
+    case "listItem":
+      return <li key={key}>{renderChildren(node.content, entries, key)}</li>;
+    case "taskList":
+      return (
+        <ul key={key} data-type="taskList">
+          {renderChildren(node.content, entries, key)}
+        </ul>
+      );
+    case "taskItem": {
+      const checked = !!node.attrs?.checked;
+      return (
+        <li key={key} data-type="taskItem" data-checked={checked}>
+          <label>
+            <input type="checkbox" checked={checked} readOnly />
+            <span>{renderChildren(node.content, entries, key)}</span>
+          </label>
+        </li>
+      );
+    }
+    case "codeBlock": {
+      const lang = (node.attrs?.language as string) || undefined;
+      return (
+        <pre key={key} className="ee-codeblock">
+          <code className={lang ? `language-${lang}` : undefined}>
+            {plainText(node.content)}
+          </code>
+        </pre>
+      );
+    }
+    case "horizontalRule":
+      return <hr key={key} />;
+    case "image": {
+      const src = (node.attrs?.src as string) || "";
+      const alt = (node.attrs?.alt as string) || "";
+      return <img key={key} src={resolveAttachmentUrl(src)} alt={alt} />;
+    }
+    case "table":
+      return (
+        <table key={key}>
+          <tbody>{renderChildren(node.content, entries, key)}</tbody>
+        </table>
+      );
+    case "tableRow":
+      return <tr key={key}>{renderChildren(node.content, entries, key)}</tr>;
+    case "tableCell":
+      return <td key={key}>{renderChildren(node.content, entries, key)}</td>;
+    case "tableHeader":
+      return <th key={key}>{renderChildren(node.content, entries, key)}</th>;
+    case "hardBreak":
+      return <br key={key} />;
+    case "clipEmbed":
+      return (
+        <ClipChip
+          key={key}
+          id={(node.attrs?.id as string) ?? ""}
+          entries={entries}
+        />
+      );
+    case "groupRef":
+      return <GroupChip key={key} name={(node.attrs?.name as string) ?? ""} />;
+    case "text":
+      return renderText(node, key);
+    default:
+      return (
+        <React.Fragment key={key}>
+          {renderChildren(node.content, entries, key)}
+        </React.Fragment>
+      );
+  }
+}
+
+function renderText(node: JSONContent, key: string): React.ReactNode {
+  let el: React.ReactNode = (node as any).text ?? "";
+  const marks = (node as any).marks as
+    | { type: string; attrs?: any }[]
+    | undefined;
+  if (!marks || marks.length === 0)
+    return <React.Fragment key={key}>{el}</React.Fragment>;
+  for (const m of marks) {
+    switch (m.type) {
+      case "bold":
+        el = <strong>{el}</strong>;
+        break;
+      case "italic":
+        el = <em>{el}</em>;
+        break;
+      case "underline":
+        el = <u>{el}</u>;
+        break;
+      case "strike":
+        el = <s>{el}</s>;
+        break;
+      case "code":
+        el = <code>{el}</code>;
+        break;
+      case "link":
+        el = (
+          <a
+            href={resolveAttachmentUrl(m.attrs?.href ?? "")}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {el}
+          </a>
+        );
+        break;
+      case "textStyle":
+        if (m.attrs?.color)
+          el = <span style={{ color: m.attrs.color }}>{el}</span>;
+        break;
+      case "highlight":
+        if (m.attrs?.color)
+          el = <mark style={{ backgroundColor: m.attrs.color }}>{el}</mark>;
+        break;
+    }
+  }
+  return <React.Fragment key={key}>{el}</React.Fragment>;
+}
+
+function plainText(nodes: JSONContent[] | undefined): string {
+  if (!nodes) return "";
+  let out = "";
+  for (const n of nodes) {
+    if (typeof (n as any).text === "string") out += (n as any).text;
+    else if (n.content) out += plainText(n.content);
+  }
+  return out;
+}
+
+// ── Embed chips ──────────────────────────────────────────────────────────
+
+const ClipChip: React.FC<{ id: string; entries: ClipboardEntry[] }> = ({
+  id,
+  entries,
+}) => {
+  const entry = entries.find((e) => e.id === id);
+  const missing = !entry && !!id;
+  return (
+    <span className={`ee-clip-chip${missing ? " ee-clip-chip--missing" : ""}`}>
+      {clipLabel(id, entries)}
+    </span>
+  );
+};
+
+const GroupChip: React.FC<{ name: string }> = ({ name }) => {
+  const c = groupColor(name);
+  return (
+    <span className="ee-group-chip" style={{ background: c.bg, color: c.fg }}>
+      <span className="ee-group-chip-dot" style={{ background: c.fg }} />
+      {name}
+    </span>
+  );
+};
+
+function clipLabel(id: string, entries: ClipboardEntry[]): string {
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) return id ? "Missing clip" : "Clip";
+  const paths = entry.type === "file" ? filePaths(entry.content) : [];
+  const fileKind = entry.type === "file" ? classifyFileEntry(entry.content) : "file";
+  if (entry.type === "image") return entry.label ?? "Image";
+  if (entry.type === "file")
+    return fileKind === "image" ? "Image file" : paths[0] ? fileName(paths[0]) : "File";
+  const text = entry.type === "html" ? entry.content.replace(/<[^>]*>/g, "") : entry.content;
+  return truncateText(text.replace(/\s+/g, " ").trim(), 28) || "Clip";
+}

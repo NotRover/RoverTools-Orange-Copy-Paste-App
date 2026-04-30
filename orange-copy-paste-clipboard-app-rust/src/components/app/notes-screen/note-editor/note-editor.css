@@ -855,3 +855,19 @@
   color: var(--text-muted);
   line-height: 1;
 }
+
+/* Callout-tone dropdown swatches */
+.ns-callout-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  flex: none;
+  border: 1px solid var(--border);
+}
+.ns-callout-swatch--info    { background: #3b82f6; }
+.ns-callout-swatch--success { background: #46a758; }
+.ns-callout-swatch--warning { background: #d97706; }
+.ns-callout-swatch--danger  { background: #e5484d; }
+.ns-callout-swatch--neutral { background: var(--text-muted); }

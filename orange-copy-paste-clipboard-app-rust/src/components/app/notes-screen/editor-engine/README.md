@@ -1,318 +1,100 @@
 # Editor Engine
 
-The notes editor for the Smart Clipboard app. Markdown is the only storage
-format. The engine exposes two editable surfaces over the same markdown
-string and a read-only renderer used by note cards.
+A Notion-like Tiptap editor for the Smart Clipboard notes screen. There is one
+editable surface and one read-only preview, both backed by ProseMirror JSON.
+Drag handles and a "+" insert button appear next to the hovered block.
 
 ```
 ┌─ Editor Engine ─────────────────────────────────────────────────────────┐
 │                                                                         │
-│   note.content ─── markdown string ─── single source of truth           │
+│   note.content ─── string ─── Tiptap JSON (or legacy markdown)          │
 │         │                                                               │
-│         ├──► MarkdownEditor (host)                                      │
-│         │       ├── RichEditor       (Tiptap WYSIWYG, "normal" mode)    │
-│         │       └── <textarea>       (raw markdown, "markdown" mode)    │
+│         ├──► NotionEditor   (Tiptap WYSIWYG, single surface)            │
 │         │                                                               │
-│         └──► MarkdownPreview (read-only, used in note cards)            │
+│         └──► NotionPreview  (read-only, used in note cards)             │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick context (human + LLM)
+## Storage
 
-If you only need the mental model, keep these points:
-
-1. `note.content` is always markdown text. No editor JSON is persisted.
-2. `MarkdownEditor` is a host with two surfaces:
-
-- `RichEditor` (Tiptap WYSIWYG, mode = `"normal"`)
-- `<textarea>` (raw markdown, mode = `"markdown"`)
-
-3. Toolbar buttons do not directly call Tiptap. They dispatch
-   `EditorCommand`, and each surface interprets the same command.
-4. Clip/group embeds are inline `<span data-*>` nodes in markdown:
-
-- clip: `<span data-clip-embed="CLIP_ID"></span>`
-- group: `<span data-group-ref="Group Name"></span>`
-
-5. Preview rendering allows GFM + safe inline HTML. It is sanitized before
-   rendering.
-
-## Where this engine is consumed
-
-- `notes-screen/note-editor/NoteEditor.tsx`
-  - Main note editing experience (toolbar + mode switch + editor handle).
-- `notes-screen/NotePreview.tsx`
-  - Read-only markdown rendering in note cards.
-- `notes-screen/notes-utils.ts`
-  - Uses `markdownToPlainText` for title/summary/search helpers.
-
-If you are changing command behavior, embeds, or markdown sanitization,
-these files are the first integration points to re-check.
-
-## Key principles
-
-1. **Markdown is canonical.** Everything serializes to / parses from a plain
-   markdown string. There is no AST, no JSON envelope, no version field.
-   `note.content` is a string that any other tool can read.
-2. **Two modes, same content.** "Normal" is a Tiptap WYSIWYG; "Markdown" is
-   a textarea. Switching modes pulls the current value out of the active
-   surface and feeds it to the other. No duplicate state.
-3. **Mode-agnostic toolbar.** Toolbar buttons emit `EditorCommand` values.
-   Each surface interprets the command its own way (Tiptap chain vs.
-   textarea string ops). The toolbar doesn't care which mode is active.
-4. **GitHub-readme-style HTML.** Inline HTML is allowed in markdown
-   (`<details>`, `<kbd>`, `<sub>`, etc.) and round-trips through both modes.
-   Rendering is sanitized in `MarkdownPreview` (read-only) and via the
-   Tiptap schema (editable).
-
-## File layout
-
-```
-editor-engine/
-├── README.md                ← you are here
-├── index.ts                 ← public API barrel
-├── types.ts                 ← EditorMode, EditorCommand, BlockKind, …
-├── markdown.ts              ← markdownToPlainText (titles, search)
-├── format-actions.ts        ← textarea ops + commandToAction mapper
-├── markdown.css             ← styles for textarea + Tiptap + chip nodes
-│
-├── MarkdownEditor.tsx       ← dual-mode host. Renders one surface, routes commands.
-├── RichEditor.tsx           ← Tiptap surface (normal mode)
-├── MarkdownPreview.tsx      ← read-only renderer (note cards)
-│
-├── embed-context.tsx        ← React context bridging clipboard entries → NodeViews
-└── extensions/
-    ├── ClipEmbed.tsx        ← Tiptap node for <span data-clip-embed="…">
-    └── GroupRef.tsx         ← Tiptap node for <span data-group-ref="…">
-```
+`note.content` is a string holding `JSON.stringify(editor.getJSON())` — a
+serialised ProseMirror document. `parseStoredContent(raw)` returns the parsed
+doc (or an empty doc on failure). `extractPlainText(raw)` powers note titles,
+search snippets, and "is this note empty" checks.
 
 ## Public API (`index.ts`)
 
-| export                                  | what it is                                                          |
-| --------------------------------------- | ------------------------------------------------------------------- |
-| `MarkdownEditor`                        | The dual-mode editor component. The thing you mount.                |
-| `MarkdownEditorHandle`                  | Ref handle: `applyCommand`, `getMarkdown`, `setMode`, `focus`, …    |
-| `MarkdownPreview`                       | Read-only markdown renderer (note cards / list views).              |
-| `RichEditor` / `RichEditorHandle`       | The Tiptap surface, exported in case you want it standalone.        |
-| `EditorMode`                            | `"normal" \| "markdown"`                                            |
-| `EditorCommand`                         | Mode-agnostic toolbar command (see below).                          |
-| `FormatAction`                          | Low-level textarea op (used by markdown mode internally).           |
-| `BlockKind` / `ActiveState`             | Toolbar feedback (current heading, list, marks under caret, …).     |
-| `markdownToPlainText`                   | Strip markdown to plain text — for titles, search, etc.             |
-| `applyAction` / `commandToAction`       | Pure helpers if you ever need to manipulate markdown without a DOM. |
-| `detectBlockKind` / `detectActiveState` | Caret-state detection in markdown mode.                             |
+| export                      | purpose                                            |
+| --------------------------- | -------------------------------------------------- |
+| `NotionEditor`              | The editable surface. Mount this in note editors.  |
+| `NotionEditorHandle`        | Imperative ref: `applyCommand`, `getContent`, …    |
+| `NotionPreview`             | Read-only renderer for note cards.                 |
+| `EditorCommand`             | Mode-agnostic toolbar command type.                |
+| `ActiveState` / `BlockKind` | Toolbar feedback (current block, marks, alignment).|
+| `CalloutTone`               | `info` \| `success` \| `warning` \| `danger` \| `neutral` |
+| `parseStoredContent`        | Detect JSON vs legacy markdown.                    |
+| `serializeDoc`              | `JSONContent → string` for persistence.            |
+| `extractPlainText`          | Plain-text projection for titles/search.           |
+| `initAttachmentResolver` …  | Local-attachment URL plumbing (unchanged).         |
 
-### Handle contract (`MarkdownEditorHandle`)
+## Toolbar contract
 
-`MarkdownEditor` exposes an imperative handle used by the surrounding
-toolbar/workflow:
+The toolbar in `note-editor/NoteEditor.tsx` emits `EditorCommand` values via
+`editorRef.current.applyCommand(cmd)`. To add a new toolbar action:
 
-- formatting and insertions: `applyCommand`, `insertText`, `insertLink`,
-  `insertClipEmbed`, `insertGroupEmbed`
-- mode control: `setMode`, `getMode`
-- state queries: `getMarkdown`, `getActiveState`, `getBlockKind`
-- focus/selection helpers: `focus`, `saveRange`
+1. Add a `kind` to `EditorCommand` in `types.ts`.
+2. Add a case in `NotionEditor.tsx`'s `applyCommand` switch.
+3. Add a button in `NoteEditor.tsx` that dispatches it.
 
-When adding new editor affordances, prefer extending this handle so the host
-screen stays mode-agnostic.
+Caret state for active feedback comes from `editorRef.current.getActiveState()`.
 
-## How the host (`MarkdownEditor`) works
+## Custom Tiptap nodes
 
-```tsx
-<MarkdownEditor
-  ref={editorRef}                    // → MarkdownEditorHandle
-  noteId={note.id}                   // remount-trigger when switching notes
-  initialMarkdown={note.content}     // initial content
-  initialMode="normal"               // optional, defaults to "normal"
-  entries={clipboardEntries}         // for resolving clip-embed labels
-  onChange={(md) => save(md)}        // fires on every edit
-  onModeChange={(m) => …}            // when the user toggles the mode switch
-  onSelectionChange={refreshToolbar} // selection moved
-/>
-```
+- `extensions/ClipEmbed.ts` — inline atom for clipboard-entry chips.
+  Renders via React node-view; entries come from `embed-context.tsx`.
+- `extensions/GroupRef.tsx` — inline atom for group-name chips.
+- `extensions/Callout.ts` — block container with a `tone` attribute.
 
-State flow:
+`Details` (toggle blocks) and `CodeBlockLowlight` come from official Tiptap
+extensions and don't need custom code.
 
-1. The host holds a `valueRef` with the latest markdown.
-2. Each surface's `onChange` updates `valueRef` and forwards to the parent.
-3. On `setMode(next)`, the host pulls the latest from the active surface,
-   stores it in `valueRef`, then unmounts the old surface and mounts the
-   new one with `defaultValue={valueRef.current}` — so the new surface
-   boots from the fresh value.
-4. The handle's `applyCommand(cmd)` routes to the active surface:
-   - normal → `RichEditor.applyCommand(cmd)` → Tiptap chain
-   - markdown → `commandToAction(cmd)` → `applyAction(state, action)` → textarea mutation
+## Preview rendering
 
-## Toolbar commands
+`NotionPreview` walks the Tiptap JSON and renders React elements directly —
+no editor instance per card.
 
-`EditorCommand` is the contract between the toolbar and the engine. To add a
-new toolbar action you add a `kind` here, then implement it in two places:
+## Block handles
 
-```ts
-type EditorCommand =
-  | { kind: "bold" }
-  | { kind: "italic" }
-  | { kind: "strike" }
-  | { kind: "code" }
-  | { kind: "heading"; level: 1 | 2 | 3 }
-  | { kind: "paragraph" }
-  | { kind: "blockquote" }
-  | { kind: "bulletList" }
-  | { kind: "orderedList" }
-  | { kind: "taskList" }
-  | { kind: "codeBlock" }
-  | { kind: "hr" }
-  | { kind: "link"; url: string; text?: string }
-  | { kind: "insertTable" }
-  | { kind: "insertText"; text: string }
-  | { kind: "clipEmbed"; id: string }
-  | { kind: "groupEmbed"; name: string };
-```
-
-Implementing a new command:
-
-1. **Tiptap (normal mode)** — add a case in `RichEditor.tsx` `applyCommand`
-   switch. Use the chain API: `c.toggleX().run()`, `c.insertContent(…)`, etc.
-2. **Markdown (markdown mode)** — add a case in `format-actions.ts`
-   `commandToAction`. Return a `FormatAction` (`wrap`, `linePrefix`, `fence`,
-   `insert`, `link`, `hr`).
-3. **Toolbar** — add a button in `note-editor/NoteEditor.tsx` that calls
-   `dispatch({ kind: "yourNewKind", … })`.
-
-Active state on toolbar buttons comes from `editorRef.current.getActiveState()`,
-which both surfaces implement.
-
-## Custom Tiptap nodes (embeds)
-
-`ClipEmbed` and `GroupRef` are the template for any custom inline node:
-
-- They serialize to `<span data-X="…"></span>` in markdown via
-  `addStorage().markdown.serialize`. Inline HTML round-trips through the
-  Markdown extension's `html: true` mode.
-- They render via `ReactNodeViewRenderer` so you get a real React component
-  inside the editor (the chip).
-- They read external state (clipboard entries) via `embed-context.tsx`.
-  When entries change, the context provider re-renders and node views
-  pick up the new value automatically.
-
-To add a new custom node, copy `extensions/ClipEmbed.tsx`, change the tag
-attribute (`data-mention`, `data-callout`, etc.), and register it in
-`RichEditor.tsx`'s `extensions` array.
-
-## Markdown rendering (preview)
-
-`MarkdownPreview` powers note cards. Pipeline:
-
-```
-markdown → remark-parse → remark-gfm → rehype-raw → rehype-sanitize → React
-```
-
-- **GFM**: tables, task lists, strikethrough, autolinks.
-- **rehype-raw**: lets users embed inline HTML (the GitHub-readme experience).
-- **rehype-sanitize**: GitHub-ish allow-list. `<script>` is dropped;
-  `tauri-asset:` and `asset:` URLs are allowed for local images.
-- **Custom components**: `<span data-clip-embed>` and `<span data-group-ref>`
-  are intercepted in the `components` map and rendered as chips matching the
-  editor.
-
-To add a new render-only feature (math, mermaid, callouts, etc.):
-
-1. Add the relevant `remark-*` / `rehype-*` plugin to the plugin arrays.
-2. If it produces custom HTML, allow the tag/attrs in the sanitize schema.
-3. If you want a custom React component, add a key to the `components` map.
-
-## Storage
-
-`note.content` is a markdown string. That's it. No version, no envelope,
-no migration. If you need to differentiate empty notes, check
-`hasMeaningfulContent(rawContent)` from `notes-utils.ts`.
-
-## Invariants (do not break)
-
-1. Markdown remains the sole persisted source of truth.
-2. Mode switches must preserve user content and current selection behavior.
-3. A toolbar command should map consistently in both modes.
-4. Embed nodes must round-trip as stable `<span data-*>` HTML markers.
-5. Preview sanitation must continue to block unsafe HTML while allowing
-   required embed attributes and local asset protocols.
-6. Missing clip IDs must render gracefully as "Missing clip" (no crash).
-
-## Adding plugins / extending — quick reference
-
-| You want…                        | Where to change                                                                                                               |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| New toolbar button               | `EditorCommand` (types.ts) + RichEditor + commandToAction + NoteEditor toolbar JSX                                            |
-| Syntax-highlighted code blocks   | Replace `codeBlock` in StarterKit with `CodeBlockLowlight`; add highlighter for preview                                       |
-| Math / Mermaid / Footnotes       | `remark-*` plugin in MarkdownPreview; configure Markdown extension in RichEditor if needed                                    |
-| Inline mention / wiki-link / tag | New Tiptap node (mirror ClipEmbed) + render mapping in MarkdownPreview                                                        |
-| Slash command menu               | `RichEditor.tsx` — Tiptap suggestion utility; or intercept in MarkdownEditor `onKeyDown`                                      |
-| New keyboard shortcut            | Markdown mode: `MarkdownEditor.handleTextareaKeyDown`; Normal mode: Tiptap `addKeyboardShortcuts()` on the relevant extension |
-| Allow a new HTML tag in preview  | `MarkdownPreview.tsx` sanitize `schema`                                                                                       |
-| New storage attribute on a node  | Add to node's `addAttributes()` and update `parseHTML`/`renderHTML` so it survives the markdown round-trip                    |
+`@tiptap/extension-drag-handle-react` renders a floating gutter next to the
+hovered block in `NotionEditor.tsx`. The gutter has two buttons: "+" inserts
+an empty paragraph after the hovered block, "⋮⋮" is the drag affordance.
 
 ## Dependencies
 
-- `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit` — core editor.
-- `@tiptap/extension-{underline,link,task-list,task-item,table,table-row,table-cell,table-header,placeholder}` — feature extensions.
-- `tiptap-markdown` — bridges Tiptap ↔ markdown (uses markdown-it under the hood).
-- `react-markdown`, `remark-gfm`, `rehype-raw`, `rehype-sanitize` — read-only renderer for note cards.
+Core: `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`.
+Features: `extension-{underline,link,task-list,task-item,table,table-row,
+table-cell,table-header,placeholder,text-align,text-style,color,highlight,
+image,details,code-block-lowlight,drag-handle-react}`, `lowlight`.
 
-## Known constraints
+## Invariants
 
-- **Bundle size**: Tiptap adds ~190 KB gzipped. If startup latency for the
-  notes screen becomes an issue, lazy-load `RichEditor` (dynamic import on
-  first switch to normal mode); markdown mode alone is small.
-- **Live mode-switch quirks**: very long markdown documents may take a few
-  hundred ms to parse into a Tiptap document. The host doesn't show a
-  spinner — switches are synchronous and happen on click.
-- **Inline HTML fidelity**: the Markdown extension uses `html: true`, so
-  arbitrary inline HTML round-trips. But complex block-level HTML
-  (nested `<table>` with custom CSS, etc.) will be normalized to Tiptap's
-  schema in normal mode and may drop attributes. Stick to the GFM-ish
-  vocabulary for safety.
-- **Atomic embed nodes**: `ClipEmbed` and `GroupRef` are atoms. They can be
-  selected/deleted as a unit but cannot contain text — by design.
+1. `note.content` is a string holding Tiptap JSON. Empty / unparseable
+   strings render as an empty doc.
+2. Embed nodes (`clipEmbed`, `groupRef`) survive every round-trip and degrade
+   to "Missing clip" / blank chip when the referenced entry is gone.
+3. Image and link `src`/`href` keep their `note-attachment://` /
+   `note-file://` schemes in the persisted JSON; resolution to displayable
+   asset URLs happens at DOM render time only.
 
-## Change checklist
-
-Use this checklist when touching the engine:
-
-1. API/contract changes:
-
-- update `types.ts` and `index.ts`
-- update toolbar caller in `note-editor/NoteEditor.tsx` if needed
-
-2. Command changes:
-
-- `RichEditor.tsx` (`applyCommand` switch)
-- `format-actions.ts` (`commandToAction`)
-
-3. New embed node:
-
-- add extension in `extensions/`
-- register in `RichEditor.tsx` extensions array
-- map render in `MarkdownPreview.tsx` components
-
-4. Preview HTML feature:
-
-- add plugin(s) in `MarkdownPreview.tsx`
-- update sanitize schema tag/attribute/protocol allow-list
-
-5. Styling changes for chips/editor text:
-
-- update `markdown.css`
-- verify final cascade with notes screen CSS (screen-level styles can
-  override editor styles if selectors collide)
-
-## Verification (recommended)
+## Verification
 
 From `orange-copy-paste-clipboard-app-rust/`:
 
 1. `bun run build`
-2. Manual smoke checks in notes UI:
-
-- switch modes with unsaved edits in both directions
-- use toolbar commands in both modes (bold/list/link/code/table/hr)
-- insert clip/group embeds and confirm labels/chips in editor + preview
-- confirm missing clip ID degrades to "Missing clip"
+2. Manual smoke checks:
+   - Toolbar: bold/italic/underline/strike/code, headings, quote, callout
+     (each tone), toggle list, lists, task list, code block, table, link,
+     image, clip embed, group embed, alignment, color, highlight.
+   - Hover the editor: drag handle and "+" appear next to each block.
+   - Cards in the list render previews from JSON content.

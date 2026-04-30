@@ -29,7 +29,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
   onDelete,
   onContextMenu,
 }) => {
-  const markdown = note.content ?? "";
+  const content = note.content ?? "";
 
   return (
     <div
@@ -67,7 +67,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
               .filter(Boolean)
               .join(" ")}
           >
-            <NotePreview markdown={markdown} entries={entries} />
+            <NotePreview content={content} entries={entries} />
           </div>
         )}
         <div className="ns-card-footer">
