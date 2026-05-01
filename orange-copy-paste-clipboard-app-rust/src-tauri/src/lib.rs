@@ -405,10 +405,13 @@ pub fn run() {
             setup_runtime(app, &history, &suppress)?;
             // Close the splash window from Rust — JS close() is unreliable for
             // conf.json windows on Windows (handle can persist as a click-blocker).
-            // If show_splash is off, close immediately (100 ms safety margin so
-            // the webview has time to exist before we close it).
-            let show = app.state::<AppState>().show_splash.load(Ordering::Relaxed);
-            let delay_ms: u64 = if show { 3_200 } else { 100 };
+            let state     = app.state::<AppState>();
+            let show      = state.show_splash.load(Ordering::Relaxed);
+            let minimized = state.start_minimized.load(Ordering::Relaxed);
+            // Only hold the splash open when the main window is hidden.
+            // If the main window is visible, dismiss immediately so the two
+            // windows don't overlap.
+            let delay_ms: u64 = if show && minimized { 3_200 } else { 100 };
             let ah = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
