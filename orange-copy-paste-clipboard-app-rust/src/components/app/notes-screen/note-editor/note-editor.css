@@ -814,16 +814,22 @@
 .ns-editor-footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   padding: 5px 14px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.ns-editor-footer-text {
+.ns-editor-footer-text,
+.ns-editor-footer-stats {
   font-size: 10.5px;
   color: var(--text-muted);
   letter-spacing: 0.2px;
+}
+
+.ns-editor-footer-stats {
+  font-variant-numeric: tabular-nums;
 }
 
 .ns-color-picker {

@@ -10,7 +10,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import React from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
@@ -38,8 +37,6 @@ import {
 } from "@tiptap/extension-details";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
-import { DotsSixVerticalIcon } from "@phosphor-icons/react";
-import type { Node as PMNode } from "@tiptap/pm/model";
 import {
   imageAttachmentUrl,
   resolveAttachmentUrl,
@@ -73,6 +70,17 @@ export interface NotionEditorHandle {
   focus: () => void;
 }
 
+export interface EditorStats {
+  /** Number of top-level blocks (≈ lines). */
+  blocks: number;
+  /** 1-indexed top-level block of the selection head. */
+  line: number;
+  /** Plain-text character count. */
+  chars: number;
+  /** Whitespace-delimited word count. */
+  words: number;
+}
+
 export interface NotionEditorProps {
   noteId: string;
   /** Stored content string — Tiptap JSON. */
@@ -81,6 +89,8 @@ export interface NotionEditorProps {
   /** Fires on every edit with the current content as a JSON string. */
   onChange: (content: string) => void;
   onSelectionChange?: () => void;
+  /** Fires with document stats on every edit / selection change. */
+  onStatsChange?: (stats: EditorStats) => void;
 }
 
 // ── Error boundary ───────────────────────────────────────────────────────
@@ -151,7 +161,7 @@ const IndentExtension = Extension.create({
 // ── Component ────────────────────────────────────────────────────────────
 
 const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
-  ({ noteId, initialContent, onChange, onSelectionChange }, ref) => {
+  ({ noteId, initialContent, onChange, onSelectionChange, onStatsChange }, ref) => {
     const [tableHandlePos, setTableHandlePos] = useState<{
       visible: boolean;
       colX: number;
@@ -160,16 +170,8 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
       rowY: number;
     }>({ visible: false, colX: 0, colY: 0, rowX: 0, rowY: 0 });
     const shellRef = useRef<HTMLDivElement | null>(null);
-    const [hover, setHover] = useState<
-      | {
-          pos: number;
-          node: PMNode;
-          top: number;
-          left: number;
-          height: number;
-        }
-      | null
-    >(null);
+    const onStatsChangeRef = useRef(onStatsChange);
+    onStatsChangeRef.current = onStatsChange;
 
     const updateTableHandlePos = useCallback(
       (nextEditor: Editor | null) => {
@@ -287,10 +289,12 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
       onUpdate: ({ editor }) => {
         onChange(serializeDoc(editor.getJSON()));
         updateTableHandlePos(editor);
+        onStatsChangeRef.current?.(computeStats(editor));
       },
       onSelectionUpdate: ({ editor }) => {
         updateTableHandlePos(editor);
         onSelectionChange?.();
+        onStatsChangeRef.current?.(computeStats(editor));
       },
     });
 
@@ -505,285 +509,10 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
       };
     }, [editor, updateTableHandlePos]);
 
-    const insertBlockBelow = useCallback(() => {
-      if (!editor || !hover) return;
-      const after = hover.pos + hover.node.nodeSize;
-      editor
-        .chain()
-        .focus()
-        .insertContentAt(after, { type: "paragraph" })
-        .setTextSelection(after + 1)
-        .run();
-    }, [editor, hover]);
-
-    // Manual drag — HTML5 drag/drop fails inside the Tauri webview, so
-    // mousedown/mousemove/mouseup drives the whole flow.
-    //
-    // Detection uses the *insertion-gap* model: top-level blocks define a
-    // sequence of gaps (above first block, between each pair, below last).
-    // The cursor's Y snaps to the nearest gap, and the drop performs a
-    // delete-then-insert at that gap's document position. This avoids the
-    // off-by-one ambiguity of "this block, above or below midpoint" and
-    // makes inserting between two filled rows the natural primary case.
-    const onGripMouseDown = useCallback(
-      (e: React.MouseEvent) => {
-        if (e.button !== 0 || !editor || !hover || !shellRef.current) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const view = editor.view;
-        const srcPos = hover.pos;
-        const srcNode = hover.node;
-        const srcEnd = srcPos + srcNode.nodeSize;
-        const srcDom = view.nodeDOM(srcPos);
-
-        // Floating ghost (follows cursor)
-        const ghost = document.createElement("div");
-        ghost.className = "ee-block-drag-ghost";
-        if (srcDom instanceof HTMLElement) {
-          ghost.appendChild(srcDom.cloneNode(true));
-          ghost.style.maxWidth = `${Math.min(
-            srcDom.getBoundingClientRect().width,
-            420,
-          )}px`;
-        } else {
-          ghost.textContent =
-            srcNode.textContent || srcNode.type.name || "block";
-        }
-        ghost.style.position = "fixed";
-        ghost.style.left = `${e.clientX + 12}px`;
-        ghost.style.top = `${e.clientY + 8}px`;
-        ghost.style.pointerEvents = "none";
-        ghost.style.zIndex = "9999";
-        document.body.appendChild(ghost);
-
-        let targetPos = -1;
-        let started = false;
-        const startX = e.clientX;
-        const startY = e.clientY;
-
-        const prevUserSelect = document.body.style.userSelect;
-        const prevCursor = document.body.style.cursor;
-
-        // Snapshot block geometry once. Build the list of insertion gaps
-        // *excluding* the two that touch source (pos === srcPos and
-        // pos === srcEnd) — those are the only positions where delete-then-
-        // insert is a true no-op, so removing them at snap time means the
-        // indicator never lands on a "drop does nothing" target.
-        //
-        // Each gap also carries the target block DOM so the drag-time row
-        // highlight can be toggled directly without a second pos→DOM lookup.
-        // For non-end gaps, dom is the block at that pos (the block that
-        // gets shifted down by the drop). For the end-of-doc gap, dom is
-        // the last block and isEnd=true so the rail anchors to its bottom.
-        type Gap = {
-          pos: number;
-          clientY: number;
-          dom: HTMLElement;
-          isEnd: boolean;
-        };
-        const gaps: Gap[] = [];
-        const doc = view.state.doc;
-        let lastBottom: number | null = null;
-        let lastEnd = 0;
-        let lastDom: HTMLElement | null = null;
-        doc.forEach((node, offset) => {
-          const dom = view.nodeDOM(offset);
-          if (!(dom instanceof HTMLElement)) return;
-          const r = dom.getBoundingClientRect();
-          const y = lastBottom == null ? r.top : (lastBottom + r.top) / 2;
-          if (offset !== srcPos && offset !== srcEnd) {
-            gaps.push({ pos: offset, clientY: y, dom, isEnd: false });
-          }
-          lastBottom = r.bottom;
-          lastEnd = offset + node.nodeSize;
-          lastDom = dom;
-        });
-        if (
-          lastBottom != null &&
-          lastDom &&
-          lastEnd !== srcPos &&
-          lastEnd !== srcEnd
-        ) {
-          gaps.push({
-            pos: lastEnd,
-            clientY: lastBottom,
-            dom: lastDom,
-            isEnd: true,
-          });
-        }
-
-        // Row-highlight tracker. We avoid React state to skip per-frame
-        // renders during the drag — direct className toggling is cheap
-        // and cleared on cleanup.
-        let currentTargetEl: HTMLElement | null = null;
-        let currentIsEnd = false;
-        const setTarget = (el: HTMLElement | null, isEnd: boolean) => {
-          if (currentTargetEl === el && currentIsEnd === isEnd) return;
-          if (currentTargetEl) {
-            currentTargetEl.classList.remove(
-              "ee-drop-target-block",
-              "ee-drop-target-block--end",
-            );
-          }
-          currentTargetEl = el;
-          currentIsEnd = isEnd;
-          if (el) {
-            el.classList.add("ee-drop-target-block");
-            if (isEnd) el.classList.add("ee-drop-target-block--end");
-          }
-        };
-
-        const onMove = (ev: MouseEvent) => {
-          ghost.style.left = `${ev.clientX + 12}px`;
-          ghost.style.top = `${ev.clientY + 8}px`;
-
-          if (!started) {
-            const dx = ev.clientX - startX;
-            const dy = ev.clientY - startY;
-            if (dx * dx + dy * dy < 16) return; // 4px threshold
-            started = true;
-            document.body.style.userSelect = "none";
-            document.body.style.cursor = "grabbing";
-          }
-
-          if (editor.isDestroyed || gaps.length === 0) return;
-
-          // Snap to nearest gap by Y distance.
-          let best = gaps[0];
-          let bestDist = Math.abs(ev.clientY - best.clientY);
-          for (let i = 1; i < gaps.length; i++) {
-            const d = Math.abs(ev.clientY - gaps[i].clientY);
-            if (d < bestDist) {
-              bestDist = d;
-              best = gaps[i];
-            }
-          }
-          targetPos = best.pos;
-          setTarget(best.dom, best.isEnd);
-        };
-
-        const cleanup = () => {
-          window.removeEventListener("mousemove", onMove);
-          window.removeEventListener("mouseup", onUp);
-          window.removeEventListener("keydown", onKey);
-          ghost.remove();
-          setTarget(null, false);
-          document.body.style.userSelect = prevUserSelect;
-          document.body.style.cursor = prevCursor;
-        };
-
-        const onUp = () => {
-          const finalTarget = targetPos;
-          cleanup();
-
-          if (!started || finalTarget < 0 || editor.isDestroyed) return;
-          // Dropping at either source boundary is a visual no-op.
-          if (finalTarget === srcPos || finalTarget === srcEnd) return;
-
-          const state = view.state;
-          const slice = state.doc.slice(srcPos, srcEnd);
-          let tr = state.tr;
-          tr = tr.delete(srcPos, srcEnd);
-          const mappedTarget = tr.mapping.map(finalTarget);
-          tr = tr.insert(mappedTarget, slice.content);
-          view.dispatch(tr.scrollIntoView());
-        };
-
-        const onKey = (ev: KeyboardEvent) => {
-          if (ev.key === "Escape") {
-            targetPos = -1;
-            cleanup();
-          }
-        };
-
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
-        window.addEventListener("keydown", onKey);
-      },
-      [editor, hover],
-    );
-
-    // Track hovered block and project gutter position into editor scroll
-    // container coordinates. The widget portals into the shell so it scrolls
-    // with content automatically.
+    // Emit initial stats once the editor is ready.
     useEffect(() => {
-      const shell = shellRef.current;
-      if (!shell || !editor) return;
-
-      let raf: number | null = null;
-      let pending: { x: number; y: number } | null = null;
-
-      const compute = () => {
-        raf = null;
-        if (!pending) return;
-        const { x, y } = pending;
-        pending = null;
-        if (editor.isDestroyed) return;
-        const { view } = editor;
-        const editorEl = view.dom as HTMLElement;
-        const editorRect = editorEl.getBoundingClientRect();
-        // Probe past the editor's left padding so posAtCoords lands on real
-        // content even when the cursor is in the gutter lane on the left.
-        const probeX = Math.min(
-          Math.max(x, editorRect.left + 84),
-          editorRect.right - 8,
-        );
-        const probeY = Math.min(
-          Math.max(y, editorRect.top + 4),
-          editorRect.bottom - 4,
-        );
-        const posInfo = view.posAtCoords({ left: probeX, top: probeY });
-        // If lookup fails or resolves outside a block, keep the previous
-        // hover so the widget stays visible while the cursor crosses padding.
-        if (!posInfo) return;
-        const $pos = view.state.doc.resolve(posInfo.pos);
-        if ($pos.depth < 1) return;
-        const blockPos = $pos.before(1);
-        const node = view.state.doc.nodeAt(blockPos);
-        if (!node) return;
-        const dom = view.nodeDOM(blockPos);
-        if (!(dom instanceof HTMLElement)) return;
-        const blockRect = dom.getBoundingClientRect();
-        const shellRect = shell.getBoundingClientRect();
-        const top = blockRect.top - shellRect.top + shell.scrollTop;
-        const left = blockRect.left - shellRect.left + shell.scrollLeft;
-        setHover((prev) => {
-          if (
-            prev &&
-            prev.pos === blockPos &&
-            Math.abs(prev.top - top) < 0.5 &&
-            Math.abs(prev.left - left) < 0.5 &&
-            Math.abs(prev.height - blockRect.height) < 0.5
-          ) {
-            return prev;
-          }
-          return { pos: blockPos, node, top, left, height: blockRect.height };
-        });
-      };
-
-      const onMove = (e: MouseEvent) => {
-        // Don't recompute while a button is held — re-rendering the gutter
-        // during the browser's drag-detection window cancels the drag.
-        if (e.buttons !== 0) return;
-        const target = e.target as Element | null;
-        if (target && target.closest(".ee-block-gutter")) return;
-        pending = { x: e.clientX, y: e.clientY };
-        if (raf == null) raf = requestAnimationFrame(compute);
-      };
-      const onLeave = (e: MouseEvent) => {
-        const next = e.relatedTarget as Node | null;
-        if (next && shell.contains(next)) return;
-        setHover(null);
-      };
-
-      shell.addEventListener("mousemove", onMove);
-      shell.addEventListener("mouseleave", onLeave);
-      return () => {
-        shell.removeEventListener("mousemove", onMove);
-        shell.removeEventListener("mouseleave", onLeave);
-        if (raf != null) cancelAnimationFrame(raf);
-      };
+      if (!editor || editor.isDestroyed) return;
+      onStatsChangeRef.current?.(computeStats(editor));
     }, [editor]);
 
     return (
@@ -793,49 +522,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           className="ee-rich-shell"
           ref={shellRef}
         />
-        {editor && hover && shellRef.current &&
-          createPortal(
-            <div
-              className="ee-block-gutter"
-              style={{
-                position: "absolute",
-                top: `${hover.top + 2}px`,
-                // Place the gutter lane: content edge minus
-                // (lane-total − num-w − gap-1) = 80 − 28 − 6 = 46.
-                // Keep in sync with --ee-lane-* variables in markdown.css.
-                left: `${Math.max(hover.left - 46, 0)}px`,
-                height: `${Math.min(hover.height, 28)}px`,
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                className="ee-block-handle ee-block-handle--add"
-                draggable={false}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  insertBlockBelow();
-                }}
-                title="Insert block below"
-                aria-label="Insert block"
-              >
-                +
-              </button>
-              <span
-                className="ee-block-handle ee-block-handle--drag"
-                onMouseDown={onGripMouseDown}
-                title="Drag to move block"
-                aria-label="Drag block"
-              >
-                <DotsSixVerticalIcon size={14} weight="bold" />
-              </span>
-            </div>,
-            shellRef.current,
-          )}
         {tableHandlePos.visible && (
           <>
             <div
@@ -959,6 +645,29 @@ function activeStateFor(editor: Editor | null): ActiveState {
     textColor: typeof colorAttr === "string" ? colorAttr : undefined,
     highlight: typeof highlightAttr === "string" ? highlightAttr : undefined,
   };
+}
+
+function computeStats(editor: Editor): EditorStats {
+  const doc = editor.state.doc;
+  const text = doc.textBetween(0, doc.content.size, "\n", " ");
+  const chars = text.length;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const blocks = Math.max(1, doc.childCount);
+  const head = editor.state.selection.head;
+  let line = 1;
+  if (head > 0 && head <= doc.content.size) {
+    const $pos = doc.resolve(Math.min(head, doc.content.size));
+    if ($pos.depth >= 1) {
+      const topPos = $pos.before(1);
+      let acc = 0;
+      doc.forEach((child, offset, index) => {
+        if (offset <= topPos) line = index + 1;
+        acc = offset + child.nodeSize;
+      });
+      void acc;
+    }
+  }
+  return { blocks, line, chars, words };
 }
 
 function insertImageFromFile(
