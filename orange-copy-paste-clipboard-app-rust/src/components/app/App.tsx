@@ -339,28 +339,38 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Re-sync with the Rust history whenever the main window regains focus.
-  // This is a safety-net: if an event was missed for any reason, the
-  // clipboard screen catches up as soon as the user switches back to it.
+  // Re-sync with the Rust history whenever the main window regains focus or
+  // becomes visible. This is a safety-net: if an event was missed for any
+  // reason, the clipboard screen catches up as soon as the user switches back
+  // to it. visibilitychange covers the "shown from tray/hotkey" path where
+  // tauri://focus alone may not fire.
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     const win = getCurrentWindow();
-    win
-      .listen("tauri://focus", () => {
+
+    const syncHistory = () => {
+      if (cancelled) return;
+      invoke<ClipboardEntry[]>("get_history").then((history) => {
         if (cancelled) return;
-        invoke<ClipboardEntry[]>("get_history").then((history) => {
-          if (cancelled) return;
-          setEntries(history);
-        });
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
+        setEntries(history);
       });
+    };
+
+    win.listen("tauri://focus", syncHistory).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") syncHistory();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
       unlisten?.();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
