@@ -227,6 +227,7 @@ fn setup_runtime(
         ("close_to_tray", &state_ref.close_to_tray, false),
         ("start_minimized", &state_ref.start_minimized, false),
         ("autosave", &state_ref.autosave, false),
+        ("show_splash", &state_ref.show_splash, true),
         // notification defaults to true when the key is absent from settings.json.
         // Operation-based notification flags also default to true.
         ("notification", &state_ref.notification_enabled, true),
@@ -321,6 +322,7 @@ pub fn run() {
         notif_copy: Arc::new(AtomicBool::new(true)),
         notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(false)),
+        show_splash: Arc::new(AtomicBool::new(true)),
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
         notes: Arc::new(parking_lot::Mutex::new(crate::notes::NoteStore::new())),
         notes_dirty: Arc::new(AtomicBool::new(false)),
@@ -401,12 +403,15 @@ pub fn run() {
         })
         .setup(move |app| {
             setup_runtime(app, &history, &suppress)?;
-            // Close the splash window from Rust after the frontend animation
-            // finishes. JS close() is unreliable for conf.json windows on
-            // Windows — the handle can persist as an invisible click-blocker.
+            // Close the splash window from Rust — JS close() is unreliable for
+            // conf.json windows on Windows (handle can persist as a click-blocker).
+            // If show_splash is off, close immediately (100 ms safety margin so
+            // the webview has time to exist before we close it).
+            let show = app.state::<AppState>().show_splash.load(Ordering::Relaxed);
+            let delay_ms: u64 = if show { 3_200 } else { 100 };
             let ah = app.handle().clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(2600));
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                 if let Some(w) = ah.get_webview_window("splash") {
                     let _ = w.close();
                 }

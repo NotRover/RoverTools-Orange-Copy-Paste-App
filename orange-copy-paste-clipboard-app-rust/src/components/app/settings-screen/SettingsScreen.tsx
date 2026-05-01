@@ -74,6 +74,7 @@ const SettingsScreen: React.FC = () => {
   const [notifCopy, setNotifCopy] = useState(true);
   const [notifPaste, setNotifPaste] = useState(true);
   const [autosave, setAutosave] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
   const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
@@ -88,6 +89,7 @@ const SettingsScreen: React.FC = () => {
     loadBoolWithDefault("notif_copy", setNotifCopy, true);
     loadBoolWithDefault("notif_paste", setNotifPaste, true);
     loadBoolWithDefault("autosave", setAutosave, false);
+    loadBoolWithDefault("show_splash", setShowSplash, true);
     invoke<boolean>("get_autostart").then(setRunOnStartup);
   }, []);
 
@@ -210,6 +212,24 @@ const SettingsScreen: React.FC = () => {
             className={`settings-toggle${startMinimized ? " active" : ""}`}
             onClick={handleStartMinimizedToggle}
             aria-pressed={startMinimized}
+          >
+            <span className="settings-toggle-knob" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <span className="settings-row-label">Show splash screen on startup</span>
+            <span className="settings-row-desc">
+              Display a brief startup screen when the app launches. Useful when
+              starting minimized to confirm the app is running in the background.
+            </span>
+          </div>
+          <button
+            type="button"
+            className={`settings-toggle${showSplash ? " active" : ""}`}
+            onClick={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
+            aria-pressed={showSplash}
           >
             <span className="settings-toggle-knob" />
           </button>

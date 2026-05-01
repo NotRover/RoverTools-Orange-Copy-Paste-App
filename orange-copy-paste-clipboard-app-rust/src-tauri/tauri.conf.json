@@ -30,7 +30,7 @@
         "url": "src/components/splash/splash.html",
         "title": "",
         "width": 380,
-        "height": 190,
+        "height": 215,
         "resizable": false,
         "decorations": false,
         "transparent": true,
