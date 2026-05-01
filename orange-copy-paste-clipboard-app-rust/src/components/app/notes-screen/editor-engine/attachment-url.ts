@@ -1,10 +1,9 @@
 // ── Attachment URL resolver ───────────────────────────────────────────────
 // Notes save attachments to `app_data/note-attachments/{images,files}/` and
-// reference them in markdown with the custom schemes `note-attachment://` (for
-// images) and `note-file://` (for documents). The schemes keep the markdown
-// source short and human-readable; this module resolves them to real
-// `tauri-asset:` URLs for display, and reverses the mapping when serializing
-// markdown back from the rich editor so the source stays clean.
+// reference them in stored content with the custom schemes
+// `note-attachment://` (images) and `note-file://` (documents). The schemes
+// keep the persisted JSON short and human-readable; this module resolves
+// them to real `tauri-asset:` URLs at DOM render time only.
 //
 // Anything outside these two schemes is left untouched, so users can still
 // paste plain http/https URLs, absolute paths, or `data:` URIs by hand.
@@ -17,8 +16,6 @@ const FILE_SCHEME = "note-file://";
 interface Resolver {
   imagesDir: string;
   filesDir: string;
-  imagesAssetPrefix: string;
-  filesAssetPrefix: string;
 }
 
 let resolver: Resolver | null = null;
@@ -30,10 +27,6 @@ export function subscribeAttachmentResolver(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-export function isAttachmentResolverReady(): boolean {
-  return resolver !== null;
-}
-
 export function initAttachmentResolver(): Promise<void> {
   if (resolver) return Promise.resolve();
   if (initPromise) return initPromise;
@@ -41,12 +34,7 @@ export function initAttachmentResolver(): Promise<void> {
     "get_note_attachments_dirs",
   )
     .then(({ images, files }) => {
-      resolver = {
-        imagesDir: images,
-        filesDir: files,
-        imagesAssetPrefix: assetDirPrefix(images),
-        filesAssetPrefix: assetDirPrefix(files),
-      };
+      resolver = { imagesDir: images, filesDir: files };
       listeners.forEach((fn) => {
         try { fn(); } catch (e) { console.error(e); }
       });
@@ -71,18 +59,6 @@ export function resolveAttachmentUrl(url: string): string {
   return url;
 }
 
-/** Reverse: collapse a resolved asset URL back to the custom scheme. */
-export function unresolveAttachmentUrl(url: string): string {
-  if (!resolver) return url;
-  if (url.startsWith(resolver.imagesAssetPrefix)) {
-    return IMAGE_SCHEME + decodeURIComponent(url.slice(resolver.imagesAssetPrefix.length));
-  }
-  if (url.startsWith(resolver.filesAssetPrefix)) {
-    return FILE_SCHEME + decodeURIComponent(url.slice(resolver.filesAssetPrefix.length));
-  }
-  return url;
-}
-
 /** Build a `note-attachment://<filename>` URL for an image filename. */
 export function imageAttachmentUrl(filename: string): string {
   return IMAGE_SCHEME + filename;
@@ -91,36 +67,6 @@ export function imageAttachmentUrl(filename: string): string {
 /** Build a `note-file://<filename>` URL for a document filename. */
 export function fileAttachmentUrl(filename: string): string {
   return FILE_SCHEME + filename;
-}
-
-/**
- * Rewrite all attachment URLs inside a markdown string to their resolved /
- * unresolved form. We target `(url)` in `![alt](url)` / `[text](url)` and
- * `src="..."` / `href="..."` inside inline HTML — the only places the schemes
- * legitimately appear in note markdown.
- */
-export function resolveMarkdown(md: string): string {
-  return rewriteMarkdown(md, resolveAttachmentUrl);
-}
-
-export function unresolveMarkdown(md: string): string {
-  return rewriteMarkdown(md, unresolveAttachmentUrl);
-}
-
-function rewriteMarkdown(md: string, fn: (url: string) => string): string {
-  if (!md) return md;
-  // Markdown link/image targets: ](url) or ](url "title")
-  let out = md.replace(/\]\(([^)\s]+)([^)]*)\)/g, (_, url: string, rest: string) => {
-    return `](${fn(url)}${rest})`;
-  });
-  // Inline HTML attrs
-  out = out.replace(/(\s(?:src|href)=)"([^"]+)"/gi, (_, head: string, url: string) => {
-    return `${head}"${fn(url)}"`;
-  });
-  out = out.replace(/(\s(?:src|href)=)'([^']+)'/gi, (_, head: string, url: string) => {
-    return `${head}'${fn(url)}'`;
-  });
-  return out;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -133,15 +79,4 @@ function joinPath(dir: string, name: string): string {
 
 function decodeName(url: string, scheme: string): string {
   return decodeURIComponent(url.slice(scheme.length));
-}
-
-/**
- * `convertFileSrc` URL-encodes the absolute path. To detect URLs that point
- * inside our attachment dirs, we precompute the encoded prefix (with a
- * trailing separator) so prefix matching is straightforward.
- */
-function assetDirPrefix(dir: string): string {
-  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
-  const withSep = dir.endsWith(sep) ? dir : dir + sep;
-  return convertFileSrc(withSep);
 }

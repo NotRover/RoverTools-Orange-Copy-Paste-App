@@ -808,7 +808,7 @@
   background-clip: padding-box;
 }
 
-/* Prose engine owns editing-surface and embed styles (see prose-engine/block-editor.css). */
+/* Editor surface and embed styles live in editor-engine/markdown.css. */
 
 /* Footer */
 .ns-editor-footer {
