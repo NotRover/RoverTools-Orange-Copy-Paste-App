@@ -20,6 +20,7 @@ export { default as NotionEditor } from "./NotionEditor";
 export type {
   NotionEditorHandle,
   NotionEditorProps,
+  EditorStats,
 } from "./NotionEditor";
 
 export { default as NotionPreview } from "./NotionPreview";

@@ -61,6 +61,7 @@ import {
   type EditorCommand,
   type ActiveState,
   type CalloutTone,
+  type EditorStats,
   imageAttachmentUrl,
   fileAttachmentUrl,
 } from "../editor-engine";
@@ -122,6 +123,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [active, setActive] = useState<ActiveState>(EMPTY_ACTIVE);
+  const [stats, setStats] = useState<EditorStats>({
+    blocks: 1,
+    line: 1,
+    chars: 0,
+    words: 0,
+  });
   const [showCalloutPicker, setShowCalloutPicker] = useState(false);
   const calloutPickerRef = useRef<HTMLDivElement>(null);
 
@@ -1281,6 +1288,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             entries={entries}
             onChange={handleEditorChange}
             onSelectionChange={refreshActive}
+            onStatsChange={setStats}
           />
         </div>
 
@@ -1288,6 +1296,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         <div className="ns-editor-footer">
           <span className="ns-editor-footer-text">
             Updated {timeAgo(note.updated_at)}
+          </span>
+          <span className="ns-editor-footer-stats">
+            Ln {stats.line} / {stats.blocks} · {stats.words} word
+            {stats.words === 1 ? "" : "s"} · {stats.chars} char
+            {stats.chars === 1 ? "" : "s"}
           </span>
         </div>
       </div>
