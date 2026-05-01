@@ -53,6 +53,8 @@ export default defineConfig(async () => ({
           __dirname,
           "src/components/notifications/notification.html",
         ),
+        // Startup splash screen
+        splash: path.resolve(__dirname, "src/components/splash/splash.html"),
       },
     },
   },

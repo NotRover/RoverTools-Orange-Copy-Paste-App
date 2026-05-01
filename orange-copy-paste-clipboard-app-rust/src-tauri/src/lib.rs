@@ -399,7 +399,20 @@ pub fn run() {
                 _ => {}
             }
         })
-        .setup(move |app| setup_runtime(app, &history, &suppress))
+        .setup(move |app| {
+            setup_runtime(app, &history, &suppress)?;
+            // Close the splash window from Rust after the frontend animation
+            // finishes. JS close() is unreliable for conf.json windows on
+            // Windows — the handle can persist as an invisible click-blocker.
+            let ah = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2600));
+                if let Some(w) = ah.get_webview_window("splash") {
+                    let _ = w.close();
+                }
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
