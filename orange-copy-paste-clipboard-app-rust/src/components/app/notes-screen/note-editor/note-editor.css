@@ -783,7 +783,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px 32px;
+  padding: 12px 12px;
   background: var(--surface);
 }
 
@@ -866,8 +866,18 @@
   flex: none;
   border: 1px solid var(--border);
 }
-.ns-callout-swatch--info    { background: #3b82f6; }
-.ns-callout-swatch--success { background: #46a758; }
-.ns-callout-swatch--warning { background: #d97706; }
-.ns-callout-swatch--danger  { background: #e5484d; }
-.ns-callout-swatch--neutral { background: var(--text-muted); }
+.ns-callout-swatch--info {
+  background: #3b82f6;
+}
+.ns-callout-swatch--success {
+  background: #46a758;
+}
+.ns-callout-swatch--warning {
+  background: #d97706;
+}
+.ns-callout-swatch--danger {
+  background: #e5484d;
+}
+.ns-callout-swatch--neutral {
+  background: var(--text-muted);
+}

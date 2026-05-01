@@ -17,6 +17,19 @@
   --ee-editor-size: 14.25px;
   --ee-editor-line: 1.6;
   --ee-caret-thickness: 2px;
+
+  /* Three lanes on the left of the rich editor — kept as variables so the
+     CSS pseudo-elements (line numbers, drop highlight) and the React gutter
+     portal stay perfectly aligned. Edit here, both follow.
+
+       [ number ][gap1][ gutter ][gap2][ content ]
+       0       28    34         72    80
+  */
+  --ee-lane-num-w: 28px;
+  --ee-lane-gap-1: 6px;
+  --ee-lane-gutter-w: 38px;
+  --ee-lane-gap-2: 8px;
+  --ee-lane-total: 80px; /* sum of the four above */
 }
 
 .ee-shell {
@@ -74,6 +87,10 @@
 .ee-rich.ProseMirror {
   outline: none;
   padding: var(--ee-editor-pad-edit);
+  /* Reserve the three-lane left strip (numbers / gutter / gap) so blocks
+     never collide with widgets in the gutter. Override the shared edit
+     padding-left with the lane total. */
+  padding-left: var(--ee-lane-total);
   font-size: var(--ee-editor-size);
   line-height: var(--ee-editor-line);
   color: var(--text);
@@ -85,6 +102,32 @@
     "kern" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  counter-reset: ee-line;
+}
+
+/* Line-number lane — numbers each top-level block (paragraph, heading, list,
+   blockquote, etc.) flush against the left edge. The block sits at the
+   content lane (--ee-lane-total from the shell edge); shifting the pseudo
+   leftward by that distance puts it at x = 0 of the shell. */
+.ee-rich.ProseMirror > * {
+  counter-increment: ee-line;
+  position: relative;
+}
+.ee-rich.ProseMirror > *::before {
+  content: counter(ee-line);
+  position: absolute;
+  left: calc(-1 * var(--ee-lane-total));
+  top: 0.4em;
+  width: var(--ee-lane-num-w);
+  padding-right: 6px;
+  text-align: right;
+  font-family: var(--ee-editor-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  opacity: 0.5;
+  user-select: none;
+  pointer-events: none;
 }
 
 .ee-rich.ProseMirror p.is-editor-empty:first-child::before {
@@ -779,7 +822,9 @@
 .ee-block-gutter {
   display: inline-flex;
   align-items: center;
-  gap: 0;
+  justify-content: flex-end;
+  gap: 2px;
+  width: var(--ee-lane-gutter-w);
   z-index: 5;
   pointer-events: auto;
   user-select: none;
@@ -850,20 +895,44 @@
   margin: 0 !important;
 }
 
-/* Reveal block boundaries while a block-drag is in progress so the user
-   can see all valid drop targets at a glance. */
-.ee-rich.ProseMirror.is-dragging-block > * {
-  outline: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
-  outline-offset: 2px;
-  border-radius: 3px;
+/* Drop-target row — the top-level block that the source will be inserted
+   *at* (i.e. the row that gets shifted down by the drop). Two cues fire:
+     1. Its line number flips to the accent color and weight so the user can
+        read off "I'm dropping at row N".
+     2. A 3px vertical accent rail appears just outside the content's left
+        edge, running the full height of the row.
+   For end-of-doc drops the source goes *after* the last block, so the
+   --end modifier flips the rail to a horizontal bar pinned beneath that
+   block instead of beside it. The line-number tint is suppressed in that
+   case (the source isn't replacing this row, it's landing after it). */
+.ee-rich.ProseMirror .ee-drop-target-block::before {
+  color: var(--accent);
+  opacity: 1;
+  font-weight: 700;
 }
-
-.ee-block-drop-indicator {
+.ee-rich.ProseMirror .ee-drop-target-block--end::before {
+  color: var(--text-muted);
+  opacity: 0.5;
+  font-weight: normal;
+}
+.ee-rich.ProseMirror .ee-drop-target-block::after {
+  content: "";
   position: absolute;
-  height: 1px;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  width: 3px;
   background: var(--accent);
+  border-radius: 2px;
   pointer-events: none;
-  z-index: 6;
-  opacity: 0.85;
+}
+.ee-rich.ProseMirror .ee-drop-target-block--end::after {
+  top: auto;
+  bottom: -4px;
+  left: -6px;
+  right: 0;
+  height: 3px;
+  width: auto;
+  border-radius: 2px;
 }
 

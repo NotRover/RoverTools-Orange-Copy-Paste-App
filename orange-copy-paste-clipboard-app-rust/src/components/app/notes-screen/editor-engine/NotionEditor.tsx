@@ -516,10 +516,15 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         .run();
     }, [editor, hover]);
 
-    // Manual drag — bypasses HTML5 drag/drop entirely (Tauri webview kept
-     // rejecting it). mousedown captures the source block, mousemove paints
-     // a drop indicator, mouseup performs the ProseMirror move via tr.delete
-     // + tr.insert. */
+    // Manual drag — HTML5 drag/drop fails inside the Tauri webview, so
+    // mousedown/mousemove/mouseup drives the whole flow.
+    //
+    // Detection uses the *insertion-gap* model: top-level blocks define a
+    // sequence of gaps (above first block, between each pair, below last).
+    // The cursor's Y snaps to the nearest gap, and the drop performs a
+    // delete-then-insert at that gap's document position. This avoids the
+    // off-by-one ambiguity of "this block, above or below midpoint" and
+    // makes inserting between two filled rows the natural primary case.
     const onGripMouseDown = useCallback(
       (e: React.MouseEvent) => {
         if (e.button !== 0 || !editor || !hover || !shellRef.current) return;
@@ -529,8 +534,8 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         const view = editor.view;
         const srcPos = hover.pos;
         const srcNode = hover.node;
+        const srcEnd = srcPos + srcNode.nodeSize;
         const srcDom = view.nodeDOM(srcPos);
-        const shell = shellRef.current;
 
         // Floating ghost (follows cursor)
         const ghost = document.createElement("div");
@@ -552,11 +557,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         ghost.style.zIndex = "9999";
         document.body.appendChild(ghost);
 
-        // Drop indicator (a horizontal line inside the shell)
-        const indicator = document.createElement("div");
-        indicator.className = "ee-block-drop-indicator";
-        shell.appendChild(indicator);
-
         let targetPos = -1;
         let started = false;
         const startX = e.clientX;
@@ -564,6 +564,75 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
 
         const prevUserSelect = document.body.style.userSelect;
         const prevCursor = document.body.style.cursor;
+
+        // Snapshot block geometry once. Build the list of insertion gaps
+        // *excluding* the two that touch source (pos === srcPos and
+        // pos === srcEnd) — those are the only positions where delete-then-
+        // insert is a true no-op, so removing them at snap time means the
+        // indicator never lands on a "drop does nothing" target.
+        //
+        // Each gap also carries the target block DOM so the drag-time row
+        // highlight can be toggled directly without a second pos→DOM lookup.
+        // For non-end gaps, dom is the block at that pos (the block that
+        // gets shifted down by the drop). For the end-of-doc gap, dom is
+        // the last block and isEnd=true so the rail anchors to its bottom.
+        type Gap = {
+          pos: number;
+          clientY: number;
+          dom: HTMLElement;
+          isEnd: boolean;
+        };
+        const gaps: Gap[] = [];
+        const doc = view.state.doc;
+        let lastBottom: number | null = null;
+        let lastEnd = 0;
+        let lastDom: HTMLElement | null = null;
+        doc.forEach((node, offset) => {
+          const dom = view.nodeDOM(offset);
+          if (!(dom instanceof HTMLElement)) return;
+          const r = dom.getBoundingClientRect();
+          const y = lastBottom == null ? r.top : (lastBottom + r.top) / 2;
+          if (offset !== srcPos && offset !== srcEnd) {
+            gaps.push({ pos: offset, clientY: y, dom, isEnd: false });
+          }
+          lastBottom = r.bottom;
+          lastEnd = offset + node.nodeSize;
+          lastDom = dom;
+        });
+        if (
+          lastBottom != null &&
+          lastDom &&
+          lastEnd !== srcPos &&
+          lastEnd !== srcEnd
+        ) {
+          gaps.push({
+            pos: lastEnd,
+            clientY: lastBottom,
+            dom: lastDom,
+            isEnd: true,
+          });
+        }
+
+        // Row-highlight tracker. We avoid React state to skip per-frame
+        // renders during the drag — direct className toggling is cheap
+        // and cleared on cleanup.
+        let currentTargetEl: HTMLElement | null = null;
+        let currentIsEnd = false;
+        const setTarget = (el: HTMLElement | null, isEnd: boolean) => {
+          if (currentTargetEl === el && currentIsEnd === isEnd) return;
+          if (currentTargetEl) {
+            currentTargetEl.classList.remove(
+              "ee-drop-target-block",
+              "ee-drop-target-block--end",
+            );
+          }
+          currentTargetEl = el;
+          currentIsEnd = isEnd;
+          if (el) {
+            el.classList.add("ee-drop-target-block");
+            if (isEnd) el.classList.add("ee-drop-target-block--end");
+          }
+        };
 
         const onMove = (ev: MouseEvent) => {
           ghost.style.left = `${ev.clientX + 12}px`;
@@ -576,53 +645,22 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
             started = true;
             document.body.style.userSelect = "none";
             document.body.style.cursor = "grabbing";
-            (view.dom as HTMLElement).classList.add("is-dragging-block");
-            setHover(null);
           }
 
-          if (editor.isDestroyed) return;
-          const editorEl = view.dom as HTMLElement;
-          const er = editorEl.getBoundingClientRect();
-          const probeX = Math.min(
-            Math.max(ev.clientX, er.left + 56),
-            er.right - 8,
-          );
-          const probeY = Math.min(
-            Math.max(ev.clientY, er.top + 4),
-            er.bottom - 4,
-          );
-          const posInfo = view.posAtCoords({ left: probeX, top: probeY });
-          if (!posInfo) {
-            indicator.style.display = "none";
-            targetPos = -1;
-            return;
-          }
-          const $p = view.state.doc.resolve(posInfo.pos);
-          if ($p.depth < 1) {
-            indicator.style.display = "none";
-            targetPos = -1;
-            return;
-          }
-          const blockPos = $p.before(1);
-          const blockNode = view.state.doc.nodeAt(blockPos);
-          if (!blockNode) {
-            indicator.style.display = "none";
-            targetPos = -1;
-            return;
-          }
-          const blockDom = view.nodeDOM(blockPos);
-          if (!(blockDom instanceof HTMLElement)) return;
-          const br = blockDom.getBoundingClientRect();
-          const sr = shell.getBoundingClientRect();
-          // Always insert after the hovered block so the indicator only ever
-          // appears between blocks (or after the last one) — never above the
-          // first block or floating at a top edge.
-          targetPos = blockPos + blockNode.nodeSize;
+          if (editor.isDestroyed || gaps.length === 0) return;
 
-          indicator.style.display = "";
-          indicator.style.left = `${br.left - sr.left + shell.scrollLeft}px`;
-          indicator.style.width = `${br.width}px`;
-          indicator.style.top = `${br.bottom - sr.top + shell.scrollTop - 1}px`;
+          // Snap to nearest gap by Y distance.
+          let best = gaps[0];
+          let bestDist = Math.abs(ev.clientY - best.clientY);
+          for (let i = 1; i < gaps.length; i++) {
+            const d = Math.abs(ev.clientY - gaps[i].clientY);
+            if (d < bestDist) {
+              bestDist = d;
+              best = gaps[i];
+            }
+          }
+          targetPos = best.pos;
+          setTarget(best.dom, best.isEnd);
         };
 
         const cleanup = () => {
@@ -630,10 +668,9 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           window.removeEventListener("mouseup", onUp);
           window.removeEventListener("keydown", onKey);
           ghost.remove();
-          indicator.remove();
+          setTarget(null, false);
           document.body.style.userSelect = prevUserSelect;
           document.body.style.cursor = prevCursor;
-          (view.dom as HTMLElement).classList.remove("is-dragging-block");
         };
 
         const onUp = () => {
@@ -641,11 +678,10 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           cleanup();
 
           if (!started || finalTarget < 0 || editor.isDestroyed) return;
-          const state = view.state;
-          const srcEnd = srcPos + srcNode.nodeSize;
-          // No-op if dropping inside the source range
-          if (finalTarget >= srcPos && finalTarget <= srcEnd) return;
+          // Dropping at either source boundary is a visual no-op.
+          if (finalTarget === srcPos || finalTarget === srcEnd) return;
 
+          const state = view.state;
           const slice = state.doc.slice(srcPos, srcEnd);
           let tr = state.tr;
           tr = tr.delete(srcPos, srcEnd);
@@ -690,7 +726,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         // Probe past the editor's left padding so posAtCoords lands on real
         // content even when the cursor is in the gutter lane on the left.
         const probeX = Math.min(
-          Math.max(x, editorRect.left + 56),
+          Math.max(x, editorRect.left + 84),
           editorRect.right - 8,
         );
         const probeY = Math.min(
@@ -764,7 +800,10 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
               style={{
                 position: "absolute",
                 top: `${hover.top + 2}px`,
-                left: `${Math.max(hover.left - 36, 0)}px`,
+                // Place the gutter lane: content edge minus
+                // (lane-total − num-w − gap-1) = 80 − 28 − 6 = 46.
+                // Keep in sync with --ee-lane-* variables in markdown.css.
+                left: `${Math.max(hover.left - 46, 0)}px`,
                 height: `${Math.min(hover.height, 28)}px`,
               }}
               onMouseDown={(e) => e.stopPropagation()}
