@@ -126,7 +126,10 @@ const WindowControls: React.FC = () => {
 
 const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
-  const [screen, setScreen] = useState<AppScreen>("clipboard");
+  const [screen, setScreen] = useState<AppScreen>(() => {
+    const saved = localStorage.getItem("sc-last-screen") as AppScreen | null;
+    return saved === "notes" || saved === "clipboard" ? saved : "clipboard";
+  });
   const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
     null,
   );
@@ -883,7 +886,12 @@ const App: React.FC = () => {
       <Sidebar
         screen={screen}
         theme={theme}
-        onNavigate={setScreen}
+        onNavigate={(s) => {
+          setScreen(s);
+          if (s === "clipboard" || s === "notes") {
+            localStorage.setItem("sc-last-screen", s);
+          }
+        }}
         onToggleTheme={toggleTheme}
       />
 

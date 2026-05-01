@@ -24,6 +24,22 @@
         "visible": false,
         "backgroundColor": "#0e0e0e",
         "dragDropEnabled": false
+      },
+      {
+        "label": "splash",
+        "url": "src/components/splash/splash.html",
+        "title": "",
+        "width": 380,
+        "height": 190,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": true,
+        "center": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
