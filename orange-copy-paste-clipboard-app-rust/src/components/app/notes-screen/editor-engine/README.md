@@ -29,14 +29,14 @@ search snippets, and "is this note empty" checks.
 | --------------------------- | -------------------------------------------------- |
 | `NotionEditor`              | The editable surface. Mount this in note editors.  |
 | `NotionEditorHandle`        | Imperative ref: `applyCommand`, `getContent`, …    |
+| `EditorStats`               | `{ blocks, line, chars, words }` from `onStatsChange`. |
 | `NotionPreview`             | Read-only renderer for note cards.                 |
 | `EditorCommand`             | Mode-agnostic toolbar command type.                |
 | `ActiveState` / `BlockKind` | Toolbar feedback (current block, marks, alignment).|
 | `CalloutTone`               | `info` \| `success` \| `warning` \| `danger` \| `neutral` |
-| `parseStoredContent`        | Detect JSON vs legacy markdown.                    |
-| `serializeDoc`              | `JSONContent → string` for persistence.            |
 | `extractPlainText`          | Plain-text projection for titles/search.           |
-| `initAttachmentResolver` …  | Local-attachment URL plumbing (unchanged).         |
+| `initAttachmentResolver`    | One-shot init for local-attachment URL plumbing.   |
+| `imageAttachmentUrl` / `fileAttachmentUrl` | Build `note-attachment://` / `note-file://` URLs. |
 
 ## Toolbar contract
 
@@ -64,18 +64,12 @@ extensions and don't need custom code.
 `NotionPreview` walks the Tiptap JSON and renders React elements directly —
 no editor instance per card.
 
-## Block handles
-
-`@tiptap/extension-drag-handle-react` renders a floating gutter next to the
-hovered block in `NotionEditor.tsx`. The gutter has two buttons: "+" inserts
-an empty paragraph after the hovered block, "⋮⋮" is the drag affordance.
-
 ## Dependencies
 
 Core: `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`.
 Features: `extension-{underline,link,task-list,task-item,table,table-row,
 table-cell,table-header,placeholder,text-align,text-style,color,highlight,
-image,details,code-block-lowlight,drag-handle-react}`, `lowlight`.
+image,details,code-block-lowlight}`, `lowlight`.
 
 ## Invariants
 
@@ -96,5 +90,5 @@ From `orange-copy-paste-clipboard-app-rust/`:
    - Toolbar: bold/italic/underline/strike/code, headings, quote, callout
      (each tone), toggle list, lists, task list, code block, table, link,
      image, clip embed, group embed, alignment, color, highlight.
-   - Hover the editor: drag handle and "+" appear next to each block.
+   - Footer shows live stats (line / blocks / words / chars).
    - Cards in the list render previews from JSON content.

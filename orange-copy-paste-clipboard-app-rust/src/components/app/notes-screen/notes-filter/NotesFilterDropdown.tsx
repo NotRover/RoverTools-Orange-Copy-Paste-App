@@ -3,7 +3,6 @@ import { groupColor } from "../../../../types";
 import { CloseIcon, FilterIcon } from "../../../icons";
 import { PinIcon as PinIconElement } from "../../../entry-types/EntryTypePill";
 import "../../clipboard-screen/search-filter/SearchFilter.css";
-import "./notes-filter.css";
 
 // ── Notes filter state hook ──────────────────────────────────────────
 

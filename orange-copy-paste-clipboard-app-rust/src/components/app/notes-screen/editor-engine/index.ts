@@ -9,12 +9,7 @@ export type {
   EditorContent,
 } from "./types";
 
-export {
-  parseStoredContent,
-  serializeDoc,
-  emptyDoc,
-  extractPlainText,
-} from "./content-codec";
+export { extractPlainText } from "./content-codec";
 
 export { default as NotionEditor } from "./NotionEditor";
 export type {
@@ -27,8 +22,6 @@ export { default as NotionPreview } from "./NotionPreview";
 
 export {
   initAttachmentResolver,
-  resolveAttachmentUrl,
-  unresolveAttachmentUrl,
   imageAttachmentUrl,
   fileAttachmentUrl,
 } from "./attachment-url";
