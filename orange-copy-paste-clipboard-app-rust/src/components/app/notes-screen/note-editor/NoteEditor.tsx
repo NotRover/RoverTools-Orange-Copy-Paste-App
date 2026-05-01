@@ -608,6 +608,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         {/* Formatting toolbar */}
         <div className="ns-format-bar">
           {/* Inline marks */}
+          <div className="ns-fmt-group">
           <button
             className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
             onClick={() => dispatch({ kind: "bold" })}
@@ -648,10 +649,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           >
             <CodeIcon size={13} weight="bold" />
           </button>
+          </div>
 
-          <span className="ns-fmt-sep" />
-
-          {/* Text color */}
+          {/* Color & highlight */}
+          <div className="ns-fmt-group">
           <div className="ns-toolbar-wrap" ref={colorPickerRef}>
             <button
               className={`ns-fmt-btn${active.textColor ? " ns-fmt-btn--active" : ""}`}
@@ -744,10 +745,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
-
-          <span className="ns-fmt-sep" />
+          </div>
 
           {/* Block types */}
+          <div className="ns-fmt-group">
           <div className="ns-heading-wrap" ref={headingDropdownRef}>
             <button
               className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "h1" || bk === "h2" || bk === "h3" || bk === "h4" || bk === "h5" ? " ns-fmt-btn--active" : ""}`}
@@ -930,9 +931,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           >
             <MinusIcon size={13} weight="bold" />
           </button>
+          </div>
 
-          <span className="ns-fmt-sep" />
-
+          {/* Lists */}
+          <div className="ns-fmt-group">
           <div className="ns-toolbar-wrap" ref={structureDropdownRef}>
             <button
               className={`ns-fmt-btn ns-fmt-btn--dropdown${structureActive ? " ns-fmt-btn--active" : ""}`}
@@ -980,10 +982,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
-
-          <span className="ns-fmt-sep" />
+          </div>
 
           {/* Text alignment */}
+          <div className="ns-fmt-group">
           <div className="ns-toolbar-wrap" ref={alignDropdownRef}>
             <button
               className={`ns-fmt-btn ns-fmt-btn--dropdown${active.align ? " ns-fmt-btn--active" : ""}`}
@@ -1059,14 +1061,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
+          </div>
 
-          <span className="ns-fmt-sep" />
-
-          {/* Link picker */}
-          <div
-            className="ns-embed-wrap ns-embed-wrap--push"
-            ref={linkPickerRef}
-          >
+          {/* Insert */}
+          <div className="ns-fmt-group">
+          <div className="ns-embed-wrap" ref={linkPickerRef}>
             <button
               className={`ns-fmt-btn${showLinkPicker ? " ns-fmt-btn--active" : ""}`}
               onClick={() => {
@@ -1276,6 +1275,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 </div>
               </div>
             )}
+          </div>
           </div>
         </div>
 

@@ -358,11 +358,24 @@
   align-items: center;
   flex-wrap: wrap;
   row-gap: 4px;
-  gap: 1px;
+  column-gap: 0;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   position: relative;
+}
+
+.ns-fmt-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 1px;
+}
+
+.ns-fmt-group + .ns-fmt-group {
+  margin-left: 6px;
+  padding-left: 7px;
+  border-left: 1px solid var(--border);
 }
 
 .ns-fmt-btn {
@@ -565,22 +578,10 @@
   margin: 2px 4px;
 }
 
-.ns-fmt-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border);
-  flex-shrink: 0;
-  margin: 0 3px;
-}
-
 /* ── Embed picker ────────────────────────────────────────────────── */
 
 .ns-embed-wrap {
   position: relative;
-}
-
-.ns-embed-wrap--push {
-  margin-left: auto;
 }
 
 .ns-embed-picker {
