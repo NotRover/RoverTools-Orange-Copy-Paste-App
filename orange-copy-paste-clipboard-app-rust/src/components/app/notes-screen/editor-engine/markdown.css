@@ -1185,50 +1185,6 @@
   color: var(--text);
 }
 
-/* ── Details / Toggle list ───────────────────────────────────────────── */
-
-.ee-details {
-  margin: 8px 0;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-2, rgba(127, 127, 127, 0.04));
-}
-.ee-details > summary {
-  cursor: pointer;
-  font-weight: 600;
-  list-style: none;
-  padding: 4px 4px 4px 22px;
-  position: relative;
-  outline: none;
-}
-.ee-details > summary::-webkit-details-marker {
-  display: none;
-}
-.ee-details > summary::before {
-  content: "▶";
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 9px;
-  opacity: 0.6;
-  transition: transform 120ms ease;
-}
-.ee-details[open] > summary::before,
-.ee-details.is-open > summary::before {
-  transform: translateY(-50%) rotate(90deg);
-}
-.ee-details > div {
-  padding: 4px 4px 4px 22px;
-}
-.ee-details > div > :first-child {
-  margin-top: 4px;
-}
-.ee-details > div > :last-child {
-  margin-bottom: 4px;
-}
-
 /* ── Code block (lowlight) ───────────────────────────────────────────── */
 
 .ee-codeblock {

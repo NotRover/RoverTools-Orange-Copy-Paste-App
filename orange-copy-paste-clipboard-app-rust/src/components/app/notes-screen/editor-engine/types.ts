@@ -17,7 +17,6 @@ export type EditorCommand =
   | { kind: "paragraph" }
   | { kind: "blockquote" }
   | { kind: "callout"; tone?: CalloutTone }
-  | { kind: "toggle" }
   | { kind: "bulletList" }
   | { kind: "orderedList" }
   | { kind: "taskList" }
@@ -53,7 +52,6 @@ export type BlockKind =
   | "h5"
   | "bq"
   | "callout"
-  | "toggle"
   | "todo"
   | "todoChecked"
   | "ul"

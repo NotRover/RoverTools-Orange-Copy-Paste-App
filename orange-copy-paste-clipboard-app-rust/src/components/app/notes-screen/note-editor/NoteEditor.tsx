@@ -28,7 +28,6 @@ import {
   ClipboardTextIcon,
   CaretDownIcon,
   TextUnderlineIcon,
-  CaretRightIcon,
   LightbulbIcon,
   TextAlignLeftIcon,
   TextAlignCenterIcon,
@@ -1001,14 +1000,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
-          <button
-            className={`ns-fmt-btn${bk === "toggle" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "toggle" })}
-            data-tooltip="Toggle list"
-            data-tooltip-pos="below"
-          >
-            <CaretRightIcon size={13} weight="bold" />
-          </button>
           <button
             className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`}
             onClick={() => dispatch({ kind: "codeBlock" })}

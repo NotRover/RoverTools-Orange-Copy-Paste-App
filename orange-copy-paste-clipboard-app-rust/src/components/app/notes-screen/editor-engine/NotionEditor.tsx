@@ -30,11 +30,6 @@ import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
 import { Image } from "@tiptap/extension-image";
-import {
-  Details,
-  DetailsContent,
-  DetailsSummary,
-} from "@tiptap/extension-details";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
 import {
@@ -230,7 +225,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         Placeholder.configure({
           placeholder: ({ node }) => {
             if (node.type.name === "heading") return "Heading";
-            if (node.type.name === "detailsSummary") return "Toggle title";
             if (node.type.name === "codeBlock") return "";
             return "Type something — or press Enter to start a new block";
           },
@@ -245,13 +239,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         TextStyle,
         Color,
         Highlight.configure({ multicolor: true }),
-        Details.configure({
-          persist: true,
-          openClassName: "is-open",
-          HTMLAttributes: { class: "ee-details" },
-        }),
-        DetailsSummary,
-        DetailsContent,
         CodeBlockLowlight.configure({
           lowlight,
           HTMLAttributes: { class: "ee-codeblock" },
@@ -346,11 +333,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
               break;
             case "callout":
               c.toggleCallout(cmd.tone ?? "info").run();
-              break;
-            case "toggle":
-              if (editor.isActive("details"))
-                c.unsetDetails().run();
-              else c.setDetails().run();
               break;
             case "bulletList":
               c.toggleBulletList().run();
@@ -618,7 +600,6 @@ function activeStateFor(editor: Editor | null): ActiveState {
   else if (editor.isActive("heading", { level: 4 })) blockKind = "h4";
   else if (editor.isActive("heading", { level: 5 })) blockKind = "h5";
   else if (editor.isActive("callout")) blockKind = "callout";
-  else if (editor.isActive("details")) blockKind = "toggle";
   else if (editor.isActive("blockquote")) blockKind = "bq";
   else if (editor.isActive("taskItem")) blockKind = "todo";
   else if (editor.isActive("bulletList")) blockKind = "ul";
