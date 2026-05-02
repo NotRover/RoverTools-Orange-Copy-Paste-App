@@ -7,35 +7,36 @@ import {
   ReactNodeViewRenderer,
   type NodeViewProps,
 } from "@tiptap/react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   ImageIcon,
   FileIcon,
   TextLinesIcon,
   HtmlCodeIcon,
   TagIcon,
+  PinIcon,
+  SaveStarIcon,
 } from "../../../../icons";
 import {
   groupColor,
-  isImageFile,
   filePaths,
-  resolveImageSrc,
   truncateText,
+  deriveDisplayKind,
 } from "../../../../../types";
+
+const SYSTEM_GROUP_META: Record<string, { label: string; bg: string; fg: string; Icon: React.FC<{ size?: number }> }> = {
+  pinned: { label: "Pinned", bg: "var(--accent-dim)", fg: "var(--accent)", Icon: PinIcon },
+  Saved: { label: "Saved", bg: "rgba(34, 197, 94, 0.12)", fg: "#22c55e", Icon: SaveStarIcon },
+};
 import { stripHtml } from "../../notes-utils";
 import { useEmbedContext } from "../embed-context";
 
 type EntryType = "text" | "image" | "file" | "html";
 
-function EntryIcon({ type, content }: { type: EntryType; content: string }) {
+function EntryIcon({ type }: { type: EntryType }) {
   const sz = 11;
   if (type === "image") return <ImageIcon size={sz} />;
   if (type === "html") return <HtmlCodeIcon size={sz} />;
-  if (type === "file") {
-    const paths = filePaths(content);
-    if (paths.some(isImageFile)) return <ImageIcon size={sz} />;
-    return <FileIcon size={sz} />;
-  }
+  if (type === "file") return <FileIcon size={sz} />;
   return <TextLinesIcon size={sz} />;
 }
 
@@ -49,25 +50,18 @@ function rowLabel(entry: { type: EntryType; content: string; label?: string }): 
   return truncateText(raw.replace(/\s+/g, " ").trim(), 52) || "—";
 }
 
-function rowThumb(
-  entry: { type: EntryType; content: string; label?: string },
-): string | null {
-  if (entry.type === "image") {
-    return resolveImageSrc(entry.content, convertFileSrc);
-  }
-  if (entry.type === "file") {
-    const paths = filePaths(entry.content).filter(isImageFile);
-    return paths[0] ? convertFileSrc(paths[0]) : null;
-  }
-  return null;
-}
 
 const GroupRefView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
   const { entries } = useEmbedContext();
   const name = (node.attrs.name as string) ?? "";
   const expanded = !!(node.attrs.expanded as boolean);
-  const c = groupColor(name);
-  const groupEntries = entries.filter((e) => e.groups.includes(name));
+  const sysMeta = SYSTEM_GROUP_META[name];
+  const c = sysMeta ?? groupColor(name);
+  const groupEntries = name === "pinned"
+    ? entries.filter((e) => e.pinned)
+    : name === "Saved"
+    ? entries.filter((e) => e.groups.includes("Saved"))
+    : entries.filter((e) => e.groups.includes(name));
 
   const handleToggle = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -75,10 +69,13 @@ const GroupRefView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
     updateAttributes({ expanded: !expanded });
   };
 
+  const SysIcon = sysMeta?.Icon;
+  const displayName = sysMeta?.label ?? name;
+
   return (
     <NodeViewWrapper
       as="span"
-      className={`ee-group-chip${expanded ? " ee-group-chip--open" : ""}`}
+      className={`ee-group-chip${sysMeta ? " ee-group-chip--system" : ""}${expanded ? " ee-group-chip--open" : ""}`}
       data-group-ref={name}
       contentEditable={false}
     >
@@ -90,8 +87,12 @@ const GroupRefView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
         data-tooltip={expanded ? "Click to collapse" : "Click to expand"}
         data-tooltip-pos="below"
       >
-        <span className="ee-group-chip-dot" style={{ background: c.fg }} />
-        {name}
+        {SysIcon ? (
+          <span className="ee-group-chip-sys-icon"><SysIcon size={10} /></span>
+        ) : (
+          <span className="ee-group-chip-dot" style={{ background: c.fg }} />
+        )}
+        {displayName}
         {groupEntries.length > 0 && (
           <span className="ee-group-chip-count">{groupEntries.length}</span>
         )}
@@ -104,8 +105,8 @@ const GroupRefView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
         >
           {/* Header */}
           <span className="ee-group-panel-header">
-            <TagIcon size={9} strokeWidth={2.5} />
-            <span style={{ color: c.fg }}>{name}</span>
+            {SysIcon ? <SysIcon size={9} /> : <TagIcon size={9} strokeWidth={2.5} />}
+            <span style={{ color: c.fg }}>{displayName}</span>
             <span className="ee-group-panel-count">
               {groupEntries.length} entr{groupEntries.length === 1 ? "y" : "ies"}
             </span>
@@ -117,21 +118,13 @@ const GroupRefView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
               <span className="ee-group-panel-empty">No entries in this group</span>
             ) : (
               groupEntries.slice(0, 10).map((entry) => {
-                const thumb = rowThumb(entry);
                 const label = rowLabel(entry);
+                const kind = deriveDisplayKind(entry);
                 return (
                   <span key={entry.id} className="ee-group-panel-row">
-                    {thumb ? (
-                      <img
-                        className="ee-group-panel-row-thumb"
-                        src={thumb}
-                        alt=""
-                      />
-                    ) : (
-                      <span className="ee-group-panel-row-icon">
-                        <EntryIcon type={entry.type} content={entry.content} />
-                      </span>
-                    )}
+                    <span className={`ee-group-panel-row-icon ee-group-panel-row-icon--${kind}`}>
+                      <EntryIcon type={entry.type} />
+                    </span>
                     <span className="ee-group-panel-row-label">{label}</span>
                   </span>
                 );

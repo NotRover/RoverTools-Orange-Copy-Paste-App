@@ -17,7 +17,14 @@ import {
   TextLinesIcon,
   HtmlCodeIcon,
   VideoIcon,
+  PinIcon,
+  SaveStarIcon,
 } from "../../../icons";
+
+const SYSTEM_GROUP_META: Record<string, { label: string; bg: string; fg: string; Icon: React.FC<{ size?: number }> }> = {
+  pinned: { label: "Pinned", bg: "var(--accent-dim)", fg: "var(--accent)", Icon: PinIcon },
+  Saved: { label: "Saved", bg: "rgba(34, 197, 94, 0.12)", fg: "#22c55e", Icon: SaveStarIcon },
+};
 import { fileName, stripHtml } from "../notes-utils";
 import {
   resolveAttachmentUrl,
@@ -307,14 +314,25 @@ const GroupChip: React.FC<{ name: string; entries: ClipboardEntry[] }> = ({
   name,
   entries,
 }) => {
-  const c = groupColor(name);
-  const count = entries.filter((e) => e.groups.includes(name)).length;
+  const sysMeta = SYSTEM_GROUP_META[name];
+  const c = sysMeta ?? groupColor(name);
+  const count = name === "pinned"
+    ? entries.filter((e) => e.pinned).length
+    : name === "Saved"
+    ? entries.filter((e) => e.groups.includes("Saved")).length
+    : entries.filter((e) => e.groups.includes(name)).length;
+  const SysIcon = sysMeta?.Icon;
+  const displayName = sysMeta?.label ?? name;
 
   return (
-    <span className="ee-group-chip">
+    <span className={`ee-group-chip${sysMeta ? " ee-group-chip--system" : ""}`}>
       <span className="ee-group-chip-inner" style={{ background: c.bg, color: c.fg }}>
-        <span className="ee-group-chip-dot" style={{ background: c.fg }} />
-        {name}
+        {SysIcon ? (
+          <span className="ee-group-chip-sys-icon"><SysIcon size={10} /></span>
+        ) : (
+          <span className="ee-group-chip-dot" style={{ background: c.fg }} />
+        )}
+        {displayName}
         {count > 0 && <span className="ee-group-chip-count">{count}</span>}
       </span>
     </span>

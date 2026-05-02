@@ -46,6 +46,7 @@ import {
   CloseIcon,
   TrashIcon,
   PinIcon,
+  SaveStarIcon,
   CheckIcon,
   PlusIcon,
   ImageIcon,
@@ -1356,30 +1357,54 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                         );
                       })
                     )
-                  ) : filteredGroups.length === 0 ? (
-                    <div className="ns-embed-empty">No groups found</div>
                   ) : (
-                    filteredGroups.map((group) => {
-                      const c = groupColor(group);
-                      return (
-                        <button
-                          key={group}
-                          className="ns-embed-item"
-                          onClick={() => insertGroupEmbed(group)}
-                        >
-                          <span
-                            className="ns-embed-item-group"
-                            style={{ background: c.bg, color: c.fg }}
-                          >
-                            <span
-                              className="ns-embed-group-dot"
-                              style={{ background: c.fg }}
-                            />
-                            {group}
-                          </span>
-                        </button>
-                      );
-                    })
+                    <>
+                      {/* System groups */}
+                      <button
+                        className="ns-embed-item"
+                        onClick={() => insertGroupEmbed("pinned")}
+                      >
+                        <span className="ns-embed-item-group ns-embed-item-group--system ns-embed-item-group--pinned">
+                          <PinIcon size={10} />
+                          Pinned
+                        </span>
+                      </button>
+                      <button
+                        className="ns-embed-item"
+                        onClick={() => insertGroupEmbed("Saved")}
+                      >
+                        <span className="ns-embed-item-group ns-embed-item-group--system ns-embed-item-group--saved">
+                          <SaveStarIcon size={10} />
+                          Saved
+                        </span>
+                      </button>
+                      {/* User groups */}
+                      {filteredGroups.length === 0 && embedSearch.trim() !== "" ? (
+                        <div className="ns-embed-empty">No groups found</div>
+                      ) : (
+                        filteredGroups.map((group) => {
+                          const c = groupColor(group);
+                          return (
+                            <button
+                              key={group}
+                              className="ns-embed-item"
+                              onClick={() => insertGroupEmbed(group)}
+                            >
+                              <span
+                                className="ns-embed-item-group"
+                                style={{ background: c.bg, color: c.fg }}
+                              >
+                                <span
+                                  className="ns-embed-group-dot"
+                                  style={{ background: c.fg }}
+                                />
+                                {group}
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </>
                   )}
                 </div>
               </div>
