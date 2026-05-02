@@ -22,6 +22,11 @@ export const ClipEmbed = Node.create({
         parseHTML: (el: HTMLElement) => el.getAttribute("data-clip-embed") ?? "",
         renderHTML: (attrs) => ({ "data-clip-embed": attrs.id ?? "" }),
       },
+      expanded: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute("data-expanded") === "true",
+        renderHTML: (attrs) => attrs.expanded ? { "data-expanded": "true" } : {},
+      },
     };
   },
 
