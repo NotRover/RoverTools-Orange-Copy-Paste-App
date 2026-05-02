@@ -17,6 +17,7 @@
   min-height: 0;
   opacity: 1;
   transition: opacity 0.16s ease;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
