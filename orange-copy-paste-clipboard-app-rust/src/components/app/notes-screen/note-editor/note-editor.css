@@ -888,3 +888,81 @@
 .ns-callout-swatch--neutral {
   background: var(--text-muted);
 }
+
+/* ── Export menu ─────────────────────────────────────────────────── */
+
+.ns-export-wrap {
+  position: relative;
+}
+
+.ns-export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 220;
+  min-width: 190px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: nsDropIn 0.12s ease-out;
+}
+
+.ns-export-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 11px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+}
+
+.ns-export-item:hover {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.ns-export-item svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.ns-export-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 4px;
+}
+
+/* Success toast that appears briefly at the bottom of the editor header */
+.ns-export-toast {
+  position: absolute;
+  bottom: -32px;
+  right: 0;
+  padding: 5px 11px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  animation: nsDropIn 0.15s ease-out;
+  z-index: 250;
+}

@@ -187,3 +187,48 @@ pub fn rename_group_in_notes(state: State<'_, AppState>, old_name: String, new_n
     state.notes.lock().rename_group(&old_name, &new_name);
     state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
 }
+
+/// Export note content as a text file saved to the user's Downloads folder.
+/// Returns the absolute path of the saved file.
+#[tauri::command]
+pub fn export_note_text(
+    app: tauri::AppHandle,
+    text: String,
+    filename: String,
+) -> Result<String, String> {
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+
+    // Sanitize filename: allow alphanumeric, space, dash, underscore, dot.
+    let safe: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = safe.trim().to_string();
+    let safe = if safe.is_empty() { "note.md".to_string() } else { safe };
+
+    // Ensure .md extension.
+    let fname = if safe.ends_with(".md") || safe.ends_with(".txt") {
+        safe
+    } else {
+        format!("{}.md", safe)
+    };
+
+    // Avoid overwriting: append a counter if the file exists.
+    let mut path = dir.join(&fname);
+    let mut counter = 1u32;
+    while path.exists() {
+        let stem = fname.trim_end_matches(".md").trim_end_matches(".txt");
+        let ext = if fname.ends_with(".txt") { "txt" } else { "md" };
+        path = dir.join(format!("{} ({}).{}", stem, counter, ext));
+        counter += 1;
+    }
+
+    std::fs::write(&path, text.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}

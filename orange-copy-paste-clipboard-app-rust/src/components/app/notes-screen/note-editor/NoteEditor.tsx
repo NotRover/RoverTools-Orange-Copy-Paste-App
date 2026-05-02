@@ -36,6 +36,8 @@ import {
   TextAlignJustifyIcon,
   PaletteIcon,
   HighlighterIcon,
+  DownloadSimpleIcon,
+  CopyIcon,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
@@ -64,6 +66,7 @@ import {
   type EditorStats,
   imageAttachmentUrl,
   fileAttachmentUrl,
+  noteToMarkdown,
 } from "../editor-engine";
 import "./note-editor.css";
 
@@ -155,6 +158,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [linkUrl, setLinkUrl] = useState("");
   const [linkText, setLinkText] = useState("");
   const linkPickerRef = useRef<HTMLDivElement>(null);
+
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [exportToast, setExportToast] = useState<string | null>(null);
 
   const [showColorPicker, setShowColorPicker] = useState(false);
   const colorPickerRef = useRef<HTMLDivElement>(null);
@@ -375,6 +382,56 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     return () => document.removeEventListener("mousedown", h);
   }, [showLinkPicker]);
 
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const h = (e: MouseEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node)
+      )
+        setShowExportMenu(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showExportMenu]);
+
+  const showToast = useCallback((msg: string) => {
+    setExportToast(msg);
+    setTimeout(() => setExportToast(null), 2800);
+  }, []);
+
+  const handleExportMarkdown = useCallback(async () => {
+    setShowExportMenu(false);
+    const content = editorRef.current?.getContent() ?? note.content;
+    const markdown = noteToMarkdown(content);
+    const title = deriveNoteTitle(titleRef.current?.value ?? "", content);
+    const safeTitle =
+      title.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") || "note";
+    try {
+      const savedPath = await invoke<string>("export_note_text", {
+        text: markdown,
+        filename: `${safeTitle}.md`,
+      });
+      const name = savedPath.replace(/\\/g, "/").split("/").pop() ?? "note.md";
+      showToast(`Saved: ${name}`);
+    } catch (err) {
+      console.error("[notes] export failed", err);
+      showToast("Export failed");
+    }
+  }, [note.id, note.content, showToast]);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    setShowExportMenu(false);
+    const content = editorRef.current?.getContent() ?? note.content;
+    const markdown = noteToMarkdown(content);
+    try {
+      await navigator.clipboard.writeText(markdown);
+      showToast("Copied as Markdown");
+    } catch {
+      showToast("Copy failed");
+    }
+  }, [note.id, note.content, showToast]);
+
   // ── Embed / link insert ───────────────────────────────────────────────
 
   const insertClipEmbed = useCallback((id: string) => {
@@ -519,6 +576,40 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             }}
           />
           <div className="ns-editor-actions">
+            {/* Export */}
+            <div className="ns-export-wrap" ref={exportMenuRef}>
+              <button
+                className={`ns-tb-btn${showExportMenu ? " ns-tb-btn--active" : ""}`}
+                onClick={() => setShowExportMenu((p) => !p)}
+                data-tooltip="Export note"
+                data-tooltip-pos="below"
+              >
+                <DownloadSimpleIcon size={12} weight="bold" />
+              </button>
+              {showExportMenu && (
+                <div className="ns-export-menu">
+                  <button
+                    className="ns-export-item"
+                    onClick={handleExportMarkdown}
+                  >
+                    <DownloadSimpleIcon size={12} weight="bold" />
+                    Save as .md
+                  </button>
+                  <div className="ns-export-sep" />
+                  <button
+                    className="ns-export-item"
+                    onClick={handleCopyMarkdown}
+                  >
+                    <CopyIcon size={12} weight="bold" />
+                    Copy as Markdown
+                  </button>
+                </div>
+              )}
+              {exportToast && (
+                <div className="ns-export-toast">{exportToast}</div>
+              )}
+            </div>
+
             <button
               className={`ns-tb-btn${note.pinned ? " ns-tb-btn--active" : ""}`}
               onClick={() => onPin(note.id, !note.pinned)}
