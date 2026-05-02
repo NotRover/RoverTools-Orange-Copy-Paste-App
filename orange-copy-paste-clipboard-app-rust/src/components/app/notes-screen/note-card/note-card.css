@@ -177,11 +177,19 @@
   border-radius: 3px;
 }
 
-/* Embed chips already styled by markdown.css (.ee-clip-chip, .ee-group-chip);
-   shrink them slightly so they fit in the card. */
-.ns-card-preview-md :is(.ee-clip-chip, .ee-group-chip) {
-  font-size: 0.78em;
-  padding: 0 6px;
+/* Compact embed chips inside note cards */
+.ns-card-preview-md .ee-clip-embed-inner,
+.ns-card-preview-md .ee-group-chip-inner {
+  font-size: 0.75em;
+  padding: 2px 4px 2px 5px;
+}
+
+/* Panels need elevated z-index to escape the card's overflow:hidden */
+.ns-card-preview-md .ee-embed-panel,
+.ns-card-preview-md .ee-group-panel {
+  max-width: 280px;
+  z-index: 20;
+  position: absolute;
 }
 
 .ns-card-preview--rich {

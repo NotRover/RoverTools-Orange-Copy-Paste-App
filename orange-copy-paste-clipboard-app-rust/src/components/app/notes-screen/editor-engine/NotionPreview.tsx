@@ -6,11 +6,23 @@ import type { JSONContent } from "@tiptap/react";
 import type { ClipboardEntry } from "../../../../types";
 import {
   classifyFileEntry,
+  deriveDisplayKind,
   filePaths,
   groupColor,
+  isImageFile,
+  resolveImageSrc,
+  timeAgo,
   truncateText,
 } from "../../../../types";
-import { fileName } from "../notes-utils";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import {
+  ImageIcon,
+  FileIcon,
+  TextLinesIcon,
+  HtmlCodeIcon,
+  VideoIcon,
+} from "../../../icons";
+import { fileName, stripHtml } from "../notes-utils";
 import {
   resolveAttachmentUrl,
   subscribeAttachmentResolver,
@@ -19,7 +31,6 @@ import { parseStoredContent } from "./content-codec";
 import "./markdown.css";
 
 interface Props {
-  /** Stored content — Tiptap JSON string. */
   content: string;
   entries: ClipboardEntry[];
   className?: string;
@@ -31,9 +42,7 @@ const NotionPreview: React.FC<Props> = ({ content, entries, className }) => {
     () => subscribeAttachmentResolver(() => setVersion((v) => v + 1)),
     [],
   );
-
   const doc = useMemo(() => parseStoredContent(content), [content]);
-
   return (
     <div className={`ee-preview${className ? " " + className : ""}`}>
       {renderChildren(doc.content, entries, "r")}
@@ -60,7 +69,9 @@ function renderNode(
   key: string,
 ): React.ReactNode {
   const align = (node.attrs?.textAlign as string) || undefined;
-  const style = align && align !== "left" ? { textAlign: align as any } : undefined;
+  const style =
+    align && align !== "left" ? { textAlign: align as any } : undefined;
+
   switch (node.type) {
     case "paragraph":
       return (
@@ -168,7 +179,13 @@ function renderNode(
         />
       );
     case "groupRef":
-      return <GroupChip key={key} name={(node.attrs?.name as string) ?? ""} />;
+      return (
+        <GroupChip
+          key={key}
+          name={(node.attrs?.name as string) ?? ""}
+          entries={entries}
+        />
+      );
     case "text":
       return renderText(node, key);
     default:
@@ -238,39 +255,276 @@ function plainText(nodes: JSONContent[] | undefined): string {
   return out;
 }
 
-// ── Embed chips ──────────────────────────────────────────────────────────
+// ── Shared caret SVG ─────────────────────────────────────────────────────
+
+const Caret: React.FC<{ expanded: boolean }> = ({ expanded }) => (
+  <svg
+    width="9"
+    height="9"
+    viewBox="0 0 10 10"
+    style={{
+      display: "block",
+      transition: "transform 0.18s cubic-bezier(0.4,0,0.2,1)",
+      transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+    }}
+  >
+    <path
+      d="M2 3.8L5 6.8L8 3.8"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+// ── Expandable Clip chip ──────────────────────────────────────────────────
+
+function getLabel(id: string, entry: ClipboardEntry | undefined): string {
+  if (!entry) return id ? "Missing entry" : "Clip";
+  if (entry.type === "image") return entry.label ?? "Image";
+  if (entry.type === "file") {
+    const paths = filePaths(entry.content);
+    const kind = classifyFileEntry(entry.content);
+    return kind === "image" ? "Image file" : paths[0] ? fileName(paths[0]) : "File";
+  }
+  const raw =
+    entry.type === "html" ? stripHtml(entry.content) : entry.content;
+  return truncateText(raw.replace(/\s+/g, " ").trim(), 38) || "Clip";
+}
+
+function getTypeLabel(entry: ClipboardEntry): string {
+  if (entry.type === "image") return "Image";
+  if (entry.type === "html") return "HTML";
+  if (entry.type === "file") {
+    const k = classifyFileEntry(entry.content);
+    return k === "image" ? "Image" : k === "video" ? "Video" : "File";
+  }
+  return "Text";
+}
+
+function TypeBadge({ entry }: { entry: ClipboardEntry }) {
+  return (
+    <span className="ee-embed-panel-type">
+      {getTypeLabel(entry)}
+    </span>
+  );
+}
 
 const ClipChip: React.FC<{ id: string; entries: ClipboardEntry[] }> = ({
   id,
   entries,
 }) => {
+  const [expanded, setExpanded] = useState(false);
   const entry = entries.find((e) => e.id === id);
   const missing = !entry && !!id;
+  const label = getLabel(id, entry);
+  const kind = entry ? deriveDisplayKind(entry) : "text";
+
   return (
-    <span className={`ee-clip-chip${missing ? " ee-clip-chip--missing" : ""}`}>
-      {clipLabel(id, entries)}
+    <span
+      className={[
+        "ee-clip-embed",
+        missing && "ee-clip-embed--missing",
+        expanded && "ee-clip-embed--open",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <span
+        className={`ee-clip-embed-inner ee-clip-embed-inner--${kind}`}
+        onClick={entry ? (e) => { e.stopPropagation(); setExpanded((p) => !p); } : undefined}
+      >
+        <span className="ee-clip-embed-icon">
+          <ClipIcon entry={entry} />
+        </span>
+        <span className="ee-clip-embed-label">{label}</span>
+      </span>
+
+      {expanded && entry && (
+        <span
+          className="ee-embed-panel"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Meta */}
+          <span className="ee-embed-panel-meta">
+            <TypeBadge entry={entry} />
+            <span className="ee-embed-panel-time">{timeAgo(entry.timestamp)}</span>
+          </span>
+          {/* Body */}
+          <span className="ee-embed-panel-body">
+            <ClipPanelBody entry={entry} />
+          </span>
+        </span>
+      )}
     </span>
   );
 };
 
-const GroupChip: React.FC<{ name: string }> = ({ name }) => {
-  const c = groupColor(name);
-  return (
-    <span className="ee-group-chip" style={{ background: c.bg, color: c.fg }}>
-      <span className="ee-group-chip-dot" style={{ background: c.fg }} />
-      {name}
-    </span>
-  );
-};
-
-function clipLabel(id: string, entries: ClipboardEntry[]): string {
-  const entry = entries.find((e) => e.id === id);
-  if (!entry) return id ? "Missing clip" : "Clip";
-  const paths = entry.type === "file" ? filePaths(entry.content) : [];
-  const fileKind = entry.type === "file" ? classifyFileEntry(entry.content) : "file";
-  if (entry.type === "image") return entry.label ?? "Image";
-  if (entry.type === "file")
-    return fileKind === "image" ? "Image file" : paths[0] ? fileName(paths[0]) : "File";
-  const text = entry.type === "html" ? entry.content.replace(/<[^>]*>/g, "") : entry.content;
-  return truncateText(text.replace(/\s+/g, " ").trim(), 28) || "Clip";
+function ClipIcon({ entry }: { entry: ClipboardEntry | undefined }) {
+  const sz = 11;
+  if (!entry) return <TextLinesIcon size={sz} />;
+  if (entry.type === "image") return <ImageIcon size={sz} />;
+  if (entry.type === "html") return <HtmlCodeIcon size={sz} />;
+  if (entry.type === "file") {
+    const k = classifyFileEntry(entry.content);
+    if (k === "image") return <ImageIcon size={sz} />;
+    if (k === "video") return <VideoIcon size={sz} />;
+    return <FileIcon size={sz} />;
+  }
+  return <TextLinesIcon size={sz} />;
 }
+
+function ClipPanelBody({ entry }: { entry: ClipboardEntry }) {
+  if (entry.type === "image") {
+    const src = resolveImageSrc(entry.content, convertFileSrc);
+    return (
+      <>
+        <img className="ee-embed-panel-img" src={src} alt={entry.label ?? ""} />
+        {entry.label && (
+          <div className="ee-embed-panel-img-caption">{entry.label}</div>
+        )}
+      </>
+    );
+  }
+
+  if (entry.type === "file") {
+    const paths = filePaths(entry.content);
+    const imgPaths = paths.filter(isImageFile);
+    const otherPaths = paths.filter((p) => !isImageFile(p));
+    return (
+      <>
+        {imgPaths.map((p) => (
+          <img
+            key={p}
+            className="ee-embed-panel-img"
+            src={convertFileSrc(p)}
+            alt={fileName(p)}
+          />
+        ))}
+        {otherPaths.length > 0 && (
+          <div className="ee-embed-panel-files">
+            {otherPaths.map((p) => (
+              <div key={p} className="ee-embed-panel-path">
+                <FileIcon size={11} />
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  const text = (
+    entry.type === "html" ? stripHtml(entry.content) : entry.content
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    <div className="ee-embed-panel-text">{text.slice(0, 600) || "—"}</div>
+  );
+}
+
+// ── Expandable Group chip ─────────────────────────────────────────────────
+
+function groupRowThumb(entry: ClipboardEntry): string | null {
+  if (entry.type === "image")
+    return resolveImageSrc(entry.content, convertFileSrc);
+  if (entry.type === "file") {
+    const imgPaths = filePaths(entry.content).filter(isImageFile);
+    return imgPaths[0] ? convertFileSrc(imgPaths[0]) : null;
+  }
+  return null;
+}
+
+function groupRowLabel(entry: ClipboardEntry): string {
+  if (entry.type === "image") return entry.label ?? "Image";
+  if (entry.type === "file") {
+    const paths = filePaths(entry.content);
+    return paths[0] ? fileName(paths[0]) : "File";
+  }
+  const raw =
+    entry.type === "html" ? stripHtml(entry.content) : entry.content;
+  return truncateText(raw.replace(/\s+/g, " ").trim(), 52) || "—";
+}
+
+const GroupChip: React.FC<{ name: string; entries: ClipboardEntry[] }> = ({
+  name,
+  entries,
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const c = groupColor(name);
+  const groupEntries = entries.filter((e) => e.groups.includes(name));
+
+  return (
+    <span
+      className={`ee-group-chip${expanded ? " ee-group-chip--open" : ""}`}
+    >
+      <span
+        className="ee-group-chip-inner"
+        style={{ background: c.bg, color: c.fg }}
+        onClick={(e) => { e.stopPropagation(); setExpanded((p) => !p); }}
+      >
+        <span className="ee-group-chip-dot" style={{ background: c.fg }} />
+        {name}
+        {groupEntries.length > 0 && (
+          <span className="ee-group-chip-count">{groupEntries.length}</span>
+        )}
+      </span>
+
+      {expanded && (
+        <span
+          className="ee-group-panel"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="ee-group-panel-header">
+            <span
+              className="ee-group-panel-header-dot"
+              style={{ background: c.fg }}
+            />
+            <span style={{ color: c.fg }}>{name}</span>
+            <span className="ee-group-panel-count">
+              {groupEntries.length} entr
+              {groupEntries.length === 1 ? "y" : "ies"}
+            </span>
+          </span>
+
+          <span className="ee-group-panel-body">
+            {groupEntries.length === 0 ? (
+              <span className="ee-group-panel-empty">No entries in this group</span>
+            ) : (
+              groupEntries.slice(0, 10).map((entry) => {
+                const thumb = groupRowThumb(entry);
+                const label = groupRowLabel(entry);
+                return (
+                  <span key={entry.id} className="ee-group-panel-row">
+                    {thumb ? (
+                      <img
+                        className="ee-group-panel-row-thumb"
+                        src={thumb}
+                        alt=""
+                      />
+                    ) : (
+                      <span className="ee-group-panel-row-icon">
+                        {entry.type === "html" ? <HtmlCodeIcon size={11} /> : <TextLinesIcon size={11} />}
+                      </span>
+                    )}
+                    <span className="ee-group-panel-row-label">{label}</span>
+                  </span>
+                );
+              })
+            )}
+            {groupEntries.length > 10 && (
+              <span className="ee-group-panel-more">
+                +{groupEntries.length - 10} more
+              </span>
+            )}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+};
