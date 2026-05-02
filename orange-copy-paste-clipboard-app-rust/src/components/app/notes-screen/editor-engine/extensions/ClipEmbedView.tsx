@@ -1,6 +1,6 @@
 // ── Tiptap node view — Clip embed ───────────────────────────────────────
 
-import React, { useState } from "react";
+import React from "react";
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
@@ -9,7 +9,6 @@ import {
   TextLinesIcon,
   HtmlCodeIcon,
   VideoIcon,
-  ChevronDownIcon,
   FilePageIcon,
 } from "../../../../icons";
 import {
@@ -58,10 +57,6 @@ function entryLabel(
     entry.type === "html" ? stripHtml(entry.content) : entry.content;
   return truncateText(raw.replace(/\s+/g, " ").trim(), 38) || "Clip";
 }
-
-const Caret: React.FC<{ expanded: boolean }> = ({ expanded: _ }) => (
-  <ChevronDownIcon size={10} />
-);
 
 // ── Expanded content ────────────────────────────────────────────────────
 
@@ -152,10 +147,10 @@ const PanelContent: React.FC<{
 
 // ── Node view ───────────────────────────────────────────────────────────
 
-const ClipEmbedView: React.FC<NodeViewProps> = ({ node }) => {
+const ClipEmbedView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
   const { entries } = useEmbedContext();
-  const [expanded, setExpanded] = useState(false);
   const id = (node.attrs.id as string) ?? "";
+  const expanded = !!(node.attrs.expanded as boolean);
   const entry = entries.find((e) => e.id === id);
   const missing = !entry && !!id;
   const label = entryLabel(id, entry);
@@ -167,7 +162,7 @@ const ClipEmbedView: React.FC<NodeViewProps> = ({ node }) => {
     e.preventDefault();
     e.stopPropagation();
     if (!entry) return;
-    setExpanded((p) => !p);
+    updateAttributes({ expanded: !expanded });
   };
 
   return (
@@ -187,6 +182,8 @@ const ClipEmbedView: React.FC<NodeViewProps> = ({ node }) => {
         className={`ee-clip-embed-inner ee-clip-embed-inner--${kind}`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={entry ? handleToggle : undefined}
+        data-tooltip={entry ? (expanded ? "Click to collapse" : "Click to expand") : undefined}
+        data-tooltip-pos="below"
       >
         <span className="ee-clip-embed-icon">
           <TypeIcon type={entry?.type ?? "text"} fileKind={fileKind} />

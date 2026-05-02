@@ -221,6 +221,24 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     return () => document.removeEventListener("selectionchange", handler);
   }, [refreshActive]);
 
+  // ── Ctrl+S — flush debounced save immediately ─────────────────────────
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
+        const c = editorRef.current?.getContent();
+        if (c != null) save(c);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [save]);
+
   // ── Close ─────────────────────────────────────────────────────────────
 
   const handleClose = useCallback(() => {

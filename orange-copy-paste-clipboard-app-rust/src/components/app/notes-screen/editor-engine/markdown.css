@@ -689,22 +689,68 @@
 }
 
 /* Type-specific chip colors — mirror entryTypes.css */
-.ee-clip-embed-inner--text     { background: var(--accent-dim); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); color: var(--accent); }
-.ee-clip-embed-inner--url      { background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.3); color: #10b981; }
-.ee-clip-embed-inner--html     { background: rgba(168, 85, 247, 0.1); border-color: rgba(168, 85, 247, 0.3); color: #a855f7; }
-.ee-clip-embed-inner--image    { background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.3); color: #3b82f6; }
-.ee-clip-embed-inner--video    { background: rgba(239, 68, 68, 0.1);  border-color: rgba(239, 68, 68, 0.3);  color: #ef4444; }
-.ee-clip-embed-inner--file     { background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.3); color: #8b5cf6; }
-.ee-clip-embed-inner--document { background: rgba(249, 115, 22, 0.1); border-color: rgba(249, 115, 22, 0.3); color: #f97316; }
-.ee-clip-embed-inner--folder   { background: rgba(14, 165, 233, 0.1); border-color: rgba(14, 165, 233, 0.3); color: #0ea5e9; }
+.ee-clip-embed-inner--text {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  color: var(--accent);
+}
+.ee-clip-embed-inner--url {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+.ee-clip-embed-inner--html {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.3);
+  color: #a855f7;
+}
+.ee-clip-embed-inner--image {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+.ee-clip-embed-inner--video {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+.ee-clip-embed-inner--file {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #8b5cf6;
+}
+.ee-clip-embed-inner--document {
+  background: rgba(249, 115, 22, 0.1);
+  border-color: rgba(249, 115, 22, 0.3);
+  color: #f97316;
+}
+.ee-clip-embed-inner--folder {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: rgba(14, 165, 233, 0.3);
+  color: #0ea5e9;
+}
 
-[data-theme="light"] .ee-clip-embed-inner--url      { color: #059669; }
-[data-theme="light"] .ee-clip-embed-inner--html     { color: #7c3aed; }
-[data-theme="light"] .ee-clip-embed-inner--image    { color: #2563eb; }
-[data-theme="light"] .ee-clip-embed-inner--video    { color: #dc2626; }
-[data-theme="light"] .ee-clip-embed-inner--file     { color: #7c3aed; }
-[data-theme="light"] .ee-clip-embed-inner--document { color: #ea6a0a; }
-[data-theme="light"] .ee-clip-embed-inner--folder   { color: #0284c7; }
+[data-theme="light"] .ee-clip-embed-inner--url {
+  color: #059669;
+}
+[data-theme="light"] .ee-clip-embed-inner--html {
+  color: #7c3aed;
+}
+[data-theme="light"] .ee-clip-embed-inner--image {
+  color: #2563eb;
+}
+[data-theme="light"] .ee-clip-embed-inner--video {
+  color: #dc2626;
+}
+[data-theme="light"] .ee-clip-embed-inner--file {
+  color: #7c3aed;
+}
+[data-theme="light"] .ee-clip-embed-inner--document {
+  color: #ea6a0a;
+}
+[data-theme="light"] .ee-clip-embed-inner--folder {
+  color: #0284c7;
+}
 
 .ee-clip-embed-icon {
   display: inline-flex;
@@ -726,6 +772,34 @@
   letter-spacing: 0.01em;
 }
 
+/* Three-dot hint: shows chip is expandable, fades when open */
+.ee-clip-embed-inner::after,
+.ee-group-chip-inner::after {
+  content: "···";
+  margin-left: 2px;
+  font-size: 1em;
+  font-weight: 700;
+  letter-spacing: 1px;
+  opacity: 0.7;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: opacity 0.14s;
+}
+
+.ee-clip-embed--open .ee-clip-embed-inner::after,
+.ee-group-chip--open .ee-group-chip-inner::after {
+  opacity: 0;
+}
+
+/* No dots or pointer in read-only preview */
+.ee-preview .ee-clip-embed-inner,
+.ee-preview .ee-group-chip-inner {
+  cursor: default;
+}
+.ee-preview .ee-clip-embed-inner::after,
+.ee-preview .ee-group-chip-inner::after {
+  display: none;
+}
 
 /* ── Shared expand panel ────────────────────────────────────────────── */
 
@@ -888,7 +962,7 @@
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
-  cursor: default;
+  cursor: pointer;
   user-select: none;
   transition:
     filter 0.12s,

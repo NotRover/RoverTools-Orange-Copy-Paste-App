@@ -1,6 +1,6 @@
 // ── Tiptap node — Group reference ─────────────────────────────────────────
 
-import React, { useState } from "react";
+import React from "react";
 import { Node, mergeAttributes } from "@tiptap/core";
 import {
   NodeViewWrapper,
@@ -14,7 +14,6 @@ import {
   TextLinesIcon,
   HtmlCodeIcon,
   TagIcon,
-  ChevronDownIcon,
 } from "../../../../icons";
 import {
   groupColor,
@@ -63,21 +62,17 @@ function rowThumb(
   return null;
 }
 
-const Caret: React.FC<{ expanded: boolean }> = ({ expanded: _ }) => (
-  <ChevronDownIcon size={10} />
-);
-
-const GroupRefView: React.FC<NodeViewProps> = ({ node }) => {
+const GroupRefView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
   const { entries } = useEmbedContext();
-  const [expanded, setExpanded] = useState(false);
   const name = (node.attrs.name as string) ?? "";
+  const expanded = !!(node.attrs.expanded as boolean);
   const c = groupColor(name);
   const groupEntries = entries.filter((e) => e.groups.includes(name));
 
   const handleToggle = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setExpanded((p) => !p);
+    updateAttributes({ expanded: !expanded });
   };
 
   return (
@@ -92,6 +87,8 @@ const GroupRefView: React.FC<NodeViewProps> = ({ node }) => {
         style={{ background: c.bg, color: c.fg }}
         onMouseDown={(e) => e.preventDefault()}
         onClick={handleToggle}
+        data-tooltip={expanded ? "Click to collapse" : "Click to expand"}
+        data-tooltip-pos="below"
       >
         <span className="ee-group-chip-dot" style={{ background: c.fg }} />
         {name}
@@ -166,6 +163,11 @@ export const GroupRef = Node.create({
         default: "",
         parseHTML: (el: HTMLElement) => el.getAttribute("data-group-ref") ?? "",
         renderHTML: (attrs) => ({ "data-group-ref": attrs.name ?? "" }),
+      },
+      expanded: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute("data-expanded") === "true",
+        renderHTML: (attrs) => attrs.expanded ? { "data-expanded": "true" } : {},
       },
     };
   },
