@@ -728,6 +728,20 @@
   opacity: 0.8;
 }
 
+.ns-embed-item-group--system {
+  gap: 5px;
+}
+
+.ns-embed-item-group--pinned {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.ns-embed-item-group--saved {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
 .ns-embed-empty {
   padding: 20px 16px;
   text-align: center;
