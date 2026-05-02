@@ -852,6 +852,14 @@
   width: auto;
   min-width: 0;
 }
+.ns-color-section-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 4px 2px 2px;
+}
 .ns-color-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

@@ -17,7 +17,6 @@ export type EditorCommand =
   | { kind: "paragraph" }
   | { kind: "blockquote" }
   | { kind: "callout"; tone?: CalloutTone }
-  | { kind: "toggle" }
   | { kind: "bulletList" }
   | { kind: "orderedList" }
   | { kind: "taskList" }
@@ -35,7 +34,8 @@ export type EditorCommand =
   | { kind: "groupEmbed"; name: string }
   | { kind: "align"; value: AlignValue }
   | { kind: "textColor"; value: string | null }
-  | { kind: "highlight"; value: string | null };
+  | { kind: "highlight"; value: string | null }
+  | { kind: "cellBackground"; value: string | null };
 
 export type CalloutTone =
   | "info"
@@ -53,7 +53,6 @@ export type BlockKind =
   | "h5"
   | "bq"
   | "callout"
-  | "toggle"
   | "todo"
   | "todoChecked"
   | "ul"
@@ -72,6 +71,7 @@ export interface ActiveState {
   align?: AlignValue;
   textColor?: string;
   highlight?: string;
+  cellBackground?: string;
 }
 
 export type EditorContent = JSONContent;

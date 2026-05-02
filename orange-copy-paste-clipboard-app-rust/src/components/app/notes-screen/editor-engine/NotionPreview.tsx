@@ -105,20 +105,6 @@ function renderNode(
         </div>
       );
     }
-    case "details":
-      return (
-        <details key={key} className="ee-details">
-          {renderChildren(node.content, entries, key)}
-        </details>
-      );
-    case "detailsSummary":
-      return (
-        <summary key={key}>
-          {renderChildren(node.content, entries, key)}
-        </summary>
-      );
-    case "detailsContent":
-      return <div key={key}>{renderChildren(node.content, entries, key)}</div>;
     case "bulletList":
       return <ul key={key}>{renderChildren(node.content, entries, key)}</ul>;
     case "orderedList":
@@ -167,10 +153,14 @@ function renderNode(
       );
     case "tableRow":
       return <tr key={key}>{renderChildren(node.content, entries, key)}</tr>;
-    case "tableCell":
-      return <td key={key}>{renderChildren(node.content, entries, key)}</td>;
-    case "tableHeader":
-      return <th key={key}>{renderChildren(node.content, entries, key)}</th>;
+    case "tableCell": {
+      const bg = node.attrs?.backgroundColor as string | undefined;
+      return <td key={key} style={bg ? { backgroundColor: bg } : undefined}>{renderChildren(node.content, entries, key)}</td>;
+    }
+    case "tableHeader": {
+      const bg = node.attrs?.backgroundColor as string | undefined;
+      return <th key={key} style={bg ? { backgroundColor: bg } : undefined}>{renderChildren(node.content, entries, key)}</th>;
+    }
     case "hardBreak":
       return <br key={key} />;
     case "clipEmbed":
