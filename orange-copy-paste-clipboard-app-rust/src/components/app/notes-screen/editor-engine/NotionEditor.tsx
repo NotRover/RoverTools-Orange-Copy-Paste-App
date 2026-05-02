@@ -24,6 +24,22 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
+
+const cellBgAttr = {
+  backgroundColor: {
+    default: null,
+    parseHTML: (el: HTMLElement) => el.style.backgroundColor || null,
+    renderHTML: ({ backgroundColor }: { backgroundColor: string | null }) =>
+      backgroundColor ? { style: `background-color: ${backgroundColor}` } : {},
+  },
+};
+
+const ColoredTableCell = TableCell.extend({
+  addAttributes() { return { ...this.parent?.(), ...cellBgAttr }; },
+});
+const ColoredTableHeader = TableHeader.extend({
+  addAttributes() { return { ...this.parent?.(), ...cellBgAttr }; },
+});
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
@@ -159,11 +175,10 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
   ({ noteId, initialContent, onChange, onSelectionChange, onStatsChange }, ref) => {
     const [tableHandlePos, setTableHandlePos] = useState<{
       visible: boolean;
-      colX: number;
-      colY: number;
-      rowX: number;
-      rowY: number;
-    }>({ visible: false, colX: 0, colY: 0, rowX: 0, rowY: 0 });
+      rowX: number; rowY: number;
+      colX: number; colY: number;
+      colFlip: boolean;
+    }>({ visible: false, rowX: 0, rowY: 0, colX: 0, colY: 0, colFlip: false });
     const shellRef = useRef<HTMLDivElement | null>(null);
     const onStatsChangeRef = useRef(onStatsChange);
     onStatsChangeRef.current = onStatsChange;
@@ -193,17 +208,16 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           );
           return;
         }
-        const table = tableEl.getBoundingClientRect();
-        const box = scrollEl.getBoundingClientRect();
-        const clamp = (v: number, min: number, max: number) =>
-          Math.min(Math.max(v, min), max);
-        const edgeGap = 6;
+        const t = tableEl.getBoundingClientRect();
+        const gap = 6;
+        const colFlip = t.right + gap + 75 > window.innerWidth;
         setTableHandlePos({
           visible: true,
-          colX: clamp(table.right + edgeGap, box.left + 10, box.right - 10),
-          colY: clamp(table.top + table.height / 2, box.top + 22, box.bottom - 22),
-          rowX: clamp(table.left + table.width / 2, box.left + 22, box.right - 22),
-          rowY: clamp(table.bottom + edgeGap, box.top + 10, box.bottom - 10),
+          rowX: t.left + t.width / 2,
+          rowY: t.bottom + gap,
+          colX: colFlip ? t.left - gap : t.right + gap,
+          colY: t.top + t.height / 2,
+          colFlip,
         });
       },
       [],
@@ -220,8 +234,8 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: false }),
         TableRow,
-        TableHeader,
-        TableCell,
+        ColoredTableHeader,
+        ColoredTableCell,
         Placeholder.configure({
           placeholder: ({ node }) => {
             if (node.type.name === "heading") return "Heading";
@@ -380,6 +394,11 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
               if (cmd.value == null) c.unsetHighlight().run();
               else c.setHighlight({ color: cmd.value }).run();
               break;
+            case "cellBackground": {
+              const nodeType = editor.isActive("tableHeader") ? "tableHeader" : "tableCell";
+              c.updateAttributes(nodeType, { backgroundColor: cmd.value ?? null }).run();
+              break;
+            }
             case "image":
               c.insertContent({
                 type: "image",
@@ -506,29 +525,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         />
         {tableHandlePos.visible && (
           <>
-            <div
-              className="ee-table-controls ee-table-controls--col"
-              style={{ left: tableHandlePos.colX, top: tableHandlePos.colY }}
-            >
-              <button
-                type="button"
-                className="ee-table-handle-btn"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runTableCommand("addCol")}
-                title="Add column to right"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className="ee-table-handle-btn ee-table-handle-btn--danger"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => runTableCommand("delCol")}
-                title="Remove current column"
-              >
-                -
-              </button>
-            </div>
+            {/* Row controls — below table, horizontally centered */}
             <div
               className="ee-table-controls ee-table-controls--row"
               style={{ left: tableHandlePos.rowX, top: tableHandlePos.rowY }}
@@ -538,18 +535,44 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
                 className="ee-table-handle-btn"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => runTableCommand("addRow")}
-                title="Add row to bottom"
+                title="Add row below"
               >
-                +
+                + Row
               </button>
+              <span className="ee-table-controls-sep" />
               <button
                 type="button"
-                className="ee-table-handle-btn ee-table-handle-btn--danger"
+                className="ee-table-handle-btn ee-table-handle-btn--del"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => runTableCommand("delRow")}
-                title="Remove current row"
+                title="Delete current row"
               >
-                -
+                − Row
+              </button>
+            </div>
+            {/* Col controls — right of table (or left if near screen edge), vertically centered */}
+            <div
+              className={`ee-table-controls ee-table-controls--col${tableHandlePos.colFlip ? " ee-table-controls--col-flip" : ""}`}
+              style={{ left: tableHandlePos.colX, top: tableHandlePos.colY }}
+            >
+              <button
+                type="button"
+                className="ee-table-handle-btn"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => runTableCommand("addCol")}
+                title="Add column to right"
+              >
+                + Col
+              </button>
+              <span className="ee-table-controls-sep" />
+              <button
+                type="button"
+                className="ee-table-handle-btn ee-table-handle-btn--del"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => runTableCommand("delCol")}
+                title="Delete current column"
+              >
+                − Col
               </button>
             </div>
           </>
@@ -614,17 +637,25 @@ function activeStateFor(editor: Editor | null): ActiveState {
   }
   const colorAttr = editor.getAttributes("textStyle")?.color;
   const highlightAttr = editor.getAttributes("highlight")?.color;
+  const inTable = editor.isActive("table");
+  let cellBackground: string | undefined;
+  if (inTable) {
+    const cellType = editor.isActive("tableHeader") ? "tableHeader" : "tableCell";
+    const bg = editor.getAttributes(cellType)?.backgroundColor;
+    if (typeof bg === "string") cellBackground = bg;
+  }
   return {
     bold: editor.isActive("bold"),
     italic: editor.isActive("italic"),
     underline: editor.isActive("underline"),
     strike: editor.isActive("strike"),
     code: editor.isActive("code"),
-    inTable: editor.isActive("table"),
+    inTable,
     blockKind,
     align,
     textColor: typeof colorAttr === "string" ? colorAttr : undefined,
     highlight: typeof highlightAttr === "string" ? highlightAttr : undefined,
+    cellBackground,
   };
 }
 

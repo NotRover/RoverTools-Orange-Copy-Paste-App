@@ -35,6 +35,7 @@ import {
   TextAlignJustifyIcon,
   PaletteIcon,
   HighlighterIcon,
+  PaintBucketIcon,
   DownloadSimpleIcon,
   CopyIcon,
 } from "@phosphor-icons/react";
@@ -167,6 +168,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const [showHighlightPicker, setShowHighlightPicker] = useState(false);
   const highlightPickerRef = useRef<HTMLDivElement>(null);
+  const [showCellBgPicker, setShowCellBgPicker] = useState(false);
+  const cellBgPickerRef = useRef<HTMLDivElement>(null);
 
   const initialContent = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
   const initialTitle = useMemo(
@@ -370,6 +373,19 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [showHighlightPicker]);
+
+  useEffect(() => {
+    if (!showCellBgPicker) return;
+    const h = (e: MouseEvent) => {
+      if (
+        cellBgPickerRef.current &&
+        !cellBgPickerRef.current.contains(e.target as Node)
+      )
+        setShowCellBgPicker(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showCellBgPicker]);
 
   useEffect(() => {
     if (!showCalloutPicker) return;
@@ -854,6 +870,74 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             )}
           </div>
+
+          {/* Cell background color — only visible when cursor is in a table */}
+          {active.inTable && (
+          <div className="ns-toolbar-wrap" ref={cellBgPickerRef}>
+            <button
+              className={`ns-fmt-btn${active.cellBackground ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => {
+                setShowCellBgPicker((p) => !p);
+                setShowColorPicker(false);
+                setShowHighlightPicker(false);
+                setShowHeadingDropdown(false);
+                setShowStructureDropdown(false);
+                setShowAlignDropdown(false);
+              }}
+              data-tooltip="Cell background"
+              data-tooltip-pos="below"
+              style={active.cellBackground ? { background: active.cellBackground } : undefined}
+            >
+              <PaintBucketIcon size={13} weight="bold" />
+            </button>
+            {showCellBgPicker && (
+              <div className="ns-embed-picker ns-color-picker">
+                <div className="ns-color-section-label">Pastel</div>
+                <div className="ns-color-grid">
+                  {HIGHLIGHT_COLORS.map((c) => (
+                    <button
+                      key={c.value ?? "none"}
+                      className="ns-color-swatch"
+                      style={{
+                        background: c.value ?? "transparent",
+                        border: c.value
+                          ? "1px solid var(--border)"
+                          : "1px dashed var(--border)",
+                      }}
+                      title={c.label}
+                      onClick={() => {
+                        dispatch({ kind: "cellBackground", value: c.value });
+                        setShowCellBgPicker(false);
+                      }}
+                    >
+                      {c.value == null && (
+                        <span className="ns-color-swatch-none">×</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="ns-color-section-label">Vivid</div>
+                <div className="ns-color-grid">
+                  {TEXT_COLORS.filter((c) => c.value !== null).map((c) => (
+                    <button
+                      key={c.value!}
+                      className="ns-color-swatch"
+                      style={{
+                        background: c.value!,
+                        border: "1px solid var(--border)",
+                      }}
+                      title={c.label}
+                      onClick={() => {
+                        dispatch({ kind: "cellBackground", value: c.value });
+                        setShowCellBgPicker(false);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          )}
           </div>
 
           {/* Block types */}
