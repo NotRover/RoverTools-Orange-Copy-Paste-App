@@ -655,8 +655,6 @@
   align-items: center;
   gap: 5px;
   padding: 3px 5px 3px 7px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 7px;
   font-size: 0.82em;
   font-weight: 600;
@@ -665,9 +663,8 @@
   white-space: nowrap;
   cursor: pointer;
   transition:
-    border-color 0.14s,
-    background 0.14s,
-    box-shadow 0.14s;
+    filter 0.12s,
+    box-shadow 0.12s;
   user-select: none;
 }
 
@@ -679,54 +676,45 @@
 .ee-clip-embed--open .ee-clip-embed-inner {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  box-shadow: none;
+  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.06);
 }
 
 .ee-clip-embed--missing .ee-clip-embed-inner {
   background: rgba(220, 80, 80, 0.08);
-  border-color: rgba(220, 80, 80, 0.32);
   color: rgba(220, 80, 80, 0.85);
 }
 
 /* Type-specific chip colors — mirror entryTypes.css */
 .ee-clip-embed-inner--text {
   background: var(--accent-dim);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
   color: var(--accent);
 }
 .ee-clip-embed-inner--url {
-  background: rgba(16, 185, 129, 0.1);
-  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.12);
   color: #10b981;
 }
 .ee-clip-embed-inner--html {
-  background: rgba(168, 85, 247, 0.1);
-  border-color: rgba(168, 85, 247, 0.3);
+  background: rgba(168, 85, 247, 0.12);
   color: #a855f7;
 }
 .ee-clip-embed-inner--image {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.12);
   color: #3b82f6;
 }
 .ee-clip-embed-inner--video {
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.12);
   color: #ef4444;
 }
 .ee-clip-embed-inner--file {
-  background: rgba(139, 92, 246, 0.1);
-  border-color: rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.12);
   color: #8b5cf6;
 }
 .ee-clip-embed-inner--document {
-  background: rgba(249, 115, 22, 0.1);
-  border-color: rgba(249, 115, 22, 0.3);
+  background: rgba(249, 115, 22, 0.12);
   color: #f97316;
 }
 .ee-clip-embed-inner--folder {
-  background: rgba(14, 165, 233, 0.1);
-  border-color: rgba(14, 165, 233, 0.3);
+  background: rgba(14, 165, 233, 0.12);
   color: #0ea5e9;
 }
 
@@ -809,9 +797,9 @@
   width: 100%;
   min-width: 240px;
   max-width: 360px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border: 1px solid var(--border);
   border-top: none;
-  border-radius: 0 0px 8px 8px;
+  border-radius: 0 0 8px 8px;
   background: var(--surface);
   box-shadow:
     0 6px 20px rgba(0, 0, 0, 0.16),
@@ -946,14 +934,14 @@
 .ee-group-chip {
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   position: relative;
   vertical-align: middle;
   margin: 0 2px;
 }
 
 .ee-group-chip-inner {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 5px;
   padding: 3px 5px 3px 7px;
@@ -977,7 +965,6 @@
 .ee-group-chip--open .ee-group-chip-inner {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  box-shadow: none;
 }
 
 .ee-group-chip-dot {
@@ -989,28 +976,25 @@
 }
 
 .ee-group-chip-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 999px;
-  font-size: 0.72em;
-  font-weight: 750;
-  background: rgba(0, 0, 0, 0.2);
-  opacity: 0.88;
+  margin-left: auto;
+  padding-left: 4px;
+  font-size: 0.95em;
+  font-weight: 600;
+  opacity: 1;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
-/* Group panel re-uses .ee-embed-panel but with neutral border */
+/* Group panel */
 .ee-group-panel {
   display: flex;
   flex-direction: column;
+  width: 100%;
   min-width: 220px;
   max-width: 340px;
   border: 1px solid var(--border);
   border-top: none;
-  border-radius: 0 8px 8px 8px;
+  border-radius: 0 0 8px 8px;
   background: var(--surface);
   box-shadow:
     0 6px 20px rgba(0, 0, 0, 0.16),
