@@ -99,6 +99,7 @@ The system is composed of two independently deployable components that collabora
 - Blob metadata and pre-signed URL generation
 - Per-member wrapped group keys (for E2E group sharing)
 - Live Share session definitions: per-member scope (`clipboard` | `notes` | `both`)
+- Encrypted user settings blob (`user_settings` table — one row per user, server never decrypts)
 
 ### 3.3 Shared domain objects
 
@@ -194,6 +195,7 @@ Self-hosted: configurable via Settings → Cloud Sync → Server URL
 | `sharing:accepted` | The invited user accepted the share | `{ share_group_id, peer_user, wrapped_group_key }` |
 | `sharing:ended` | Either party ended the sharing session | `{ share_group_id, ended_by }` |
 | `sharing:scope_changed` | A peer updated their contribution scope | `{ share_group_id, user_id, share_scope }` |
+| `settings:updated` | Another device pushed new settings | `{ updated_at }` — pull and apply if newer than local |
 | `ping` | Server heartbeat (every 30s) | `{ server_ts }` |
 
 ---
@@ -288,6 +290,62 @@ When the network is unavailable, the sync module accumulates entries in `{app_da
 ]
 ```
 On reconnect, the queue is flushed in order before pulling delta, ensuring local actions take precedence in LWW ordering.
+
+### 6.5 Settings Sync
+
+User preferences are synced as a single encrypted blob, separate from the entry sync stream.
+
+**What is synced (user preferences — follow the user across devices):**
+
+| Setting | Storage source | Notes |
+|---|---|---|
+| Theme (dark/light) | `localStorage` | |
+| Layout (tiles/list) | `localStorage` | |
+| Sort order | `localStorage` | |
+| Paste slot count | `localStorage` | |
+| Group names | `localStorage` | |
+| Group color assignments | `localStorage` | |
+| Notifications master toggle | `settings.json` | |
+| Copy notification | `settings.json` | |
+| Paste notification | `settings.json` | |
+| Persist history | `settings.json` | |
+| Close to tray | `settings.json` | |
+| Start minimized | `settings.json` | |
+| Autosave | `settings.json` | |
+| Sharing notify | `settings.json` | |
+
+**What is NOT synced (device-specific — stay local):**
+
+- `sync_enabled` — each device decides independently whether sync is on
+- `sync_server_url` — device may point to a self-hosted instance
+- `sharing_enabled` — device-level kill switch
+- Window geometry (`window-state.json`)
+- Autostart (OS-specific registry/startup entry)
+- Recent searches
+
+**Flow:**
+
+```
+On any synced setting change (debounced 2s):
+  Client builds plaintext settings JSON from localStorage + settings.json
+  Client encrypts with UMK → encrypted_blob
+  Client → PUT /api/v1/settings { encrypted_blob, updated_at: now() }
+  Server → LWW: if server updated_at > client updated_at, returns server blob + winner: 'server'
+  If winner == 'server': client decrypts server blob and applies to local settings
+
+On startup (after auth):
+  Client → GET /api/v1/settings
+  If 404: no settings pushed yet, use local defaults
+  If server updated_at > local updated_at: decrypt and apply
+  If local updated_at > server updated_at: push local settings to server
+
+On receiving settings:updated WS event:
+  Client → GET /api/v1/settings
+  Decrypt and apply if server updated_at > local
+```
+
+**Applying to the frontend:**
+The Rust sync module emits a `sync:settings` Tauri event with the decrypted settings JSON. React listens and applies `localStorage`-backed settings (theme, layout, sort, paste slots, group names, group colors). The Rust layer writes `settings.json`-backed settings directly.
 
 ---
 
@@ -490,11 +548,15 @@ sync_get_groups()                        → Vec<SyncGroup>
 sync_create_group(name: String)          → SyncGroup
 sync_join_group(invite_code: String)
 sync_leave_group(group_id: String)
+sync_push_settings()                     // encrypt settings blob → PUT /settings; debounced 2s
+sync_pull_settings()                     // GET /settings; decrypt; emit sync:settings if server wins
+sync_receive_local_settings(json: String) // React → Rust bridge: pass localStorage values for next push
 sharing_invite(email: String, scope: String)    → SharingInvite
 sharing_accept(invite_code: String, scope: String)
 sharing_get_sessions()                          → Vec<SharingSession>
 sharing_update_scope(share_group_id: String, scope: String)
-sharing_end_session(share_group_id: String)
+sharing_end_session(share_group_id: String)     // owner dissolves group
+sharing_leave_session(share_group_id: String)   // non-owner leaves group
 ```
 
 ### 11.4 Integration points (existing files touched minimally)
@@ -585,3 +647,6 @@ These constraints must be preserved across any change to either submodule:
 | 11 | **Sharing is always opt-in.** No entry is tagged with a Live Share group UUID unless the user has an active Live Share session and the entry type matches their configured `share_scope`. |
 | 12 | **File/video sync is size-gated.** Entries of `kind: 'file'` are never pushed to the server if their total payload exceeds 5 MB. This is enforced on both client and server (HTTP 413 from `request-upload`). |
 | 13 | **Sharing ends cleanly.** When a Live Share session is terminated or a member leaves, the Live Share group UUID must be removed from `id_map.json` so no future entries are tagged with it. Existing entries in all users' local stores are not affected. |
+| 14 | **Settings sync is encrypted.** The settings blob is encrypted with UMK on-device before `PUT /settings`. The server never sees plaintext preferences. |
+| 15 | **Device-specific settings are never synced.** `sync_enabled`, `sync_server_url`, `sharing_enabled`, autostart, and window geometry must never be included in the settings blob. |
+| 16 | **Settings sync is debounced.** Changes are batched and pushed at most once every 2 seconds. Never push on every keystroke. |
