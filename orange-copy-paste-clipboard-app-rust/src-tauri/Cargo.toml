@@ -55,6 +55,30 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_HiDpi",
 ] }
 
+# ── Cloud sync dependencies ──────────────────────────────────────────────────
+# These are loaded only when the sync module is active (runtime-gated by
+# sync_enabled setting).  They are compiled unconditionally so the binary is
+# always sync-capable without a separate feature build.
+
+# Async HTTP client (rustls TLS, no native-tls dependency)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Async runtime for the sync module's dedicated background thread pool
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+# Async WebSocket client (rustls TLS with bundled WebPKI certificate roots)
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+# Futures utilities (Stream/Sink combinators for the WS listener)
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# Argon2id — User Master Key derivation
+argon2 = "0.5"
+# AES-256-GCM — symmetric content encryption
+aes-gcm = "0.10"
+# X25519 ECDH — multi-device key exchange and group key wrapping
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+# OS credential store (Windows Credential Manager / macOS Keychain / libsecret)
+keyring = "2"
+# Zeroize — scrub key material from memory on drop
+zeroize = { version = "1", features = ["derive"] }
+
 [profile.release]
 opt-level = "z"   # optimize for binary size
 lto = true        # enable link-time optimization

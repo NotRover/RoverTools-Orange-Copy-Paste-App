@@ -72,6 +72,12 @@ fn capture_clipboard_change(
         let _ = app.emit("clipboard:new-entry", new_entry);
         crate::runtime::notifications::notify_if_enabled(app, new_entry);
         crate::clipboard::commands::auto_save_history(app, history);
+        // Sync hook (invariant: only called after confirmed push, never from
+        // watcher internals — the SyncClient does all network work)
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            s.on_new_clipboard_entry(new_entry.clone());
+        }
     }
     true
 }

@@ -212,6 +212,15 @@ pub struct ClipboardEntry {
     /// a file path.  Not persisted — only relevant within a single session.
     #[serde(skip)]
     pub content_hash: Option<u64>,
+    // ── Transient sync fields — excluded from MessagePack serialization ──
+    // These are populated at runtime by the SyncClient from id_map.json.
+    // They drive the cloud-sync icon shown on entry cards in the UI.
+    /// Server-assigned UUID for this entry after a successful push.
+    #[serde(skip)]
+    pub server_id: Option<String>,
+    /// Whether this entry has been synced to the server.
+    #[serde(skip, default)]
+    pub sync_status: crate::sync::types::SyncStatus,
 }
 
 /// Compute a fast 64-bit hash of the given string.
@@ -246,6 +255,8 @@ impl ClipboardEntry {
             groups: Vec::new(),
             label,
             content_hash,
+            server_id: None,
+            sync_status: crate::sync::types::SyncStatus::LocalOnly,
         }
     }
 

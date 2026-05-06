@@ -128,6 +128,8 @@ pub fn get_notes(state: State<'_, AppState>) -> Vec<Note> {
 pub fn create_note(state: State<'_, AppState>) -> Note {
     let note = state.notes.lock().create();
     state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    let sync = state.sync_client.lock().clone();
+    if let Some(s) = sync { s.on_new_note(note.clone()); }
     note
 }
 
@@ -136,6 +138,9 @@ pub fn update_note(state: State<'_, AppState>, id: String, title: String, conten
     let ok = state.notes.lock().update(&id, title, content);
     if ok {
         state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        let note = state.notes.lock().find(&id).cloned();
+        let sync = state.sync_client.lock().clone();
+        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
     }
     ok
 }
@@ -145,6 +150,8 @@ pub fn delete_note(state: State<'_, AppState>, id: String) -> bool {
     let ok = state.notes.lock().delete(&id);
     if ok {
         state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync { s.on_delete_note(id.clone()); }
     }
     ok
 }
@@ -154,6 +161,9 @@ pub fn pin_note(state: State<'_, AppState>, id: String) -> bool {
     let ok = state.notes.lock().pin(&id);
     if ok {
         state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        let note = state.notes.lock().find(&id).cloned();
+        let sync = state.sync_client.lock().clone();
+        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
     }
     ok
 }
@@ -163,6 +173,9 @@ pub fn unpin_note(state: State<'_, AppState>, id: String) -> bool {
     let ok = state.notes.lock().unpin(&id);
     if ok {
         state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        let note = state.notes.lock().find(&id).cloned();
+        let sync = state.sync_client.lock().clone();
+        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
     }
     ok
 }
@@ -172,6 +185,9 @@ pub fn set_note_groups(state: State<'_, AppState>, id: String, groups: Vec<Strin
     let ok = state.notes.lock().set_groups(&id, groups);
     if ok {
         state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        let note = state.notes.lock().find(&id).cloned();
+        let sync = state.sync_client.lock().clone();
+        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
     }
     ok
 }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::clipboard::history::ClipboardHistory;
 use crate::notes::NoteStore;
+use crate::sync::SyncClient;
 
 /// State managed by Tauri and injected into every command handler.
 pub struct AppState {
@@ -44,4 +45,8 @@ pub struct AppState {
     pub notes: Arc<Mutex<NoteStore>>,
     /// Set to `true` whenever the in-memory notes diverge from disk.
     pub notes_dirty: Arc<AtomicBool>,
+    /// Cloud sync client.  `None` when sync is disabled or the user is not
+    /// logged in.  Wrapped in a Mutex so it can be initialized lazily during
+    /// `setup_runtime` or when the user enables sync via `sync_set_enabled`.
+    pub sync_client: Mutex<Option<Arc<SyncClient>>>,
 }
