@@ -51,7 +51,8 @@ The system is composed of two independently deployable components that collabora
 │                      Backend (FastAPI + uvicorn)                        │
 │                                                                         │
 │   /api/v1/auth    /api/v1/sync    /api/v1/groups    /api/v1/blobs      │
-│   /ws  (WebSocket hub)            /internal/healthz                     │
+│   /api/v1/sharing (Live Share sessions, ≤5 members) /ws                │
+│   /internal/healthz                                                     │
 │                                                                         │
 │   PostgreSQL          Redis 7           S3 / Cloudflare R2              │
 │   (primary store)     (pub/sub + queue) (image blobs)                   │
@@ -69,14 +70,14 @@ The system is composed of two independently deployable components that collabora
 
 | Component | Technology | Role |
 |---|---|---|
-| Desktop App UI | React 19 + TypeScript + Vite | Clipboard history, notes, settings, sync status |
+| Desktop App UI | React 19 + TypeScript + Vite | Clipboard history, notes, settings, sync status, sharing UI |
 | Desktop App Backend | Rust + Tauri 2 | OS integrations, clipboard capture, local persistence, IPC |
 | Desktop Sync Module | Rust (`src-tauri/src/sync/`) | HTTP client, WebSocket listener, encryption, offline queue |
-| Web Backend | Python 3.12 + FastAPI | Auth, sync relay, group management, blob URL generation |
+| Web Backend | Python 3.12 + FastAPI | Auth, sync relay, group management, blob URL generation, sharing sessions |
 | Task Worker | Celery 5 + Redis | Email, blob cleanup, push notifications |
-| Primary Store | PostgreSQL 16 | Users, devices, sync entries (encrypted), groups |
+| Primary Store | PostgreSQL 16 | Users, devices, sync entries (encrypted), groups, Live Share sessions |
 | Pub/Sub + Cache | Redis 7 | Realtime fan-out, JWT deny-list, presence tracking |
-| Blob Store | Cloudflare R2 (S3 API) | Image and binary clipboard content |
+| Blob Store | Cloudflare R2 (S3 API) | Image, binary, file, and video clipboard content (≤ 5 MB per entry) |
 
 ---
 
@@ -94,9 +95,10 @@ The system is composed of two independently deployable components that collabora
 - User accounts and device registry
 - Encrypted sync entries (server sees ciphertext + metadata shell)
 - Sync cursors (per-device high-water marks)
-- Group definitions and membership
+- Group definitions and membership (team pool groups + Live Share groups, up to 5 members)
 - Blob metadata and pre-signed URL generation
 - Per-member wrapped group keys (for E2E group sharing)
+- Live Share session definitions: per-member scope (`clipboard` | `notes` | `both`)
 
 ### 3.3 Shared domain objects
 
@@ -146,8 +148,8 @@ Self-hosted: configurable via Settings → Cloud Sync → Server URL
     "updated_at": 1713225600000,
     "pinned": false,
     "deleted_at": null,                  // set for tombstones
-    "blob_key": null,                    // S3 key for image entries
-    "group_ids": []                      // server-side group UUIDs
+    "blob_key": null,                    // S3 key for image/file/video entries (≤ 5 MB)
+    "group_ids": []                      // server-side group UUIDs (team groups + Live Share group UUIDs)
   }]
 }
 ```
@@ -188,6 +190,10 @@ Self-hosted: configurable via Settings → Cloud Sync → Server URL
 | `device:offline` | A device disconnected or timed out | `{ device_id }` |
 | `group:membership_changed` | User joined or left a group | `{ group_id, action, user_id }` |
 | `group:rekey` | Group key was rotated (member removed) | `{ group_id, wrapped_group_key }` |
+| `sharing:invite` | Another user sent a sharing invite | `{ share_group_id, from_user, invite_code, expires_at }` |
+| `sharing:accepted` | The invited user accepted the share | `{ share_group_id, peer_user, wrapped_group_key }` |
+| `sharing:ended` | Either party ended the sharing session | `{ share_group_id, ended_by }` |
+| `sharing:scope_changed` | A peer updated their contribution scope | `{ share_group_id, user_id, share_scope }` |
 | `ping` | Server heartbeat (every 30s) | `{ server_ts }` |
 
 ---
@@ -322,6 +328,8 @@ Device A (clipboard capture)
 
 **Group sharing:** Same flow, but `redis.publish` fans out to `group:{group_id}` channels in addition to `user:{user_id}`. All group members with active WebSocket connections receive the entry.
 
+**Live Share (multi-user real-time sharing):** Uses the same group fan-out path. The sync client automatically appends active Live Share group UUIDs to `entry.group_ids` for entries that match the user's configured `share_scope` (`clipboard`, `notes`, or `both`). All other members of the Live Share group receive these entries via the group channel and merge them into the appropriate local store. Up to 5 users per group. File and video entries are included if total size ≤ 5 MB; larger entries are skipped and flagged in the sync status UI.
+
 ---
 
 ## 8. E2E Encryption Boundary
@@ -428,6 +436,17 @@ The desktop app uses string group names locally. When sync is enabled:
 - Otherwise → group name stays in `encrypted_metadata` only (server-invisible personal tag)
 - The sync module resolves this mapping on first sync using a local `groups_map.json`
 
+### 10.4 Live Share (multi-user real-time clipboard/notes sharing)
+
+A **Live Share** is a specialised group (`group_type: 'live_share'`, `max_members: 5`) of 2–5 different user accounts. It enables real-time cross-user clipboard and/or notes mirroring.
+
+- **Scope** is per-member: each user independently chooses `clipboard` | `notes` | `both` — controlling what *they contribute* to the group, not what they receive.
+- **Establishment:** Owner creates a Live Share session and invites up to 4 others by email. Each invited user accepts and receives the Group Key via X25519 key exchange (same mechanism as team group keys).
+- **Live flow:** On each captured entry, the sync client checks active Live Share groups. If the `entry_type` matches the user's scope, the group UUID is included in `entry.group_ids`. The entry is encrypted with the Live Share Group Key. The server fans it out to all other members via the existing group channel.
+- **File/video limit:** Files and videos are shared only if total entry size ≤ 5 MB. Entries exceeding the limit are skipped with a UI notification.
+- **Termination:** Owner dissolves the group (all members removed). Non-owner members can leave individually. Existing shared entries remain in each user's local store.
+- **Privacy:** The server sees that users share a Live Share group but cannot read the content — all entries are E2E encrypted with the Live Share Group Key, which the server cannot derive.
+
 ---
 
 ## 11. Desktop App Changes for Cloud
@@ -471,6 +490,11 @@ sync_get_groups()                        → Vec<SyncGroup>
 sync_create_group(name: String)          → SyncGroup
 sync_join_group(invite_code: String)
 sync_leave_group(group_id: String)
+sharing_invite(email: String, scope: String)    → SharingInvite
+sharing_accept(invite_code: String, scope: String)
+sharing_get_sessions()                          → Vec<SharingSession>
+sharing_update_scope(share_group_id: String, scope: String)
+sharing_end_session(share_group_id: String)
 ```
 
 ### 11.4 Integration points (existing files touched minimally)
@@ -491,6 +515,8 @@ sync_leave_group(group_id: String)
 - Sync status indicator: Synced / Syncing / Offline / Re-login required
 - Per-entry cloud icon (synced ✓ / pending ○ / local-only —)
 - Shared Groups panel: list, create, invite, leave
+- Live Share panel: active sessions (member list, individual scopes, online status), create new Live Share, invite member, accept invite, change own scope, leave session, end session (owner only)
+- File sync skip notification: when a file/video entry is too large to sync (> 5 MB), a dismissible notice in sync status
 
 ---
 
@@ -556,3 +582,6 @@ These constraints must be preserved across any change to either submodule:
 | 8 | **Group key rotation on member removal.** Removing a group member must trigger a new Group Key and re-distribution to remaining members before new entries are pushed. |
 | 9 | **Cursor advances only on confirmed receipt.** `POST /sync/cursor` is only called after entries are successfully decrypted and merged into local store. |
 | 10 | **ID mapping is maintained.** The `client_id → server_id` mapping must be preserved across restarts. Losing it causes duplicate entries on the next push. |
+| 11 | **Sharing is always opt-in.** No entry is tagged with a Live Share group UUID unless the user has an active Live Share session and the entry type matches their configured `share_scope`. |
+| 12 | **File/video sync is size-gated.** Entries of `kind: 'file'` are never pushed to the server if their total payload exceeds 5 MB. This is enforced on both client and server (HTTP 413 from `request-upload`). |
+| 13 | **Sharing ends cleanly.** When a Live Share session is terminated or a member leaves, the Live Share group UUID must be removed from `id_map.json` so no future entries are tagged with it. Existing entries in all users' local stores are not affected. |

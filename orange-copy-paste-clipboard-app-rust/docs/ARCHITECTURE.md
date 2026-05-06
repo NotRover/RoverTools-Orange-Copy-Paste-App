@@ -28,6 +28,7 @@ A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real
   - [Popups](#popups)
   - [UI Components](#ui-components)
 - [Data Flows](#data-flows)
+- [TODO — Implementation Checklist](#todo--implementation-checklist)
 - [Persistence & Storage](#persistence--storage)
 - [Tauri Configuration & Permissions](#tauri-configuration--permissions)
 - [Cross-System Invariants](#cross-system-invariants)
@@ -517,15 +518,48 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `sync_create_group`   | `(name: String) → SyncGroup`                        | Create group; generates Group Key; posts to server                       |
 | `sync_join_group`     | `(invite_code: String) → ()`                        | Join via invite code                                                     |
 | `sync_leave_group`    | `(group_id: String) → ()`                           | Leave group; removes local GK                                            |
+| `sharing_invite`      | `(email: String, scope: String) → SharingInvite`    | Create or invite to Live Share group (max 5 members); `scope` = `clipboard\|notes\|both` |
+| `sharing_accept`      | `(invite_code: String, scope: String) → ()`         | Accept sharing invite; exchange Group Key via X25519                     |
+| `sharing_get_sessions`| `() → Vec<SharingSession>`                          | List active sharing sessions with peer info and scope                    |
+| `sharing_update_scope`| `(share_group_id: String, scope: String) → ()`       | Update what this user contributes to the share                           |
+| `sharing_end_session` | `(share_group_id: String) → ()`                      | Terminate sharing; remove Live Share group UUID from `id_map.json`             |
+
+#### File and Video Sync (5 MB Limit)
+
+`kind: 'file'` entries captured from CF_HDROP are synced subject to a **5 MB total size cap**:
+
+1. On `on_new_entry(entry)`, if `entry.kind == File`:
+   - Read each file path from `entry.content` (newline-delimited).
+   - Sum file sizes. If total > 5 MB: skip sync for this entry, increment `sync_status.skipped_count`, emit a `sync:file-skipped` Tauri event so the UI can surface a notification. Do not add to `sync_pending.json`.
+   - If within limit: for each file, call `POST /blobs/request-upload` → upload bytes to R2 via pre-signed PUT → `POST /blobs/confirm-upload`. Collect `blob_key` values.
+   - `encrypted_content` = encrypt(`[{ filename, mime_type, size_bytes, blob_key }, ...]` as JSON).
+   - `blob_key` field on the push payload = first file's blob key (for server routing).
+2. On receiving a `sync:entry` of `kind: 'file'` from the server: download each blob via pre-signed GET to `{app_data}/sync-downloads/`, update `entry.content` to the downloaded paths.
+
+The same flow applies to video files (CF_HDROP paths to `.mp4`, `.mov`, etc.). The 5 MB check is per-clipboard-entry (sum of all files in that single clipboard event), not per file.
+
+#### Live Share — Sync Module Integration
+
+When an active sharing session exists, `on_new_entry` and `on_update_entry` check whether to fan out to the pair:
+
+1. For each active sharing session in `SyncClient.sharing_sessions`:
+   - If `session.my_scope` includes the `entry.entry_type`, append `session.share_group_id` to `entry.group_ids`.
+   - Encrypt `encrypted_content` with the session's Group Key (GK), not UMK.
+2. Push the entry with the extended `group_ids`. The server fans it out to the paired user via the group channel automatically.
+
+On receiving `sharing:invite` via WebSocket: emit `sharing:invite-received` Tauri event → React shows invite notification in Settings.
+On receiving `sharing:ended`: remove the Live Share group UUID from `id_map.json` and `sharing_sessions` in-memory.
 
 #### `config.rs` — Sync Settings
 
-Two settings are added to the existing `settings.json` store:
+Four settings are added to the existing `settings.json` store:
 
 | Key               | Type   | Default                             | Description                         |
 | ----------------- | ------ | ----------------------------------- | ----------------------------------- |
 | `sync_enabled`    | bool   | false                               | Master toggle for all sync behavior |
 | `sync_server_url` | string | `"https://api.orangeclipboard.app"` | API base URL (self-hosted override) |
+| `sharing_enabled` | bool   | true                                | Whether Live Share is active (false = ignore all Live Share group fan-out) |
+| `sharing_notify`  | bool   | true                                | Show notification when a peer copies something |
 
 ### Runtime Module
 
@@ -731,6 +765,7 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Connected devices** list → fetched via `GET /api/v1/auth/devices`; shows current device highlighted
 - **Sync status indicator**: Synced ✓ / Syncing… / Offline / Re-login required → driven by `sync_get_status`
 - **Shared Groups** panel: list, create, invite link, leave → calls `sync_create_group`, `sync_join_group`, `sync_leave_group`
+- **Live Share** panel (Phase 8): create a Live Share session (up to 5 members), invite by email, view member list with individual scopes, change own scope, leave session, end session (owner only). Driven by `sharing_invite`, `sharing_accept`, `sharing_get_sessions`, `sharing_update_scope`, `sharing_end_session`
 
 #### Notes Screen (`NotesScreen.tsx`)
 
@@ -1038,3 +1073,151 @@ The following constraints span both this app and the backend. Violating any of t
 | 8   | **Sync runtime never blocks the main runtime** | All `SyncClient` methods are `async` and run in the dedicated background Tokio runtime. Use `Handle::current().spawn()` — never `block_on` from the Tauri runtime.  |
 | 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                |
 | 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable — the server deduplicates by `client_id`. |
+| 11  | **Sharing is always opt-in**                   | No entry gets a sharing Live Share group UUID unless the user has an active session and the entry type matches their `share_scope`. Never auto-tag on sync re-enroll.      |
+| 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:file-skipped` to the UI; do not silently drop.                                        |
+| 13  | **Ending a sharing session is clean**          | `sharing_end_session` must remove the Live Share group UUID from `id_map.json` and in-memory `sharing_sessions` before returning. Future captures must not be tagged.     |
+
+---
+
+## TODO — Implementation Checklist
+
+Tracks all client-side work not yet implemented. Organized by phase matching the backend sequencing (see `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md §13`).
+
+---
+
+### Phase 6 — Cloud Sync (Rust module + React UI)
+
+#### Rust: new module `src-tauri/src/sync/`
+
+- [ ] Create `sync/mod.rs` — `SyncClient` struct, background Tokio runtime init, `Option<Arc<SyncClient>>` in `AppState`
+- [ ] Create `sync/crypto.rs` — `derive_umk`, `encrypt`, `decrypt`, `generate_x25519_keypair`, `x25519_shared_secret`, `wrap_key`, `unwrap_key`
+- [ ] Create `sync/client.rs` — `reqwest` HTTP client, base URL config, `Authorization` header injection, automatic 401 → token refresh → retry
+- [ ] Create `sync/ws_listener.rs` — `tokio-tungstenite` WebSocket connection, reconnect backoff, dispatch table for all `sync:*`, `device:*`, `group:*` events
+- [ ] Create `sync/pending_queue.rs` — read/write `{app_data}/sync_pending.json`; operations: `push`, `delete`, `update`; flush-in-order on reconnect
+- [ ] Create `sync/commands.rs` — register all sync Tauri commands (see list below)
+- [ ] Create `sync/config.rs` — read/write `sync_enabled` and `sync_server_url` from `settings.json`
+
+#### Rust: Cargo.toml additions
+
+- [ ] `reqwest = { features = ["json", "rustls-tls"] }`  # do not pin; use Cargo to resolve latest compatible
+- [ ] `tokio-tungstenite = { features = ["rustls-tls-webpki-roots"] }`  # do not pin
+- [ ] `argon2`  # do not pin; use latest
+- [ ] `aes-gcm`  # do not pin; use latest
+- [ ] `x25519-dalek`  # do not pin; use latest
+- [ ] `keyring`  # do not pin; use latest
+
+#### Rust: integration into existing files
+
+- [ ] `state/app_state.rs` — add `sync_client: Option<Arc<SyncClient>>`
+- [ ] `clipboard/history.rs` — add transient fields `server_id: Option<String>` and `sync_status: SyncStatus` to `ClipboardEntry` (skip serialization to `history.bin`)
+- [ ] `notes/store.rs` — same transient fields on `Note`
+- [ ] `clipboard/commands.rs` — call `SyncClient.on_new_entry(entry)` after every successful `history.push()`
+- [ ] `clipboard/commands.rs` — call `SyncClient.on_delete_entry(id)` from `delete_entry` and `clear_history`
+- [ ] `clipboard/commands.rs` — call `SyncClient.on_update_entry(entry)` from `pin_entry`, `unpin_entry`, `set_entry_groups`, bulk mutations
+- [ ] `notes/commands.rs` — call `SyncClient.on_new_entry` / `on_update_entry` / `on_delete_entry` from note CRUD commands
+- [ ] `lib.rs` — register sync commands; initialize `SyncClient` in `setup()` if `sync_enabled`
+
+#### Rust: sync Tauri commands to implement
+
+- [ ] `sync_login(email, password, device_name) → Result<SyncUser>`
+- [ ] `sync_logout() → ()`
+- [ ] `sync_get_user() → Option<SyncUser>`
+- [ ] `sync_get_status() → SyncStatus` — `{ connected, last_synced_at, pending_count, skipped_count }`
+- [ ] `sync_now() → ()`
+- [ ] `sync_set_enabled(enabled: bool) → ()`
+- [ ] `sync_set_server_url(url: String) → ()`
+- [ ] `sync_get_groups() → Vec<SyncGroup>`
+- [ ] `sync_create_group(name: String) → SyncGroup`
+- [ ] `sync_join_group(invite_code: String) → ()`
+- [ ] `sync_leave_group(group_id: String) → ()`
+
+#### Rust: persistence files to implement
+
+- [ ] `{app_data}/id_map.json` — read/write `{ entries: { client_id → server_uuid }, groups: { name → server_uuid } }`
+- [ ] `{app_data}/sync_state.json` — read/write `{ last_server_ts, device_id, user_id }`
+- [ ] `{app_data}/sync_pending.json` — managed by `pending_queue.rs` (already listed above)
+
+#### React: App.tsx event wiring
+
+- [ ] Listen for `sync:entry` Tauri event → decrypt (via invoke) → prepend to `entries[]` state
+- [ ] Listen for `sync:note` Tauri event → merge into `notes[]` state
+- [ ] Listen for `sync:status-changed` Tauri event → update sync status indicator
+
+#### React: Settings screen — Cloud Sync section
+
+- [ ] Enable/disable Cloud Sync toggle → `sync_set_enabled`
+- [ ] Server URL input field → `sync_set_server_url`
+- [ ] Login form (email + password) → `sync_login`
+- [ ] Logout button → `sync_logout`
+- [ ] Logged-in user display (email, display name)
+- [ ] Connected devices list (fetched from backend) with current device highlighted and revoke button
+- [ ] Sync status indicator: `Synced ✓` / `Syncing…` / `Offline` / `Re-login required` — driven by `sync_get_status`
+- [ ] Shared Groups sub-panel: list joined groups, create new group, copy invite link, leave group
+
+#### React: Entry card
+
+- [ ] Cloud sync icon on each card: filled cloud ✓ (`Synced`) / outline cloud (`Pending`) / no icon (`LocalOnly`)
+
+---
+
+### Phase 7 — File & Video Sync (5 MB gate)
+
+#### Rust: `sync/client.rs` or `sync/mod.rs`
+
+- [ ] In `on_new_entry`: if `entry.kind == File`, read each file path from `entry.content` (newline-delimited)
+- [ ] Sum file sizes; if total > 5 MB → emit `sync:file-skipped` Tauri event, increment `skipped_count`, return early (do not push)
+- [ ] If within limit → for each file: `POST /blobs/request-upload` → PUT bytes to pre-signed R2 URL → `POST /blobs/confirm-upload`
+- [ ] Build `encrypted_content` = `encrypt(UMK, JSON([{ filename, mime_type, size_bytes, blob_key }, ...]), aad=client_id)`
+- [ ] Set `blob_key` on push payload to the first file's key
+
+#### Rust: `ws_listener.rs` / pull handler
+
+- [ ] On receiving a `kind: 'file'` entry from pull or WebSocket: for each `blob_key` in decrypted content list → `GET /blobs/{key}/download-url` → download to `{app_data}/sync-downloads/{filename}`
+- [ ] Update local `entry.content` to the downloaded local file paths
+
+#### React
+
+- [ ] Listen for `sync:file-skipped` Tauri event → show dismissible notification in sync status area ("File too large to sync — must be under 5 MB")
+
+---
+
+### Phase 8 — Live Share
+
+#### Rust: `SyncClient` additions
+
+- [ ] Add `sharing_sessions: Vec<SharingSession>` field (loaded from `id_map.json` on init)
+- [ ] `SharingSession` struct: `{ share_group_id, group_key: [u8; 32], my_scope, members: Vec<SessionMember> }`
+
+#### Rust: sync Tauri commands to implement
+
+- [ ] `sharing_invite(email: String, scope: String) → Result<SharingInvite>` — `POST /sharing` then `POST /sharing/{id}/invite`
+- [ ] `sharing_accept(invite_code: String, scope: String) → Result<()>` — `POST /sharing/join`; derive shared secret; wrap Group Key; store GK in session
+- [ ] `sharing_get_sessions() → Vec<SharingSession>`
+- [ ] `sharing_update_scope(share_group_id: String, scope: String) → ()` — `PATCH /sharing/sessions/{id}/scope`
+- [ ] `sharing_end_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}`; remove from `id_map.json`
+- [ ] `sharing_leave_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}/leave`; remove from local session list
+
+#### Rust: `on_new_entry` Live Share fan-out
+
+- [ ] After pushing a new entry: for each active `SharingSession` where `my_scope` matches `entry.entry_type`
+  - [ ] Re-encrypt `encrypted_content` with the session's `group_key` (GK) instead of UMK
+  - [ ] Append `share_group_id` to `entry.group_ids`
+  - [ ] Push the group-scoped copy to the server
+
+#### Rust: `ws_listener.rs` — Live Share WS events
+
+- [ ] `sharing:invite` → emit `sharing:invite-received` Tauri event to React (for invite notification UI)
+- [ ] `sharing:accepted` → decrypt `wrapped_group_key` using own X25519 private key; store GK in `sharing_sessions`; persist to `id_map.json`
+- [ ] `sharing:ended` → remove session from `sharing_sessions`; remove `share_group_id` from `id_map.json`
+- [ ] `sharing:member_left` → update `session.members` list
+- [ ] `sharing:scope_changed` → update the relevant member's scope in `session.members`
+
+#### React: Settings screen — Live Share panel
+
+- [ ] Create Live Share button → `sharing_invite` (opens invite form)
+- [ ] Invite form: email field + scope selector (`clipboard` / `notes` / `both`) → `sharing_invite`
+- [ ] Active sessions list: session name, member list (display name + their scope + online indicator)
+- [ ] Own scope selector per session → `sharing_update_scope`
+- [ ] Leave session button (non-owner) → `sharing_leave_session`
+- [ ] End session button (owner only) → `sharing_end_session`
+- [ ] Incoming invite notification (driven by `sharing:invite-received` Tauri event): accept/decline with scope selection → `sharing_accept`
