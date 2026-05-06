@@ -85,6 +85,11 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
         auto_save_history(&app, &state.history);
+        // Tombstone must propagate to sync even when offline (invariant #5)
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            s.on_delete_clipboard_entry(id);
+        }
     }
     removed
 }
@@ -143,6 +148,12 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
             "clipboard:entry-pinned",
             serde_json::json!({ "id": id, "pinned": pin }),
         );
+        // Propagate pin metadata change to sync
+        let entry = state.history.lock().find(id).cloned();
+        let sync = state.sync_client.lock().clone();
+        if let (Some(entry), Some(s)) = (entry, sync) {
+            s.on_update_clipboard_entry(entry);
+        }
     }
     success
 }
@@ -379,6 +390,11 @@ pub fn set_entry_groups(
             "clipboard:entry-groups-changed",
             serde_json::json!({ "id": id, "groups": groups }),
         );
+        let entry = state.history.lock().find(&id).cloned();
+        let sync = state.sync_client.lock().clone();
+        if let (Some(entry), Some(s)) = (entry, sync) {
+            s.on_update_clipboard_entry(entry);
+        }
     }
     success
 }

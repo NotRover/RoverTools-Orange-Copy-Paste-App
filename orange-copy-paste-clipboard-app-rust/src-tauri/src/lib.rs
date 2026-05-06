@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod notes;
 pub mod runtime;
 pub mod state;
+pub mod sync;
 
 pub use state::AppState;
 
@@ -301,6 +302,19 @@ fn setup_runtime(
     crate::runtime::popup_windows::setup_main_window_focus_handler(app);
     crate::runtime::window_state::restore(app);
     crate::runtime::window_state::setup_tracking(app);
+
+    // Initialize cloud sync if it was enabled when the app last quit.
+    let sync_config = crate::sync::config::SyncConfig::load(&app.handle().clone());
+    if sync_config.enabled {
+        match crate::sync::SyncClient::new(app.handle().clone(), sync_config) {
+            Ok(client) => {
+                *app.state::<AppState>().sync_client.lock() =
+                    Some(std::sync::Arc::new(client));
+            }
+            Err(e) => eprintln!("[sync] init failed: {e}"),
+        }
+    }
+
     Ok(())
 }
 
@@ -326,6 +340,7 @@ pub fn run() {
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
         notes: Arc::new(parking_lot::Mutex::new(crate::notes::NoteStore::new())),
         notes_dirty: Arc::new(AtomicBool::new(false)),
+        sync_client: parking_lot::Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -379,6 +394,25 @@ pub fn run() {
             crate::notes::commands::save_note_file,
             crate::notes::commands::get_note_attachments_dirs,
             crate::notes::commands::export_note_text,
+            // Cloud sync commands
+            crate::sync::commands::sync_login,
+            crate::sync::commands::sync_logout,
+            crate::sync::commands::sync_get_user,
+            crate::sync::commands::sync_get_status,
+            crate::sync::commands::sync_now,
+            crate::sync::commands::sync_set_enabled,
+            crate::sync::commands::sync_set_server_url,
+            crate::sync::commands::sync_receive_local_settings,
+            crate::sync::commands::sync_get_groups,
+            crate::sync::commands::sync_create_group,
+            crate::sync::commands::sync_join_group,
+            crate::sync::commands::sync_leave_group,
+            crate::sync::commands::sharing_invite,
+            crate::sync::commands::sharing_accept,
+            crate::sync::commands::sharing_get_sessions,
+            crate::sync::commands::sharing_update_scope,
+            crate::sync::commands::sharing_end_session,
+            crate::sync::commands::sharing_leave_session,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {

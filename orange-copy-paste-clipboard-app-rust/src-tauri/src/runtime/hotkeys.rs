@@ -154,6 +154,12 @@ fn handle_copy_shortcut(
             }
             let _ = app.emit("clipboard:new-entry", &entry);
             crate::clipboard::commands::auto_save_history(&app, &history);
+            // Sync hook — Ctrl+Shift+C entries bypass the watcher (suppress
+            // flag is set), so we notify here directly.
+            let sync = state.sync_client.lock().clone();
+            if let Some(s) = sync {
+                s.on_new_clipboard_entry(entry.clone());
+            }
         }
         crate::clipboard::commands::set_active_clipboard_id(&app, &entry.id);
         show_copy_popup(&app, &entry);
