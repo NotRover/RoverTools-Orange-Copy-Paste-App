@@ -909,9 +909,31 @@ const App: React.FC = () => {
     }
   }, [notes]);
 
+  const syncPillLabel =
+    syncConnected === true
+      ? "Sync connected"
+      : syncConnected === false
+        ? "Sync offline"
+        : "Sync inactive";
+
+  const syncPillClass =
+    syncConnected === true
+      ? "sync-pill sync-pill--connected"
+      : syncConnected === false
+        ? "sync-pill sync-pill--offline"
+        : "sync-pill sync-pill--inactive";
+
   return (
     <div className="app" data-theme={theme}>
       <TooltipPortal />
+      <div
+        className={syncPillClass}
+        data-tooltip={syncPillLabel}
+        data-tooltip-pos="top"
+      >
+        <span className="sync-pill-dot" />
+        <span className="sync-pill-text">{syncPillLabel}</span>
+      </div>
       <Sidebar
         screen={screen}
         theme={theme}
@@ -922,7 +944,6 @@ const App: React.FC = () => {
           }
         }}
         onToggleTheme={toggleTheme}
-        syncConnected={syncConnected}
       />
 
       <div className="main-frame">
