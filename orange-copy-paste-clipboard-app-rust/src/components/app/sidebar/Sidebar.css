@@ -82,3 +82,26 @@
   border-radius: 0 2px 2px 0;
   background: var(--accent);
 }
+
+/* Cloud sync connection indicator */
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin: 4px auto 0;
+  flex-shrink: 0;
+}
+
+.sync-dot--connected {
+  background: #22c55e;
+  box-shadow: 0 0 4px 1px rgba(34, 197, 94, 0.45);
+}
+
+.sync-dot--offline {
+  background: #f59e0b;
+}
+
+.sync-dot--inactive {
+  background: var(--text-muted);
+  opacity: 0.35;
+}

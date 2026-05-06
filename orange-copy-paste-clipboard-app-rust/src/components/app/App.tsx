@@ -139,6 +139,9 @@ const App: React.FC = () => {
   // ID of the entry currently in the OS clipboard
   const [activeClipboardId, setActiveClipboardId] = useState("");
 
+  // null = sync inactive/not logged in; true/false = WS connected state
+  const [syncConnected, setSyncConnected] = useState<boolean | null>(null);
+
   // Undo state for group deletion
   const [deletedGroup, setDeletedGroup] = useState<{
     name: string;
@@ -371,6 +374,22 @@ const App: React.FC = () => {
       cancelled = true;
       unlisten?.();
       document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  // Track cloud sync connection state.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<{ connected: boolean }>("sync:status-changed", (event) => {
+      if (!cancelled) setSyncConnected(event.payload.connected);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -903,6 +922,7 @@ const App: React.FC = () => {
           }
         }}
         onToggleTheme={toggleTheme}
+        syncConnected={syncConnected}
       />
 
       <div className="main-frame">

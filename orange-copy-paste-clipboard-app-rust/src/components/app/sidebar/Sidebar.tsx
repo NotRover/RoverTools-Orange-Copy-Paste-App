@@ -87,6 +87,24 @@ const Sidebar: React.FC<SidebarProps> = ({
       >
         <GearIcon />
       </button>
+
+      <div
+        className={`sync-dot ${
+          syncConnected === true
+            ? "sync-dot--connected"
+            : syncConnected === false
+              ? "sync-dot--offline"
+              : "sync-dot--inactive"
+        }`}
+        data-tooltip={
+          syncConnected === true
+            ? "Cloud Sync: Connected"
+            : syncConnected === false
+              ? "Cloud Sync: Offline"
+              : "Cloud Sync: Inactive"
+        }
+        data-tooltip-pos="right"
+      />
     </div>
   </aside>
 );
