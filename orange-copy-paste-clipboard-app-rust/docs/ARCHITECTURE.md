@@ -95,7 +95,7 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | serde + serde_json           | 1       | Serialization for IPC and settings persistence                                 |
 | rmp-serde                    | 1       | MessagePack binary serialization for history persistence                       |
 | reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — **Phase 6, sync module only**     |
-| tokio-tungstenite            | 0.23    | Async WebSocket client for realtime events — **Phase 6, sync module only**                  |
+| tokio-tungstenite            | 0.24    | Async WebSocket client for realtime events — **Phase 6, sync module only**                  |
 | argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **Phase 6, sync module only**           |
 | aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **Phase 6, sync module only**                   |
 | x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and group key wrapping — **Phase 6, sync module only** |
@@ -407,7 +407,7 @@ Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sy
 
 ### Cloud Sync Module
 
-> **Status:** Planned — Phase 6 of backend implementation.
+> **Status:** Rust client implemented (Phase 6). React UI pending.
 > **Location:** `src-tauri/src/sync/`
 > **Principle:** Additive only — no existing capture, storage, or popup logic changes.
 
@@ -1113,59 +1113,60 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: new module `src-tauri/src/sync/`
 
-- [ ] Create `sync/mod.rs` — `SyncClient` struct, background Tokio runtime init, `Option<Arc<SyncClient>>` in `AppState`
-- [ ] Create `sync/crypto.rs` — `derive_umk`, `encrypt`, `decrypt`, `generate_x25519_keypair`, `x25519_shared_secret`, `wrap_key`, `unwrap_key`
-- [ ] Create `sync/client.rs` — `reqwest` HTTP client, base URL config, `Authorization` header injection, automatic 401 → token refresh → retry
-- [ ] Create `sync/ws_listener.rs` — `tokio-tungstenite` WebSocket connection, reconnect backoff, dispatch table for all `sync:*`, `device:*`, `group:*` events
-- [ ] Create `sync/pending_queue.rs` — read/write `{app_data}/sync_pending.json`; operations: `push`, `delete`, `update`; flush-in-order on reconnect
-- [ ] Create `sync/commands.rs` — register all sync Tauri commands (see list below)
-- [ ] Create `sync/config.rs` — read/write `sync_enabled` and `sync_server_url` from `settings.json`
+- [x] Create `sync/mod.rs` — `SyncClient` struct, background Tokio runtime init, `Option<Arc<SyncClient>>` in `AppState`
+- [x] Create `sync/crypto.rs` — `derive_umk`, `encrypt`, `decrypt`, `generate_x25519_keypair`, `x25519_shared_secret`, `wrap_key`, `unwrap_key`
+- [x] Create `sync/client.rs` — `reqwest` HTTP client, base URL config, `Authorization` header injection, automatic 401 → token refresh → retry
+- [x] Create `sync/ws_listener.rs` — `tokio-tungstenite` WebSocket connection, reconnect backoff, dispatch table for all `sync:*`, `device:*`, `group:*` events
+- [x] Create `sync/pending_queue.rs` — read/write `{app_data}/sync_pending.json`; operations: `push`, `delete`, `update`; flush-in-order on reconnect
+- [x] Create `sync/commands.rs` — register all sync Tauri commands (see list below)
+- [x] Create `sync/config.rs` — read/write `sync_enabled` and `sync_server_url` from `settings.json`
 
 #### Rust: Cargo.toml additions
 
-- [ ] `reqwest = { features = ["json", "rustls-tls"] }`
-- [ ] `tokio-tungstenite = { features = ["rustls-tls-webpki-roots"] }`
-- [ ] `argon2`
-- [ ] `aes-gcm`
-- [ ] `x25519-dalek`
-- [ ] `keyring`
+- [x] `reqwest = { features = ["json", "rustls-tls"] }`
+- [x] `tokio-tungstenite = { features = ["rustls-tls-webpki-roots", "connect"] }`
+- [x] `argon2`
+- [x] `aes-gcm`
+- [x] `x25519-dalek`
+- [x] `keyring`
 
 #### Rust: integration into existing files
 
-- [ ] `state/app_state.rs` — add `sync_client: Option<Arc<SyncClient>>`
-- [ ] `clipboard/history.rs` — add transient fields `server_id: Option<String>` and `sync_status: SyncStatus` to `ClipboardEntry` (skip serialization to `history.bin`)
-- [ ] `notes/store.rs` — same transient fields on `Note`
-- [ ] `clipboard/commands.rs` — call `SyncClient.on_new_entry(entry)` after every successful `history.push()`
-- [ ] `clipboard/commands.rs` — call `SyncClient.on_delete_entry(id)` from `delete_entry` and `clear_history`
-- [ ] `clipboard/commands.rs` — call `SyncClient.on_update_entry(entry)` from `pin_entry`, `unpin_entry`, `set_entry_groups`, bulk mutations
-- [ ] `notes/commands.rs` — call `SyncClient.on_new_entry` / `on_update_entry` / `on_delete_entry` from note CRUD commands
-- [ ] `lib.rs` — register sync commands; initialize `SyncClient` in `setup()` if `sync_enabled`
+- [x] `state/app_state.rs` — add `sync_client: Mutex<Option<Arc<SyncClient>>>`
+- [x] `clipboard/history.rs` — add transient fields `server_id: Option<String>` and `sync_status: SyncStatus` to `ClipboardEntry` (skip serialization to `history.bin`)
+- [x] `notes/store.rs` — same transient fields on `Note`
+- [x] `runtime/clipboard_watcher.rs` — call `SyncClient.on_new_clipboard_entry(entry)` after successful history push
+- [x] `runtime/hotkeys.rs` — call `SyncClient.on_new_clipboard_entry(entry)` for Ctrl+Shift+C path
+- [x] `clipboard/commands.rs` — call `SyncClient.on_delete_clipboard_entry(id)` from `delete_entry`; `on_update_clipboard_entry` from `toggle_pin`, `set_entry_groups`
+- [ ] `clipboard/commands.rs` — call `SyncClient.on_delete_clipboard_entry` from `clear_history`; `on_update_clipboard_entry` from bulk pin/group mutations
+- [x] `notes/commands.rs` — call `SyncClient.on_new_note` / `on_update_note` / `on_delete_note` from note CRUD commands
+- [x] `lib.rs` — register sync commands; initialize `SyncClient` in `setup_runtime()` if `sync_enabled`
 
 #### Rust: sync Tauri commands to implement
 
-- [ ] `sync_login(email, password, device_name) → Result<SyncUser>`
-- [ ] `sync_logout() → ()`
-- [ ] `sync_get_user() → Option<SyncUser>`
-- [ ] `sync_get_status() → SyncStatus` — `{ connected, last_synced_at, pending_count, skipped_count }`
-- [ ] `sync_now() → ()`
-- [ ] `sync_set_enabled(enabled: bool) → ()`
-- [ ] `sync_set_server_url(url: String) → ()`
-- [ ] `sync_get_groups() → Vec<SyncGroup>`
-- [ ] `sync_create_group(name: String) → SyncGroup`
-- [ ] `sync_join_group(invite_code: String) → ()`
-- [ ] `sync_leave_group(group_id: String) → ()`
+- [x] `sync_login(email, password, device_name) → Result<SyncUser>`
+- [x] `sync_logout() → ()`
+- [x] `sync_get_user() → Option<SyncUser>`
+- [x] `sync_get_status() → SyncStatusInfo` — `{ connected, pending_count, skipped_count }`
+- [x] `sync_now() → ()`
+- [x] `sync_set_enabled(enabled: bool) → ()`
+- [x] `sync_set_server_url(url: String) → ()`
+- [x] `sync_get_groups() → Vec<SyncGroup>`
+- [x] `sync_create_group(name: String) → SyncGroup`
+- [x] `sync_join_group(invite_code: String) → ()`
+- [x] `sync_leave_group(group_id: String) → ()`
 
 #### Rust: persistence files to implement
 
-- [ ] `{app_data}/id_map.json` — read/write `{ entries: { client_id → server_uuid }, groups: { name → server_uuid } }`
-- [ ] `{app_data}/sync_state.json` — read/write `{ last_server_ts, device_id, user_id }`
-- [ ] `{app_data}/sync_pending.json` — managed by `pending_queue.rs` (already listed above)
+- [x] `{app_data}/id_map.json` — read/write `{ entries: { client_id → server_uuid }, groups: { name → server_uuid } }`
+- [x] `{app_data}/sync_state.json` — read/write `{ last_server_ts, device_id, user_id }`
+- [x] `{app_data}/sync_pending.json` — managed by `pending_queue.rs`
 
 #### React: App.tsx event wiring
 
-- [ ] Listen for `sync:entry` Tauri event → decrypt (via invoke) → prepend to `entries[]` state
-- [ ] Listen for `sync:note` Tauri event → merge into `notes[]` state
-- [ ] Listen for `sync:status-changed` Tauri event → update sync status indicator
+- [ ] Listen for `sync:remote-entry` Tauri event → decrypt (via invoke) → prepend to `entries[]` state
+- [ ] Listen for `sync:remote-delete` Tauri event → remove from `entries[]` state
+- [x] Listen for `sync:status-changed` Tauri event → update sync dot indicator in Sidebar
 
 #### React: Settings screen — Cloud Sync section
 
@@ -1202,7 +1203,7 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
   - `GET /api/v1/settings`
   - If 404: skip (no settings on server yet)
   - Decrypt blob; if `server_updated_at > local_updated_at`: apply and emit `sync:settings`
-- [ ] Add a debounce timer (2 seconds) inside `SyncClient`; any call to internal `schedule_settings_push()` resets the timer
+- [x] Debounce timer (2 seconds) inside `SyncClient` — `schedule_settings_push()` resets timer; poller fires push at 2s elapsed
 
 #### Rust: hook settings push into existing commands
 
@@ -1211,7 +1212,7 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: `ws_listener.rs`
 
-- [ ] Handle `settings:updated` WS event → call `sync_pull_settings()` automatically
+- [x] `settings:updated` WS event → emits `sync:settings-updated` Tauri event (React or command handler should call `sync_pull_settings()`)
 
 #### React: App.tsx
 
@@ -1220,7 +1221,7 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: new Tauri command
 
-- [ ] `sync_receive_local_settings(json: String) → ()` — receives `localStorage` values from React; stores in `SyncClient` pending settings state for the next `sync_push_settings()` call
+- [x] `sync_receive_local_settings(json: String) → ()` — receives `localStorage` values from React; stores payload to `sync_settings_local.json` for next push
 
 ---
 
@@ -1249,32 +1250,30 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: `SyncClient` additions
 
-- [ ] Add `sharing_sessions: Vec<SharingSession>` field (loaded from `id_map.json` on init)
-- [ ] `SharingSession` struct: `{ share_group_id, group_key: [u8; 32], my_scope, members: Vec<SessionMember> }`
+- [x] `sharing_sessions: Arc<Mutex<Vec<SharingSession>>>` field in `SyncClient`
+- [x] `SharingSession` struct: `{ share_group_id, name, my_scope, members, group_key: Option<[u8; 32]> }` (in `types.rs`)
 
 #### Rust: sync Tauri commands to implement
 
-- [ ] `sharing_invite(email: String, scope: String) → Result<SharingInvite>` — `POST /sharing` then `POST /sharing/{id}/invite`
-- [ ] `sharing_accept(invite_code: String, scope: String) → Result<()>` — `POST /sharing/join`; derive shared secret; wrap Group Key; store GK in session
-- [ ] `sharing_get_sessions() → Vec<SharingSession>`
-- [ ] `sharing_update_scope(share_group_id: String, scope: String) → ()` — `PATCH /sharing/sessions/{id}/scope`
-- [ ] `sharing_end_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}`; remove from `id_map.json`
-- [ ] `sharing_leave_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}/leave`; remove from local session list
+- [x] `sharing_invite(email: String, scope: String) → Result<SharingInvite>` — `POST /sharing` then `POST /sharing/{id}/invite`
+- [x] `sharing_accept(invite_code: String, scope: String) → Result<()>` — `POST /sharing/join`; X25519 key exchange skeleton (full GK decryption pending WS `group:rekey` flow)
+- [x] `sharing_get_sessions() → Vec<SharingSession>`
+- [x] `sharing_update_scope(share_group_id: String, scope: String) → ()` — `PATCH /sharing/sessions/{id}/scope`
+- [x] `sharing_end_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}`; remove from `id_map.json`
+- [x] `sharing_leave_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}/leave`; remove from local session list
 
 #### Rust: `on_new_entry` Live Share fan-out
 
-- [ ] After pushing a new entry: for each active `SharingSession` where `my_scope` matches `entry.entry_type`
-  - [ ] Re-encrypt `encrypted_content` with the session's `group_key` (GK) instead of UMK
-  - [ ] Append `share_group_id` to `entry.group_ids`
-  - [ ] Push the group-scoped copy to the server
+- [x] Fan-out skeleton: `spawn_push_clipboard_entry` / `spawn_push_note` append active session `share_group_id` values to `group_ids` based on scope
+- [ ] Full GK re-encryption: re-encrypt `encrypted_content` with session `group_key` instead of UMK (pending GK decryption from `sharing:accepted` WS flow)
 
 #### Rust: `ws_listener.rs` — Live Share WS events
 
-- [ ] `sharing:invite` → emit `sharing:invite-received` Tauri event to React (for invite notification UI)
-- [ ] `sharing:accepted` → decrypt `wrapped_group_key` using own X25519 private key; store GK in `sharing_sessions`; persist to `id_map.json`
-- [ ] `sharing:ended` → remove session from `sharing_sessions`; remove `share_group_id` from `id_map.json`
-- [ ] `sharing:member_left` → update `session.members` list
-- [ ] `sharing:scope_changed` → update the relevant member's scope in `session.members`
+- [x] `sharing:invite` → emit `sharing:invite-received` Tauri event to React
+- [x] `sharing:accepted` → emit `sharing:accepted` Tauri event (full GK store pending)
+- [x] `sharing:ended` → emit `sharing:ended` Tauri event
+- [x] `sharing:member_left` → emit `sharing:member-left` Tauri event
+- [x] `sharing:scope_changed` → emit `sharing:scope-changed` Tauri event
 
 #### React: Settings screen — Live Share panel
 
