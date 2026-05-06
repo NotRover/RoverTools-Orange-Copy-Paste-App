@@ -94,12 +94,12 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | parking_lot                  | 0.12    | Mutex without poisoning                                                        |
 | serde + serde_json           | 1       | Serialization for IPC and settings persistence                                 |
 | rmp-serde                    | 1       | MessagePack binary serialization for history persistence                       |
-| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — sync module only     |
-| tokio-tungstenite            | 0.23    | Async WebSocket client for realtime events — sync module only                  |
-| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — sync module only           |
-| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — sync module only                   |
-| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and group key wrapping               |
-| keyring                      | 2       | OS credential store for refresh token and device private key                   |
+| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — **Phase 6, sync module only**     |
+| tokio-tungstenite            | 0.23    | Async WebSocket client for realtime events — **Phase 6, sync module only**                  |
+| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **Phase 6, sync module only**           |
+| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **Phase 6, sync module only**                   |
+| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and group key wrapping — **Phase 6, sync module only** |
+| keyring                      | 2       | OS credential store for refresh token and device private key — **Phase 6, sync module only** |
 
 ### Frontend
 
@@ -505,24 +505,28 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 #### `commands.rs` — New Tauri Commands
 
-| Command               | Signature                                           | Description                                                              |
-| --------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
-| `sync_login`          | `(email, password, device_name) → Result<SyncUser>` | Authenticate; derives UMK in memory; stores refresh token in OS keychain |
-| `sync_logout`         | `() → ()`                                           | Revoke device token; clear UMK; delete keychain entry                    |
-| `sync_get_user`       | `() → Option<SyncUser>`                             | Returns cached login info if authenticated                               |
-| `sync_get_status`     | `() → SyncStatus`                                   | `{ connected, last_synced_at, pending_count }`                           |
-| `sync_now`            | `() → ()`                                           | Trigger immediate pull + queue flush                                     |
-| `sync_set_enabled`    | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                 |
-| `sync_set_server_url` | `(url: String) → ()`                                | Override default server URL (self-hosted)                                |
-| `sync_get_groups`     | `() → Vec<SyncGroup>`                               | List joined shared groups                                                |
-| `sync_create_group`   | `(name: String) → SyncGroup`                        | Create group; generates Group Key; posts to server                       |
-| `sync_join_group`     | `(invite_code: String) → ()`                        | Join via invite code                                                     |
-| `sync_leave_group`    | `(group_id: String) → ()`                           | Leave group; removes local GK                                            |
-| `sharing_invite`      | `(email: String, scope: String) → SharingInvite`    | Create or invite to Live Share group (max 5 members); `scope` = `clipboard\|notes\|both` |
-| `sharing_accept`      | `(invite_code: String, scope: String) → ()`         | Accept sharing invite; exchange Group Key via X25519                     |
-| `sharing_get_sessions`| `() → Vec<SharingSession>`                          | List active sharing sessions with peer info and scope                    |
-| `sharing_update_scope`| `(share_group_id: String, scope: String) → ()`       | Update what this user contributes to the share                           |
-| `sharing_end_session` | `(share_group_id: String) → ()`                      | Terminate sharing; remove Live Share group UUID from `id_map.json`             |
+| Command                | Signature                                           | Description                                                                              |
+| ---------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `sync_login`           | `(email, password, device_name) → Result<SyncUser>` | Authenticate; derives UMK in memory; stores refresh token in OS keychain                 |
+| `sync_logout`          | `() → ()`                                           | Revoke device token; clear UMK; delete keychain entry                                    |
+| `sync_get_user`        | `() → Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
+| `sync_get_status`      | `() → SyncStatus`                                   | `{ connected, last_synced_at, pending_count }`                                           |
+| `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
+| `sync_set_enabled`     | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                                 |
+| `sync_set_server_url`  | `(url: String) → ()`                                | Override default server URL (self-hosted)                                                |
+| `sync_get_groups`      | `() → Vec<SyncGroup>`                               | List joined shared groups                                                                |
+| `sync_create_group`    | `(name: String) → SyncGroup`                        | Create group; generates Group Key; posts to server                                       |
+| `sync_join_group`      | `(invite_code: String) → ()`                        | Join via invite code                                                                     |
+| `sync_leave_group`     | `(group_id: String) → ()`                           | Leave group; removes local GK                                                            |
+| `sync_push_settings`   | `() → ()`                                           | Encrypt current settings blob and `PUT /settings`; internally debounced (2s)             |
+| `sync_pull_settings`          | `() → ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
+| `sync_receive_local_settings` | `(json: String) → ()`                                  | Receives `localStorage` settings from React in response to `sync:collect-settings` event; merged into the next `sync_push_settings` call |
+| `sharing_invite`              | `(email: String, scope: String) → SharingInvite`       | Create or invite to Live Share group (max 5 members); `scope` = `clipboard\|notes\|both`            |
+| `sharing_accept`       | `(invite_code: String, scope: String) → ()`         | Accept sharing invite; exchange Group Key via X25519                                     |
+| `sharing_get_sessions` | `() → Vec<SharingSession>`                          | List active sharing sessions with peer info and scope                                    |
+| `sharing_update_scope` | `(share_group_id: String, scope: String) → ()`      | Update what this user contributes to the share                                           |
+| `sharing_end_session`   | `(share_group_id: String) → ()`                    | Owner dissolves the Live Share group entirely; removes group UUID from `id_map.json`     |
+| `sharing_leave_session` | `(share_group_id: String) → ()`                    | Non-owner leaves the group; `DELETE /sharing/sessions/{id}/leave`; removes from local session list |
 
 #### File and Video Sync (5 MB Limit)
 
@@ -550,16 +554,33 @@ When an active sharing session exists, `on_new_entry` and `on_update_entry` chec
 On receiving `sharing:invite` via WebSocket: emit `sharing:invite-received` Tauri event → React shows invite notification in Settings.
 On receiving `sharing:ended`: remove the Live Share group UUID from `id_map.json` and `sharing_sessions` in-memory.
 
+#### Settings Sync — What Gets Synced
+
+The sync module builds a plaintext settings JSON from two sources and encrypts the whole blob with UMK before pushing:
+
+**Synced (user preferences):**
+- From `localStorage`: `theme`, `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
+- From `settings.json`: `notifications_enabled`, `notif_copy`, `notif_paste`, `persist_history`, `close_to_tray`, `start_minimized`, `autosave`, `sharing_notify`
+
+**Not synced (device-specific — never included in blob):**
+- `sync_enabled`, `sync_server_url`, `sharing_enabled` — each device decides independently
+- Window geometry, autostart, recent searches
+
+Push is debounced: after any synced setting changes, a 2-second timer starts. If another change arrives within that window, the timer resets. This prevents a push per keystroke in fields like the server URL.
+
+On `settings:updated` WS event: call `sync_pull_settings()` automatically.  
+On pull: emit `sync:settings` Tauri event with decrypted JSON → React applies `localStorage` keys; Rust writes `settings.json` keys directly.
+
 #### `config.rs` — Sync Settings
 
 Four settings are added to the existing `settings.json` store:
 
-| Key               | Type   | Default                             | Description                         |
-| ----------------- | ------ | ----------------------------------- | ----------------------------------- |
-| `sync_enabled`    | bool   | false                               | Master toggle for all sync behavior |
-| `sync_server_url` | string | `"https://api.orangeclipboard.app"` | API base URL (self-hosted override) |
+| Key               | Type   | Default                             | Description                                                                |
+| ----------------- | ------ | ----------------------------------- | -------------------------------------------------------------------------- |
+| `sync_enabled`    | bool   | false                               | Master toggle for all sync behavior                                        |
+| `sync_server_url` | string | `"https://api.orangeclipboard.app"` | API base URL (self-hosted override)                                        |
 | `sharing_enabled` | bool   | true                                | Whether Live Share is active (false = ignore all Live Share group fan-out) |
-| `sharing_notify`  | bool   | true                                | Show notification when a peer copies something |
+| `sharing_notify`  | bool   | true                                | Show notification when a peer copies something                             |
 
 ### Runtime Module
 
@@ -1018,7 +1039,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Group names        | `localStorage.sc-groups`               | JSON string array                                                | On group edits           | On mount           |
 | Group colors       | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                           | On color change          | On mount           |
 | Recent searches    | `localStorage.sc-recent-searches`      | JSON string array (max 8)                                        | On search                | On mount           |
-| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id }`                         | After each pull          | On sync init       |
+| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, settings_updated_at }`    | After each pull/settings push | On sync init  |
 | Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update ops (encrypted content) | On mutation when offline | On reconnect       |
 | ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", "note:7": "..." }`             | After each push          | On sync init       |
 
@@ -1061,21 +1082,24 @@ Applied to all three windows:
 
 The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee. The canonical list lives in `docs/ARCHITECTURE.md` (workspace root, §13); this is the app-side view.
 
-| #   | Invariant                                      | App-side implication                                                                                                                                                |
-| --- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Local store is always plaintext**            | `history.bin` and `notes.bin` must never be encrypted. Encryption boundary = network only.                                                                          |
-| 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                         |
-| 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                    |
-| 4   | **UMK never leaves the device**                | `derive_umk()` output is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.       |
-| 5   | **Tombstones always propagate**                | `delete_entry` command must call `SyncClient.on_delete_entry(id)` even when offline. The delete must be queued in `sync_pending.json`.                              |
-| 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_entry` call happens after `history.push()`, as a post-commit side-effect.             |
-| 7   | **Suppress flag is respected**                 | `SyncClient.on_new_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                  |
-| 8   | **Sync runtime never blocks the main runtime** | All `SyncClient` methods are `async` and run in the dedicated background Tokio runtime. Use `Handle::current().spawn()` — never `block_on` from the Tauri runtime.  |
-| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                |
-| 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable — the server deduplicates by `client_id`. |
-| 11  | **Sharing is always opt-in**                   | No entry gets a sharing Live Share group UUID unless the user has an active session and the entry type matches their `share_scope`. Never auto-tag on sync re-enroll.      |
-| 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:file-skipped` to the UI; do not silently drop.                                        |
-| 13  | **Ending a sharing session is clean**          | `sharing_end_session` must remove the Live Share group UUID from `id_map.json` and in-memory `sharing_sessions` before returning. Future captures must not be tagged.     |
+| #   | Invariant                                      | App-side implication                                                                                                                                                  |
+| --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Local store is always plaintext**            | `history.bin` and `notes.bin` must never be encrypted. Encryption boundary = network only.                                                                            |
+| 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                           |
+| 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                      |
+| 4   | **UMK never leaves the device**                | `derive_umk()` output is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.         |
+| 5   | **Tombstones always propagate**                | `delete_entry` command must call `SyncClient.on_delete_entry(id)` even when offline. The delete must be queued in `sync_pending.json`.                                |
+| 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_entry` call happens after `history.push()`, as a post-commit side-effect.               |
+| 7   | **Suppress flag is respected**                 | `SyncClient.on_new_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                    |
+| 8   | **Sync runtime never blocks the main runtime** | All `SyncClient` methods are `async` and run in the dedicated background Tokio runtime. Use `Handle::current().spawn()` — never `block_on` from the Tauri runtime.    |
+| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                  |
+| 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable — the server deduplicates by `client_id`.   |
+| 11  | **Sharing is always opt-in**                   | No entry gets a sharing Live Share group UUID unless the user has an active session and the entry type matches their `share_scope`. Never auto-tag on sync re-enroll. |
+| 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:file-skipped` to the UI; do not silently drop.                                           |
+| 13  | **Ending a sharing session is clean**          | `sharing_end_session` must remove the Live Share group UUID from `id_map.json` and in-memory `sharing_sessions` before returning. Future captures must not be tagged. |
+| 14  | **Settings blob is encrypted**                 | `crypto::encrypt(UMK, settings_json)` must be called before `PUT /settings`. Never send plaintext preferences over the network.                                       |
+| 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sharing_enabled`, autostart, and window geometry must be excluded from the settings blob at the call site in `sync_push_settings()`. |
+| 16  | **Settings push is debounced**                 | `schedule_settings_push()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation — always go through the debounce path.                        |
 
 ---
 
@@ -1099,12 +1123,12 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: Cargo.toml additions
 
-- [ ] `reqwest = { features = ["json", "rustls-tls"] }`  # do not pin; use Cargo to resolve latest compatible
-- [ ] `tokio-tungstenite = { features = ["rustls-tls-webpki-roots"] }`  # do not pin
-- [ ] `argon2`  # do not pin; use latest
-- [ ] `aes-gcm`  # do not pin; use latest
-- [ ] `x25519-dalek`  # do not pin; use latest
-- [ ] `keyring`  # do not pin; use latest
+- [ ] `reqwest = { features = ["json", "rustls-tls"] }`
+- [ ] `tokio-tungstenite = { features = ["rustls-tls-webpki-roots"] }`
+- [ ] `argon2`
+- [ ] `aes-gcm`
+- [ ] `x25519-dalek`
+- [ ] `keyring`
 
 #### Rust: integration into existing files
 
@@ -1157,6 +1181,46 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 #### React: Entry card
 
 - [ ] Cloud sync icon on each card: filled cloud ✓ (`Synced`) / outline cloud (`Pending`) / no icon (`LocalOnly`)
+
+#### React: Settings screen — Settings Sync UX
+
+- [ ] Show a "Settings synced" indicator (last synced timestamp) in the Cloud Sync section
+- [ ] On `sync:settings` Tauri event: apply received `localStorage` keys (theme, layout, sort, paste_slots, group_names, group_colors) without a full page reload
+
+---
+
+### Phase 6b — Settings Sync
+
+#### Rust: `sync/commands.rs`
+
+- [ ] Implement `sync_push_settings()`:
+  - Collect synced keys from `settings.json` (via `get_setting` helpers)
+  - Emit `sync:collect-settings` Tauri event → React responds with `localStorage` values via `sync_receive_local_settings(json)` command
+  - Merge into one JSON blob, encrypt with UMK, `PUT /api/v1/settings { encrypted_blob, updated_at }`
+  - If response `winner == 'server'`: decrypt server blob and apply (emit `sync:settings`)
+- [ ] Implement `sync_pull_settings()`:
+  - `GET /api/v1/settings`
+  - If 404: skip (no settings on server yet)
+  - Decrypt blob; if `server_updated_at > local_updated_at`: apply and emit `sync:settings`
+- [ ] Add a debounce timer (2 seconds) inside `SyncClient`; any call to internal `schedule_settings_push()` resets the timer
+
+#### Rust: hook settings push into existing commands
+
+- [ ] In `set_setting()` command: after writing to `settings.json`, call `sync_client.schedule_settings_push()` if sync is enabled and the key is in the synced-keys list
+- [ ] In `lib.rs` setup: after successful auth + delta pull, call `sync_pull_settings()`
+
+#### Rust: `ws_listener.rs`
+
+- [ ] Handle `settings:updated` WS event → call `sync_pull_settings()` automatically
+
+#### React: App.tsx
+
+- [ ] Listen for `sync:collect-settings` Tauri event → collect `localStorage` synced keys → call `sync_receive_local_settings(json)` Tauri command
+- [ ] Listen for `sync:settings` Tauri event → apply received settings to `localStorage` (theme, layout, sort, paste_slots, group_names, group_colors) and re-render affected components
+
+#### Rust: new Tauri command
+
+- [ ] `sync_receive_local_settings(json: String) → ()` — receives `localStorage` values from React; stores in `SyncClient` pending settings state for the next `sync_push_settings()` call
 
 ---
 
