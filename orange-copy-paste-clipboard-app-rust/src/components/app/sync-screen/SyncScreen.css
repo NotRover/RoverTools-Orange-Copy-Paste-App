@@ -85,10 +85,11 @@
 
 /* ── Card layout containers ── */
 
+/* Masonry tiles — matches clipboard screen's .entry-grid columns layout */
 .sync-feed-card-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
+  columns: 2;
+  column-gap: 10px;
+  padding-top: 4px;
 }
 
 .sync-feed-card-list {
@@ -97,13 +98,13 @@
   gap: 2px;
 }
 
-/* Make clipboard entry cards fill their grid cell and pin the footer to the bottom */
+/* Clipboard entry cards: masonry break + flex column so footer pins to bottom */
 
 .sync-feed-card-grid .entry-card {
+  break-inside: avoid;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  margin-bottom: 0;
+  margin-bottom: 10px;
 }
 
 .sync-feed-card-grid .card-body {
@@ -116,11 +117,11 @@
   margin-top: auto;
 }
 
-/* Same for note cards */
+/* Note cards: same masonry treatment */
 
 .sync-feed-card-grid .ns-card {
-  height: 100%;
-  margin-bottom: 0;
+  break-inside: avoid;
+  margin-bottom: 10px;
   display: flex;
   flex-direction: column;
 }
@@ -433,9 +434,14 @@
 .sync-feed-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 14px 14px;
+  padding: 10px 0 14px;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+}
+
+/* Empty + error states inside scroll retain comfortable padding */
+.sync-feed-scroll .sync-feed-empty {
+  padding: 48px 24px;
 }
 
 .sync-feed-scroll::-webkit-scrollbar {
@@ -998,6 +1004,61 @@
   cursor: not-allowed;
 }
 
+/* ── Source type badges (shown in "all" mode) ── */
+
+/* Wrapper for NoteCard in tiles so we can position-anchor the badge */
+.sync-note-card-wrap {
+  position: relative;
+}
+
+/* Floats in the top-right corner — styled identically to .type-pill */
+.sync-source-badge {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+  pointer-events: none;
+  /* type-pill geometry */
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+
+/* Clipboard: neutral gray — distinct from content-type pills */
+.sync-source-badge--clip {
+  background: rgba(107, 114, 128, 0.12);
+  color: #6b7280;
+}
+
+/* Note: amber — matches the app's note accent feel */
+.sync-source-badge--note {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+/* List-mode source indicator for clipboard cards — same type-pill geometry, icon only */
+.sync-list-source-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sync-list-source-badge--clip {
+  background: rgba(107, 114, 128, 0.12);
+  color: #6b7280;
+}
+
 /* ── Hide NoteCard's delete button inside sync feed ── */
 
 .sync-feed-card-grid .ns-card-delete,
@@ -1318,10 +1379,189 @@
   text-align: center;
 }
 
-/* NoteEditor fills the feed panel when inspecting a note */
+/* ── Read-only note badge ── */
 
-.sync-feed-panel .ns-editor-shell {
+.sync-readonly-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  user-select: none;
+}
+
+/* ── Timeline rail (mirrors clipboard screen's timeline-* pattern) ── */
+
+.sync-timeline-wrap {
+  min-height: 100%;
+}
+
+.sync-timeline-groups {
+  display: flex;
+  flex-direction: column;
+  margin-left: 15px;
+}
+
+.sync-timeline-group {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.sync-timeline-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
+  top: 0;
+  bottom: 0;
+}
+
+.sync-timeline-group:first-child::before {
+  top: 15px;
+}
+
+.sync-timeline-group--last::before {
+  bottom: 0;
+  height: auto;
+  background: linear-gradient(to bottom, var(--accent) 70%, transparent 100%);
+}
+
+.sync-timeline-group--only::before {
+  display: none;
+}
+
+.sync-timeline-end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 16px 20px;
+}
+
+.sync-timeline-end-text {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+  user-select: none;
+  opacity: 0.6;
+}
+
+.sync-timeline-day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 8px 0;
+  position: relative;
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sync-timeline-day-row:hover .sync-timeline-day-label {
+  opacity: 0.8;
+}
+
+.sync-timeline-day-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  flex-shrink: 0;
+  margin-left: -5px;
+  position: relative;
+  z-index: 1;
+}
+
+.sync-timeline-day-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.2px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sync-timeline-day-chevron {
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.5;
+  margin-left: auto;
+  margin-right: 4px;
+  transition: transform 0.2s ease;
+}
+
+.sync-timeline-day-row--collapsed .sync-timeline-day-chevron {
+  transform: rotate(-90deg);
+}
+
+.sync-timeline-day-count {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 999px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.sync-timeline-day-row::after {
+  content: "";
   flex: 1;
+  height: 0.5px;
+  background: var(--accent);
+  opacity: 0.25;
+  margin-left: 4px;
+}
+
+.sync-timeline-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.sync-timeline-group-body--collapsed {
+  grid-template-rows: 0fr;
+}
+
+.sync-timeline-group-body__inner {
   min-height: 0;
   overflow: hidden;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.2s ease 0.25s,
+    transform 0.2s ease 0.25s;
+}
+
+.sync-timeline-group-body--collapsed .sync-timeline-group-body__inner {
+  opacity: 0;
+  transform: translateY(-6px);
+  visibility: hidden;
+  padding: 0 !important;
+  margin: 0 !important;
+  transition:
+    opacity 0.15s ease 0s,
+    transform 0.15s ease 0s,
+    visibility 0s linear 0.15s;
+}
+
+.sync-timeline-groups .sync-feed-card-grid,
+.sync-timeline-groups .sync-feed-card-list {
+  padding-left: 15px;
+  padding-right: 2px;
 }
