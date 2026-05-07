@@ -1399,3 +1399,86 @@ export const HrIcon: React.FC<IconProps> = ({ size = 14, className }) => (
     <line x1="3" y1="16" x2="15" y2="16" strokeWidth="1.5" />
   </svg>
 );
+
+/* ── Cloud sync (sidebar nav) ── */
+
+export const CloudSyncIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 18,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+    <path d="M9 15l2 2 4-4" />
+  </svg>
+);
+
+/* ── Users / group ── */
+
+export const UsersIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+
+/* ── Share / invite link ── */
+
+export const ShareIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+
+/* ── Key / join by code ── */
+
+export const KeyIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="7.5" cy="15.5" r="5.5" />
+    <path d="M21 2 11.5 11.5" />
+    <path d="M15.5 6 19 9.5" />
+  </svg>
+);
+
+/* ── Logout / leave ── */
+
+export const LogOutIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 13,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+);
+
+/* ── Online presence dot ── */
+
+export const OnlineDotIcon: React.FC<{ online: boolean; size?: number }> = ({
+  online,
+  size = 7,
+}) => (
+  <svg width={size} height={size} viewBox="0 0 8 8">
+    <circle cx="4" cy="4" r="4" fill={online ? "#22c55e" : "#6b7280"} />
+  </svg>
+);
