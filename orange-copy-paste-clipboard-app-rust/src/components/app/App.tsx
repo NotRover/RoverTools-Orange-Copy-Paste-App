@@ -962,6 +962,7 @@ const App: React.FC = () => {
       <Sidebar
         screen={screen}
         theme={theme}
+        syncConnected={syncConnected}
         onNavigate={(s) => {
           setScreen(s);
           if (s === "clipboard" || s === "notes" || s === "sync") {
@@ -1042,14 +1043,16 @@ const App: React.FC = () => {
               total={entries.length}
             />
           )}
-          <div
-            className={syncPillClass}
-            data-tooltip={syncPillLabel}
-            data-tooltip-pos="top"
-          >
-            <span className="sync-pill-dot" />
-            <span className="sync-pill-text">{syncPillLabel}</span>
-          </div>
+          {screen !== "sync" && (
+            <div
+              className={syncPillClass}
+              data-tooltip={syncPillLabel}
+              data-tooltip-pos="top"
+            >
+              <span className="sync-pill-dot" />
+              <span className="sync-pill-text">{syncPillLabel}</span>
+            </div>
+          )}
         </div>
 
         {pinLimitReached && (

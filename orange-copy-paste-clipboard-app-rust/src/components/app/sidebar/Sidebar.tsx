@@ -1,10 +1,10 @@
 import React from "react";
+import { Cloud, CloudCheck, CloudWarning } from "@phosphor-icons/react";
 import type { AppScreen, AppTheme } from "../../../types";
 import {
   ClipboardIcon,
   NotesIcon,
   KeyboardIcon,
-  CloudSyncIcon,
   SunIcon,
   MoonIcon,
   GearIcon,
@@ -14,6 +14,7 @@ import "./Sidebar.css";
 interface SidebarProps {
   screen: AppScreen;
   theme: AppTheme;
+  syncConnected: boolean | null;
   onNavigate: (screen: AppScreen) => void;
   onToggleTheme: () => void;
 }
@@ -21,9 +22,29 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({
   screen,
   theme,
+  syncConnected,
   onNavigate,
   onToggleTheme,
-}) => (
+}) => {
+  const syncActive = screen === "sync";
+
+  const syncIcon =
+    syncConnected === true  ? <CloudCheck   size={20} weight="duotone" /> :
+    syncConnected === false ? <CloudWarning size={20} weight="duotone" /> :
+                              <Cloud        size={20} weight="regular"  />;
+
+  const syncColor =
+    syncActive               ? undefined :
+    syncConnected === true   ? "#22c55e" :
+    syncConnected === false  ? "#f59e0b" :
+    undefined;
+
+  const syncTooltip =
+    syncConnected === true  ? "Sync & Groups · Connected" :
+    syncConnected === false ? "Sync & Groups · Offline" :
+                              "Sync & Groups";
+
+  return (
   <aside className="sidebar">
     {/* Logo */}
     <div className="sidebar-logo">
@@ -60,12 +81,13 @@ const Sidebar: React.FC<SidebarProps> = ({
         <NotesIcon />
       </button>
       <button
-        className={`nav-btn ${screen === "sync" ? "active" : ""}`}
+        className={`nav-btn ${syncActive ? "active" : ""}`}
         onClick={() => onNavigate("sync")}
-        data-tooltip="Sync & Groups"
+        data-tooltip={syncTooltip}
         data-tooltip-pos="right"
+        style={syncColor ? { color: syncColor } : undefined}
       >
-        <CloudSyncIcon />
+        {syncIcon}
       </button>
       <button
         className={`nav-btn ${screen === "shortcuts" ? "active" : ""}`}
@@ -96,9 +118,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       >
         <GearIcon />
       </button>
-
     </div>
   </aside>
-);
+  );
+};
 
 export default Sidebar;
