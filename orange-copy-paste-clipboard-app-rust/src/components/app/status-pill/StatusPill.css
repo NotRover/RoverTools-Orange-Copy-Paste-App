@@ -1,9 +1,6 @@
 /*  Status pill (bottom-right Obsidian-style)  */
 
 .status-pill {
-  position: absolute;
-  bottom: 10px;
-  right: 18px;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -13,7 +10,6 @@
   border-radius: 7.5px;
   box-shadow: var(--shadow-sm);
   pointer-events: none;
-  z-index: 10;
 }
 
 .status-item {

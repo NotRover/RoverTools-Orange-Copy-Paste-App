@@ -926,14 +926,6 @@ const App: React.FC = () => {
   return (
     <div className="app" data-theme={theme}>
       <TooltipPortal />
-      <div
-        className={syncPillClass}
-        data-tooltip={syncPillLabel}
-        data-tooltip-pos="top"
-      >
-        <span className="sync-pill-dot" />
-        <span className="sync-pill-text">{syncPillLabel}</span>
-      </div>
       <Sidebar
         screen={screen}
         theme={theme}
@@ -999,15 +991,25 @@ const App: React.FC = () => {
           />
         )}
 
-        {screen === "clipboard" && entries.length > 0 && (
-          <StatusPill
-            textCount={textCount}
-            imageCount={imageCount}
-            fileCount={fileCount}
-            htmlCount={htmlCount}
-            total={entries.length}
-          />
-        )}
+        <div className="bottom-pill-row">
+          {screen === "clipboard" && entries.length > 0 && (
+            <StatusPill
+              textCount={textCount}
+              imageCount={imageCount}
+              fileCount={fileCount}
+              htmlCount={htmlCount}
+              total={entries.length}
+            />
+          )}
+          <div
+            className={syncPillClass}
+            data-tooltip={syncPillLabel}
+            data-tooltip-pos="top"
+          >
+            <span className="sync-pill-dot" />
+            <span className="sync-pill-text">{syncPillLabel}</span>
+          </div>
+        </div>
 
         {pinLimitReached && (
           <ToastNotification

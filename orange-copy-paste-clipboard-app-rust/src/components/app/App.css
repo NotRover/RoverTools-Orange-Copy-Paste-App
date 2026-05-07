@@ -157,31 +157,34 @@ textarea {
   color: #fff;
 }
 
+/* ── Bottom pill row (StatusPill + SyncPill side-by-side) ── */
+
+.bottom-pill-row {
+  position: absolute;
+  bottom: 10px;
+  right: 18px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
 /* ── Cloud sync status pill ── */
 
 .sync-pill {
-  position: absolute;
-  bottom: 12px;
-  right: 14px;
-  z-index: 50;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px 3px 6px;
-  border-radius: 999px;
+  gap: 7px;
+  padding: 4px 11px;
+  border-radius: 7.5px;
   border: 1px solid var(--border);
   background: var(--surface);
-  font-size: 10px;
-  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+  font-size: 10.5px;
   letter-spacing: 0.2px;
   pointer-events: none;
   user-select: none;
-  opacity: 0.85;
-  transition: opacity 0.2s;
-}
-
-.sync-pill:hover {
-  opacity: 1;
 }
 
 .sync-pill-dot {
@@ -192,8 +195,8 @@ textarea {
 }
 
 .sync-pill-text {
-  color: var(--text-secondary);
-  line-height: 1;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .sync-pill--connected .sync-pill-dot {
