@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::state::AppState;
 use crate::sync::client::{
@@ -412,6 +412,134 @@ pub async fn sharing_leave_session(
     let http = sync.http().ok_or("not authenticated")?;
     http.leave_sharing_session(&share_group_id).await?;
     sync.remove_sharing_session(&share_group_id);
+    Ok(())
+}
+
+// ── Settings sync commands ────────────────────────────────────────────
+
+/// Settings keys sourced from settings.json that participate in cloud sync.
+const SYNCED_JSON_KEYS: &[&str] = &[
+    "keep_history",
+    "close_to_tray",
+    "start_minimized",
+    "notification",
+    "notif_copy",
+    "notif_paste",
+    "autosave",
+    "sharing_notify",
+];
+
+/// Encrypt and push merged settings (settings.json + localStorage) to the server.
+/// If the server wins (its settings are newer), decrypts and emits `sync:settings`.
+#[tauri::command]
+pub async fn sync_push_settings(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let sync = sync_client(&state)?;
+    let http = sync.http().ok_or("not authenticated")?;
+    let umk = sync.umk_clone().ok_or("not authenticated")?;
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data: {e}"))?;
+
+    // Build blob from settings.json
+    let settings_path = app_data.join("settings.json");
+    let mut blob: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    if let Ok(data) = std::fs::read_to_string(&settings_path) {
+        if let Ok(map) = serde_json::from_str::<serde_json::Map<_, _>>(&data) {
+            for key in SYNCED_JSON_KEYS {
+                if let Some(v) = map.get(*key) {
+                    blob.insert(key.to_string(), v.clone());
+                }
+            }
+        }
+    }
+
+    // Merge localStorage values collected via sync_receive_local_settings
+    let local_path = app_data.join("sync_settings_local.json");
+    if let Ok(data) = std::fs::read_to_string(&local_path) {
+        if let Ok(map) = serde_json::from_str::<serde_json::Map<_, _>>(&data) {
+            for (k, v) in map {
+                blob.insert(k, v);
+            }
+        }
+    }
+
+    let blob_str = serde_json::to_string(&serde_json::Value::Object(blob))
+        .map_err(|e| format!("serialize: {e}"))?;
+    let encrypted = crypto::encrypt(&umk, &blob_str, "settings")
+        .map_err(|e| format!("encrypt settings: {e}"))?;
+    let updated_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let resp = http
+        .push_settings(crate::sync::client::SettingsPushRequest {
+            encrypted_blob: encrypted,
+            updated_at,
+        })
+        .await?;
+
+    // Server wins: apply its blob
+    if resp.winner == "server" {
+        if let Some(server_blob) = resp.encrypted_blob {
+            if let Ok(decrypted) = crypto::decrypt(&umk, &server_blob, "settings") {
+                let _ = app.emit("sync:settings", &decrypted);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Pull settings from the server, decrypt, and apply.
+/// Emits `sync:settings` to React with the decrypted JSON blob.
+#[tauri::command]
+pub async fn sync_pull_settings(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let sync = sync_client(&state)?;
+    let http = sync.http().ok_or("not authenticated")?;
+    let umk = sync.umk_clone().ok_or("not authenticated")?;
+
+    let result = http.pull_settings().await?;
+    let Some(pull) = result else {
+        return Ok(()); // No settings on server yet
+    };
+
+    let decrypted = crypto::decrypt(&umk, &pull.encrypted_blob, "settings")
+        .map_err(|e| format!("decrypt settings: {e}"))?;
+
+    // Emit localStorage keys to React for application
+    let _ = app.emit("sync:settings", &decrypted);
+
+    // Write settings.json keys directly
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data: {e}"))?;
+    let settings_path = app_data.join("settings.json");
+    if let Ok(blob) = serde_json::from_str::<serde_json::Map<_, _>>(&decrypted) {
+        let mut existing: serde_json::Map<String, serde_json::Value> =
+            std::fs::read_to_string(&settings_path)
+                .ok()
+                .and_then(|d| serde_json::from_str(&d).ok())
+                .unwrap_or_default();
+        for key in SYNCED_JSON_KEYS {
+            if let Some(v) = blob.get(*key) {
+                existing.insert(key.to_string(), v.clone());
+            }
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(existing)) {
+            let _ = std::fs::write(&settings_path, json);
+        }
+    }
+
     Ok(())
 }
 

@@ -14,6 +14,8 @@ export interface ClipboardEntry {
   groups: string[];
   /** Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images). */
   label?: string;
+  /** Cloud sync status (populated at runtime from id_map; not persisted to disk). */
+  sync_status?: "synced" | "pending" | "local_only";
 }
 
 /** Matches the Rust `Note` struct. */
@@ -37,7 +39,7 @@ export type AppTheme = "dark" | "light";
 // ── Cloud sync types ────────────────────────────────────────────────
 
 export interface SyncUser {
-  id: string;
+  user_id: string;
   email: string;
   display_name: string;
 }
@@ -52,6 +54,7 @@ export interface SyncGroup {
 export interface SharingMember {
   user_id: string;
   display_name: string;
+  email: string;
   scope: "clipboard" | "notes" | "both";
   online: boolean;
 }
@@ -61,13 +64,13 @@ export interface SharingSession {
   name: string;
   my_scope: "clipboard" | "notes" | "both";
   members: SharingMember[];
-  is_owner: boolean;
 }
 
 export interface SyncStatusInfo {
   connected: boolean;
   pending_count: number;
   skipped_count: number;
+  last_synced_at?: number;
 }
 
 // ── Group tag colors ────────────────────────────────────────────────
