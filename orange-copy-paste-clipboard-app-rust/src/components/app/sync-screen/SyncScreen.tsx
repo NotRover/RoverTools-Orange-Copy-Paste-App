@@ -889,6 +889,7 @@ const ClipFeedCard: React.FC<{
   showSourceBadge?: boolean;
 }> = ({ entry, onCopy, onView, layout, showSourceBadge }) => {
   const [copied, setCopied] = useState(false);
+  const [menuPos, setMenuPos] = useState<SyncMenuPos | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(
     (e: React.MouseEvent) => {
@@ -920,7 +921,11 @@ const ClipFeedCard: React.FC<{
             ? filePaths(entry.content).map(fileNameFromPath).join(", ")
             : (entry.label ?? "");
     return (
-      <div className="sync-list-card" onClick={() => onView(entry)}>
+      <div
+        className="sync-list-card"
+        onClick={() => onView(entry)}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPos({ x: e.clientX, y: e.clientY }); }}
+      >
         {showSourceBadge && (
           <span className="sync-list-source-badge sync-list-source-badge--clip">
             <ClipboardIcon size={10} />
@@ -991,42 +996,52 @@ const ClipFeedCard: React.FC<{
   }
 
   return (
-    <div
-      className="entry-card sync-feed-entry-card"
-      onClick={() => onView(entry)}
-    >
-      {mediaSection}
-      <div className="card-body">
-        {preview}
-        <div className="card-footer">
-          <div className="card-chips">
-            {showSourceBadge && (
-              <span className="card-type-chip sync-source-chip--clip">
-                <ClipboardIcon size={9} strokeWidth={2.5} />
-                <span className="card-type-label">Clipboard</span>
+    <>
+      <div
+        className="entry-card sync-feed-entry-card"
+        onClick={() => onView(entry)}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPos({ x: e.clientX, y: e.clientY }); }}
+      >
+        {mediaSection}
+        <div className="card-body">
+          {preview}
+          <div className="card-footer">
+            <div className="card-chips">
+              {showSourceBadge && (
+                <span className="card-type-chip sync-source-chip--clip">
+                  <ClipboardIcon size={9} strokeWidth={2.5} />
+                  <span className="card-type-label">Clipboard</span>
+                </span>
+              )}
+              <EntryTypePill kind={dk} />
+            </div>
+            {copied ? (
+              <span className="card-time card-time--copied">
+                <CheckIcon size={9} strokeWidth={2.8} />
+                Copied
               </span>
+            ) : (
+              <span className="card-time">{timeAgo(entry.timestamp)}</span>
             )}
-            <EntryTypePill kind={dk} />
+            <button
+              className="sync-card-copy-btn"
+              onClick={handleCopy}
+              data-tooltip="Copy"
+              data-tooltip-pos="top"
+            >
+              <CopyIcon size={10} />
+            </button>
           </div>
-          {copied ? (
-            <span className="card-time card-time--copied">
-              <CheckIcon size={9} strokeWidth={2.8} />
-              Copied
-            </span>
-          ) : (
-            <span className="card-time">{timeAgo(entry.timestamp)}</span>
-          )}
-          <button
-            className="sync-card-copy-btn"
-            onClick={handleCopy}
-            data-tooltip="Copy"
-            data-tooltip-pos="top"
-          >
-            <CopyIcon size={10} />
-          </button>
         </div>
       </div>
-    </div>
+      <SyncCardMenu
+        pos={menuPos}
+        onClose={() => setMenuPos(null)}
+        copied={copied}
+        onCopy={() => { onCopy(entry.id); if (timer.current) clearTimeout(timer.current); setCopied(true); timer.current = setTimeout(() => setCopied(false), 1500); }}
+        onOpen={() => onView(entry)}
+      />
+    </>
   );
 };
 
@@ -1040,78 +1055,105 @@ const NoteFeedCard: React.FC<{
   showSourceBadge?: boolean;
 }> = ({ note, entries, onView, layout, showSourceBadge }) => {
   const plain = extractNoteText(note.content);
+  const [menuPos, setMenuPos] = useState<SyncMenuPos | null>(null);
+  const openMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuPos({ x: e.clientX, y: e.clientY });
+  }, []);
 
   // ── List mode ──────────────────────────────────────────────────────
   if (layout === "list") {
     return (
-      <div
-        className="sync-list-card sync-list-card--note"
-        onClick={() => onView(note)}
-      >
-        <span className="sync-list-note-badge">
-          <NotesIcon size={12} />
-        </span>
-        <div className="sync-list-note-content">
-          <span className="sync-list-title">
-            {note.title || "(Untitled note)"}
+      <>
+        <div
+          className="sync-list-card sync-list-card--note"
+          onClick={() => onView(note)}
+          onContextMenu={openMenu}
+        >
+          <span className="sync-list-note-badge">
+            <NotesIcon size={12} />
           </span>
-          {plain && (
-            <span className="sync-list-preview">{truncateText(plain, 70)}</span>
-          )}
+          <div className="sync-list-note-content">
+            <span className="sync-list-title">
+              {note.title || "(Untitled note)"}
+            </span>
+            {plain && (
+              <span className="sync-list-preview">{truncateText(plain, 70)}</span>
+            )}
+          </div>
+          <span className="sync-list-time">{timeAgo(note.updated_at)}</span>
         </div>
-        <span className="sync-list-time">{timeAgo(note.updated_at)}</span>
-      </div>
+        <SyncCardMenu
+          pos={menuPos}
+          onClose={() => setMenuPos(null)}
+          copied={false}
+          onOpen={() => onView(note)}
+        />
+      </>
     );
   }
 
   // ── Tiles mode: replicate NoteCard markup so we control the chip row ──
   const content = note.content ?? "";
   return (
-    <div className="ns-card" onClick={() => onView(note)}>
-      <div className="ns-card-body">
-        <div className="ns-card-title">
-          {deriveNoteTitle(note.title, note.content)}
-        </div>
-        {content && (
-          <div className="ns-card-preview">
-            <NotionPreview
-              content={content}
-              entries={entries}
-              className="ns-card-preview-md"
-            />
+    <>
+      <div
+        className="ns-card"
+        onClick={() => onView(note)}
+        onContextMenu={openMenu}
+      >
+        <div className="ns-card-body">
+          <div className="ns-card-title">
+            {deriveNoteTitle(note.title, note.content)}
           </div>
-        )}
-        <div className="ns-card-footer">
-          <div className="ns-card-chips">
-            {showSourceBadge && (
-              <span className="card-type-chip sync-source-chip--note">
-                <NotesIcon size={9} />
-                <span className="card-type-label">Note</span>
-              </span>
-            )}
-            {note.groups.map((g) => {
-              const c = groupColor(g);
-              return (
-                <span
-                  key={g}
-                  className="ns-chip"
-                  style={{ background: c.bg, color: c.fg }}
-                >
-                  <span className="ns-chip-dot" />
-                  <span className="ns-chip-label">{g}</span>
+          {content && (
+            <div className="ns-card-preview">
+              <NotionPreview
+                content={content}
+                entries={entries}
+                className="ns-card-preview-md"
+              />
+            </div>
+          )}
+          <div className="ns-card-footer">
+            <div className="ns-card-chips">
+              {showSourceBadge && (
+                <span className="card-type-chip sync-source-chip--note">
+                  <NotesIcon size={9} />
+                  <span className="card-type-label">Note</span>
                 </span>
-              );
-            })}
+              )}
+              {note.groups.map((g) => {
+                const c = groupColor(g);
+                return (
+                  <span
+                    key={g}
+                    className="ns-chip"
+                    style={{ background: c.bg, color: c.fg }}
+                  >
+                    <span className="ns-chip-dot" />
+                    <span className="ns-chip-label">{g}</span>
+                  </span>
+                );
+              })}
+            </div>
+            <span
+              className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
+            >
+              {note.pinned && <PinIcon size={8} />}
+              {timeAgo(note.updated_at)}
+            </span>
           </div>
-          <span
-            className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
-          >
-            {note.pinned && <PinIcon size={8} />}
-            {timeAgo(note.updated_at)}
-          </span>
         </div>
       </div>
-    </div>
+      <SyncCardMenu
+        pos={menuPos}
+        onClose={() => setMenuPos(null)}
+        copied={false}
+        onOpen={() => onView(note)}
+      />
+    </>
   );
 };
 
