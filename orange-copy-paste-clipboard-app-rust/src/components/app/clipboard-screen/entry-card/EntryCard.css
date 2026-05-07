@@ -595,6 +595,22 @@ button.card-type-chip.open .card-type-chevron {
   font-weight: 600;
 }
 
+.card-sync-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding-top: 3px;
+  opacity: 0.65;
+}
+
+.card-sync-icon--synced {
+  color: #10b981;
+}
+
+.card-sync-icon--pending {
+  color: #f59e0b;
+}
+
 /*  Custom video player  */
 
 .video-player {
