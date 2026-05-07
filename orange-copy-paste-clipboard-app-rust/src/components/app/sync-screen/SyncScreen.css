@@ -97,6 +97,44 @@
   gap: 2px;
 }
 
+/* Make clipboard entry cards fill their grid cell and pin the footer to the bottom */
+
+.sync-feed-card-grid .entry-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin-bottom: 0;
+}
+
+.sync-feed-card-grid .card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.sync-feed-card-grid .card-footer {
+  margin-top: auto;
+}
+
+/* Same for note cards */
+
+.sync-feed-card-grid .ns-card {
+  height: 100%;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sync-feed-card-grid .ns-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.sync-feed-card-grid .ns-card-footer {
+  margin-top: auto;
+}
+
 /* ── List mode cards ── */
 
 .sync-list-card {
@@ -690,6 +728,99 @@
   height: 16px;
   border-radius: 0 2px 2px 0;
   background: var(--accent);
+}
+
+/* Group card wrapper (contains card row + optional member list) */
+
+.sync-group-card-wrap {
+  margin-bottom: 2px;
+}
+
+.sync-group-card-wrap .sync-group-card {
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+/* Clickable main area of the card */
+
+.sync-group-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 6px 6px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+/* Chevron expand button */
+
+.sync-group-expand-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 100%;
+  min-height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 0.15s ease;
+}
+
+.sync-group-expand-btn:hover {
+  color: var(--text-secondary);
+}
+
+.sync-group-expand-btn svg {
+  transition: transform 0.18s ease;
+  transform: rotate(90deg);
+}
+
+.sync-group-expand-btn--open svg {
+  transform: rotate(270deg);
+}
+
+/* Member list */
+
+.sync-group-members {
+  padding: 3px 8px 6px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sync-group-member-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+}
+
+.sync-group-member-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-group-member-scope {
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
 }
 
 /* Letter avatar */

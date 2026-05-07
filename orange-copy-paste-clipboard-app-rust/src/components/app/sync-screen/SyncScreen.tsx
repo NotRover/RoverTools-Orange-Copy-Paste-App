@@ -13,6 +13,7 @@ import type {
   Note,
   SyncGroup,
   SharingSession,
+  SharingMember,
 } from "../../../types";
 import {
   timeAgo,
@@ -144,6 +145,231 @@ function matchesSearch(item: FeedItem, q: string): boolean {
     extractNoteText(item.note.content).toLowerCase().includes(lower)
   );
 }
+
+// ── DEMO DATA — delete this entire block before production ───────────
+// Populates the sync panel and feed with realistic-looking mock content
+// so the UI can be iterated on without a live backend connection.
+
+const _DEMO_NOW = Date.now();
+const DEMO_GROUP_ID = "__demo_team__";
+const DEMO_PERSONAL_ID = "__demo_personal__";
+const DEMO_SHARE_ID = "__demo_live__";
+
+const DEMO_SYNC_GROUPS: SyncGroup[] = [
+  {
+    id: DEMO_GROUP_ID,
+    name: "Team Orange",
+    member_count: 4,
+    invite_code: "TM-ORANGE-2024",
+  },
+  {
+    id: DEMO_PERSONAL_ID,
+    name: "Personal Devices",
+    member_count: 2,
+  },
+];
+
+// DEMO: member lists per group — remove with the rest of the demo block before production
+const DEMO_GROUP_MEMBERS: Record<string, SharingMember[]> = {
+  [DEMO_GROUP_ID]: [
+    { user_id: "m1", display_name: "Alex K.", scope: "both", online: true },
+    { user_id: "m2", display_name: "Jordan L.", scope: "clipboard", online: true },
+    { user_id: "m3", display_name: "Sam R.", scope: "notes", online: false },
+    { user_id: "m4", display_name: "You", scope: "both", online: true },
+  ],
+  [DEMO_PERSONAL_ID]: [
+    { user_id: "m5", display_name: "MacBook Pro", scope: "both", online: true },
+    { user_id: "m6", display_name: "You (Desktop)", scope: "both", online: true },
+  ],
+};
+
+const DEMO_SESSIONS: SharingSession[] = [
+  {
+    share_group_id: DEMO_SHARE_ID,
+    name: "Design Review",
+    my_scope: "both",
+    is_owner: true,
+    members: [
+      { user_id: "u1", display_name: "Alex K.", scope: "both", online: true },
+      { user_id: "u2", display_name: "Jordan", scope: "clipboard", online: true },
+      { user_id: "u3", display_name: "Sam", scope: "notes", online: false },
+    ],
+  },
+];
+
+const DEMO_ENTRIES: ClipboardEntry[] = [
+  {
+    id: "__demo_e1__",
+    type: "text",
+    content:
+      "Meeting agenda: Q3 planning\n1. OKR review\n2. Roadmap discussion\n3. Resource allocation\n4. AOB",
+    timestamp: _DEMO_NOW - 1000 * 60 * 4,
+    pinned: true,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e2__",
+    type: "html",
+    content:
+      "<html><body><p><strong>Sprint 24 Review</strong></p><ul><li>Completed sync screen redesign ✓</li><li>Fixed clipboard latency on Windows</li><li>Deployed v2.4.1 to staging</li></ul><p>Next sprint starts <em>Monday</em>.</p></body></html>",
+    timestamp: _DEMO_NOW - 1000 * 60 * 38,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e3__",
+    type: "text",
+    content: "figma.com/file/abc123/Orange-Design-System-v3",
+    timestamp: _DEMO_NOW - 1000 * 60 * 75,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e4__",
+    type: "text",
+    content: "STRIPE_SECRET=sk_test_9f2a3b7c1d4e8f6a2b5c9d3e",
+    timestamp: _DEMO_NOW - 1000 * 60 * 60 * 2,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e5__",
+    type: "text",
+    content: "Tailwind v4 migration checklist: audit config → replace JIT flags → update postcss → test dark mode",
+    timestamp: _DEMO_NOW - 1000 * 60 * 60 * 5,
+    pinned: false,
+    groups: [DEMO_PERSONAL_ID],
+  },
+];
+
+const DEMO_NOTES: Note[] = [
+  {
+    id: "__demo_n1__",
+    title: "Sync Screen Design Brief",
+    content: JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Overview" }],
+        },
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "The sync screen lets users share clipboard entries and notes across devices and team members in real time via persistent groups or ephemeral live-share sessions.",
+            },
+          ],
+        },
+        {
+          type: "heading",
+          attrs: { level: 3 },
+          content: [{ type: "text", text: "Key Features" }],
+        },
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [
+                    { type: "text", marks: [{ type: "bold" }], text: "Sync Groups" },
+                    { type: "text", text: " — persistent shared collections with invite codes" },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "listItem",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [
+                    { type: "text", marks: [{ type: "bold" }], text: "Live Share" },
+                    { type: "text", text: " — real-time session with per-member scope control" },
+                  ],
+                },
+              ],
+            },
+            {
+              type: "listItem",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "Offline queue with automatic retry on reconnect" }],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: "blockquote",
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  marks: [{ type: "italic" }],
+                  text: "Design goal: zero friction. Copy once, available everywhere.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    created_at: _DEMO_NOW - 1000 * 60 * 60 * 24,
+    updated_at: _DEMO_NOW - 1000 * 60 * 28,
+    pinned: true,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_n2__",
+    title: "Standup — May 7",
+    content: JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", marks: [{ type: "bold" }], text: "Yesterday: " },
+            {
+              type: "text",
+              text: "Finished group panel redesign, wired real NoteCard and EntryCard into the sync feed.",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", marks: [{ type: "bold" }], text: "Today: " },
+            {
+              type: "text",
+              text: "Wire up WebSocket events, add optimistic updates, polish empty states.",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", marks: [{ type: "bold" }], text: "Blockers: " },
+            { type: "text", text: "None." },
+          ],
+        },
+      ],
+    }),
+    created_at: _DEMO_NOW - 1000 * 60 * 60 * 3,
+    updated_at: _DEMO_NOW - 1000 * 60 * 12,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+];
+// ── END DEMO DATA ─────────────────────────────────────────────────────
 
 // ── Filter dropdown ───────────────────────────────────────────────────
 
@@ -675,9 +901,13 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   syncConnected,
   onCopyEntry,
 }) => {
-  const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
-  const [sessions, setSessions] = useState<SharingSession[]>([]);
-  const [selected, setSelected] = useState<SelectedGroup | null>(null);
+  // DEMO: pre-filled with mock data — replace initial values with [] / null before production
+  const [syncGroups, setSyncGroups] = useState<SyncGroup[]>(DEMO_SYNC_GROUPS);
+  const [sessions, setSessions] = useState<SharingSession[]>(DEMO_SESSIONS);
+  const [selected, setSelected] = useState<SelectedGroup | null>({
+    kind: "sync",
+    group: DEMO_SYNC_GROUPS[0],
+  });
   const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>(
@@ -687,6 +917,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
     () => (localStorage.getItem("sync-layout") as ClipboardLayout) ?? "tiles",
   );
   const [detailItem, setDetailItem] = useState<FeedItem | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
@@ -770,12 +1001,13 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
 
 
   useEffect(() => {
+    // DEMO: catch falls back to demo data instead of [] — remove fallback before production
     invoke<SyncGroup[]>("sync_get_groups")
       .then(setSyncGroups)
-      .catch(() => setSyncGroups([]));
+      .catch(() => setSyncGroups(DEMO_SYNC_GROUPS));
     invoke<SharingSession[]>("sharing_get_sessions")
       .then(setSessions)
-      .catch(() => setSessions([]));
+      .catch(() => setSessions(DEMO_SESSIONS));
   }, [syncConnected]);
 
   useEffect(() => {
@@ -783,6 +1015,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   }, [selected]);
 
   // Base feed items (group + type filter)
+  // DEMO: merges DEMO_ENTRIES / DEMO_NOTES alongside real props — remove before production
   const allFeedItems = useMemo((): FeedItem[] => {
     if (!selected) return [];
     const matchesGroup = (groups: string[]) => {
@@ -791,12 +1024,14 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
       return groups.includes(selected.session.share_group_id);
     };
     const items: FeedItem[] = [];
+    const allEntries = [...entries, ...DEMO_ENTRIES]; // DEMO
+    const allNotes = [...notes, ...DEMO_NOTES]; // DEMO
     if (feedFilter !== "notes")
-      for (const entry of entries)
+      for (const entry of allEntries)
         if (matchesGroup(entry.groups))
           items.push({ kind: "clipboard", entry });
     if (feedFilter !== "clipboard")
-      for (const note of notes)
+      for (const note of allNotes)
         if (matchesGroup(note.groups)) items.push({ kind: "note", note });
     return items;
   }, [selected, feedFilter, entries, notes]);
@@ -1286,22 +1521,57 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
             ) : (
               syncGroups.map((group) => {
                 const isActive = selected?.kind === "sync" && selected.group.id === group.id;
+                const isExpanded = expandedGroups.has(group.id);
                 const color = groupAvatarColor(group.id);
                 const initials = group.name.slice(0, 2).toUpperCase();
+                // DEMO: replace with real member list from API before production
+                const members: SharingMember[] = DEMO_GROUP_MEMBERS[group.id] ?? [];
                 return (
-                  <button
-                    key={group.id}
-                    className={`sync-group-card${isActive ? " active" : ""}`}
-                    onClick={() => setSelected({ kind: "sync", group })}
-                  >
-                    <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
-                    <span className="sync-group-card-body">
-                      <span className="sync-group-card-name">{group.name}</span>
-                      <span className="sync-group-card-meta">
-                        {group.member_count} member{group.member_count === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                  </button>
+                  <div key={group.id} className="sync-group-card-wrap">
+                    <div className={`sync-group-card${isActive ? " active" : ""}`}>
+                      <button
+                        className="sync-group-card-main"
+                        onClick={() => setSelected({ kind: "sync", group })}
+                      >
+                        <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
+                        <span className="sync-group-card-body">
+                          <span className="sync-group-card-name">{group.name}</span>
+                          <span className="sync-group-card-meta">
+                            {group.member_count} member{group.member_count === 1 ? "" : "s"}
+                          </span>
+                        </span>
+                      </button>
+                      {members.length > 0 && (
+                        <button
+                          className={`sync-group-expand-btn${isExpanded ? " sync-group-expand-btn--open" : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedGroups((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(group.id)) next.delete(group.id);
+                              else next.add(group.id);
+                              return next;
+                            });
+                          }}
+                          data-tooltip={isExpanded ? "Hide members" : "Show members"}
+                          data-tooltip-pos="left"
+                        >
+                          <ChevronRightIcon size={9} strokeWidth={2.5} />
+                        </button>
+                      )}
+                    </div>
+                    {isExpanded && members.length > 0 && (
+                      <div className="sync-group-members">
+                        {members.map((m) => (
+                          <div key={m.user_id} className="sync-group-member-row">
+                            <OnlineDotIcon online={m.online} size={5} />
+                            <span className="sync-group-member-name">{m.display_name}</span>
+                            <span className="sync-group-member-scope">{m.scope}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               })
             )}
