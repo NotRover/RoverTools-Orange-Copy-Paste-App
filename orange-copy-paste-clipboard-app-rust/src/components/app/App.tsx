@@ -11,6 +11,7 @@ import {
 } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
+import SyncScreen from "./sync-screen/SyncScreen";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
@@ -128,7 +129,7 @@ const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [screen, setScreen] = useState<AppScreen>(() => {
     const saved = localStorage.getItem("sc-last-screen") as AppScreen | null;
-    return saved === "notes" || saved === "clipboard" ? saved : "clipboard";
+    return saved === "notes" || saved === "clipboard" || saved === "sync" ? saved : "clipboard";
   });
   const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
     null,
@@ -390,6 +391,38 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
       unlisten?.();
+    };
+  }, []);
+
+  // Receive remote entries pushed from the sync WS listener.
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenEntry: (() => void) | undefined;
+    let unlistenDelete: (() => void) | undefined;
+
+    listen<ClipboardEntry>("sync:remote-entry", (event) => {
+      if (cancelled) return;
+      setEntries((prev) => {
+        if (prev.some((e) => e.id === event.payload.id)) return prev;
+        return [event.payload, ...prev];
+      });
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenEntry = fn;
+    });
+
+    listen<string>("sync:remote-delete", (event) => {
+      if (cancelled) return;
+      setEntries((prev) => prev.filter((e) => e.id !== event.payload));
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenDelete = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlistenEntry?.();
+      unlistenDelete?.();
     };
   }, []);
 
@@ -931,7 +964,7 @@ const App: React.FC = () => {
         theme={theme}
         onNavigate={(s) => {
           setScreen(s);
-          if (s === "clipboard" || s === "notes") {
+          if (s === "clipboard" || s === "notes" || s === "sync") {
             localStorage.setItem("sc-last-screen", s);
           }
         }}
@@ -948,6 +981,14 @@ const App: React.FC = () => {
           <SettingsScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
+        ) : screen === "sync" ? (
+          <SyncScreen
+            entries={entries}
+            notes={notes}
+            availableGroups={availableGroups}
+            syncConnected={syncConnected}
+            onCopyEntry={handleCopy}
+          />
         ) : screen === "notes" ? (
           <NotesScreen
             notes={notes}

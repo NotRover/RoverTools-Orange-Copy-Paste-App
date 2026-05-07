@@ -4,6 +4,7 @@ import {
   ClipboardIcon,
   NotesIcon,
   KeyboardIcon,
+  CloudSyncIcon,
   SunIcon,
   MoonIcon,
   GearIcon,
@@ -57,6 +58,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip-pos="right"
       >
         <NotesIcon />
+      </button>
+      <button
+        className={`nav-btn ${screen === "sync" ? "active" : ""}`}
+        onClick={() => onNavigate("sync")}
+        data-tooltip="Sync & Groups"
+        data-tooltip-pos="right"
+      >
+        <CloudSyncIcon />
       </button>
       <button
         className={`nav-btn ${screen === "shortcuts" ? "active" : ""}`}

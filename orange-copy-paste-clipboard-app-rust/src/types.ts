@@ -31,8 +31,44 @@ export interface Note {
   groups: string[];
 }
 
-export type AppScreen = "clipboard" | "notes" | "shortcuts" | "settings";
+export type AppScreen = "clipboard" | "notes" | "sync" | "shortcuts" | "settings";
 export type AppTheme = "dark" | "light";
+
+// ── Cloud sync types ────────────────────────────────────────────────
+
+export interface SyncUser {
+  id: string;
+  email: string;
+  display_name: string;
+}
+
+export interface SyncGroup {
+  id: string;
+  name: string;
+  member_count: number;
+  invite_code?: string;
+}
+
+export interface SharingMember {
+  user_id: string;
+  display_name: string;
+  scope: "clipboard" | "notes" | "both";
+  online: boolean;
+}
+
+export interface SharingSession {
+  share_group_id: string;
+  name: string;
+  my_scope: "clipboard" | "notes" | "both";
+  members: SharingMember[];
+  is_owner: boolean;
+}
+
+export interface SyncStatusInfo {
+  connected: boolean;
+  pending_count: number;
+  skipped_count: number;
+}
 
 // ── Group tag colors ────────────────────────────────────────────────
 

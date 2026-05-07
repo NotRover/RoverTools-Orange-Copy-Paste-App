@@ -96,8 +96,27 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
 
 #[tauri::command]
 pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    // Capture IDs of unpinned entries before clearing so tombstones can propagate (invariant #5).
+    let deleted_ids: Vec<String> = state
+        .history
+        .lock()
+        .all()
+        .iter()
+        .filter(|e| !e.pinned)
+        .map(|e| e.id.clone())
+        .collect();
+
     state.history.lock().clear();
     auto_save_history(&app, &state.history);
+
+    if !deleted_ids.is_empty() {
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            for id in deleted_ids {
+                s.on_delete_clipboard_entry(id);
+            }
+        }
+    }
     true
 }
 
@@ -218,15 +237,23 @@ pub fn bulk_delete_entries(
 ) -> u32 {
     let mut hist = state.history.lock();
     let mut removed = 0u32;
+    let mut deleted_ids: Vec<String> = Vec::new();
     for id in &ids {
         if hist.remove(id) {
             let _ = app.emit("clipboard:entry-deleted", id);
+            deleted_ids.push(id.clone());
             removed += 1;
         }
     }
     drop(hist);
     if removed > 0 {
         auto_save_history(&app, &state.history);
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            for id in deleted_ids {
+                s.on_delete_clipboard_entry(id);
+            }
+        }
     }
     removed
 }
@@ -268,6 +295,14 @@ pub fn bulk_pin_entries(
     drop(hist);
     if changed > 0 {
         auto_save_history(&app, &state.history);
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            for id in &ids {
+                if let Some(entry) = state.history.lock().find(id).cloned() {
+                    s.on_update_clipboard_entry(entry);
+                }
+            }
+        }
     }
     changed
 }
@@ -297,6 +332,14 @@ pub fn bulk_set_groups(
     drop(hist);
     if changed > 0 {
         save_after_group_change(&app, &state);
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            for id in &ids {
+                if let Some(entry) = state.history.lock().find(id).cloned() {
+                    s.on_update_clipboard_entry(entry);
+                }
+            }
+        }
     }
     changed
 }
@@ -329,6 +372,14 @@ pub fn bulk_add_group(
     drop(hist);
     if changed > 0 {
         save_after_group_change(&app, &state);
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            for id in &ids {
+                if let Some(entry) = state.history.lock().find(id).cloned() {
+                    s.on_update_clipboard_entry(entry);
+                }
+            }
+        }
     }
     changed
 }
@@ -361,6 +412,14 @@ pub fn bulk_remove_group(
     drop(hist);
     if changed > 0 {
         save_after_group_change(&app, &state);
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            for id in &ids {
+                if let Some(entry) = state.history.lock().find(id).cloned() {
+                    s.on_update_clipboard_entry(entry);
+                }
+            }
+        }
     }
     changed
 }
