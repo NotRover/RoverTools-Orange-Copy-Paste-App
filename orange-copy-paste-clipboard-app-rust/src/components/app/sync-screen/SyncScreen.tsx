@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { SquaresFour } from "@phosphor-icons/react";
 import type {
   ClipboardEntry,
@@ -18,6 +18,8 @@ import {
   timeAgo,
   truncateText,
   htmlPlainText,
+  htmlFragment,
+  resolveImageSrc,
   filePaths,
   fileNameFromPath,
   deriveDisplayKind,
@@ -50,6 +52,11 @@ import {
   ClipboardIcon,
   FilterIcon,
 } from "../../icons";
+import NoteCard from "../notes-screen/note-card/NoteCard";
+import NoteEditor from "../notes-screen/note-editor/NoteEditor";
+import "../notes-screen/note-card/note-card.css";
+import "../notes-screen/note-editor/note-editor.css";
+import "../clipboard-screen/entry-card/EntryCard.css";
 import "./SyncScreen.css";
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -136,111 +143,6 @@ function matchesSearch(item: FeedItem, q: string): boolean {
     item.note.title.toLowerCase().includes(lower) ||
     extractNoteText(item.note.content).toLowerCase().includes(lower)
   );
-}
-
-// ── Tiptap → React (read-only) ────────────────────────────────────────
-
-type TiptapMark = { type: string };
-type TiptapNode = {
-  type: string;
-  text?: string;
-  content?: TiptapNode[];
-  marks?: TiptapMark[];
-  attrs?: Record<string, unknown>;
-};
-
-function renderInline(node: TiptapNode, i: number): React.ReactNode {
-  if (node.type === "hardBreak") return <br key={i} />;
-  if (node.type !== "text") return null;
-  let el: React.ReactNode = node.text ?? "";
-  if (node.marks?.some((m) => m.type === "bold"))
-    el = <strong key={`b${i}`}>{el}</strong>;
-  if (node.marks?.some((m) => m.type === "italic"))
-    el = <em key={`i${i}`}>{el}</em>;
-  if (node.marks?.some((m) => m.type === "underline"))
-    el = <u key={`u${i}`}>{el}</u>;
-  if (node.marks?.some((m) => m.type === "strike"))
-    el = <s key={`s${i}`}>{el}</s>;
-  if (node.marks?.some((m) => m.type === "code"))
-    el = (
-      <code key={`c${i}`} className="sync-detail-inline-code">
-        {el}
-      </code>
-    );
-  return <React.Fragment key={i}>{el}</React.Fragment>;
-}
-
-function renderTiptapNode(node: TiptapNode, i: number): React.ReactNode {
-  const inline = node.content?.map(renderInline) ?? [];
-  const block = node.content?.map((n, j) => renderTiptapNode(n, j)) ?? [];
-  switch (node.type) {
-    case "paragraph":
-      return node.content?.length ? (
-        <p key={i} className="sync-detail-para">
-          {inline}
-        </p>
-      ) : (
-        <div key={i} className="sync-detail-spacer" />
-      );
-    case "heading": {
-      const lvl = Math.min(Number(node.attrs?.level ?? 1), 6);
-      const Tag = `h${lvl}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
-      return (
-        <Tag key={i} className={`sync-detail-h${lvl}`}>
-          {inline}
-        </Tag>
-      );
-    }
-    case "bulletList":
-      return (
-        <ul key={i} className="sync-detail-list">
-          {block}
-        </ul>
-      );
-    case "orderedList":
-      return (
-        <ol key={i} className="sync-detail-list sync-detail-list--ordered">
-          {block}
-        </ol>
-      );
-    case "listItem":
-      return (
-        <li key={i}>{node.content?.map((n, j) => renderTiptapNode(n, j))}</li>
-      );
-    case "blockquote":
-      return (
-        <blockquote key={i} className="sync-detail-blockquote">
-          {block}
-        </blockquote>
-      );
-    case "codeBlock":
-      return (
-        <pre key={i} className="sync-detail-code">
-          <code>{node.content?.map((n) => n.text ?? "").join("")}</code>
-        </pre>
-      );
-    case "horizontalRule":
-      return <hr key={i} className="sync-detail-hr" />;
-    case "text":
-      return renderInline(node, i);
-    default:
-      return null;
-  }
-}
-
-function TiptapView({ content }: { content: string }) {
-  const nodes = useMemo((): React.ReactNode => {
-    try {
-      const doc = JSON.parse(content) as TiptapNode;
-      if (doc.type === "doc" && Array.isArray(doc.content))
-        return doc.content.map((n, i) => renderTiptapNode(n, i));
-    } catch {
-      /* legacy */
-    }
-    const plain = extractNoteText(content);
-    return plain ? <p className="sync-detail-para">{plain}</p> : null;
-  }, [content]);
-  return <div className="sync-detail-rich">{nodes}</div>;
 }
 
 // ── Filter dropdown ───────────────────────────────────────────────────
@@ -427,17 +329,31 @@ const SyncFilterDropdown: React.FC<{
 // ── Clipboard detail body ─────────────────────────────────────────────
 
 function ClipDetailBody({ entry }: { entry: ClipboardEntry }) {
-  if (entry.type === "text" || entry.type === "html") {
-    const text =
-      entry.type === "html" ? htmlPlainText(entry.content) : entry.content;
-    return <p className="sync-detail-entry-text">{text}</p>;
+  if (entry.type === "text") {
+    return <p className="sync-detail-entry-text">{entry.content}</p>;
   }
-  if (entry.type === "image")
+  if (entry.type === "html") {
     return (
-      <div className="sync-detail-entry-file">
-        <span className="sync-detail-file-name">{entry.label ?? "Image"}</span>
+      <div
+        className="sync-detail-html-preview"
+        dangerouslySetInnerHTML={{ __html: htmlFragment(entry.content) }}
+      />
+    );
+  }
+  if (entry.type === "image") {
+    return (
+      <div className="sync-detail-image-wrap">
+        <img
+          src={resolveImageSrc(entry.content, convertFileSrc)}
+          alt={entry.label ?? "Image"}
+          className="sync-detail-image-img"
+        />
+        {entry.label && (
+          <p className="sync-detail-image-caption">{entry.label}</p>
+        )}
       </div>
     );
+  }
   if (entry.type === "file") {
     const paths = filePaths(entry.content);
     return (
@@ -454,22 +370,21 @@ function ClipDetailBody({ entry }: { entry: ClipboardEntry }) {
   return <p className="sync-detail-entry-text">{entry.content}</p>;
 }
 
-// ── Detail panel ──────────────────────────────────────────────────────
+// ── Clipboard detail panel ────────────────────────────────────────────
 
 const DetailPanel: React.FC<{
-  item: FeedItem;
+  entry: ClipboardEntry;
   onClose: () => void;
   onCopy: (id: string) => void;
-}> = ({ item, onClose, onCopy }) => {
+}> = ({ entry, onClose, onCopy }) => {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(() => {
-    if (item.kind !== "clipboard") return;
-    onCopy(item.entry.id);
+    onCopy(entry.id);
     if (timer.current) clearTimeout(timer.current);
     setCopied(true);
     timer.current = setTimeout(() => setCopied(false), 1600);
-  }, [item, onCopy]);
+  }, [entry.id, onCopy]);
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
@@ -477,9 +392,7 @@ const DetailPanel: React.FC<{
     [],
   );
 
-  const isNote = item.kind === "note";
-  const ts = isNote ? item.note.updated_at : item.entry.timestamp;
-  const dk = !isNote ? deriveDisplayKind(item.entry) : null;
+  const dk = deriveDisplayKind(entry);
 
   return (
     <div className="sync-detail-panel">
@@ -493,44 +406,26 @@ const DetailPanel: React.FC<{
           Back
         </button>
         <div className="sync-detail-toolbar-right">
-          {isNote ? (
-            <span className="sync-detail-kind-badge sync-detail-kind-badge--note">
-              <NotesIcon size={10} />
-              Note
-            </span>
-          ) : (
-            dk && <EntryTypePill kind={dk} />
-          )}
-          <span className="sync-detail-time">{timeAgo(ts)}</span>
-          {!isNote && (
-            <button
-              className={`sync-detail-copy-btn${copied ? " sync-detail-copy-btn--done" : ""}`}
-              onClick={handleCopy}
-            >
-              {copied ? (
-                <>
-                  <CheckIcon size={11} strokeWidth={2.5} /> Copied!
-                </>
-              ) : (
-                <>
-                  <CopyIcon size={11} /> Copy
-                </>
-              )}
-            </button>
-          )}
+          <EntryTypePill kind={dk} />
+          <span className="sync-detail-time">{timeAgo(entry.timestamp)}</span>
+          <button
+            className={`sync-detail-copy-btn${copied ? " sync-detail-copy-btn--done" : ""}`}
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <>
+                <CheckIcon size={11} strokeWidth={2.5} /> Copied!
+              </>
+            ) : (
+              <>
+                <CopyIcon size={11} /> Copy
+              </>
+            )}
+          </button>
         </div>
       </div>
       <div className="sync-detail-scroll">
-        {isNote && (
-          <h2 className="sync-detail-note-title">
-            {item.note.title || "(Untitled note)"}
-          </h2>
-        )}
-        {isNote ? (
-          <TiptapView content={item.note.content} />
-        ) : (
-          <ClipDetailBody entry={item.entry} />
-        )}
+        <ClipDetailBody entry={entry} />
       </div>
     </div>
   );
@@ -597,17 +492,31 @@ const ClipFeedCard: React.FC<{
   }
 
   // ── Tiles mode ─────────────────────────────────────────────────────
+  let mediaSection: React.ReactNode = null;
   let preview: React.ReactNode = null;
+
   if (entry.type === "text") {
     preview = <p className="card-text">{truncateText(entry.content, 180)}</p>;
   } else if (entry.type === "html") {
     preview = (
-      <p className="card-text">
-        {truncateText(htmlPlainText(entry.content) || entry.content, 180)}
-      </p>
+      <div
+        className="card-html-preview"
+        dangerouslySetInnerHTML={{ __html: htmlFragment(entry.content) }}
+      />
     );
   } else if (entry.type === "image") {
-    preview = <p className="card-text--image-name">{entry.label ?? "Image"}</p>;
+    mediaSection = (
+      <div className="card-media">
+        <img
+          src={resolveImageSrc(entry.content, convertFileSrc)}
+          alt={entry.label ?? "Image"}
+          className="card-media-img"
+        />
+      </div>
+    );
+    preview = (
+      <p className="card-text card-text--image-name">{entry.label ?? "Image"}</p>
+    );
   } else if (entry.type === "file") {
     const paths = filePaths(entry.content);
     preview = (
@@ -632,6 +541,7 @@ const ClipFeedCard: React.FC<{
       className="entry-card sync-feed-entry-card"
       onClick={() => onView(entry)}
     >
+      {mediaSection}
       <div className="card-body">
         {preview}
         <div className="card-footer">
@@ -660,9 +570,10 @@ const ClipFeedCard: React.FC<{
 
 const NoteFeedCard: React.FC<{
   note: Note;
+  entries: ClipboardEntry[];
   onView: (note: Note) => void;
   layout: ClipboardLayout;
-}> = ({ note, onView, layout }) => {
+}> = ({ note, entries, onView, layout }) => {
   const plain = extractNoteText(note.content);
 
   // ── List mode ──────────────────────────────────────────────────────
@@ -688,31 +599,19 @@ const NoteFeedCard: React.FC<{
     );
   }
 
-  // ── Tiles mode ─────────────────────────────────────────────────────
+  // ── Tiles mode: use NoteCard for identical appearance to notes screen ──
   return (
-    <div className="ns-card sync-feed-note-card" onClick={() => onView(note)}>
-      <div className="ns-card-body">
-        <p className="ns-card-title">{note.title || "(Untitled note)"}</p>
-        {plain && (
-          <div className="ns-card-preview">{truncateText(plain, 140)}</div>
-        )}
-        <div className="ns-card-footer">
-          <div className="ns-card-chips">
-            <span
-              className="card-type-chip"
-              style={{
-                background: "var(--accent-dim)",
-                color: "var(--accent)",
-              }}
-            >
-              <NotesIcon size={9} />
-              <span className="card-type-label">Note</span>
-            </span>
-          </div>
-          <span className="ns-card-time">{timeAgo(note.updated_at)}</span>
-        </div>
-      </div>
-    </div>
+    <NoteCard
+      note={note}
+      entries={entries}
+      isSelecting={false}
+      isSelected={false}
+      isExpanded={false}
+      onToggleSelect={() => {}}
+      onOpen={() => onView(note)}
+      onDelete={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    />
   );
 };
 
@@ -1244,11 +1143,26 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
 
             {/* Detail or feed */}
             {detailItem ? (
-              <DetailPanel
-                item={detailItem}
-                onClose={() => setDetailItem(null)}
-                onCopy={onCopyEntry}
-              />
+              detailItem.kind === "note" ? (
+                <NoteEditor
+                  key={detailItem.note.id}
+                  note={detailItem.note}
+                  entries={entries}
+                  availableGroups={[]}
+                  onUpdate={() => {}}
+                  onDelete={() => {}}
+                  onPin={() => {}}
+                  onSetGroups={() => {}}
+                  onCopyEntry={onCopyEntry}
+                  onBack={() => setDetailItem(null)}
+                />
+              ) : (
+                <DetailPanel
+                  entry={detailItem.entry}
+                  onClose={() => setDetailItem(null)}
+                  onCopy={onCopyEntry}
+                />
+              )
             ) : (
               <div className="sync-feed-scroll">
                 {feedItems.length === 0 ? (
@@ -1303,6 +1217,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                             <NoteFeedCard
                               key={item.note.id}
                               note={item.note}
+                              entries={entries}
                               onView={(n) =>
                                 setDetailItem({ kind: "note", note: n })
                               }

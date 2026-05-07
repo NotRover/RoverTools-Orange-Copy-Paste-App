@@ -867,6 +867,13 @@
   cursor: not-allowed;
 }
 
+/* ── Hide NoteCard's delete button inside sync feed ── */
+
+.sync-feed-card-grid .ns-card-delete,
+.sync-feed-card-list .ns-card-delete {
+  display: none;
+}
+
 /* ── Note view hint on card ── */
 
 .sync-note-view-hint {
@@ -1146,4 +1153,44 @@
 .sync-detail-file-name {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* ── Clipboard detail: rendered HTML ── */
+
+.sync-detail-html-preview {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+/* ── Clipboard detail: image preview ── */
+
+.sync-detail-image-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-detail-image-img {
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+}
+
+.sync-detail-image-caption {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* NoteEditor fills the feed panel when inspecting a note */
+
+.sync-feed-panel .ns-editor-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
