@@ -1170,23 +1170,23 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### React: Settings screen — Cloud Sync section
 
-- [ ] Enable/disable Cloud Sync toggle → `sync_set_enabled`
-- [ ] Server URL input field → `sync_set_server_url`
-- [ ] Login form (email + password) → `sync_login`
-- [ ] Logout button → `sync_logout`
-- [ ] Logged-in user display (email, display name)
+- [x] Enable/disable Cloud Sync toggle → `sync_set_enabled`
+- [x] Server URL input field → `sync_set_server_url`
+- [x] Login form (email + password) → `sync_login`
+- [x] Logout button → `sync_logout`
+- [x] Logged-in user display (email, display name)
 - [ ] Connected devices list (fetched from backend) with current device highlighted and revoke button
-- [ ] Sync status indicator: `Synced ✓` / `Syncing…` / `Offline` / `Re-login required` — driven by `sync_get_status`
-- [ ] Shared Groups sub-panel: list joined groups, create new group, copy invite link, leave group
+- [x] Sync status indicator: `Synced ✓` / `Syncing…` / `Offline` / `Re-login required` — driven by `sync_get_status`
+- [x] Shared Groups sub-panel: list joined groups, create new group, copy invite link, leave group
 
 #### React: Entry card
 
-- [ ] Cloud sync icon on each card: filled cloud ✓ (`Synced`) / outline cloud (`Pending`) / no icon (`LocalOnly`)
+- [x] Cloud sync icon on each card: filled cloud ✓ (`Synced`) / outline cloud (`Pending`) / no icon (`LocalOnly`)
 
 #### React: Settings screen — Settings Sync UX
 
-- [ ] Show a "Settings synced" indicator (last synced timestamp) in the Cloud Sync section
-- [ ] On `sync:settings` Tauri event: apply received `localStorage` keys (theme, layout, sort, paste_slots, group_names, group_colors) without a full page reload
+- [x] Show a "Settings synced" indicator (last synced timestamp) in the Cloud Sync section
+- [x] On `sync:settings` Tauri event: apply received `localStorage` keys (theme, layout, sort, paste_slots, group_names, group_colors) without a full page reload
 
 ---
 
@@ -1194,12 +1194,12 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: `sync/commands.rs`
 
-- [ ] Implement `sync_push_settings()`:
+- [x] Implement `sync_push_settings()`:
   - Collect synced keys from `settings.json` (via `get_setting` helpers)
   - Emit `sync:collect-settings` Tauri event → React responds with `localStorage` values via `sync_receive_local_settings(json)` command
   - Merge into one JSON blob, encrypt with UMK, `PUT /api/v1/settings { encrypted_blob, updated_at }`
   - If response `winner == 'server'`: decrypt server blob and apply (emit `sync:settings`)
-- [ ] Implement `sync_pull_settings()`:
+- [x] Implement `sync_pull_settings()`:
   - `GET /api/v1/settings`
   - If 404: skip (no settings on server yet)
   - Decrypt blob; if `server_updated_at > local_updated_at`: apply and emit `sync:settings`
@@ -1207,7 +1207,7 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: hook settings push into existing commands
 
-- [ ] In `set_setting()` command: after writing to `settings.json`, call `sync_client.schedule_settings_push()` if sync is enabled and the key is in the synced-keys list
+- [x] In `set_setting()` command: after writing to `settings.json`, call `sync_client.schedule_settings_push()` if sync is enabled and the key is in the synced-keys list
 - [ ] In `lib.rs` setup: after successful auth + delta pull, call `sync_pull_settings()`
 
 #### Rust: `ws_listener.rs`
@@ -1216,8 +1216,8 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### React: App.tsx
 
-- [ ] Listen for `sync:collect-settings` Tauri event → collect `localStorage` synced keys → call `sync_receive_local_settings(json)` Tauri command
-- [ ] Listen for `sync:settings` Tauri event → apply received settings to `localStorage` (theme, layout, sort, paste_slots, group_names, group_colors) and re-render affected components
+- [x] Listen for `sync:collect-settings` Tauri event → collect `localStorage` synced keys → call `sync_receive_local_settings(json)` Tauri command
+- [x] Listen for `sync:settings` Tauri event → apply received settings to `localStorage` (theme, layout, sort, paste_slots, group_names, group_colors) and re-render affected components
 
 #### Rust: new Tauri command
 
@@ -1242,7 +1242,7 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### React
 
-- [ ] Listen for `sync:file-skipped` Tauri event → show dismissible notification in sync status area ("File too large to sync — must be under 5 MB")
+- [x] Listen for `sync:file-skipped` Tauri event → show dismissible notification in sync status area ("File too large to sync — must be under 5 MB")
 
 ---
 
@@ -1277,10 +1277,10 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### React: Settings screen — Live Share panel
 
-- [ ] Create Live Share button → `sharing_invite` (opens invite form)
-- [ ] Invite form: email field + scope selector (`clipboard` / `notes` / `both`) → `sharing_invite`
-- [ ] Active sessions list: session name, member list (display name + their scope + online indicator)
-- [ ] Own scope selector per session → `sharing_update_scope`
-- [ ] Leave session button (non-owner) → `sharing_leave_session`
-- [ ] End session button (owner only) → `sharing_end_session`
-- [ ] Incoming invite notification (driven by `sharing:invite-received` Tauri event): accept/decline with scope selection → `sharing_accept`
+- [x] Create Live Share button → `sharing_invite` (opens invite form)
+- [x] Invite form: email field + scope selector (`clipboard` / `notes` / `both`) → `sharing_invite`
+- [x] Active sessions list: session name, member list (display name + their scope + online indicator)
+- [x] Own scope selector per session → `sharing_update_scope`
+- [x] Leave session button (non-owner) → `sharing_leave_session`
+- [x] End session button (owner only) → `sharing_end_session`
+- [x] Incoming invite notification (driven by `sharing:invite-received` Tauri event): accept/decline with scope selection → `sharing_accept`

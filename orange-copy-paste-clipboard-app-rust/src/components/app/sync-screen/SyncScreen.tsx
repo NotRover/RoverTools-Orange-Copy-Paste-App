@@ -175,14 +175,14 @@ const DEMO_SYNC_GROUPS: SyncGroup[] = [
 // DEMO: member lists per group — remove with the rest of the demo block before production
 const DEMO_GROUP_MEMBERS: Record<string, SharingMember[]> = {
   [DEMO_GROUP_ID]: [
-    { user_id: "m1", display_name: "Alex K.", scope: "both", online: true },
-    { user_id: "m2", display_name: "Jordan L.", scope: "clipboard", online: true },
-    { user_id: "m3", display_name: "Sam R.", scope: "notes", online: false },
-    { user_id: "m4", display_name: "You", scope: "both", online: true },
+    { user_id: "m1", display_name: "Alex K.", email: "", scope: "both", online: true },
+    { user_id: "m2", display_name: "Jordan L.", email: "", scope: "clipboard", online: true },
+    { user_id: "m3", display_name: "Sam R.", email: "", scope: "notes", online: false },
+    { user_id: "m4", display_name: "You", email: "", scope: "both", online: true },
   ],
   [DEMO_PERSONAL_ID]: [
-    { user_id: "m5", display_name: "MacBook Pro", scope: "both", online: true },
-    { user_id: "m6", display_name: "You (Desktop)", scope: "both", online: true },
+    { user_id: "m5", display_name: "MacBook Pro", email: "", scope: "both", online: true },
+    { user_id: "m6", display_name: "You (Desktop)", email: "", scope: "both", online: true },
   ],
 };
 
@@ -191,11 +191,10 @@ const DEMO_SESSIONS: SharingSession[] = [
     share_group_id: DEMO_SHARE_ID,
     name: "Design Review",
     my_scope: "both",
-    is_owner: true,
     members: [
-      { user_id: "u1", display_name: "Alex K.", scope: "both", online: true },
-      { user_id: "u2", display_name: "Jordan", scope: "clipboard", online: true },
-      { user_id: "u3", display_name: "Sam", scope: "notes", online: false },
+      { user_id: "u1", display_name: "Alex K.", email: "", scope: "both", online: true },
+      { user_id: "u2", display_name: "Jordan", email: "", scope: "clipboard", online: true },
+      { user_id: "u3", display_name: "Sam", email: "", scope: "notes", online: false },
     ],
   },
 ];
@@ -1678,15 +1677,11 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                     onClick={() =>
                       handleLeaveSession(selected.session.share_group_id)
                     }
-                    data-tooltip={
-                      selected.session.is_owner
-                        ? "End session"
-                        : "Leave session"
-                    }
+                    data-tooltip="Leave session"
                     data-tooltip-pos="top"
                   >
                     <LogOutIcon size={11} />
-                    {selected.session.is_owner ? "End" : "Leave"}
+                    Leave
                   </button>
                 )}
               </div>

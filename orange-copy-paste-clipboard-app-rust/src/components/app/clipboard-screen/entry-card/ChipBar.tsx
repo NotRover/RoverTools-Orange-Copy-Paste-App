@@ -10,7 +10,7 @@ import {
   TYPE_ICONS,
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
-import { ChevronDownIcon, CheckIcon, ClipboardIcon } from "../../../icons";
+import { ChevronDownIcon, CheckIcon, ClipboardIcon, CloudSyncIcon } from "../../../icons";
 
 const CHIP_GAP_PX = 4;
 
@@ -364,6 +364,22 @@ const ChipBar: React.FC<ChipBarProps> = ({
             </button>
           </div>
         </div>
+        {entry.sync_status === "synced" && (
+          <span
+            className="card-sync-icon card-sync-icon--synced"
+            data-tooltip="Synced"
+          >
+            <CloudSyncIcon size={11} />
+          </span>
+        )}
+        {entry.sync_status === "pending" && (
+          <span
+            className="card-sync-icon card-sync-icon--pending"
+            data-tooltip="Sync pending"
+          >
+            <CloudSyncIcon size={11} />
+          </span>
+        )}
         {justPinned ? (
           <span className="card-time card-time--pinned">
             {PinIcon}

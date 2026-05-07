@@ -28,6 +28,7 @@ import {
   MaximizeIcon,
   RestoreIcon,
   WindowCloseIcon,
+  CloudSyncIcon,
 } from "../icons";
 import "./App.css";
 
@@ -423,6 +424,111 @@ const App: React.FC = () => {
       cancelled = true;
       unlistenEntry?.();
       unlistenDelete?.();
+    };
+  }, []);
+
+  // Settings sync: when the sync debounce fires, collect localStorage values
+  // and send them to the Rust side so they can be merged into the push payload.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<null>("sync:collect-settings", () => {
+      if (cancelled) return;
+      const SYNC_KEYS: Record<string, string> = {
+        theme: localStorage.getItem("sc-theme") ?? "",
+        layout: localStorage.getItem("sc-layout") ?? "",
+        sort: localStorage.getItem("sc-sort") ?? "",
+        paste_slots: localStorage.getItem("sc-paste-slots") ?? "",
+        group_names: localStorage.getItem("sc-groups") ?? "[]",
+        group_colors: localStorage.getItem("sc-group-colors") ?? "{}",
+      };
+      invoke("sync_receive_local_settings", {
+        json: JSON.stringify(SYNC_KEYS),
+      }).catch(console.error);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Settings sync: apply incoming settings blob from the server to localStorage.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<string>("sync:settings", (event) => {
+      if (cancelled) return;
+      try {
+        const data = JSON.parse(event.payload) as Record<string, unknown>;
+        const STORAGE_MAP: Record<string, string> = {
+          theme: "sc-theme",
+          layout: "sc-layout",
+          sort: "sc-sort",
+          paste_slots: "sc-paste-slots",
+          group_names: "sc-groups",
+          group_colors: "sc-group-colors",
+        };
+        for (const [key, storageKey] of Object.entries(STORAGE_MAP)) {
+          const val = data[key];
+          if (val != null) {
+            localStorage.setItem(
+              storageKey,
+              typeof val === "string" ? val : JSON.stringify(val),
+            );
+          }
+        }
+        // Apply theme change immediately without full reload
+        if (data.theme === "dark" || data.theme === "light") {
+          setTheme(data.theme as import("../../types").AppTheme);
+        }
+        // Apply groups change
+        if (typeof data.group_names === "string") {
+          try {
+            const groups = JSON.parse(data.group_names) as string[];
+            if (Array.isArray(groups)) {
+              setAvailableGroups(groups.filter((g) => typeof g === "string"));
+            }
+          } catch { /* ignore */ }
+        }
+      } catch (e) {
+        console.error("[sync:settings] apply failed", e);
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // File-too-large-to-sync notification
+  const [fileSyncSkipped, setFileSyncSkipped] = useState(false);
+  const fileSyncSkippedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<{ client_id: string; size_bytes: number }>("sync:file-skipped", () => {
+      if (cancelled) return;
+      if (fileSyncSkippedTimerRef.current !== null)
+        clearTimeout(fileSyncSkippedTimerRef.current);
+      setFileSyncSkipped(true);
+      fileSyncSkippedTimerRef.current = setTimeout(() => {
+        fileSyncSkippedTimerRef.current = null;
+        setFileSyncSkipped(false);
+      }, 5000);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -1144,6 +1250,15 @@ const App: React.FC = () => {
             }}
             duration={5000}
             onDismiss={() => setBulkDeletedNotes(null)}
+          />
+        )}
+
+        {fileSyncSkipped && (
+          <ToastNotification
+            message="File too large to sync — must be under 5 MB"
+            icon={<CloudSyncIcon size={13} />}
+            duration={5000}
+            onDismiss={() => setFileSyncSkipped(false)}
           />
         )}
       </div>

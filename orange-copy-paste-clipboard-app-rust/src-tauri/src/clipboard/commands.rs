@@ -215,15 +215,35 @@ pub fn set_setting(
         .ok()
         .and_then(|d| serde_json::from_str(&d).ok())
         .unwrap_or_default();
-    map.insert(key, value);
+    map.insert(key.clone(), value);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(
+    let written = std::fs::write(
         &path,
         serde_json::to_string_pretty(&map).unwrap_or_default(),
     )
-    .is_ok()
+    .is_ok();
+
+    // Schedule a settings sync push when a synced key changes
+    const SYNCED_KEYS: &[&str] = &[
+        "keep_history",
+        "close_to_tray",
+        "start_minimized",
+        "notification",
+        "notif_copy",
+        "notif_paste",
+        "autosave",
+        "sharing_notify",
+    ];
+    if written && SYNCED_KEYS.contains(&key.as_str()) {
+        let sync = state.sync_client.lock().clone();
+        if let Some(s) = sync {
+            s.schedule_settings_push();
+        }
+    }
+
+    written
 }
 
 // ── Bulk operations ─────────────────────────────────────────────────
