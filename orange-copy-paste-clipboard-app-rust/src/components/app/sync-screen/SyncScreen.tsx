@@ -24,11 +24,10 @@ import {
   filePaths,
   fileNameFromPath,
   deriveDisplayKind,
+  groupColor,
 } from "../../../types";
 import { EntryTypePill } from "../../entry-types/EntryTypePill";
 import {
-  PinIcon as PinIconElement,
-  SaveIcon as SaveIconElement,
   TYPE_ICONS,
   TYPE_LABELS,
 } from "../../entry-types/EntryTypePill";
@@ -53,9 +52,13 @@ import {
   SearchXIcon,
   ClipboardIcon,
   FilterIcon,
+  PinIcon,
+  ExpandIcon,
 } from "../../icons";
-import NoteCard from "../notes-screen/note-card/NoteCard";
+import { createPortal } from "react-dom";
+import "../card-menu/CardMenu.css";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
+import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
 import "../clipboard-screen/entry-card/EntryCard.css";
 import "./SyncScreen.css";
@@ -581,13 +584,78 @@ const DEMO_NOTES: Note[] = [
 ];
 // ── END DEMO DATA ─────────────────────────────────────────────────────
 
+// ── Sync context menu ─────────────────────────────────────────────────
+
+interface SyncMenuPos { x: number; y: number }
+
+const SyncCardMenu: React.FC<{
+  pos: SyncMenuPos | null;
+  onClose: () => void;
+  copied: boolean;
+  onCopy?: () => void;
+  onOpen: () => void;
+}> = ({ pos, onClose, copied, onCopy, onOpen }) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pos) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [pos, onClose]);
+
+  useEffect(() => {
+    if (!pos || !ref.current) return;
+    const el = ref.current;
+    el.style.left = `${pos.x}px`;
+    el.style.top = `${pos.y}px`;
+    const r = el.getBoundingClientRect();
+    let x = pos.x, y = pos.y;
+    if (r.right > window.innerWidth) x = Math.max(0, pos.x - r.width);
+    if (r.bottom > window.innerHeight) y = Math.max(0, pos.y - r.height);
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+  }, [pos]);
+
+  if (!pos) return null;
+
+  const closeAfter = (fn: () => void) => () => { fn(); onClose(); };
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="card-menu-dropdown"
+      style={{ position: "fixed", left: pos.x, top: pos.y }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {onCopy && (
+        <button
+          className={`card-menu-item card-menu-item--copy${copied ? " card-menu-item--success" : ""}`}
+          onClick={closeAfter(onCopy)}
+        >
+          {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+          <span>{copied ? "Copied!" : "Copy"}</span>
+        </button>
+      )}
+      <button className="card-menu-item" onClick={closeAfter(onOpen)}>
+        <ExpandIcon size={13} />
+        <span>Open</span>
+      </button>
+    </div>,
+    document.body,
+  );
+};
+
 // ── Filter dropdown ───────────────────────────────────────────────────
 
 interface SyncFilterState {
-  pinnedOnly: boolean;
-  setPinnedOnly: React.Dispatch<React.SetStateAction<boolean>>;
-  savedOnly: boolean;
-  setSavedOnly: React.Dispatch<React.SetStateAction<boolean>>;
   selectedKinds: Set<DisplayKind>;
   toggleKind: (k: DisplayKind) => void;
   dateAfter: string;
@@ -633,65 +701,9 @@ const SyncFilterDropdown: React.FC<{
       </button>
       {sf.filtersOpen && (
         <div className="cs-filter-card">
-          {/* System */}
-          <div className="cs-card-section">
-            <div className="cs-section-label">
-              System
-              {(sf.pinnedOnly ? 1 : 0) + (sf.savedOnly ? 1 : 0) > 0 && (
-                <span className="cs-count">
-                  {(sf.pinnedOnly ? 1 : 0) + (sf.savedOnly ? 1 : 0)}
-                </span>
-              )}
-            </div>
-            <div className="cs-type-grid">
-              <label
-                className={`cs-type-option${sf.pinnedOnly ? " cs-type-option--on" : ""}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={sf.pinnedOnly}
-                  onChange={() => sf.setPinnedOnly((v) => !v)}
-                  className="cs-type-cb"
-                />
-                <span
-                  className="cs-type-icon type-pill"
-                  style={{
-                    background: "var(--accent-dim)",
-                    color: "var(--accent)",
-                  }}
-                >
-                  {PinIconElement}
-                </span>
-                <span className="cs-type-name">Pinned</span>
-              </label>
-              {feedFilter !== "notes" && (
-                <label
-                  className={`cs-type-option${sf.savedOnly ? " cs-type-option--on" : ""}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={sf.savedOnly}
-                    onChange={() => sf.setSavedOnly((v) => !v)}
-                    className="cs-type-cb"
-                  />
-                  <span
-                    className="cs-type-icon type-pill"
-                    style={{
-                      background: "rgba(34,197,94,0.12)",
-                      color: "#22c55e",
-                    }}
-                  >
-                    {SaveIconElement}
-                  </span>
-                  <span className="cs-type-name">Saved</span>
-                </label>
-              )}
-            </div>
-          </div>
           {/* Clipboard types */}
           {feedFilter !== "notes" && (
             <>
-              <div className="cs-card-divider" />
               <div className="cs-card-section">
                 <div className="cs-section-label">
                   Clipboard Types
@@ -724,7 +736,7 @@ const SyncFilterDropdown: React.FC<{
             </>
           )}
           {/* Date */}
-          <div className="cs-card-divider" />
+          {feedFilter !== "notes" && <div className="cs-card-divider" />}
           <div className="cs-card-section">
             <div className="cs-section-label">
               Date{dateActive && <span className="cs-count">1</span>}
@@ -983,30 +995,34 @@ const ClipFeedCard: React.FC<{
       className="entry-card sync-feed-entry-card"
       onClick={() => onView(entry)}
     >
-      {showSourceBadge && (
-        <span className="sync-source-badge sync-source-badge--clip">
-          <ClipboardIcon size={9} />
-          Clipboard
-        </span>
-      )}
       {mediaSection}
       <div className="card-body">
         {preview}
         <div className="card-footer">
           <div className="card-chips">
+            {showSourceBadge && (
+              <span className="card-type-chip sync-source-chip--clip">
+                <ClipboardIcon size={9} strokeWidth={2.5} />
+                <span className="card-type-label">Clipboard</span>
+              </span>
+            )}
             <EntryTypePill kind={dk} />
           </div>
-          <span className="card-time">{timeAgo(entry.timestamp)}</span>
+          {copied ? (
+            <span className="card-time card-time--copied">
+              <CheckIcon size={9} strokeWidth={2.8} />
+              Copied
+            </span>
+          ) : (
+            <span className="card-time">{timeAgo(entry.timestamp)}</span>
+          )}
           <button
-            className={`sync-copy-btn${copied ? " sync-copy-btn--done" : ""}`}
+            className="sync-card-copy-btn"
             onClick={handleCopy}
+            data-tooltip="Copy"
+            data-tooltip-pos="top"
           >
-            {copied ? (
-              <CheckIcon size={10} strokeWidth={2.5} />
-            ) : (
-              <CopyIcon size={10} />
-            )}
-            {copied ? "Copied!" : "Copy"}
+            <CopyIcon size={10} />
           </button>
         </div>
       </div>
@@ -1048,26 +1064,53 @@ const NoteFeedCard: React.FC<{
     );
   }
 
-  // ── Tiles mode: use NoteCard for identical appearance to notes screen ──
+  // ── Tiles mode: replicate NoteCard markup so we control the chip row ──
+  const content = note.content ?? "";
   return (
-    <div className="sync-note-card-wrap">
-      {showSourceBadge && (
-        <span className="sync-source-badge sync-source-badge--note">
-          <NotesIcon size={9} />
-          Note
-        </span>
-      )}
-      <NoteCard
-        note={note}
-        entries={entries}
-        isSelecting={false}
-        isSelected={false}
-        isExpanded={false}
-        onToggleSelect={() => {}}
-        onOpen={() => onView(note)}
-        onDelete={(e) => e.stopPropagation()}
-        onContextMenu={(e) => e.preventDefault()}
-      />
+    <div className="ns-card" onClick={() => onView(note)}>
+      <div className="ns-card-body">
+        <div className="ns-card-title">
+          {deriveNoteTitle(note.title, note.content)}
+        </div>
+        {content && (
+          <div className="ns-card-preview">
+            <NotionPreview
+              content={content}
+              entries={entries}
+              className="ns-card-preview-md"
+            />
+          </div>
+        )}
+        <div className="ns-card-footer">
+          <div className="ns-card-chips">
+            {showSourceBadge && (
+              <span className="card-type-chip sync-source-chip--note">
+                <NotesIcon size={9} />
+                <span className="card-type-label">Note</span>
+              </span>
+            )}
+            {note.groups.map((g) => {
+              const c = groupColor(g);
+              return (
+                <span
+                  key={g}
+                  className="ns-chip"
+                  style={{ background: c.bg, color: c.fg }}
+                >
+                  <span className="ns-chip-dot" />
+                  <span className="ns-chip-label">{g}</span>
+                </span>
+              );
+            })}
+          </div>
+          <span
+            className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
+          >
+            {note.pinned && <PinIcon size={8} />}
+            {timeAgo(note.updated_at)}
+          </span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1189,8 +1232,6 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Advanced filter state
-  const [pinnedOnly, setPinnedOnly] = useState(false);
-  const [savedOnly, setSavedOnly] = useState(false);
   const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
     new Set(),
   );
@@ -1209,16 +1250,12 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (pinnedOnly) n++;
-    if (savedOnly) n++;
     if (selectedKinds.size > 0) n++;
     if (dateAfter || (dateBefore && dateBefore !== todayStr)) n++;
     return n;
-  }, [pinnedOnly, savedOnly, selectedKinds, dateAfter, dateBefore, todayStr]);
+  }, [selectedKinds, dateAfter, dateBefore, todayStr]);
 
   const clearAllFilters = useCallback(() => {
-    setPinnedOnly(false);
-    setSavedOnly(false);
     setSelectedKinds(new Set());
     setDateAfter("");
     setDateBefore(todayStr);
@@ -1243,10 +1280,6 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   }, []);
 
   const sf: SyncFilterState = {
-    pinnedOnly,
-    setPinnedOnly,
-    savedOnly,
-    setSavedOnly,
     selectedKinds,
     toggleKind,
     dateAfter,
@@ -1311,14 +1344,6 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   // Apply search + advanced filters + sort
   const feedItems = useMemo((): FeedItem[] => {
     let pool = allFeedItems;
-    if (pinnedOnly)
-      pool = pool.filter((item) =>
-        item.kind === "clipboard" ? item.entry.pinned : item.note.pinned,
-      );
-    if (savedOnly)
-      pool = pool.filter((item) =>
-        item.kind === "clipboard" ? item.entry.groups.includes("Saved") : true,
-      );
     if (selectedKinds.size > 0)
       pool = pool.filter(
         (item) =>
@@ -1376,16 +1401,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
         sorted.sort((a, b) => getTs(b) - getTs(a));
     }
     return sorted;
-  }, [
-    allFeedItems,
-    pinnedOnly,
-    savedOnly,
-    selectedKinds,
-    dateAfter,
-    dateBefore,
-    search,
-    sort,
-  ]);
+  }, [allFeedItems, selectedKinds, dateAfter, dateBefore, search, sort]);
 
   const feedByDay = useMemo(() => {
     const days: { label: string; items: FeedItem[] }[] = [];
