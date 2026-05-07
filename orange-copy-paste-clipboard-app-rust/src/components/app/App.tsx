@@ -986,7 +986,6 @@ const App: React.FC = () => {
           <SyncScreen
             entries={entries}
             notes={notes}
-            availableGroups={availableGroups}
             syncConnected={syncConnected}
             onCopyEntry={handleCopy}
           />

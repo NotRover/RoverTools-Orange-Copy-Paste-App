@@ -15,7 +15,6 @@ import type {
   SharingSession,
 } from "../../../types";
 import {
-  groupColor,
   timeAgo,
   truncateText,
   htmlPlainText,
@@ -74,6 +73,17 @@ const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "file",
   "folder",
 ];
+
+const AVATAR_PALETTE = [
+  "#ff3e1c", "#f59e0b", "#22c55e", "#3b82f6",
+  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316",
+];
+
+function groupAvatarColor(seed: string): string {
+  let h = 0;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -748,31 +758,12 @@ const InlineForm: React.FC<{
   );
 };
 
-// ── Section header ────────────────────────────────────────────────────
-
-const SectionHeader: React.FC<{
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-  badge?: React.ReactNode;
-}> = ({ label, open, onToggle, badge }) => (
-  <button className="sync-section-label" onClick={onToggle}>
-    <ChevronRightIcon
-      size={9}
-      strokeWidth={2.8}
-      className={`sync-section-chevron${open ? " sync-section-chevron--open" : ""}`}
-    />
-    <span>{label}</span>
-    {badge}
-  </button>
-);
 
 // ── Props ─────────────────────────────────────────────────────────────
 
 interface SyncScreenProps {
   entries: ClipboardEntry[];
   notes: Note[];
-  availableGroups: string[];
   syncConnected: boolean | null;
   onCopyEntry: (id: string) => void;
 }
@@ -782,7 +773,6 @@ interface SyncScreenProps {
 const SyncScreen: React.FC<SyncScreenProps> = ({
   entries,
   notes,
-  availableGroups,
   syncConnected,
   onCopyEntry,
 }) => {
@@ -879,10 +869,6 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [filtersOpen]);
 
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const toggleCollapsed = useCallback((key: string) => {
-    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
 
   useEffect(() => {
     invoke<SyncGroup[]>("sync_get_groups")
@@ -1117,8 +1103,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           data-tooltip="All items"
           data-tooltip-pos="below"
         >
-          <SquaresFour size={12} weight="duotone" />
-          All
+          <SquaresFour size={12} weight="regular" />
         </button>
         <button
           className={`sync-feed-seg-btn${feedFilter === "clipboard" ? " sync-feed-seg-btn--active" : ""}`}
@@ -1126,8 +1111,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           data-tooltip="Clipboard only"
           data-tooltip-pos="below"
         >
-          <ClipboardIcon size={10} strokeWidth={1.8} />
-          Clips
+          <ClipboardIcon size={11} strokeWidth={1.8} />
         </button>
         <button
           className={`sync-feed-seg-btn${feedFilter === "notes" ? " sync-feed-seg-btn--active" : ""}`}
@@ -1135,8 +1119,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           data-tooltip="Notes only"
           data-tooltip-pos="below"
         >
-          <NotesIcon size={10} />
-          Notes
+          <NotesIcon size={11} />
         </button>
       </div>
       <div className="cs-toolbar-sep" />
@@ -1337,24 +1320,20 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
         ) : (
           <div className="sync-no-selection">
             <div className="sync-no-selection-inner">
-              {availableGroups.length === 0 && syncGroups.length === 0 ? (
+              {syncGroups.length === 0 && sessions.length === 0 ? (
                 <>
                   <UsersIcon size={40} strokeWidth={1.3} />
                   <span className="sync-no-selection-title">No groups yet</span>
                   <span className="sync-no-selection-sub">
-                    Create a group or join one to organize shared clipboard
-                    entries and notes across devices.
+                    Create a sync group or join one with an invite code.
                   </span>
                 </>
               ) : (
                 <>
                   <UsersIcon size={40} strokeWidth={1.3} />
-                  <span className="sync-no-selection-title">
-                    Select a group
-                  </span>
+                  <span className="sync-no-selection-title">Select a group</span>
                   <span className="sync-no-selection-sub">
-                    Pick a group from the panel on the right to view its shared
-                    content.
+                    Pick a group from the right to view its shared content.
                   </span>
                 </>
               )}
@@ -1365,117 +1344,80 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
 
       {/* Right groups panel */}
       <aside className="sync-panel-right">
-        <div className="sync-panel-right-inner">
-          {availableGroups.length > 0 && (
-            <section className="sync-group-section">
-              <SectionHeader
-                label="Local Groups"
-                open={!collapsed["local"]}
-                onToggle={() => toggleCollapsed("local")}
-              />
-              {!collapsed["local"] &&
-                availableGroups.map((name) => {
-                  const c = groupColor(name);
-                  const isActive =
-                    selected?.kind === "local" && selected.name === name;
-                  const count =
-                    entries.filter((e) => e.groups.includes(name)).length +
-                    notes.filter((n) => n.groups.includes(name)).length;
-                  return (
-                    <button
-                      key={name}
-                      className={`sync-group-item${isActive ? " active" : ""}`}
-                      onClick={() => setSelected({ kind: "local", name })}
-                    >
-                      <span
-                        className="sync-group-color-dot"
-                        style={{ background: c.fg }}
-                      />
-                      <span className="sync-group-item-name">{name}</span>
-                      {count > 0 && (
-                        <span className="sync-group-count">{count}</span>
-                      )}
-                    </button>
-                  );
-                })}
-            </section>
-          )}
+        <div className="sync-panel-header">
+          <span className="sync-panel-title">Groups</span>
+          <span className={`sync-conn-chip sync-conn-chip--${syncConnected === true ? "on" : syncConnected === false ? "off" : "idle"}`}>
+            <span className="sync-conn-dot" />
+            {syncConnected === true ? "Connected" : syncConnected === false ? "Offline" : "Inactive"}
+          </span>
+        </div>
 
-          <section className="sync-group-section">
-            <SectionHeader
-              label="Sync Groups"
-              open={!collapsed["sync"]}
-              onToggle={() => toggleCollapsed("sync")}
-              badge={
-                syncConnected === true ? (
-                  <span className="sync-section-dot sync-section-dot--online" />
-                ) : syncConnected === false ? (
-                  <span className="sync-section-dot sync-section-dot--offline" />
-                ) : null
-              }
-            />
-            {!collapsed["sync"] &&
-              (syncGroups.length === 0 ? (
-                <div className="sync-group-empty-hint">
-                  {syncConnected === null
-                    ? "Sign in to see shared groups"
-                    : syncConnected === false
-                      ? "Offline — reconnecting…"
-                      : "No sync groups yet"}
-                </div>
-              ) : (
-                syncGroups.map((group) => {
-                  const isActive =
-                    selected?.kind === "sync" && selected.group.id === group.id;
-                  return (
-                    <button
-                      key={group.id}
-                      className={`sync-group-item${isActive ? " active" : ""}`}
-                      onClick={() => setSelected({ kind: "sync", group })}
-                    >
-                      <UsersIcon size={10} className="sync-group-icon" />
-                      <span className="sync-group-item-name">{group.name}</span>
-                      <span className="sync-group-count">
-                        {group.member_count}
+        <div className="sync-panel-scroll">
+          <div className="sync-group-section">
+            {syncGroups.length > 0 && (
+              <div className="sync-section-row">
+                <span className="sync-section-label-text">Sync</span>
+                <span className="sync-section-badge">{syncGroups.length}</span>
+              </div>
+            )}
+            {syncGroups.length === 0 ? (
+              <p className="sync-group-empty-hint">
+                {syncConnected === null
+                  ? "Not signed in"
+                  : syncConnected === false
+                    ? "Offline — reconnecting…"
+                    : "No sync groups yet"}
+              </p>
+            ) : (
+              syncGroups.map((group) => {
+                const isActive = selected?.kind === "sync" && selected.group.id === group.id;
+                const color = groupAvatarColor(group.id);
+                const initials = group.name.slice(0, 2).toUpperCase();
+                return (
+                  <button
+                    key={group.id}
+                    className={`sync-group-card${isActive ? " active" : ""}`}
+                    onClick={() => setSelected({ kind: "sync", group })}
+                  >
+                    <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
+                    <span className="sync-group-card-body">
+                      <span className="sync-group-card-name">{group.name}</span>
+                      <span className="sync-group-card-meta">
+                        {group.member_count} member{group.member_count === 1 ? "" : "s"}
                       </span>
-                    </button>
-                  );
-                })
-              ))}
-          </section>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
 
           {sessions.length > 0 && (
-            <section className="sync-group-section">
-              <SectionHeader
-                label="Live Share"
-                open={!collapsed["share"]}
-                onToggle={() => toggleCollapsed("share")}
-              />
-              {!collapsed["share"] &&
-                sessions.map((session) => {
-                  const isActive =
-                    selected?.kind === "share" &&
-                    selected.session.share_group_id === session.share_group_id;
-                  return (
-                    <button
-                      key={session.share_group_id}
-                      className={`sync-group-item${isActive ? " active" : ""}`}
-                      onClick={() => setSelected({ kind: "share", session })}
-                    >
-                      <OnlineDotIcon
-                        online={session.members.some((m) => m.online)}
-                        size={7}
-                      />
-                      <span className="sync-group-item-name">
-                        {session.name}
-                      </span>
-                      <span className="sync-group-count">
-                        {session.members.length}
-                      </span>
-                    </button>
-                  );
-                })}
-            </section>
+            <div className="sync-group-section">
+              <div className="sync-section-row">
+                <span className="sync-section-label-text">Live Share</span>
+                <span className="sync-section-badge">{sessions.length}</span>
+              </div>
+              {sessions.map((session) => {
+                const isActive = selected?.kind === "share" && selected.session.share_group_id === session.share_group_id;
+                const onlineCount = session.members.filter((m) => m.online).length;
+                return (
+                  <button
+                    key={session.share_group_id}
+                    className={`sync-group-card sync-group-card--live${isActive ? " active" : ""}`}
+                    onClick={() => setSelected({ kind: "share", session })}
+                  >
+                    <span className="sync-group-live-avatar">
+                      <span className="sync-group-live-dot" />
+                    </span>
+                    <span className="sync-group-card-body">
+                      <span className="sync-group-card-name">{session.name}</span>
+                      <span className="sync-group-card-meta">{onlineCount}/{session.members.length} online</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
 
