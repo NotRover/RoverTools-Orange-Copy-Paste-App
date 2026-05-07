@@ -46,6 +46,7 @@ import {
   LogOutIcon,
   CopyIcon,
   ChevronRightIcon,
+  ChevronDownIcon,
   OnlineDotIcon,
   NotesIcon,
   FileIcon,
@@ -54,9 +55,8 @@ import {
   FilterIcon,
 } from "../../icons";
 import NoteCard from "../notes-screen/note-card/NoteCard";
-import NoteEditor from "../notes-screen/note-editor/NoteEditor";
+import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import "../notes-screen/note-card/note-card.css";
-import "../notes-screen/note-editor/note-editor.css";
 import "../clipboard-screen/entry-card/EntryCard.css";
 import "./SyncScreen.css";
 
@@ -197,7 +197,10 @@ const DEMO_SESSIONS: SharingSession[] = [
   },
 ];
 
+const _DAY = 1000 * 60 * 60 * 24;
+
 const DEMO_ENTRIES: ClipboardEntry[] = [
+  // ── Today ──
   {
     id: "__demo_e1__",
     type: "text",
@@ -211,7 +214,7 @@ const DEMO_ENTRIES: ClipboardEntry[] = [
     id: "__demo_e2__",
     type: "html",
     content:
-      "<html><body><p><strong>Sprint 24 Review</strong></p><ul><li>Completed sync screen redesign ✓</li><li>Fixed clipboard latency on Windows</li><li>Deployed v2.4.1 to staging</li></ul><p>Next sprint starts <em>Monday</em>.</p></body></html>",
+      "<p><strong>Sprint 24 Review</strong></p><ul><li>Completed sync screen redesign ✓</li><li>Fixed clipboard latency on Windows</li><li>Deployed v2.4.1 to staging</li></ul><p>Next sprint starts <em>Monday</em>.</p>",
     timestamp: _DEMO_NOW - 1000 * 60 * 38,
     pinned: false,
     groups: [DEMO_GROUP_ID],
@@ -240,9 +243,88 @@ const DEMO_ENTRIES: ClipboardEntry[] = [
     pinned: false,
     groups: [DEMO_PERSONAL_ID],
   },
+  // ── Yesterday ──
+  {
+    id: "__demo_e6__",
+    type: "text",
+    content: "npm install @radix-ui/react-dialog @radix-ui/react-tooltip",
+    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 30,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e7__",
+    type: "html",
+    content:
+      "<p><code>GET /api/v2/sync/groups</code> → returns <strong>200</strong> with group list. Auth via <code>Bearer</code> token in header.</p><p>Rate limit: <em>60 req/min</em> per user.</p>",
+    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 95,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e8__",
+    type: "text",
+    content: "postgres://user:pass@db.internal:5432/orange_prod",
+    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 60 * 3,
+    pinned: true,
+    groups: [DEMO_PERSONAL_ID],
+  },
+  {
+    id: "__demo_e9__",
+    type: "text",
+    content: "Review PR #418 — WebSocket reconnect with exponential backoff\nhttps://github.com/org/orange/pull/418",
+    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 60 * 5,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  // ── 3 days ago ──
+  {
+    id: "__demo_e10__",
+    type: "text",
+    content: "Design tokens update:\n--color-accent: #ff3e1c;\n--radius: 10px;\n--shadow-sm: 0 1px 3px rgba(0,0,0,.08);",
+    timestamp: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 20,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e11__",
+    type: "html",
+    content:
+      "<p><strong>Retro action items:</strong></p><ol><li>Add skeleton loaders to feed cards</li><li>Throttle clipboard watcher to 250 ms</li><li>Write migration guide for v3 API</li></ol>",
+    timestamp: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 80,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e12__",
+    type: "text",
+    content: "curl -X POST https://api.orange.app/v2/invite \\\n  -H 'Authorization: Bearer $TOKEN' \\\n  -d '{\"group_id\": \"grp_abc123\"}'",
+    timestamp: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 60 * 2,
+    pinned: false,
+    groups: [DEMO_PERSONAL_ID],
+  },
+  // ── 6 days ago ──
+  {
+    id: "__demo_e13__",
+    type: "text",
+    content: "Kick-off notes: scope confirmed for Q3. Focus on sync reliability, not new features.",
+    timestamp: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 45,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  {
+    id: "__demo_e14__",
+    type: "html",
+    content:
+      "<p><strong>Team OKRs — Q3 2025</strong></p><ul><li>O1: Ship sync v2 by end of August</li><li>O2: Reduce p95 paste latency to &lt;80 ms</li><li>O3: Reach 10 k MAU milestone</li></ul>",
+    timestamp: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 60 * 2,
+    pinned: true,
+    groups: [DEMO_GROUP_ID],
+  },
 ];
 
 const DEMO_NOTES: Note[] = [
+  // ── Today ──
   {
     id: "__demo_n1__",
     title: "Sync Screen Design Brief",
@@ -323,7 +405,7 @@ const DEMO_NOTES: Note[] = [
         },
       ],
     }),
-    created_at: _DEMO_NOW - 1000 * 60 * 60 * 24,
+    created_at: _DEMO_NOW - _DAY,
     updated_at: _DEMO_NOW - 1000 * 60 * 28,
     pinned: true,
     groups: [DEMO_GROUP_ID],
@@ -365,6 +447,134 @@ const DEMO_NOTES: Note[] = [
     }),
     created_at: _DEMO_NOW - 1000 * 60 * 60 * 3,
     updated_at: _DEMO_NOW - 1000 * 60 * 12,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  // ── Yesterday ──
+  {
+    id: "__demo_n3__",
+    title: "API Contract — Sync v2",
+    content: JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Endpoints" }],
+        },
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "code" }], text: "POST /v2/groups" }, { type: "text", text: " — create group" }] }],
+            },
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "code" }], text: "GET /v2/groups/:id/feed" }, { type: "text", text: " — paginated feed" }] }],
+            },
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "code" }], text: "WS /v2/groups/:id/stream" }, { type: "text", text: " — real-time push" }] }],
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "All payloads use " },
+            { type: "text", marks: [{ type: "bold" }], text: "MessagePack" },
+            { type: "text", text: " for binary efficiency. Auth via short-lived JWT issued by the identity service." },
+          ],
+        },
+      ],
+    }),
+    created_at: _DEMO_NOW - _DAY - 1000 * 60 * 60 * 2,
+    updated_at: _DEMO_NOW - _DAY - 1000 * 60 * 50,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  // ── 3 days ago ──
+  {
+    id: "__demo_n4__",
+    title: "Retro — Sprint 23",
+    content: JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 3 },
+          content: [{ type: "text", text: "What went well" }],
+        },
+        {
+          type: "bulletList",
+          content: [
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Timeline rail shipped ahead of schedule" }] }] },
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Zero regressions in clipboard watcher" }] }] },
+          ],
+        },
+        {
+          type: "heading",
+          attrs: { level: 3 },
+          content: [{ type: "text", text: "What to improve" }],
+        },
+        {
+          type: "bulletList",
+          content: [
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Need better offline UX — error states are too quiet" }] }] },
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "WebSocket reconnect needs exponential backoff" }] }] },
+          ],
+        },
+      ],
+    }),
+    created_at: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 60,
+    updated_at: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 40,
+    pinned: false,
+    groups: [DEMO_GROUP_ID],
+  },
+  // ── 6 days ago ──
+  {
+    id: "__demo_n5__",
+    title: "Q3 Kick-off — Goals & Scope",
+    content: JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Agreed scope for Q3: ship " },
+            { type: "text", marks: [{ type: "bold" }], text: "Sync v2" },
+            { type: "text", text: " with group management, real-time push, and offline queue. No new clipboard capture features this quarter." },
+          ],
+        },
+        {
+          type: "blockquote",
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                { type: "text", marks: [{ type: "italic" }], text: "\"If sync isn't rock-solid by September, nothing else matters.\" — Alex" },
+              ],
+            },
+          ],
+        },
+        {
+          type: "heading",
+          attrs: { level: 3 },
+          content: [{ type: "text", text: "Milestones" }],
+        },
+        {
+          type: "bulletList",
+          content: [
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "July 31" }, { type: "text", text: " — API v2 complete" }] }] },
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "Aug 15" }, { type: "text", text: " — Desktop client integration" }] }] },
+            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "Aug 31" }, { type: "text", text: " — Beta to 100 users" }] }] },
+          ],
+        },
+      ],
+    }),
+    created_at: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 60 * 3,
+    updated_at: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 60,
     pinned: false,
     groups: [DEMO_GROUP_ID],
   },
@@ -664,7 +874,8 @@ const ClipFeedCard: React.FC<{
   onCopy: (id: string) => void;
   onView: (entry: ClipboardEntry) => void;
   layout: ClipboardLayout;
-}> = ({ entry, onCopy, onView, layout }) => {
+  showSourceBadge?: boolean;
+}> = ({ entry, onCopy, onView, layout, showSourceBadge }) => {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(
@@ -698,6 +909,11 @@ const ClipFeedCard: React.FC<{
             : (entry.label ?? "");
     return (
       <div className="sync-list-card" onClick={() => onView(entry)}>
+        {showSourceBadge && (
+          <span className="sync-list-source-badge sync-list-source-badge--clip">
+            <ClipboardIcon size={10} />
+          </span>
+        )}
         <span className="sync-list-type-wrap">
           <EntryTypePill kind={dk} />
         </span>
@@ -767,6 +983,12 @@ const ClipFeedCard: React.FC<{
       className="entry-card sync-feed-entry-card"
       onClick={() => onView(entry)}
     >
+      {showSourceBadge && (
+        <span className="sync-source-badge sync-source-badge--clip">
+          <ClipboardIcon size={9} />
+          Clipboard
+        </span>
+      )}
       {mediaSection}
       <div className="card-body">
         {preview}
@@ -799,7 +1021,8 @@ const NoteFeedCard: React.FC<{
   entries: ClipboardEntry[];
   onView: (note: Note) => void;
   layout: ClipboardLayout;
-}> = ({ note, entries, onView, layout }) => {
+  showSourceBadge?: boolean;
+}> = ({ note, entries, onView, layout, showSourceBadge }) => {
   const plain = extractNoteText(note.content);
 
   // ── List mode ──────────────────────────────────────────────────────
@@ -827,19 +1050,58 @@ const NoteFeedCard: React.FC<{
 
   // ── Tiles mode: use NoteCard for identical appearance to notes screen ──
   return (
-    <NoteCard
-      note={note}
-      entries={entries}
-      isSelecting={false}
-      isSelected={false}
-      isExpanded={false}
-      onToggleSelect={() => {}}
-      onOpen={() => onView(note)}
-      onDelete={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
-    />
+    <div className="sync-note-card-wrap">
+      {showSourceBadge && (
+        <span className="sync-source-badge sync-source-badge--note">
+          <NotesIcon size={9} />
+          Note
+        </span>
+      )}
+      <NoteCard
+        note={note}
+        entries={entries}
+        isSelecting={false}
+        isSelected={false}
+        isExpanded={false}
+        onToggleSelect={() => {}}
+        onOpen={() => onView(note)}
+        onDelete={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+    </div>
   );
 };
+
+// ── Read-only note detail panel ───────────────────────────────────────
+
+const ReadOnlyNotePanel: React.FC<{
+  note: Note;
+  entries: ClipboardEntry[];
+  onClose: () => void;
+}> = ({ note, entries, onClose }) => (
+  <div className="sync-detail-panel">
+    <div className="sync-detail-toolbar">
+      <button className="sync-detail-back" onClick={onClose}>
+        <ChevronRightIcon
+          size={11}
+          strokeWidth={2.6}
+          className="sync-detail-back-chevron"
+        />
+        Back
+      </button>
+      <div className="sync-detail-toolbar-right">
+        <span className="sync-readonly-badge">Read-only</span>
+        <span className="sync-detail-time">{timeAgo(note.updated_at)}</span>
+      </div>
+    </div>
+    <div className="sync-detail-scroll">
+      {note.title && (
+        <h1 className="sync-detail-note-title">{note.title}</h1>
+      )}
+      <NotionPreview content={note.content} entries={entries} />
+    </div>
+  </div>
+);
 
 // ── Inline form ───────────────────────────────────────────────────────
 
@@ -918,6 +1180,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   );
   const [detailItem, setDetailItem] = useState<FeedItem | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [syncCollapsed, setSyncCollapsed] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
@@ -960,6 +1223,15 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
     setDateAfter("");
     setDateBefore(todayStr);
   }, [todayStr]);
+
+  const toggleSyncDay = useCallback((label: string) => {
+    setSyncCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }, []);
 
   const toggleKind = useCallback((k: DisplayKind) => {
     setSelectedKinds((prev) => {
@@ -1379,17 +1651,11 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
             {/* Detail or feed */}
             {detailItem ? (
               detailItem.kind === "note" ? (
-                <NoteEditor
+                <ReadOnlyNotePanel
                   key={detailItem.note.id}
                   note={detailItem.note}
                   entries={entries}
-                  availableGroups={[]}
-                  onUpdate={() => {}}
-                  onDelete={() => {}}
-                  onPin={() => {}}
-                  onSetGroups={() => {}}
-                  onCopyEntry={onCopyEntry}
-                  onBack={() => setDetailItem(null)}
+                  onClose={() => setDetailItem(null)}
                 />
               ) : (
                 <DetailPanel
@@ -1427,42 +1693,82 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                     )}
                   </div>
                 ) : (
-                  feedByDay.map(({ label, items }) => (
-                    <div key={label} className="sync-feed-day-group">
-                      <div className="sync-feed-day-label">{label}</div>
-                      <div
-                        className={
-                          layout === "tiles"
-                            ? "sync-feed-card-grid"
-                            : "sync-feed-card-list"
-                        }
-                      >
-                        {items.map((item) =>
-                          item.kind === "clipboard" ? (
-                            <ClipFeedCard
-                              key={item.entry.id}
-                              entry={item.entry}
-                              onCopy={onCopyEntry}
-                              onView={(e) =>
-                                setDetailItem({ kind: "clipboard", entry: e })
-                              }
-                              layout={layout}
+                  <div className="sync-timeline-wrap">
+                    <div className="sync-timeline-groups">
+                      {feedByDay.map(({ label, items }, idx) => (
+                        <div
+                          key={label}
+                          className={`sync-timeline-group${
+                            feedByDay.length === 1
+                              ? " sync-timeline-group--only"
+                              : idx === feedByDay.length - 1
+                                ? " sync-timeline-group--last"
+                                : ""
+                          }`}
+                        >
+                          <button
+                            className={`sync-timeline-day-row${syncCollapsed.has(label) ? " sync-timeline-day-row--collapsed" : ""}`}
+                            onClick={() => toggleSyncDay(label)}
+                          >
+                            <div className="sync-timeline-day-dot" />
+                            <span className="sync-timeline-day-label">{label}</span>
+                            {syncCollapsed.has(label) && (
+                              <span className="sync-timeline-day-count">{items.length}</span>
+                            )}
+                            <ChevronDownIcon
+                              className="sync-timeline-day-chevron"
+                              size={10}
+                              strokeWidth={2.5}
                             />
-                          ) : (
-                            <NoteFeedCard
-                              key={item.note.id}
-                              note={item.note}
-                              entries={entries}
-                              onView={(n) =>
-                                setDetailItem({ kind: "note", note: n })
-                              }
-                              layout={layout}
-                            />
-                          ),
-                        )}
+                          </button>
+                          <div
+                            className={`sync-timeline-group-body${syncCollapsed.has(label) ? " sync-timeline-group-body--collapsed" : ""}`}
+                          >
+                            <div className="sync-timeline-group-body__inner">
+                              <div
+                                className={
+                                  layout === "tiles"
+                                    ? "sync-feed-card-grid"
+                                    : "sync-feed-card-list"
+                                }
+                              >
+                                {items.map((item) =>
+                                  item.kind === "clipboard" ? (
+                                    <ClipFeedCard
+                                      key={item.entry.id}
+                                      entry={item.entry}
+                                      onCopy={onCopyEntry}
+                                      onView={(e) =>
+                                        setDetailItem({ kind: "clipboard", entry: e })
+                                      }
+                                      layout={layout}
+                                      showSourceBadge={feedFilter === "all"}
+                                    />
+                                  ) : (
+                                    <NoteFeedCard
+                                      key={item.note.id}
+                                      note={item.note}
+                                      entries={entries}
+                                      onView={(n) =>
+                                        setDetailItem({ kind: "note", note: n })
+                                      }
+                                      layout={layout}
+                                      showSourceBadge={feedFilter === "all"}
+                                    />
+                                  ),
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="sync-timeline-end">
+                        <span className="sync-timeline-end-text">
+                          You&rsquo;re all caught up
+                        </span>
                       </div>
                     </div>
-                  ))
+                  </div>
                 )}
               </div>
             )}
