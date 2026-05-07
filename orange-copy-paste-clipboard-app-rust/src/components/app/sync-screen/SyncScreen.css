@@ -489,33 +489,6 @@
   flex: 1;
 }
 
-.sync-copy-btn {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 10.5px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
-  flex-shrink: 0;
-}
-
-.sync-copy-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.sync-copy-btn--done {
-  border-color: #22c55e;
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.08);
-}
 
 /* ── Empty / no-selection states ── */
 
@@ -1004,45 +977,20 @@
   cursor: not-allowed;
 }
 
-/* ── Source type badges (shown in "all" mode) ── */
+/* ── Source type chips (shown in "all" mode) ── */
+/* These sit inside card-chips / ns-card-chips, styled as card-type-chip variants */
 
-/* Wrapper for NoteCard in tiles so we can position-anchor the badge */
-.sync-note-card-wrap {
-  position: relative;
+.sync-source-chip--clip {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
 }
 
-/* Floats in the top-right corner — styled identically to .type-pill */
-.sync-source-badge {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  z-index: 2;
-  pointer-events: none;
-  /* type-pill geometry */
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 7px 3px 5px;
-  border-radius: 5px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  user-select: none;
+.sync-source-chip--note {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
 }
 
-/* Clipboard: neutral gray — distinct from content-type pills */
-.sync-source-badge--clip {
-  background: rgba(107, 114, 128, 0.12);
-  color: #6b7280;
-}
-
-/* Note: amber — matches the app's note accent feel */
-.sync-source-badge--note {
-  background: rgba(245, 158, 11, 0.12);
-  color: #f59e0b;
-}
-
-/* List-mode source indicator for clipboard cards — same type-pill geometry, icon only */
+/* List-mode source indicator for clipboard cards (icon-only pill) */
 .sync-list-source-badge {
   flex-shrink: 0;
   display: inline-flex;
@@ -1055,8 +1003,31 @@
 }
 
 .sync-list-source-badge--clip {
-  background: rgba(107, 114, 128, 0.12);
-  color: #6b7280;
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+}
+
+/* ── Minimal card copy button (tiles mode) ── */
+
+.sync-card-copy-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.sync-card-copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
 }
 
 /* ── Hide NoteCard's delete button inside sync feed ── */

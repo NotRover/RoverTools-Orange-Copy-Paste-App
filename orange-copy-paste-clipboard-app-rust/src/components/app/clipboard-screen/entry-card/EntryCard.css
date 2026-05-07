@@ -492,7 +492,7 @@ button.card-type-chip.open .card-type-chevron {
 
 .card-footer {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 6px;
 }
