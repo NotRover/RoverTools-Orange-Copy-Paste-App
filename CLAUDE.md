@@ -98,6 +98,7 @@ Pick the smallest valid check set for the files changed.
 - App Rust/Tauri changes: `cd src-tauri && cargo check`
 - Behavior-sensitive runtime changes (watcher/hotkeys/popup/paste): run `bun run tauri dev` and smoke test that specific user flow.
 - Backend changes (when code exists): run that stack's lint/type/test commands only after discovering them from manifests.
+- Python code changes (any file in the backend): always run `ty check` after writing or editing Python. Fix all reported errors before considering the task done. Use `ruff check` for linting. Do not suppress errors with `# type: ignore` unless the error is a known false positive from a third-party stub (document why inline).
 
 ## Token-Saving Strategy
 
