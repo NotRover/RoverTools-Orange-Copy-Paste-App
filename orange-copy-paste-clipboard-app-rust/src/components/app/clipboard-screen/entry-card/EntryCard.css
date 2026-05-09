@@ -428,7 +428,7 @@ button.card-type-chip.open .card-type-chevron {
   flex-direction: column;
   gap: 2px;
   max-height: 150px;
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: 4px 0 1px;
 }
 

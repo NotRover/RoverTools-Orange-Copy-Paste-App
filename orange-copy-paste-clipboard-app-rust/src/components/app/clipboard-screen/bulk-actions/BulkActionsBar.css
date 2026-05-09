@@ -225,7 +225,7 @@
   flex-wrap: wrap;
   gap: 5px;
   max-height: 160px;
-  overflow-y: auto;
+  overflow: hidden auto;
 }
 
 .bulk-popup-flyout-chips::-webkit-scrollbar {

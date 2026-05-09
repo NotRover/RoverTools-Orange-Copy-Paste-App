@@ -381,7 +381,7 @@ body {
   gap: 2px;
   padding: 4px 0 2px 28px;
   max-height: 120px;
-  overflow-y: auto;
+  overflow: hidden auto;
   min-height: 0;
   animation: pasteFileListSlideIn 0.18s ease-out;
 }
