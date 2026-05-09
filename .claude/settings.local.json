@@ -5,7 +5,9 @@
       "Bash(npx vite:*)",
       "Bash(bun run *)",
       "Bash(node -e ' *)",
-      "Bash(cargo check *)"
+      "Bash(cargo check *)",
+      "Bash(ty check *)",
+      "Bash(ruff check *)"
     ]
   }
 }
