@@ -68,8 +68,7 @@
   flex-direction: column;
   gap: 1px;
   max-height: 200px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden auto;
 }
 
 .gm-group-list::-webkit-scrollbar {

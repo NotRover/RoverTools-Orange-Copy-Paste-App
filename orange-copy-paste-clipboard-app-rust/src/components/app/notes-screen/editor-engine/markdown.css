@@ -30,8 +30,7 @@
 
 .ee-rich-shell {
   flex: 1 1 auto;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden auto;
   min-height: 0;
   position: relative;
 }
@@ -875,8 +874,7 @@
 /* Panel content area */
 .ee-embed-panel-body {
   max-height: 220px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden auto;
   padding: 9px 10px;
   display: flex;
   flex-direction: column;
@@ -1058,7 +1056,7 @@
 
 .ee-group-panel-body {
   max-height: 200px;
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: 4px 6px;
   display: flex;
   flex-direction: column;

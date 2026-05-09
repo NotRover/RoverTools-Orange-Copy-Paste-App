@@ -18,7 +18,7 @@
   opacity: 1;
   transition: opacity 0.16s ease;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden auto;
 }
 
 .layout-viewport--fading {
@@ -263,7 +263,7 @@
 
 .entry-grid {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: 14px;
   columns: 2;
   column-gap: 10px;
@@ -333,7 +333,7 @@
 
 .entry-list {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: 14px;
   columns: 2;
   column-gap: 10px;
@@ -481,7 +481,7 @@
 
 .entry-list .entry-card.entry-card--expanded .card-file-list {
   max-height: 150px;
-  overflow-y: auto;
+  overflow: hidden auto;
 }
 
 /* Expanded media: switch to block layout so image/video renders above body */
