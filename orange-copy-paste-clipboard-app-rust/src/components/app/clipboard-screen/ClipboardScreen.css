@@ -501,6 +501,18 @@
   object-fit: contain;
 }
 
+/* Tiles layout: let expanded image cards grow to their natural aspect ratio. */
+.entry-grid .entry-card.entry-card--expanded .card-media {
+  height: auto;
+}
+
+.entry-grid .entry-card.entry-card--expanded .card-media-img {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+}
+
 /* Footer always pinned to the bottom of the card body */
 .entry-list .card-footer {
   margin-top: auto;
