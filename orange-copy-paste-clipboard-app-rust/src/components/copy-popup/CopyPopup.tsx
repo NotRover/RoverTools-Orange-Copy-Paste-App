@@ -14,6 +14,7 @@ import {
   resolveImageSrc,
   truncateText,
 } from "../../types";
+import { loadImagePreview } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   TrashIcon,
@@ -160,9 +161,13 @@ const CopyPopup: React.FC = () => {
       setImagePreview(null);
       return;
     }
-    invoke<string | null>("get_image_file_preview", { path: firstFile })
-      .then(setImagePreview)
-      .catch(() => setImagePreview(null));
+    let active = true;
+    loadImagePreview(firstFile).then((p) => {
+      if (active) setImagePreview(p);
+    });
+    return () => {
+      active = false;
+    };
   }, [kind, firstFile]);
 
   // Dynamic resize based on content
