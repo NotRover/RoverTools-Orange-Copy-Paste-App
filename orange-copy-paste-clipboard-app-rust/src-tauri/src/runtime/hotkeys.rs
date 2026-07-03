@@ -6,7 +6,6 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 use crate::clipboard::commands::read_clipboard_entry;
-use crate::state::app_state::AppState;
 use crate::{
     clipboard::history::{ClipboardEntry, ClipboardHistory},
     runtime::platform,
@@ -16,18 +15,9 @@ use crate::{
     },
 };
 
-fn copy_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
-    tauri_plugin_global_shortcut::Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::SHIFT),
-        Code::KeyC,
-    )
-}
-
-fn paste_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
-    tauri_plugin_global_shortcut::Shortcut::new(
-        Some(Modifiers::CONTROL | Modifiers::SHIFT),
-        Code::KeyV,
-    )
+/// `Ctrl+Shift+<code>` global shortcut.
+fn ctrl_shift(code: Code) -> tauri_plugin_global_shortcut::Shortcut {
+    tauri_plugin_global_shortcut::Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), code)
 }
 
 fn toggle_popup_if_visible(app: &tauri::AppHandle, label: &str) -> bool {
@@ -57,63 +47,32 @@ fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
     }
 }
 
-fn register_copy_shortcut(
-    app_handle: &tauri::AppHandle,
-    history: Arc<Mutex<ClipboardHistory>>,
-    suppress: Arc<AtomicBool>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let ah_copy = app_handle.clone();
-    let hist_copy = Arc::clone(&history);
-    let suppress_copy = Arc::clone(&suppress);
-    let sc_copy = copy_shortcut();
-
-    let _ = app_handle.global_shortcut().unregister(sc_copy);
-
-    app_handle
-        .global_shortcut()
-        .on_shortcut(sc_copy, move |_app, _sc, event| {
-            if event.state() == ShortcutState::Pressed {
-                handle_copy_shortcut(
-                    ah_copy.clone(),
-                    Arc::clone(&hist_copy),
-                    Arc::clone(&suppress_copy),
-                );
-            }
-        })?;
-
-    Ok(())
-}
-
-fn register_paste_shortcut(
-    app_handle: &tauri::AppHandle,
-    history: Arc<Mutex<ClipboardHistory>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let ah_paste = app_handle.clone();
-    let sc_paste = paste_shortcut();
-
-    let _ = app_handle.global_shortcut().unregister(sc_paste);
-
-    app_handle
-        .global_shortcut()
-        .on_shortcut(sc_paste, move |_app, _sc, event| {
-            if event.state() == ShortcutState::Pressed {
-                handle_paste_shortcut(ah_paste.clone(), Arc::clone(&history));
-            }
-        })?;
-
-    Ok(())
-}
-
 /// Register `Ctrl+Shift+C` (copy popup) and `Ctrl+Shift+V` (paste popup).
 pub(crate) fn register_global_shortcuts(
     app: &tauri::App,
     history: Arc<Mutex<ClipboardHistory>>,
     suppress: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app_handle = app.handle().clone();
+    let gs = app.global_shortcut();
 
-    register_copy_shortcut(&app_handle, Arc::clone(&history), suppress)?;
-    register_paste_shortcut(&app_handle, history)?;
+    let sc_copy = ctrl_shift(Code::KeyC);
+    let _ = gs.unregister(sc_copy);
+    let ah = app.handle().clone();
+    let hist = Arc::clone(&history);
+    gs.on_shortcut(sc_copy, move |_app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            handle_copy_shortcut(ah.clone(), Arc::clone(&hist), Arc::clone(&suppress));
+        }
+    })?;
+
+    let sc_paste = ctrl_shift(Code::KeyV);
+    let _ = gs.unregister(sc_paste);
+    let ah = app.handle().clone();
+    gs.on_shortcut(sc_paste, move |_app, _sc, event| {
+        if event.state() == ShortcutState::Pressed {
+            handle_paste_shortcut(ah.clone(), Arc::clone(&history));
+        }
+    })?;
 
     Ok(())
 }
@@ -147,19 +106,9 @@ fn handle_copy_shortcut(
         };
 
         if inserted {
-            // If autosave is enabled, add the "Saved" group to the new entry.
-            let state: tauri::State<'_, AppState> = app.state();
-            if state.autosave.load(Ordering::Relaxed) {
-                history.lock().add_group(&entry.id, "Saved");
-            }
-            let _ = app.emit("clipboard:new-entry", &entry);
-            crate::clipboard::commands::auto_save_history(&app, &history);
-            // Sync hook — Ctrl+Shift+C entries bypass the watcher (suppress
-            // flag is set), so we notify here directly.
-            let sync = state.sync_client.lock().clone();
-            if let Some(s) = sync {
-                s.on_new_clipboard_entry(entry.clone());
-            }
+            // Ctrl+Shift+C entries bypass the watcher (suppress flag is set),
+            // so run the shared post-capture bookkeeping here directly.
+            crate::runtime::clipboard_watcher::after_new_entry(&app, &history, &entry);
         }
         crate::clipboard::commands::set_active_clipboard_id(&app, &entry.id);
         show_copy_popup(&app, &entry);

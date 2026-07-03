@@ -38,20 +38,12 @@ pub struct PendingQueue {
 
 impl PendingQueue {
     pub fn load(path: PathBuf) -> Self {
-        let ops = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        let ops = crate::sync::persist::load_json(&path);
         Self { ops, path }
     }
 
     fn persist(&self) {
-        if let Some(parent) = self.path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(json) = serde_json::to_string(&self.ops) {
-            let _ = std::fs::write(&self.path, json);
-        }
+        crate::sync::persist::save_json(&self.path, &self.ops);
     }
 
     /// Append an operation.  Immediately persisted to disk.

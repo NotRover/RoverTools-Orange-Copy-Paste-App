@@ -17,6 +17,7 @@ pub mod config;
 pub mod crypto;
 pub mod id_map;
 pub mod pending_queue;
+pub(crate) mod persist;
 pub mod sync_state;
 pub mod types;
 pub mod ws_listener;

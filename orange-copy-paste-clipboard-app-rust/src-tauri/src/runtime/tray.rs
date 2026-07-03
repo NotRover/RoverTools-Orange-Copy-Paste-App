@@ -4,6 +4,15 @@ use tauri::{
     Manager,
 };
 
+/// Show, unminimize, and focus the main window.
+fn show_main_window(app_handle: &tauri::AppHandle) {
+    if let Some(win) = app_handle.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
 pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItemBuilder::with_id("show", "Show Orange Copy Paste").build(app)?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
@@ -24,16 +33,8 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
         .show_menu_on_left_click(false)
         .tooltip("Orange Copy Paste")
         .on_menu_event(|app_handle, event| match event.id().as_ref() {
-            "show" => {
-                if let Some(win) = app_handle.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
-                }
-            }
-            "quit" => {
-                app_handle.exit(0);
-            }
+            "show" => show_main_window(app_handle),
+            "quit" => app_handle.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -43,11 +44,7 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
                 ..
             } = event
             {
-                if let Some(win) = tray.app_handle().get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
-                }
+                show_main_window(tray.app_handle());
             }
         })
         .build(app)?;

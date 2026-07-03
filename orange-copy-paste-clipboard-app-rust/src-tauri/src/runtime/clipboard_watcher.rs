@@ -63,23 +63,33 @@ fn capture_clipboard_change(
     };
 
     if let Some(ref new_entry) = maybe_new_entry {
-        // If autosave is enabled, add the "Saved" group to the new entry.
-        let state: tauri::State<'_, AppState> = app.state();
-        if state.autosave.load(Ordering::Relaxed) {
-            history.lock().add_group(&new_entry.id, "Saved");
-        }
         crate::clipboard::commands::set_active_clipboard_id(app, &new_entry.id);
-        let _ = app.emit("clipboard:new-entry", new_entry);
+        after_new_entry(app, history, new_entry);
         crate::runtime::notifications::notify_if_enabled(app, new_entry);
-        crate::clipboard::commands::auto_save_history(app, history);
-        // Sync hook (invariant: only called after confirmed push, never from
-        // watcher internals — the SyncClient does all network work)
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            s.on_new_clipboard_entry(new_entry.clone());
-        }
     }
     true
+}
+
+/// Post-capture bookkeeping shared by the watcher and the copy shortcut:
+/// autosave grouping, frontend event, debounced persistence, and the sync
+/// hook (invariant: only called after a confirmed push into history — the
+/// SyncClient does all network work).
+pub(crate) fn after_new_entry(
+    app: &tauri::AppHandle,
+    history: &Arc<Mutex<ClipboardHistory>>,
+    entry: &ClipboardEntry,
+) {
+    let state: tauri::State<'_, AppState> = app.state();
+    // If autosave is enabled, add the "Saved" group to the new entry.
+    if state.autosave.load(Ordering::Relaxed) {
+        history.lock().add_group(&entry.id, "Saved");
+    }
+    let _ = app.emit("clipboard:new-entry", entry);
+    crate::clipboard::commands::auto_save_history(app, history);
+    let sync = state.sync_client.lock().clone();
+    if let Some(s) = sync {
+        s.on_new_clipboard_entry(entry.clone());
+    }
 }
 
 pub(crate) fn start_clipboard_watcher(
