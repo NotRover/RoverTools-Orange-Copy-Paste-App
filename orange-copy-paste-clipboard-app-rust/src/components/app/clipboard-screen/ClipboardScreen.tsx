@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
@@ -94,6 +94,11 @@ function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
   }));
 }
 
+// How many cards to render initially and per "load more" step as the user
+// scrolls. Keeps the DOM light with large histories instead of mounting every
+// entry up front. Grows on scroll via an IntersectionObserver sentinel.
+const RENDER_PAGE_SIZE = 100;
+
 // Clipboard Screen
 
 interface ClipboardScreenProps {
@@ -150,18 +155,110 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  // Progressive rendering window (see RENDER_PAGE_SIZE).
+  const [visibleCount, setVisibleCount] = useState(RENDER_PAGE_SIZE);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
   // Search & filter (delegated to sub-component)
   const sf = useSearchFilter(entries);
 
   // Multi-select state
   const multiSelect = useMultiSelect();
 
-  // Flat list of all visible entry IDs (respecting sort order) for range selection
-  const dayGroups = groupByDay(sf.filteredEntries).map((g) => ({
-    ...g,
-    entries: applySortWithinGroup(g.entries, sort),
-  }));
-  const allVisibleIds = dayGroups.flatMap((g) => g.entries.map((e) => e.id));
+  // Day groups (sorted within each day). Memoised so grouping/sorting only
+  // recomputes when the filtered set or sort mode changes.
+  const dayGroups = useMemo(
+    () =>
+      groupByDay(sf.filteredEntries).map((g) => ({
+        ...g,
+        entries: applySortWithinGroup(g.entries, sort),
+      })),
+    [sf.filteredEntries, sort],
+  );
+
+  // Flat list of all filtered entry IDs (respecting sort order) for range /
+  // select-all. Covers the whole filtered set, not just the rendered window.
+  const allVisibleIds = useMemo(
+    () => dayGroups.flatMap((g) => g.entries.map((e) => e.id)),
+    [dayGroups],
+  );
+
+  // Apply the render window across day groups in order. Groups beyond the
+  // budget are dropped entirely; the group straddling the boundary is sliced.
+  const { windowedGroups, hasMore } = useMemo(() => {
+    let budget = visibleCount;
+    const out: DayGroup[] = [];
+    for (const g of dayGroups) {
+      if (budget <= 0) break;
+      if (g.entries.length <= budget) {
+        out.push(g);
+        budget -= g.entries.length;
+      } else {
+        out.push({ ...g, entries: g.entries.slice(0, budget) });
+        budget = 0;
+      }
+    }
+    const shown = out.reduce((n, g) => n + g.entries.length, 0);
+    return { windowedGroups: out, hasMore: shown < allVisibleIds.length };
+  }, [dayGroups, visibleCount, allVisibleIds.length]);
+
+  // Reset the window (and scroll to top) when the view changes — a new search,
+  // filter, or sort. Data-only updates (new copies, pin toggles) don't reset it,
+  // so the user's scrolled position and loaded window are preserved.
+  const viewKey = useMemo(
+    () =>
+      JSON.stringify([
+        sf.searchQuery.trim(),
+        [...sf.selectedKinds],
+        sf.pinnedOnly,
+        sf.dateAfter,
+        sf.dateBefore,
+        [...sf.selectedFilterGroups],
+        sort,
+      ]),
+    [
+      sf.searchQuery,
+      sf.selectedKinds,
+      sf.pinnedOnly,
+      sf.dateAfter,
+      sf.dateBefore,
+      sf.selectedFilterGroups,
+      sort,
+    ],
+  );
+  useEffect(() => {
+    setVisibleCount(RENDER_PAGE_SIZE);
+    viewportRef.current?.scrollTo({ top: 0 });
+  }, [viewKey]);
+
+  // Grow the window when the sentinel scrolls near the viewport bottom. The
+  // windowedGroups dependency re-arms the observer after each growth, so a
+  // viewport that isn't full yet keeps loading until it is (or all are shown).
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (obs) => {
+        if (obs.some((o) => o.isIntersecting)) {
+          setVisibleCount((c) => c + RENDER_PAGE_SIZE);
+        }
+      },
+      { root: viewportRef.current, rootMargin: "600px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, windowedGroups]);
+
+  // Stable range-select handler: reads the latest id list from a ref so the
+  // callback identity never changes (keeps EntryCard's memoisation intact).
+  const allVisibleIdsRef = useRef(allVisibleIds);
+  allVisibleIdsRef.current = allVisibleIds;
+  const handleRangeSelect = useCallback(
+    (id: string) => multiSelect.selectRange(id, allVisibleIdsRef.current),
+    [multiSelect.selectRange],
+  );
 
   // Prune stale selections when entries change
   useEffect(() => {
@@ -379,6 +476,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       />
 
       <div
+        ref={viewportRef}
         className={`layout-viewport${fading ? " layout-viewport--fading" : ""}`}
       >
         {sf.isFiltering && sf.filteredEntries.length === 0 ? (
@@ -386,13 +484,13 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         ) : (
         <div className="timeline-wrap">
           <div className="timeline-groups">
-            {dayGroups.map((group, idx) => (
+            {windowedGroups.map((group, idx) => (
               <div
                 key={group.key}
                 className={`timeline-group${
-                  dayGroups.length === 1
+                  windowedGroups.length === 1
                     ? " timeline-group--only"
-                    : idx === dayGroups.length - 1
+                    : idx === windowedGroups.length - 1
                       ? " timeline-group--last"
                       : ""
                 }`}
@@ -443,9 +541,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           isSelecting={multiSelect.isSelecting}
                           isSelected={multiSelect.selectedIds.has(entry.id)}
                           onToggleSelect={multiSelect.toggleSelect}
-                          onRangeSelect={(id) =>
-                            multiSelect.selectRange(id, allVisibleIds)
-                          }
+                          onRangeSelect={handleRangeSelect}
                           isInClipboard={entry.id === activeClipboardId}
                         />
                       ))}
@@ -454,12 +550,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                 </div>
               </div>
             ))}
-            {/* End of timeline marker */}
-            <div className="timeline-end">
-              <span className="timeline-end-text">
-                You&rsquo;re all caught up
-              </span>
-            </div>
+            {/* Load-more sentinel while more entries remain, else the end marker */}
+            {hasMore ? (
+              <div ref={sentinelRef} className="timeline-sentinel" aria-hidden />
+            ) : (
+              <div className="timeline-end">
+                <span className="timeline-end-text">
+                  You&rsquo;re all caught up
+                </span>
+              </div>
+            )}
           </div>
         </div>
         )}

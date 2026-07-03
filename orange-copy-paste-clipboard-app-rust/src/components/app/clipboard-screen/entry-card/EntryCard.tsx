@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../../types";
 import {
@@ -220,7 +220,7 @@ interface EntryCardProps {
   isInClipboard?: boolean;
 }
 
-export const EntryCard: React.FC<EntryCardProps> = ({
+const EntryCardImpl: React.FC<EntryCardProps> = ({
   entry,
   onCopy,
   onDelete,
@@ -260,6 +260,13 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const [contentExpanded, setContentExpanded] = useState(false);
   const [htmlOverflows, setHtmlOverflows] = useState(false);
   const htmlPreviewRef = useRef<HTMLDivElement>(null);
+
+  // Sanitising rich-text runs a full DOMParser pass — memoise so it only
+  // reruns when the HTML content actually changes, not on every re-render.
+  const sanitizedHtml = useMemo(
+    () => (entry.type === "html" ? sanitizeHtml(htmlFragment(entry.content)) : ""),
+    [entry.type, entry.content],
+  );
 
   const files = entry.type === "file" ? filePaths(entry.content) : [];
   const firstFile = files[0] ?? null;
@@ -544,9 +551,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           <div
             ref={htmlPreviewRef}
             className={`card-html-preview${contentExpanded ? " card-html-preview--expanded" : ""}${!contentExpanded && htmlOverflows ? " card-html-preview--faded" : ""}`}
-            dangerouslySetInnerHTML={{
-              __html: sanitizeHtml(htmlFragment(entry.content)),
-            }}
+            dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         )}
         {entry.type === "file" && !isMulti && (
@@ -727,5 +732,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     </div>
   );
 };
+
+// Memoised: with 1k+ entries mounted, an unmemoised card re-renders on every
+// parent state change (search keystroke, select-mode toggle, active-id change).
+// All callback props from the parent are useCallback-stable, so shallow prop
+// comparison is safe and effective here.
+export const EntryCard = React.memo(EntryCardImpl);
+EntryCard.displayName = "EntryCard";
 
 export default EntryCard;
