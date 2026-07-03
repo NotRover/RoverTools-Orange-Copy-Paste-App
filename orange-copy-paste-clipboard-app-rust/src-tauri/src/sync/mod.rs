@@ -17,6 +17,7 @@ pub mod config;
 pub mod crypto;
 pub mod id_map;
 pub mod pending_queue;
+pub(crate) mod persist;
 pub mod sync_state;
 pub mod types;
 pub mod ws_listener;
@@ -39,10 +40,28 @@ use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{EntryType, ShareScope, SharingSession, SyncStatusInfo, SyncUser};
 use crate::sync::ws_listener::WsListener;
 
-/// How often the background debounce poller wakes up.
-const DEBOUNCE_POLL_MS: u64 = 100;
 /// How long after the last `schedule_settings_push()` call before the push fires.
 const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
+
+/// Shared handles cloned out of `SyncClient` for a spawned push/delete task.
+struct PushCtx {
+    http: Option<Arc<SyncHttpClient>>,
+    queue: Arc<Mutex<PendingQueue>>,
+    id_map: Arc<Mutex<IdMap>>,
+    status: Arc<Mutex<SyncStatusInfo>>,
+    app: tauri::AppHandle,
+}
+
+/// Everything that differs between a clipboard push and a note push.
+struct PushJob {
+    client_id: String,
+    content: String,
+    metadata_json: String,
+    /// "clipboard" | "notes"
+    entry_type: &'static str,
+    kind: String,
+    group_ids: Vec<String>,
+}
 
 // ── SyncClient ───────────────────────────────────────────────────────
 
@@ -74,6 +93,8 @@ pub struct SyncClient {
 
     /// When set, a settings push is pending at this instant.
     settings_push_at: Arc<Mutex<Option<Instant>>>,
+    /// Wakes the debounce task when a settings push is (re)scheduled.
+    settings_notify: Arc<tokio::sync::Notify>,
 
     /// Handle to the dedicated background Tokio runtime.
     handle: tokio::runtime::Handle,
@@ -110,26 +131,30 @@ impl SyncClient {
             ..Default::default()
         }));
         let settings_push_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        let settings_notify = Arc::new(tokio::sync::Notify::new());
 
-        // Start debounce background poller
+        // Debounce task: sleeps until 2s after the most recent schedule call,
+        // then signals React to collect localStorage values.  Idle (no polling)
+        // until `schedule_settings_push()` wakes it.
         {
             let push_at = Arc::clone(&settings_push_at);
+            let notify = Arc::clone(&settings_notify);
             let app2 = app.clone();
             handle.spawn(async move {
                 loop {
-                    tokio::time::sleep(Duration::from_millis(DEBOUNCE_POLL_MS)).await;
-                    // Instant is Copy — match *guard to copy it out of the lock.
-                    let elapsed = match *push_at.lock() {
-                        Some(at) => Some(at.elapsed().as_secs_f64()),
-                        None => None,
-                    };
-                    if let Some(secs) = elapsed {
-                        if secs >= SETTINGS_DEBOUNCE_SECS {
+                    notify.notified().await;
+                    loop {
+                        let deadline = match *push_at.lock() {
+                            Some(at) => at + Duration::from_secs_f64(SETTINGS_DEBOUNCE_SECS),
+                            None => break,
+                        };
+                        let now = Instant::now();
+                        if now >= deadline {
                             *push_at.lock() = None;
-                            // Signal React to collect localStorage values
-                            let _ =
-                                app2.emit("sync:collect-settings", serde_json::Value::Null);
+                            let _ = app2.emit("sync:collect-settings", serde_json::Value::Null);
+                            break;
                         }
+                        tokio::time::sleep(deadline - now).await;
                     }
                 }
             });
@@ -149,6 +174,7 @@ impl SyncClient {
             sharing_sessions: Arc::new(Mutex::new(Vec::new())),
             ws_listener: Mutex::new(None),
             settings_push_at,
+            settings_notify,
             handle,
             _runtime: runtime,
         })
@@ -254,6 +280,7 @@ impl SyncClient {
     /// any sync command handler.
     pub fn schedule_settings_push(&self) {
         *self.settings_push_at.lock() = Some(Instant::now());
+        self.settings_notify.notify_one();
     }
 
     /// Store the localStorage values received from React via the
@@ -309,23 +336,37 @@ impl SyncClient {
 
     // ── Internal spawn helpers ────────────────────────────────────
 
+    /// Clone the shared handles a spawned task needs.
+    fn push_ctx(&self) -> PushCtx {
+        PushCtx {
+            http: self.http.lock().clone(),
+            queue: Arc::clone(&self.pending_queue),
+            id_map: Arc::clone(&self.id_map),
+            status: Arc::clone(&self.status),
+            app: self.app.clone(),
+        }
+    }
+
+    /// Live Share group IDs whose scope matches `scope_matches`.
+    fn session_group_ids(&self, scope_matches: impl Fn(&SharingSession) -> bool) -> Vec<String> {
+        self.sharing_sessions
+            .lock()
+            .iter()
+            .filter(|s| scope_matches(s))
+            .map(|s| s.share_group_id.clone())
+            .collect()
+    }
+
     fn spawn_push_clipboard_entry(
         &self,
         entry: ClipboardEntry,
         umk: Zeroizing<[u8; 32]>,
         is_update: bool,
     ) {
-        let http = self.http.lock().clone();
-        let queue = Arc::clone(&self.pending_queue);
-        let id_map = Arc::clone(&self.id_map);
-        let status = Arc::clone(&self.status);
-        let sessions = Arc::clone(&self.sharing_sessions);
-        let app = self.app.clone();
+        let ctx = self.push_ctx();
+        let group_ids = self.session_group_ids(|s| s.my_scope.includes_clipboard());
 
         self.handle.spawn(async move {
-            let client_id = entry.id.clone();
-            let kind = entry.kind.label().to_string();
-
             // Skip file entries larger than 5 MB (Phase 7 enforcement)
             if entry.kind == EntryKind::File {
                 let total_bytes: u64 = entry
@@ -336,203 +377,53 @@ impl SyncClient {
                     .sum();
                 const FILE_SIZE_LIMIT: u64 = 5 * 1024 * 1024;
                 if total_bytes > FILE_SIZE_LIMIT {
-                    status.lock().skipped_count += 1;
-                    let _ = app.emit(
+                    ctx.status.lock().skipped_count += 1;
+                    let _ = ctx.app.emit(
                         "sync:file-skipped",
-                        serde_json::json!({ "client_id": client_id, "size_bytes": total_bytes }),
+                        serde_json::json!({ "client_id": entry.id, "size_bytes": total_bytes }),
                     );
                     return;
                 }
             }
 
-            let encrypted_content =
-                match crypto::encrypt(&umk, &entry.content, &client_id) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("[sync] encrypt content: {e}");
-                        return;
-                    }
-                };
             let metadata_json = serde_json::json!({
                 "groups": entry.groups,
                 "pinned": entry.pinned,
                 "label": entry.label,
             })
             .to_string();
-            let encrypted_metadata =
-                match crypto::encrypt(&umk, &metadata_json, &client_id) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("[sync] encrypt metadata: {e}");
-                        return;
-                    }
-                };
-
-            // Fan out to Live Share sessions matching clipboard scope
-            let group_ids: Vec<String> = sessions
-                .lock()
-                .iter()
-                .filter(|s| s.my_scope.includes_clipboard())
-                .map(|s| s.share_group_id.clone())
-                .collect();
-
-            let push_req = PushEntryRequest {
-                client_id: client_id.clone(),
-                encrypted_content,
-                encrypted_metadata,
-                entry_type: "clipboard".into(),
-                kind,
-                blob_key: None,
+            let job = PushJob {
+                client_id: entry.id.clone(),
+                content: entry.content,
+                metadata_json,
+                entry_type: "clipboard",
+                kind: entry.kind.label().to_string(),
                 group_ids,
             };
-
-            if let Some(http) = http.as_ref().filter(|h| h.is_authenticated()) {
-                let op_type = if is_update { "update" } else { "push" };
-                match http.push_entries(vec![push_req.clone()]).await {
-                    Ok(responses) => {
-                        if let Some(r) = responses
-                            .into_iter()
-                            .find(|r| r.client_id == client_id)
-                        {
-                            id_map
-                                .lock()
-                                .set_entry(&format!("clipboard:{client_id}"), &r.server_id);
-                            let _ = app.emit(
-                                "sync:entry-synced",
-                                serde_json::json!({
-                                    "client_id": client_id,
-                                    "server_id": r.server_id,
-                                }),
-                            );
-                        }
-                        status.lock().pending_count = queue.lock().len();
-                        return;
-                    }
-                    Err(e) => eprintln!("[sync] {op_type} failed: {e}"),
-                }
-            }
-
-            // Offline / unauthenticated — queue
-            let entry_json = match serde_json::to_string(&push_req) {
-                Ok(j) => j,
-                Err(e) => {
-                    eprintln!("[sync] serialize push: {e}");
-                    return;
-                }
-            };
-            let op = if is_update {
-                PendingOp::Update {
-                    entry_json,
-                    entry_type: "clipboard".into(),
-                }
-            } else {
-                PendingOp::Push {
-                    entry_json,
-                    entry_type: "clipboard".into(),
-                }
-            };
-            queue.lock().push(op);
-            status.lock().pending_count = queue.lock().len();
+            push_entry_task(ctx, umk, is_update, job).await;
         });
     }
 
-    fn spawn_push_note(
-        &self,
-        note: Note,
-        umk: Zeroizing<[u8; 32]>,
-        is_update: bool,
-    ) {
-        let http = self.http.lock().clone();
-        let queue = Arc::clone(&self.pending_queue);
-        let id_map = Arc::clone(&self.id_map);
-        let status = Arc::clone(&self.status);
-        let sessions = Arc::clone(&self.sharing_sessions);
-        let app = self.app.clone();
+    fn spawn_push_note(&self, note: Note, umk: Zeroizing<[u8; 32]>, is_update: bool) {
+        let ctx = self.push_ctx();
+        let group_ids = self.session_group_ids(|s| s.my_scope.includes_notes());
 
         self.handle.spawn(async move {
-            let client_id = note.id.clone();
-
-            let encrypted_content =
-                match crypto::encrypt(&umk, &note.content, &client_id) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("[sync] note encrypt content: {e}");
-                        return;
-                    }
-                };
             let metadata_json = serde_json::json!({
                 "title": note.title,
                 "groups": note.groups,
                 "pinned": note.pinned,
             })
             .to_string();
-            let encrypted_metadata =
-                match crypto::encrypt(&umk, &metadata_json, &client_id) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("[sync] note encrypt metadata: {e}");
-                        return;
-                    }
-                };
-
-            let group_ids: Vec<String> = sessions
-                .lock()
-                .iter()
-                .filter(|s| s.my_scope.includes_notes())
-                .map(|s| s.share_group_id.clone())
-                .collect();
-
-            let push_req = PushEntryRequest {
-                client_id: client_id.clone(),
-                encrypted_content,
-                encrypted_metadata,
-                entry_type: "notes".into(),
+            let job = PushJob {
+                client_id: note.id.clone(),
+                content: note.content,
+                metadata_json,
+                entry_type: "notes",
                 kind: "note".into(),
-                blob_key: None,
                 group_ids,
             };
-
-            if let Some(http) = http.as_ref().filter(|h| h.is_authenticated()) {
-                match http.push_entries(vec![push_req.clone()]).await {
-                    Ok(responses) => {
-                        if let Some(r) =
-                            responses.into_iter().find(|r| r.client_id == client_id)
-                        {
-                            id_map
-                                .lock()
-                                .set_entry(&format!("note:{client_id}"), &r.server_id);
-                            let _ = app.emit(
-                                "sync:note-synced",
-                                serde_json::json!({ "client_id": client_id }),
-                            );
-                        }
-                        status.lock().pending_count = queue.lock().len();
-                        return;
-                    }
-                    Err(e) => eprintln!("[sync] note push failed: {e}"),
-                }
-            }
-
-            let entry_json = match serde_json::to_string(&push_req) {
-                Ok(j) => j,
-                Err(e) => {
-                    eprintln!("[sync] serialize note push: {e}");
-                    return;
-                }
-            };
-            let op = if is_update {
-                PendingOp::Update {
-                    entry_json,
-                    entry_type: "notes".into(),
-                }
-            } else {
-                PendingOp::Push {
-                    entry_json,
-                    entry_type: "notes".into(),
-                }
-            };
-            queue.lock().push(op);
-            status.lock().pending_count = queue.lock().len();
+            push_entry_task(ctx, umk, is_update, job).await;
         });
     }
 
@@ -693,4 +584,96 @@ impl SyncClient {
     pub fn umk_clone(&self) -> Option<Zeroizing<[u8; 32]>> {
         self.umk.lock().clone()
     }
+}
+
+/// Encrypt and push one entry (clipboard or note); queue it when offline.
+/// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.
+async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
+    let PushJob {
+        client_id,
+        content,
+        metadata_json,
+        entry_type,
+        kind,
+        group_ids,
+    } = job;
+
+    let encrypted_content = match crypto::encrypt(&umk, &content, &client_id) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[sync] {entry_type} encrypt content: {e}");
+            return;
+        }
+    };
+    let encrypted_metadata = match crypto::encrypt(&umk, &metadata_json, &client_id) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[sync] {entry_type} encrypt metadata: {e}");
+            return;
+        }
+    };
+
+    let push_req = PushEntryRequest {
+        client_id: client_id.clone(),
+        encrypted_content,
+        encrypted_metadata,
+        entry_type: entry_type.into(),
+        kind,
+        blob_key: None,
+        group_ids,
+    };
+
+    if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {
+        match http.push_entries(vec![push_req.clone()]).await {
+            Ok(responses) => {
+                if let Some(r) = responses.into_iter().find(|r| r.client_id == client_id) {
+                    if entry_type == "notes" {
+                        ctx.id_map
+                            .lock()
+                            .set_entry(&format!("note:{client_id}"), &r.server_id);
+                        let _ = ctx.app.emit(
+                            "sync:note-synced",
+                            serde_json::json!({ "client_id": client_id }),
+                        );
+                    } else {
+                        ctx.id_map
+                            .lock()
+                            .set_entry(&format!("clipboard:{client_id}"), &r.server_id);
+                        let _ = ctx.app.emit(
+                            "sync:entry-synced",
+                            serde_json::json!({
+                                "client_id": client_id,
+                                "server_id": r.server_id,
+                            }),
+                        );
+                    }
+                }
+                ctx.status.lock().pending_count = ctx.queue.lock().len();
+                return;
+            }
+            Err(e) => eprintln!("[sync] {entry_type} push failed: {e}"),
+        }
+    }
+
+    // Offline / unauthenticated — queue
+    let entry_json = match serde_json::to_string(&push_req) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[sync] serialize {entry_type} push: {e}");
+            return;
+        }
+    };
+    let op = if is_update {
+        PendingOp::Update {
+            entry_json,
+            entry_type: entry_type.into(),
+        }
+    } else {
+        PendingOp::Push {
+            entry_json,
+            entry_type: entry_type.into(),
+        }
+    };
+    ctx.queue.lock().push(op);
+    ctx.status.lock().pending_count = ctx.queue.lock().len();
 }

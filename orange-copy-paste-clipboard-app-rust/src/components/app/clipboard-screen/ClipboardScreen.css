@@ -108,6 +108,13 @@
   display: none;
 }
 
+/* Invisible load-more sentinel — grows the render window when scrolled near */
+.timeline-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
 /* End-of-timeline message */
 .timeline-end {
   display: flex;

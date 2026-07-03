@@ -6,12 +6,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ClipboardEntry, AppTheme } from "../../types";
 import {
   deriveDisplayKind,
+  fileNameFromPath,
   htmlPlainText,
   isImageFile,
   isVideoFile,
   readTheme,
   resolveImageSrc,
+  truncateText,
 } from "../../types";
+import { loadImagePreview } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   TrashIcon,
@@ -158,9 +161,13 @@ const CopyPopup: React.FC = () => {
       setImagePreview(null);
       return;
     }
-    invoke<string | null>("get_image_file_preview", { path: firstFile })
-      .then(setImagePreview)
-      .catch(() => setImagePreview(null));
+    let active = true;
+    loadImagePreview(firstFile).then((p) => {
+      if (active) setImagePreview(p);
+    });
+    return () => {
+      active = false;
+    };
   }, [kind, firstFile]);
 
   // Dynamic resize based on content
@@ -226,8 +233,7 @@ const CopyPopup: React.FC = () => {
   }, [entryId, cancelBlur]);
 
   // Preview
-  const previewText =
-    content.length > 200 ? content.slice(0, 200) + "\u2026" : content;
+  const previewText = truncateText(content, 200);
 
   const displayKind = deriveDisplayKind({
     id: entryId ?? "",
@@ -275,9 +281,7 @@ const CopyPopup: React.FC = () => {
               />
             ) : kind === "html" ? (
               <p className="popup-preview-text">
-                {htmlPlainText(content).length > 200
-                  ? htmlPlainText(content).slice(0, 200) + "\u2026"
-                  : htmlPlainText(content) || "Rich text copied"}
+                {truncateText(htmlPlainText(content), 200) || "Rich text copied"}
               </p>
             ) : kind === "file" ? (
               <>
@@ -297,7 +301,7 @@ const CopyPopup: React.FC = () => {
                   />
                 )}
                 <p className="popup-preview-text">
-                  {files.map((f) => f.split(/[\\/]/).pop()).join(", ")}
+                  {files.map(fileNameFromPath).join(", ")}
                 </p>
               </>
             ) : (

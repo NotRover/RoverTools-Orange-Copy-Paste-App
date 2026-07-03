@@ -11,6 +11,7 @@
 //! runtime for background tasks).
 
 use parking_lot::Mutex;
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -251,29 +252,68 @@ impl SyncHttpClient {
             .map(|t| format!("Bearer {t}"))
     }
 
+    /// Build an authenticated request for `path` (joined onto the base URL).
+    fn authed(&self, method: Method, path: &str) -> Result<reqwest::RequestBuilder, String> {
+        let auth = self.auth_header().ok_or("not authenticated")?;
+        Ok(self
+            .inner
+            .request(method, self.url(path))
+            .header("Authorization", auth))
+    }
+
+    /// Send a request; map transport/status errors to `"{tag} …"` strings.
+    /// With `allow_404`, a 404 response yields `Ok(None)` instead of an error.
+    async fn send_checked(
+        req: reqwest::RequestBuilder,
+        tag: &str,
+        allow_404: bool,
+    ) -> Result<Option<reqwest::Response>, String> {
+        let resp = req.send().await.map_err(|e| format!("{tag}: {e}"))?;
+        if allow_404 && resp.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let s = resp.status().as_u16();
+            let b = resp.text().await.unwrap_or_default();
+            return Err(format!("{tag} {s}: {b}"));
+        }
+        Ok(Some(resp))
+    }
+
+    /// Send, check status, and parse the JSON body as `T`.
+    async fn expect_json<T: serde::de::DeserializeOwned>(
+        req: reqwest::RequestBuilder,
+        tag: &str,
+    ) -> Result<T, String> {
+        let resp = Self::send_checked(req, tag, false)
+            .await?
+            .expect("404 not allowed here");
+        resp.json::<T>()
+            .await
+            .map_err(|e| format!("{tag} parse: {e}"))
+    }
+
+    /// Send and check status, discarding the response body.
+    async fn expect_ok(
+        req: reqwest::RequestBuilder,
+        tag: &str,
+        allow_404: bool,
+    ) -> Result<(), String> {
+        Self::send_checked(req, tag, allow_404).await.map(|_| ())
+    }
+
     // ── Auth ──────────────────────────────────────────────────────
 
     pub async fn login(&self, req: LoginRequest) -> Result<LoginResponse, String> {
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/auth/login"))
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("login request: {e}"))?;
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("login {status}: {body}"));
-        }
-        resp.json::<LoginResponse>()
-            .await
-            .map_err(|e| format!("login parse: {e}"))
+        Self::expect_json(
+            self.inner.post(self.url("/api/v1/auth/login")).json(&req),
+            "login",
+        )
+        .await
     }
 
     pub async fn refresh_token(&self, user_id: &str) -> Result<String, String> {
-        let refresh_token =
-            crate::sync::crypto::load_refresh_token(user_id)?;
+        let refresh_token = crate::sync::crypto::load_refresh_token(user_id)?;
         let resp = self
             .inner
             .post(self.url("/api/v1/auth/refresh"))
@@ -292,13 +332,8 @@ impl SyncHttpClient {
     }
 
     pub async fn logout(&self) -> Result<(), String> {
-        if let Some(auth) = self.auth_header() {
-            let _ = self
-                .inner
-                .post(self.url("/api/v1/auth/logout"))
-                .header("Authorization", auth)
-                .send()
-                .await;
+        if let Ok(req) = self.authed(Method::POST, "/api/v1/auth/logout") {
+            let _ = req.send().await;
         }
         self.clear_auth();
         Ok(())
@@ -310,23 +345,11 @@ impl SyncHttpClient {
         &self,
         entries: Vec<PushEntryRequest>,
     ) -> Result<Vec<PushEntryResponse>, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/sync/push"))
-            .header("Authorization", auth)
-            .json(&entries)
-            .send()
-            .await
-            .map_err(|e| format!("push request: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("push {s}: {b}"));
-        }
-        resp.json::<Vec<PushEntryResponse>>()
-            .await
-            .map_err(|e| format!("push parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, "/api/v1/sync/push")?.json(&entries),
+            "push",
+        )
+        .await
     }
 
     pub async fn pull_entries(
@@ -334,58 +357,30 @@ impl SyncHttpClient {
         after_ts: Option<u64>,
         limit: u32,
     ) -> Result<PullResponse, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let mut url = self.url("/api/v1/sync/pull");
-        url.push_str(&format!("?limit={limit}"));
+        let mut path = format!("/api/v1/sync/pull?limit={limit}");
         if let Some(ts) = after_ts {
-            url.push_str(&format!("&after_ts={ts}"));
+            path.push_str(&format!("&after_ts={ts}"));
         }
-        let resp = self
-            .inner
-            .get(&url)
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("pull request: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("pull {s}: {b}"));
-        }
-        resp.json::<PullResponse>()
-            .await
-            .map_err(|e| format!("pull parse: {e}"))
+        Self::expect_json(self.authed(Method::GET, &path)?, "pull").await
     }
 
     pub async fn advance_cursor(&self, last_server_ts: u64) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/sync/cursor"))
-            .header("Authorization", auth)
-            .json(&CursorRequest { last_server_ts })
-            .send()
-            .await
-            .map_err(|e| format!("cursor request: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("cursor {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(
+            self.authed(Method::POST, "/api/v1/sync/cursor")?
+                .json(&CursorRequest { last_server_ts }),
+            "cursor",
+            false,
+        )
+        .await
     }
 
     pub async fn delete_entry(&self, server_id: &str) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .delete(self.url(&format!("/api/v1/sync/entries/{server_id}")))
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("delete request: {e}"))?;
-        if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            return Err(format!("delete {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(
+            self.authed(Method::DELETE, &format!("/api/v1/sync/entries/{server_id}"))?,
+            "delete",
+            true,
+        )
+        .await
     }
 
     // ── Settings ──────────────────────────────────────────────────
@@ -394,113 +389,59 @@ impl SyncHttpClient {
         &self,
         req: SettingsPushRequest,
     ) -> Result<SettingsPushResponse, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .put(self.url("/api/v1/settings"))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("settings push request: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("settings push {s}: {b}"));
-        }
-        resp.json::<SettingsPushResponse>()
-            .await
-            .map_err(|e| format!("settings push parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::PUT, "/api/v1/settings")?.json(&req),
+            "settings push",
+        )
+        .await
     }
 
     pub async fn pull_settings(&self) -> Result<Option<SettingsPullResponse>, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .get(self.url("/api/v1/settings"))
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("settings pull request: {e}"))?;
-        if resp.status().as_u16() == 404 {
-            return Ok(None);
+        match Self::send_checked(
+            self.authed(Method::GET, "/api/v1/settings")?,
+            "settings pull",
+            true,
+        )
+        .await?
+        {
+            None => Ok(None),
+            Some(resp) => resp
+                .json::<SettingsPullResponse>()
+                .await
+                .map(Some)
+                .map_err(|e| format!("settings pull parse: {e}")),
         }
-        if !resp.status().is_success() {
-            return Err(format!("settings pull {}", resp.status().as_u16()));
-        }
-        let parsed = resp
-            .json::<SettingsPullResponse>()
-            .await
-            .map_err(|e| format!("settings pull parse: {e}"))?;
-        Ok(Some(parsed))
     }
 
     // ── Pool groups ───────────────────────────────────────────────
 
     pub async fn list_groups(&self) -> Result<Vec<ServerGroup>, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .get(self.url("/api/v1/groups"))
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("list groups: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("list groups {}", resp.status().as_u16()));
-        }
-        resp.json().await.map_err(|e| format!("list groups parse: {e}"))
+        Self::expect_json(self.authed(Method::GET, "/api/v1/groups")?, "list groups").await
     }
 
     pub async fn create_group(&self, req: CreateGroupRequest) -> Result<ServerGroup, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/groups"))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("create group: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("create group {s}: {b}"));
-        }
-        resp.json().await.map_err(|e| format!("create group parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, "/api/v1/groups")?.json(&req),
+            "create group",
+        )
+        .await
     }
 
     pub async fn join_group(&self, req: JoinGroupRequest) -> Result<ServerGroup, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/groups/join"))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("join group: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("join group {s}: {b}"));
-        }
-        resp.json().await.map_err(|e| format!("join group parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, "/api/v1/groups/join")?.json(&req),
+            "join group",
+        )
+        .await
     }
 
     pub async fn leave_group(&self, group_id: &str) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .delete(self.url(&format!("/api/v1/groups/{group_id}")))
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("leave group: {e}"))?;
-        if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            return Err(format!("leave group {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(
+            self.authed(Method::DELETE, &format!("/api/v1/groups/{group_id}"))?,
+            "leave group",
+            true,
+        )
+        .await
     }
 
     // ── Live Share ────────────────────────────────────────────────
@@ -509,21 +450,11 @@ impl SyncHttpClient {
         &self,
         req: CreateSharingRequest,
     ) -> Result<CreateSharingResponse, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/sharing"))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("create sharing: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("create sharing {s}: {b}"));
-        }
-        resp.json().await.map_err(|e| format!("create sharing parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, "/api/v1/sharing")?.json(&req),
+            "create sharing",
+        )
+        .await
     }
 
     pub async fn invite_to_sharing(
@@ -531,42 +462,23 @@ impl SyncHttpClient {
         share_group_id: &str,
         req: SharingInviteRequest,
     ) -> Result<SharingInviteResponse, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url(&format!("/api/v1/sharing/{share_group_id}/invite")))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("sharing invite: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("sharing invite {s}: {b}"));
-        }
-        resp.json().await.map_err(|e| format!("sharing invite parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, &format!("/api/v1/sharing/{share_group_id}/invite"))?
+                .json(&req),
+            "sharing invite",
+        )
+        .await
     }
 
     pub async fn join_sharing(
         &self,
         req: JoinSharingRequest,
     ) -> Result<JoinSharingResponse, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/sharing/join"))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("join sharing: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("join sharing {s}: {b}"));
-        }
-        resp.json().await.map_err(|e| format!("join sharing parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, "/api/v1/sharing/join")?.json(&req),
+            "join sharing",
+        )
+        .await
     }
 
     pub async fn update_sharing_scope(
@@ -574,55 +486,42 @@ impl SyncHttpClient {
         share_group_id: &str,
         scope: &str,
     ) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .patch(self.url(&format!(
-                "/api/v1/sharing/sessions/{share_group_id}/scope"
-            )))
-            .header("Authorization", auth)
+        Self::expect_ok(
+            self.authed(
+                Method::PATCH,
+                &format!("/api/v1/sharing/sessions/{share_group_id}/scope"),
+            )?
             .json(&UpdateScopeRequest {
                 scope: scope.to_string(),
-            })
-            .send()
-            .await
-            .map_err(|e| format!("update scope: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("update scope {}", resp.status().as_u16()));
-        }
-        Ok(())
+            }),
+            "update scope",
+            false,
+        )
+        .await
     }
 
     pub async fn end_sharing_session(&self, share_group_id: &str) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .delete(self.url(&format!("/api/v1/sharing/sessions/{share_group_id}")))
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("end sharing: {e}"))?;
-        if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            return Err(format!("end sharing {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(
+            self.authed(
+                Method::DELETE,
+                &format!("/api/v1/sharing/sessions/{share_group_id}"),
+            )?,
+            "end sharing",
+            true,
+        )
+        .await
     }
 
     pub async fn leave_sharing_session(&self, share_group_id: &str) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .delete(self.url(&format!(
-                "/api/v1/sharing/sessions/{share_group_id}/leave"
-            )))
-            .header("Authorization", auth)
-            .send()
-            .await
-            .map_err(|e| format!("leave sharing: {e}"))?;
-        if !resp.status().is_success() && resp.status().as_u16() != 404 {
-            return Err(format!("leave sharing {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(
+            self.authed(
+                Method::DELETE,
+                &format!("/api/v1/sharing/sessions/{share_group_id}/leave"),
+            )?,
+            "leave sharing",
+            true,
+        )
+        .await
     }
 
     // ── Blob storage ──────────────────────────────────────────────
@@ -631,52 +530,27 @@ impl SyncHttpClient {
         &self,
         req: BlobUploadRequest,
     ) -> Result<BlobUploadResponse, String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/blobs/request-upload"))
-            .header("Authorization", auth)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| format!("blob request-upload: {e}"))?;
-        if !resp.status().is_success() {
-            let s = resp.status().as_u16();
-            let b = resp.text().await.unwrap_or_default();
-            return Err(format!("blob request-upload {s}: {b}"));
-        }
-        resp.json().await.map_err(|e| format!("blob parse: {e}"))
+        Self::expect_json(
+            self.authed(Method::POST, "/api/v1/blobs/request-upload")?
+                .json(&req),
+            "blob request-upload",
+        )
+        .await
     }
 
     pub async fn upload_blob_bytes(&self, upload_url: &str, data: Vec<u8>) -> Result<(), String> {
-        let resp = self
-            .inner
-            .put(upload_url)
-            .body(data)
-            .send()
-            .await
-            .map_err(|e| format!("blob upload: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("blob upload {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(self.inner.put(upload_url).body(data), "blob upload", false).await
     }
 
     pub async fn confirm_blob_upload(&self, blob_key: &str) -> Result<(), String> {
-        let auth = self.auth_header().ok_or("not authenticated")?;
-        let resp = self
-            .inner
-            .post(self.url("/api/v1/blobs/confirm-upload"))
-            .header("Authorization", auth)
-            .json(&BlobConfirmRequest {
-                blob_key: blob_key.to_string(),
-            })
-            .send()
-            .await
-            .map_err(|e| format!("blob confirm: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("blob confirm {}", resp.status().as_u16()));
-        }
-        Ok(())
+        Self::expect_ok(
+            self.authed(Method::POST, "/api/v1/blobs/confirm-upload")?
+                .json(&BlobConfirmRequest {
+                    blob_key: blob_key.to_string(),
+                }),
+            "blob confirm",
+            false,
+        )
+        .await
     }
 }

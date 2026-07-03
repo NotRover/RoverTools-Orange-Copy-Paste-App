@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note, ClipboardEntry } from "../../../types";
 
 import type { SortMode } from "../sort-options";
@@ -17,6 +17,9 @@ import {
   MultiSelectIcon,
 } from "../../icons";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import { useClickOutside } from "../../../hooks/useClickOutside";
+import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
+import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
 import NoteEditor from "./note-editor/NoteEditor";
@@ -76,8 +79,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [fading, setFading] = useState(false);
-  const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const nf = useNotesFilter();
 
@@ -86,9 +87,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
   });
-  const [layout, setLayout] = useState<ClipboardLayout>(() => {
-    return (localStorage.getItem("ns-layout") as ClipboardLayout) ?? "tiles";
-  });
+  const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
+    "ns-layout",
+    "tiles",
+  );
   const [collapsedSections, setCollapsedSections] = useState({
     pinned: false,
     notes: false,
@@ -110,50 +112,42 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const mainRef = useRef<HTMLDivElement>(null);
 
   // Close filter dropdown on outside click
-  useEffect(() => {
-    if (!nf.filtersOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        nf.filterRef.current &&
-        !nf.filterRef.current.contains(e.target as Node)
-      )
-        nf.setFiltersOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [nf.filtersOpen]);
+  useClickOutside(nf.filterRef, nf.filtersOpen, () => nf.setFiltersOpen(false));
 
-  const filteredNotes = notes.filter((n) => {
-    if (nf.pinnedOnly && !n.pinned) return false;
-    if (
-      nf.selectedGroups.size > 0 &&
-      !n.groups.some((g) => nf.selectedGroups.has(g))
-    )
-      return false;
-    if (search) {
-      const q = search.toLowerCase();
+  // Filter + sort memoised so they only recompute when inputs change, not on
+  // every keystroke / select-mode toggle / resize.
+  const sortedNotes = useMemo(() => {
+    const filtered = notes.filter((n) => {
+      if (nf.pinnedOnly && !n.pinned) return false;
       if (
-        !n.title.toLowerCase().includes(q) &&
-        !stripHtml(n.content).toLowerCase().includes(q)
+        nf.selectedGroups.size > 0 &&
+        !n.groups.some((g) => nf.selectedGroups.has(g))
       )
         return false;
-    }
-    return true;
-  });
-
-  const sortedNotes = [...filteredNotes].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    switch (sort) {
-      case "oldest":
-        return a.updated_at - b.updated_at;
-      case "a-z":
-        return (a.title || "").localeCompare(b.title || "");
-      case "z-a":
-        return (b.title || "").localeCompare(a.title || "");
-      default:
-        return b.updated_at - a.updated_at;
-    }
-  });
+      if (search) {
+        const q = search.toLowerCase();
+        if (
+          !n.title.toLowerCase().includes(q) &&
+          !stripHtml(n.content).toLowerCase().includes(q)
+        )
+          return false;
+      }
+      return true;
+    });
+    return filtered.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      switch (sort) {
+        case "oldest":
+          return a.updated_at - b.updated_at;
+        case "a-z":
+          return (a.title || "").localeCompare(b.title || "");
+        case "z-a":
+          return (b.title || "").localeCompare(a.title || "");
+        default:
+          return b.updated_at - a.updated_at;
+      }
+    });
+  }, [notes, nf.pinnedOnly, nf.selectedGroups, search, sort]);
 
   const editingNote = editingId
     ? (notes.find((n) => n.id === editingId) ?? null)
@@ -225,37 +219,44 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     [onDelete, editingId],
   );
 
-  useEffect(
-    () => () => {
-      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
+  const pinnedCount = useMemo(
+    () => sortedNotes.filter((n) => n.pinned).length,
+    [sortedNotes],
+  );
+  const showSections = pinnedCount > 0 && pinnedCount < sortedNotes.length;
+  const visibleNotes = useMemo(
+    () =>
+      showSections
+        ? sortedNotes.filter((n) => {
+            if (n.pinned && collapsedSections.pinned) return false;
+            if (!n.pinned && collapsedSections.notes) return false;
+            return true;
+          })
+        : sortedNotes,
+    [sortedNotes, showSections, collapsedSections],
+  );
+  const allVisibleIds = useMemo(
+    () => visibleNotes.map((n) => n.id),
+    [visibleNotes],
+  );
+
+  // Stable, id-based NoteCard callbacks so memoised cards don't re-render on
+  // every parent update. allVisibleIds is read through a ref to keep identity
+  // fixed across filter changes.
+  const allVisibleIdsRef = useRef(allVisibleIds);
+  allVisibleIdsRef.current = allVisibleIds;
+  const handleToggleSelect = useCallback(
+    (id: string, shiftKey: boolean) => {
+      if (shiftKey) multiSelect.selectRange(id, allVisibleIdsRef.current);
+      else multiSelect.toggleSelect(id);
     },
+    [multiSelect.selectRange, multiSelect.toggleSelect],
+  );
+  const handleOpen = useCallback((id: string) => setEditingId(id), []);
+  const handleContextMenu = useCallback(
+    (id: string, x: number, y: number) => setMenuState({ id, x, y }),
     [],
   );
-
-  const selectLayout = useCallback(
-    (l: ClipboardLayout) => {
-      if (l === layout) return;
-      setFading(true);
-      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
-      layoutTimerRef.current = setTimeout(() => {
-        setLayout(l);
-        localStorage.setItem("ns-layout", l);
-        setFading(false);
-      }, 160);
-    },
-    [layout],
-  );
-
-  const pinnedCount = sortedNotes.filter((n) => n.pinned).length;
-  const showSections = pinnedCount > 0 && pinnedCount < sortedNotes.length;
-  const visibleNotes = showSections
-    ? sortedNotes.filter((n) => {
-        if (n.pinned && collapsedSections.pinned) return false;
-        if (!n.pinned && collapsedSections.notes) return false;
-        return true;
-      })
-    : sortedNotes;
-  const allVisibleIds = visibleNotes.map((n) => n.id);
 
   // Prune stale selections when notes change
   useEffect(() => {
@@ -274,19 +275,11 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     return () => document.removeEventListener("keydown", handler);
   }, [multiSelect.isSelecting]);
 
-  // Compute bulk state
-  const allPinned =
-    multiSelect.selectedCount > 0 &&
-    notes
-      .filter((n) => multiSelect.selectedIds.has(n.id))
-      .every((n) => n.pinned);
-  const commonGroups = (() => {
-    if (multiSelect.selectedCount === 0) return [] as string[];
-    const sel = notes.filter((n) => multiSelect.selectedIds.has(n.id));
-    if (sel.length === 0) return [] as string[];
-    const first = new Set(sel[0].groups);
-    return [...first].filter((g) => sel.every((n) => n.groups.includes(g)));
-  })();
+  // Bulk-selection state (notes have no "Saved" concept, so allSaved is unused).
+  const { allPinned, commonGroups } = useSelectionSummary(
+    notes,
+    multiSelect.selectedIds,
+  );
 
   return (
     <div
@@ -500,24 +493,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       isSelecting={multiSelect.isSelecting}
                       isSelected={multiSelect.selectedIds.has(n.id)}
                       isExpanded={expandedNoteIds.has(n.id)}
-                      onToggleSelect={(shiftKey) => {
-                        if (shiftKey) {
-                          multiSelect.selectRange(n.id, allVisibleIds);
-                        } else {
-                          multiSelect.toggleSelect(n.id);
-                        }
-                      }}
-                      onOpen={() => setEditingId(n.id)}
-                      onDelete={(e) => {
-                        e.stopPropagation();
-                        handleDelete(n.id);
-                      }}
-                      onContextMenu={(e) => {
-                        if (multiSelect.isSelecting) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setMenuState({ id: n.id, x: e.clientX, y: e.clientY });
-                      }}
+                      onToggleSelect={handleToggleSelect}
+                      onOpen={handleOpen}
+                      onDelete={handleDelete}
+                      onContextMenu={handleContextMenu}
                     />
                   )}
                 </React.Fragment>

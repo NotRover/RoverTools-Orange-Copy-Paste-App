@@ -1,12 +1,15 @@
 //! Tauri command handlers for clipboard history operations, plus internal
 //! helpers for reading and writing clipboard content.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::Ordering;
+use std::sync::LazyLock;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
 use arboard::Clipboard;
+use parking_lot::Mutex;
 use tauri::{Emitter, Manager, State};
 
 use crate::clipboard::files::{
@@ -84,7 +87,7 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
-        auto_save_history(&app, &state.history);
+        auto_save_history(&app);
         // Tombstone must propagate to sync even when offline (invariant #5)
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
@@ -107,7 +110,7 @@ pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool 
         .collect();
 
     state.history.lock().clear();
-    auto_save_history(&app, &state.history);
+    auto_save_history(&app);
 
     if !deleted_ids.is_empty() {
         let sync = state.sync_client.lock().clone();
@@ -162,7 +165,7 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
         }
     };
     if success {
-        auto_save_history(app, &state.history);
+        auto_save_history(app);
         let _ = app.emit(
             "clipboard:entry-pinned",
             serde_json::json!({ "id": id, "pinned": pin }),
@@ -248,6 +251,58 @@ pub fn set_setting(
 
 // ── Bulk operations ─────────────────────────────────────────────────
 
+/// Shared tail of the bulk update commands: persist, then propagate the
+/// updated entries to sync.
+fn finish_bulk_update(
+    app: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    ids: &[String],
+    group_change: bool,
+) {
+    if group_change {
+        save_after_group_change(app, state);
+    } else {
+        auto_save_history(app);
+    }
+    let sync = state.sync_client.lock().clone();
+    if let Some(s) = sync {
+        for id in ids {
+            if let Some(entry) = state.history.lock().find(id).cloned() {
+                s.on_update_clipboard_entry(entry);
+            }
+        }
+    }
+}
+
+/// Shared body of the bulk group commands: apply `mutate` per entry, emit
+/// `clipboard:entry-groups-changed` with the entry's resulting groups, then
+/// persist and sync. Returns the number of entries changed.
+fn bulk_modify_groups(
+    ids: &[String],
+    state: &State<'_, AppState>,
+    app: &tauri::AppHandle,
+    mutate: impl Fn(&mut crate::clipboard::history::ClipboardHistory, &str) -> bool,
+) -> u32 {
+    let mut hist = state.history.lock();
+    let mut changed = 0u32;
+    for id in ids {
+        if mutate(&mut hist, id) {
+            if let Some(e) = hist.find(id) {
+                let _ = app.emit(
+                    "clipboard:entry-groups-changed",
+                    serde_json::json!({ "id": id, "groups": e.groups }),
+                );
+            }
+            changed += 1;
+        }
+    }
+    drop(hist);
+    if changed > 0 {
+        finish_bulk_update(app, state, ids, true);
+    }
+    changed
+}
+
 /// Delete multiple entries at once. Returns the number of entries actually removed.
 #[tauri::command]
 pub fn bulk_delete_entries(
@@ -267,7 +322,7 @@ pub fn bulk_delete_entries(
     }
     drop(hist);
     if removed > 0 {
-        auto_save_history(&app, &state.history);
+        auto_save_history(&app);
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
             for id in deleted_ids {
@@ -314,15 +369,7 @@ pub fn bulk_pin_entries(
 
     drop(hist);
     if changed > 0 {
-        auto_save_history(&app, &state.history);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
+        finish_bulk_update(&app, &state, &ids, false);
     }
     changed
 }
@@ -336,32 +383,9 @@ pub fn bulk_set_groups(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    let mut hist = state.history.lock();
-    let mut changed = 0u32;
-
-    for id in &ids {
-        if hist.set_groups(id, groups.clone()) {
-            let _ = app.emit(
-                "clipboard:entry-groups-changed",
-                serde_json::json!({ "id": id, "groups": &groups }),
-            );
-            changed += 1;
-        }
-    }
-
-    drop(hist);
-    if changed > 0 {
-        save_after_group_change(&app, &state);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
-    }
-    changed
+    bulk_modify_groups(&ids, &state, &app, |hist, id| {
+        hist.set_groups(id, groups.clone())
+    })
 }
 
 /// Add a single group to multiple entries (without replacing existing groups).
@@ -373,35 +397,7 @@ pub fn bulk_add_group(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    let mut hist = state.history.lock();
-    let mut changed = 0u32;
-
-    for id in &ids {
-        if hist.add_group(id, &group) {
-            if let Some(e) = hist.find(id) {
-                let groups = e.groups.clone();
-                let _ = app.emit(
-                    "clipboard:entry-groups-changed",
-                    serde_json::json!({ "id": id, "groups": groups }),
-                );
-            }
-            changed += 1;
-        }
-    }
-
-    drop(hist);
-    if changed > 0 {
-        save_after_group_change(&app, &state);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
-    }
-    changed
+    bulk_modify_groups(&ids, &state, &app, |hist, id| hist.add_group(id, &group))
 }
 
 /// Remove a single group from multiple entries.
@@ -413,35 +409,7 @@ pub fn bulk_remove_group(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    let mut hist = state.history.lock();
-    let mut changed = 0u32;
-
-    for id in &ids {
-        if hist.remove_group(id, &group) {
-            if let Some(e) = hist.find(id) {
-                let groups = e.groups.clone();
-                let _ = app.emit(
-                    "clipboard:entry-groups-changed",
-                    serde_json::json!({ "id": id, "groups": groups }),
-                );
-            }
-            changed += 1;
-        }
-    }
-
-    drop(hist);
-    if changed > 0 {
-        save_after_group_change(&app, &state);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
-    }
-    changed
+    bulk_modify_groups(&ids, &state, &app, |hist, id| hist.remove_group(id, &group))
 }
 
 /// Trigger an immediate flush of the full history to disk.
@@ -507,13 +475,13 @@ fn save_after_group_change(app: &tauri::AppHandle, state: &State<'_, AppState>) 
     if let Some(path) = get_saved_file_path(app) {
         let _ = state.history.lock().save_saved_to_file(&path);
     }
-    auto_save_history(app, &state.history);
+    auto_save_history(app);
 }
 
 /// Mark the history as needing a flush to disk.  The actual I/O happens on
 /// a background timer (~2 s) so rapid clipboard changes are coalesced into a
 /// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
-pub(crate) fn auto_save_history(app: &tauri::AppHandle, _history: &crate::SharedHistory) {
+pub(crate) fn auto_save_history(app: &tauri::AppHandle) {
     let state: tauri::State<'_, AppState> = app.state();
     if state.keep_history.load(Ordering::Relaxed) {
         state.history_dirty.store(true, Ordering::Relaxed);
@@ -584,9 +552,109 @@ fn get_file_preview(
     Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
 }
 
+// ── Image preview cache ──────────────────────────────────────────────
+//
+// Encoding an image preview reads the whole file and base64-encodes it. This
+// cache lets repeat requests — including from separate windows (grid, copy /
+// paste popups), which don't share JS memory — skip that work. Bounded by total
+// bytes to respect the app's file-backed / low-RAM image strategy, and keyed by
+// (path, mtime, len) so an on-disk change transparently refreshes the entry.
+const PREVIEW_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+struct PreviewEntry {
+    mtime: u64,
+    len: u64,
+    data_url: String,
+}
+
+#[derive(Default)]
+struct PreviewCache {
+    entries: HashMap<String, PreviewEntry>,
+    /// Access order, front = least-recently used.
+    order: Vec<String>,
+    bytes: usize,
+}
+
+impl PreviewCache {
+    fn detach(&mut self, path: &str) {
+        if let Some(pos) = self.order.iter().position(|p| p == path) {
+            self.order.remove(pos);
+        }
+    }
+
+    fn get(&mut self, path: &str, mtime: u64, len: u64) -> Option<String> {
+        match self.entries.get(path) {
+            Some(e) if e.mtime == mtime && e.len == len => {
+                let url = e.data_url.clone();
+                self.detach(path);
+                self.order.push(path.to_string());
+                Some(url)
+            }
+            // Missing or stale (file changed): drop any stale copy.
+            Some(_) => {
+                self.remove(path);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn remove(&mut self, path: &str) {
+        if let Some(e) = self.entries.remove(path) {
+            self.bytes -= e.data_url.len();
+            self.detach(path);
+        }
+    }
+
+    fn insert(&mut self, path: String, mtime: u64, len: u64, data_url: String) {
+        // A single item larger than the whole budget is served but not cached.
+        if data_url.len() > PREVIEW_CACHE_MAX_BYTES {
+            return;
+        }
+        self.remove(&path);
+        self.bytes += data_url.len();
+        self.entries
+            .insert(path.clone(), PreviewEntry { mtime, len, data_url });
+        self.order.push(path);
+        while self.bytes > PREVIEW_CACHE_MAX_BYTES {
+            let Some(lru) = self.order.first().cloned() else {
+                break;
+            };
+            self.remove(&lru);
+        }
+    }
+}
+
+static PREVIEW_CACHE: LazyLock<Mutex<PreviewCache>> =
+    LazyLock::new(|| Mutex::new(PreviewCache::default()));
+
+/// Current (mtime-secs, len) stamp for cache validation, or None if missing.
+fn file_stamp(path: &Path) -> Option<(u64, u64)> {
+    let md = std::fs::metadata(path).ok()?;
+    let mtime = md
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Some((mtime, md.len()))
+}
+
 #[tauri::command]
 pub fn get_image_file_preview(path: String) -> Option<String> {
-    get_file_preview(&path, mime_from_image_ext, MAX_IMAGE_PREVIEW_BYTES)
+    let stamp = file_stamp(Path::new(&path));
+    if let Some((mtime, len)) = stamp {
+        if let Some(hit) = PREVIEW_CACHE.lock().get(&path, mtime, len) {
+            return Some(hit);
+        }
+    }
+    let data_url = get_file_preview(&path, mime_from_image_ext, MAX_IMAGE_PREVIEW_BYTES)?;
+    if let Some((mtime, len)) = stamp {
+        PREVIEW_CACHE
+            .lock()
+            .insert(path, mtime, len, data_url.clone());
+    }
+    Some(data_url)
 }
 
 #[tauri::command]
@@ -660,7 +728,7 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
                     // File-backed image: write as CF_HDROP so the paste target
                     // receives the file directly — no image decode or pixel
                     // conversion, matching Explorer-copy performance.
-                    write_files_to_clipboard(&[entry.content.clone()])?;
+                    write_files_to_clipboard(std::slice::from_ref(&entry.content))?;
                 }
             }
             #[cfg(not(windows))]

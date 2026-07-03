@@ -32,21 +32,46 @@ fn sync_client(state: &State<'_, AppState>) -> Result<Arc<SyncClient>, String> {
         .ok_or_else(|| "sync not enabled".into())
 }
 
-fn write_setting(app: &tauri::AppHandle, key: &str, value: serde_json::Value) {
-    if let Some(path) = app
-        .path()
-        .app_data_dir()
+/// Resolve both the SyncClient and its authenticated HTTP client, or fail
+/// with the same errors the individual lookups produced.
+fn sync_http(
+    state: &State<'_, AppState>,
+) -> Result<(Arc<SyncClient>, Arc<crate::sync::client::SyncHttpClient>), String> {
+    let sync = sync_client(state)?;
+    let http = sync.http().ok_or("not authenticated")?;
+    Ok((sync, http))
+}
+
+/// Read-modify-write `settings.json` under app_data.
+fn update_settings(
+    app: &tauri::AppHandle,
+    f: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let path = dir.join("settings.json");
+    let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(&path)
         .ok()
-        .map(|d| d.join("settings.json"))
-    {
-        let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    f(&mut map);
+    if let Ok(json) = serde_json::to_string_pretty(&map) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+fn write_setting(app: &tauri::AppHandle, key: &str, value: serde_json::Value) {
+    update_settings(app, |map| {
         map.insert(key.to_string(), value);
-        if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(map)) {
-            let _ = std::fs::write(&path, json);
-        }
+    });
+}
+
+fn to_sync_group(g: crate::sync::client::ServerGroup) -> SyncGroup {
+    SyncGroup {
+        id: g.id,
+        name: g.name,
+        member_count: g.member_count,
     }
 }
 
@@ -205,17 +230,9 @@ pub fn sync_receive_local_settings(
 
 #[tauri::command]
 pub async fn sync_get_groups(state: State<'_, AppState>) -> Result<Vec<SyncGroup>, String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (_sync, http) = sync_http(&state)?;
     let groups = http.list_groups().await?;
-    Ok(groups
-        .into_iter()
-        .map(|g| SyncGroup {
-            id: g.id,
-            name: g.name,
-            member_count: g.member_count,
-        })
-        .collect())
+    Ok(groups.into_iter().map(to_sync_group).collect())
 }
 
 #[tauri::command]
@@ -223,19 +240,14 @@ pub async fn sync_create_group(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<SyncGroup, String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (_sync, http) = sync_http(&state)?;
     let g = http
         .create_group(CreateGroupRequest {
             name,
             group_type: "pool".into(),
         })
         .await?;
-    Ok(SyncGroup {
-        id: g.id,
-        name: g.name,
-        member_count: g.member_count,
-    })
+    Ok(to_sync_group(g))
 }
 
 #[tauri::command]
@@ -243,11 +255,8 @@ pub async fn sync_join_group(
     invite_code: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
-    let g = http
-        .join_group(JoinGroupRequest { invite_code })
-        .await?;
+    let (sync, http) = sync_http(&state)?;
+    let g = http.join_group(JoinGroupRequest { invite_code }).await?;
     sync.register_group_mapping(&g.name, &g.id);
     Ok(())
 }
@@ -257,8 +266,7 @@ pub async fn sync_leave_group(
     group_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (_sync, http) = sync_http(&state)?;
     http.leave_group(&group_id).await?;
     Ok(())
 }
@@ -271,8 +279,7 @@ pub async fn sharing_invite(
     scope: String,
     state: State<'_, AppState>,
 ) -> Result<SharingInvite, String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
 
     // Create the Live Share group first, then invite
     let created = http
@@ -319,8 +326,7 @@ pub async fn sharing_accept(
     scope: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
     let _umk = sync.umk_clone().ok_or("not authenticated")?;
 
     let user_id = sync
@@ -381,8 +387,7 @@ pub async fn sharing_update_scope(
     scope: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
     http.update_sharing_scope(&share_group_id, &scope).await?;
 
     // Update local session
@@ -396,8 +401,7 @@ pub async fn sharing_end_session(
     share_group_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
     http.end_sharing_session(&share_group_id).await?;
     sync.remove_sharing_session(&share_group_id);
     Ok(())
@@ -408,8 +412,7 @@ pub async fn sharing_leave_session(
     share_group_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
     http.leave_sharing_session(&share_group_id).await?;
     sync.remove_sharing_session(&share_group_id);
     Ok(())
@@ -436,8 +439,7 @@ pub async fn sync_push_settings(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
     let umk = sync.umk_clone().ok_or("not authenticated")?;
 
     let app_data = app
@@ -503,8 +505,7 @@ pub async fn sync_pull_settings(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    let http = sync.http().ok_or("not authenticated")?;
+    let (sync, http) = sync_http(&state)?;
     let umk = sync.umk_clone().ok_or("not authenticated")?;
 
     let result = http.pull_settings().await?;
@@ -519,25 +520,14 @@ pub async fn sync_pull_settings(
     let _ = app.emit("sync:settings", &decrypted);
 
     // Write settings.json keys directly
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data: {e}"))?;
-    let settings_path = app_data.join("settings.json");
     if let Ok(blob) = serde_json::from_str::<serde_json::Map<_, _>>(&decrypted) {
-        let mut existing: serde_json::Map<String, serde_json::Value> =
-            std::fs::read_to_string(&settings_path)
-                .ok()
-                .and_then(|d| serde_json::from_str(&d).ok())
-                .unwrap_or_default();
-        for key in SYNCED_JSON_KEYS {
-            if let Some(v) = blob.get(*key) {
-                existing.insert(key.to_string(), v.clone());
+        update_settings(&app, |existing| {
+            for key in SYNCED_JSON_KEYS {
+                if let Some(v) = blob.get(*key) {
+                    existing.insert(key.to_string(), v.clone());
+                }
             }
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(existing)) {
-            let _ = std::fs::write(&settings_path, json);
-        }
+        });
     }
 
     Ok(())

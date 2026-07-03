@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../../types";
 import {
   fileNameFromPath,
@@ -7,7 +7,6 @@ import {
   isImageFile,
   isVideoFile,
   truncateText,
-  timeAgo,
   deriveDisplayKind,
   htmlFragment,
   imageDisplayName,
@@ -18,10 +17,11 @@ import CardMenu from "../../card-menu/CardMenu";
 import { CheckIcon } from "../../../icons";
 import ChipBar from "./ChipBar";
 import VideoPlayer from "./VideoPlayer";
+import { useRelativeTime } from "../../../../hooks/useRelativeTime";
+import { useImagePreviews, useMissingFiles } from "../../../../hooks/useFileMeta";
 import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
-const REL_TIME_REFRESH_MS = 15_000;
 const TEXT_PREVIEW_LENGTH = 160;
 
 // Allow-list based HTML sanitiser for safe rendering of rich-text clipboard
@@ -220,7 +220,7 @@ interface EntryCardProps {
   isInClipboard?: boolean;
 }
 
-export const EntryCard: React.FC<EntryCardProps> = ({
+const EntryCardImpl: React.FC<EntryCardProps> = ({
   entry,
   onCopy,
   onDelete,
@@ -251,15 +251,18 @@ export const EntryCard: React.FC<EntryCardProps> = ({
       );
     }
   };
-  const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
-  const [imagePreviews, setImagePreviews] = useState<
-    Record<string, string | null>
-  >({});
+  const relTime = useRelativeTime(entry.timestamp);
   const [showFileList, setShowFileList] = useState(false);
-  const [missingFiles, setMissingFiles] = useState<Set<string>>(new Set());
   const [contentExpanded, setContentExpanded] = useState(false);
   const [htmlOverflows, setHtmlOverflows] = useState(false);
   const htmlPreviewRef = useRef<HTMLDivElement>(null);
+
+  // Sanitising rich-text runs a full DOMParser pass — memoise so it only
+  // reruns when the HTML content actually changes, not on every re-render.
+  const sanitizedHtml = useMemo(
+    () => (entry.type === "html" ? sanitizeHtml(htmlFragment(entry.content)) : ""),
+    [entry.type, entry.content],
+  );
 
   const files = entry.type === "file" ? filePaths(entry.content) : [];
   const firstFile = files[0] ?? null;
@@ -269,60 +272,15 @@ export const EntryCard: React.FC<EntryCardProps> = ({
   const entryGroups = entry.groups ?? [];
   const displayGroups = entryGroups.filter((g) => g !== "Saved");
 
-  // Load image previews for file entries (single or multi)
-  useEffect(() => {
-    if (entry.type !== "file") {
-      setImagePreviews({});
-      return;
-    }
-    const toLoad = isMulti
-      ? imageFiles.slice(0, 4)
-      : firstFile && isImageFile(firstFile)
-        ? [firstFile]
-        : [];
-    if (toLoad.length === 0) {
-      setImagePreviews({});
-      return;
-    }
-    let active = true;
-    Promise.all(
-      toLoad.map((path) =>
-        invoke<string | null>("get_image_file_preview", { path })
-          .then((p) => [path, p] as const)
-          .catch(() => [path, null] as const),
-      ),
-    ).then((results) => {
-      if (active) setImagePreviews(Object.fromEntries(results));
-    });
-    return () => {
-      active = false;
-    };
-  }, [entry.type, entry.content]);
-
-  // Check whether referenced files still exist on disk
-  useEffect(() => {
-    if (entry.type !== "file" || files.length === 0) {
-      setMissingFiles(new Set());
-      return;
-    }
-    let active = true;
-    invoke<string[]>("check_missing_files", { paths: files })
-      .then((missing) => {
-        if (active) setMissingFiles(new Set(missing));
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [entry.type, entry.content]);
-
-  useEffect(() => {
-    const timer = setInterval(
-      () => setRelTime(timeAgo(entry.timestamp)),
-      REL_TIME_REFRESH_MS,
-    );
-    return () => clearInterval(timer);
-  }, [entry.timestamp]);
+  // Image previews + missing-file checks go through shared, batched, cached
+  // loaders so many cards mounting at once don't each fire their own IPC.
+  const previewPaths = isMulti
+    ? imageFiles.slice(0, 4)
+    : firstFile && isImageFile(firstFile)
+      ? [firstFile]
+      : [];
+  const imagePreviews = useImagePreviews(previewPaths);
+  const missingFiles = useMissingFiles(files);
 
   useEffect(() => {
     return () => {
@@ -544,9 +502,7 @@ export const EntryCard: React.FC<EntryCardProps> = ({
           <div
             ref={htmlPreviewRef}
             className={`card-html-preview${contentExpanded ? " card-html-preview--expanded" : ""}${!contentExpanded && htmlOverflows ? " card-html-preview--faded" : ""}`}
-            dangerouslySetInnerHTML={{
-              __html: sanitizeHtml(htmlFragment(entry.content)),
-            }}
+            dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         )}
         {entry.type === "file" && !isMulti && (
@@ -727,5 +683,12 @@ export const EntryCard: React.FC<EntryCardProps> = ({
     </div>
   );
 };
+
+// Memoised: with 1k+ entries mounted, an unmemoised card re-renders on every
+// parent state change (search keystroke, select-mode toggle, active-id change).
+// All callback props from the parent are useCallback-stable, so shallow prop
+// comparison is safe and effective here.
+export const EntryCard = React.memo(EntryCardImpl);
+EntryCard.displayName = "EntryCard";
 
 export default EntryCard;

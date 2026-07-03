@@ -51,6 +51,12 @@ pub struct Note {
     pub sync_status: crate::sync::types::SyncStatus,
 }
 
+impl Default for Note {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Note {
     pub fn new() -> Self {
         let now = now_ms();
@@ -79,7 +85,7 @@ fn write_binary(path: &std::path::Path, data: &[u8]) -> Result<(), std::io::Erro
 
 fn save_notes_binary(notes: &[Note], path: &std::path::Path) -> Result<(), std::io::Error> {
     let msgpack =
-        rmp_serde::to_vec(notes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        rmp_serde::to_vec(notes).map_err(std::io::Error::other)?;
     write_binary(path, &msgpack)
 }
 
@@ -117,18 +123,29 @@ impl NoteStore {
         note
     }
 
+    /// Apply `f` to the note with the given ID. Returns `true` if found.
+    fn with_note(&mut self, id: &str, f: impl FnOnce(&mut Note)) -> bool {
+        match self.notes.iter_mut().find(|n| n.id == id) {
+            Some(n) => {
+                f(n);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Update the title and content of a note. Returns `true` if found.
     pub fn update(&mut self, id: &str, title: String, content: String) -> bool {
-        if let Some(n) = self.notes.iter_mut().find(|n| n.id == id) {
+        let found = self.with_note(id, |n| {
             n.title = title;
             n.content = content;
             n.updated_at = now_ms();
+        });
+        if found {
             // Re-sort so the most recently updated note is first.
             self.notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-            true
-        } else {
-            false
         }
+        found
     }
 
     /// Delete a note by ID. Returns `true` if found.
@@ -148,32 +165,17 @@ impl NoteStore {
 
     /// Pin a note.
     pub fn pin(&mut self, id: &str) -> bool {
-        if let Some(n) = self.notes.iter_mut().find(|n| n.id == id) {
-            n.pinned = true;
-            true
-        } else {
-            false
-        }
+        self.with_note(id, |n| n.pinned = true)
     }
 
     /// Unpin a note.
     pub fn unpin(&mut self, id: &str) -> bool {
-        if let Some(n) = self.notes.iter_mut().find(|n| n.id == id) {
-            n.pinned = false;
-            true
-        } else {
-            false
-        }
+        self.with_note(id, |n| n.pinned = false)
     }
 
     /// Set groups on a note.
     pub fn set_groups(&mut self, id: &str, groups: Vec<String>) -> bool {
-        if let Some(n) = self.notes.iter_mut().find(|n| n.id == id) {
-            n.groups = groups;
-            true
-        } else {
-            false
-        }
+        self.with_note(id, |n| n.groups = groups)
     }
 
     /// Remove a group name from all notes.

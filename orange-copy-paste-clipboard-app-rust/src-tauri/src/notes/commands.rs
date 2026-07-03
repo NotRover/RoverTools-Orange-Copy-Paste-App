@@ -31,7 +31,7 @@ pub fn save_note_image(
         _ => "png",
     };
 
-    let ts = current_nanos()?;
+    let ts = current_nanos();
     let seq = IMAGE_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
     let filename = format!("note_{}_{}.{}", ts, seq, safe_ext);
     let filepath = dir.join(&filename);
@@ -51,24 +51,9 @@ pub fn save_note_file(
 ) -> Result<String, String> {
     let dir = note_attachments_dir(&app, "files")?;
 
-    let safe_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' || c == ' ' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let safe_name = safe_name.trim();
-    let safe_name = if safe_name.is_empty() {
-        "attachment".to_string()
-    } else {
-        safe_name.to_string()
-    };
+    let safe_name = sanitize_filename(&name, "attachment");
 
-    let ts = current_nanos()?;
+    let ts = current_nanos();
     let seq = IMAGE_SEQ.fetch_add(1, AtomicOrdering::Relaxed);
     let filename = format!("{}_{}_{}", ts, seq, safe_name);
     let filepath = dir.join(&filename);
@@ -112,11 +97,44 @@ fn note_attachments_dir(
     Ok(dir)
 }
 
-fn current_nanos() -> Result<u128, String> {
-    Ok(SystemTime::now()
+fn current_nanos() -> u128 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos())
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+/// Replace filesystem-unsafe characters with `_` and trim; returns `fallback`
+/// when the result is empty. Allows alphanumeric, `.`, `-`, `_`, and space.
+fn sanitize_filename(name: &str, fallback: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = safe.trim();
+    if safe.is_empty() {
+        fallback.to_string()
+    } else {
+        safe.to_string()
+    }
+}
+
+/// Mark the notes store dirty and propagate the updated note to sync.
+fn after_note_update(state: &State<'_, AppState>, id: &str) {
+    state
+        .notes_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let note = state.notes.lock().find(id).cloned();
+    let sync = state.sync_client.lock().clone();
+    if let (Some(note), Some(s)) = (note, sync) {
+        s.on_update_note(note);
+    }
 }
 
 #[tauri::command]
@@ -137,10 +155,7 @@ pub fn create_note(state: State<'_, AppState>) -> Note {
 pub fn update_note(state: State<'_, AppState>, id: String, title: String, content: String) -> bool {
     let ok = state.notes.lock().update(&id, title, content);
     if ok {
-        state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-        let note = state.notes.lock().find(&id).cloned();
-        let sync = state.sync_client.lock().clone();
-        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
+        after_note_update(&state, &id);
     }
     ok
 }
@@ -160,10 +175,7 @@ pub fn delete_note(state: State<'_, AppState>, id: String) -> bool {
 pub fn pin_note(state: State<'_, AppState>, id: String) -> bool {
     let ok = state.notes.lock().pin(&id);
     if ok {
-        state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-        let note = state.notes.lock().find(&id).cloned();
-        let sync = state.sync_client.lock().clone();
-        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
+        after_note_update(&state, &id);
     }
     ok
 }
@@ -172,10 +184,7 @@ pub fn pin_note(state: State<'_, AppState>, id: String) -> bool {
 pub fn unpin_note(state: State<'_, AppState>, id: String) -> bool {
     let ok = state.notes.lock().unpin(&id);
     if ok {
-        state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-        let note = state.notes.lock().find(&id).cloned();
-        let sync = state.sync_client.lock().clone();
-        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
+        after_note_update(&state, &id);
     }
     ok
 }
@@ -184,10 +193,7 @@ pub fn unpin_note(state: State<'_, AppState>, id: String) -> bool {
 pub fn set_note_groups(state: State<'_, AppState>, id: String, groups: Vec<String>) -> bool {
     let ok = state.notes.lock().set_groups(&id, groups);
     if ok {
-        state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-        let note = state.notes.lock().find(&id).cloned();
-        let sync = state.sync_client.lock().clone();
-        if let (Some(note), Some(s)) = (note, sync) { s.on_update_note(note); }
+        after_note_update(&state, &id);
     }
     ok
 }
@@ -214,19 +220,7 @@ pub fn export_note_text(
 ) -> Result<String, String> {
     let dir = app.path().download_dir().map_err(|e| e.to_string())?;
 
-    // Sanitize filename: allow alphanumeric, space, dash, underscore, dot.
-    let safe: String = filename
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ' ' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let safe = safe.trim().to_string();
-    let safe = if safe.is_empty() { "note.md".to_string() } else { safe };
+    let safe = sanitize_filename(&filename, "note.md");
 
     // Ensure .md extension.
     let fname = if safe.ends_with(".md") || safe.ends_with(".txt") {

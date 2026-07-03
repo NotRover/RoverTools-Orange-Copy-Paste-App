@@ -28,20 +28,12 @@ pub struct IdMap {
 
 impl IdMap {
     pub fn load(path: PathBuf) -> Self {
-        let data = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        let data = crate::sync::persist::load_json(&path);
         Self { data, path }
     }
 
     fn persist(&self) {
-        if let Some(parent) = self.path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&self.data) {
-            let _ = std::fs::write(&self.path, json);
-        }
+        crate::sync::persist::save_json(&self.path, &self.data);
     }
 
     // ── Clipboard / Note entries ──────────────────────────────────
