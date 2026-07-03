@@ -19,6 +19,7 @@ import {
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
+import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
 import NoteEditor from "./note-editor/NoteEditor";
@@ -239,6 +240,24 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     [visibleNotes],
   );
 
+  // Stable, id-based NoteCard callbacks so memoised cards don't re-render on
+  // every parent update. allVisibleIds is read through a ref to keep identity
+  // fixed across filter changes.
+  const allVisibleIdsRef = useRef(allVisibleIds);
+  allVisibleIdsRef.current = allVisibleIds;
+  const handleToggleSelect = useCallback(
+    (id: string, shiftKey: boolean) => {
+      if (shiftKey) multiSelect.selectRange(id, allVisibleIdsRef.current);
+      else multiSelect.toggleSelect(id);
+    },
+    [multiSelect.selectRange, multiSelect.toggleSelect],
+  );
+  const handleOpen = useCallback((id: string) => setEditingId(id), []);
+  const handleContextMenu = useCallback(
+    (id: string, x: number, y: number) => setMenuState({ id, x, y }),
+    [],
+  );
+
   // Prune stale selections when notes change
   useEffect(() => {
     if (!multiSelect.isSelecting) return;
@@ -256,19 +275,11 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     return () => document.removeEventListener("keydown", handler);
   }, [multiSelect.isSelecting]);
 
-  // Compute bulk state
-  const allPinned =
-    multiSelect.selectedCount > 0 &&
-    notes
-      .filter((n) => multiSelect.selectedIds.has(n.id))
-      .every((n) => n.pinned);
-  const commonGroups = (() => {
-    if (multiSelect.selectedCount === 0) return [] as string[];
-    const sel = notes.filter((n) => multiSelect.selectedIds.has(n.id));
-    if (sel.length === 0) return [] as string[];
-    const first = new Set(sel[0].groups);
-    return [...first].filter((g) => sel.every((n) => n.groups.includes(g)));
-  })();
+  // Bulk-selection state (notes have no "Saved" concept, so allSaved is unused).
+  const { allPinned, commonGroups } = useSelectionSummary(
+    notes,
+    multiSelect.selectedIds,
+  );
 
   return (
     <div
@@ -482,24 +493,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       isSelecting={multiSelect.isSelecting}
                       isSelected={multiSelect.selectedIds.has(n.id)}
                       isExpanded={expandedNoteIds.has(n.id)}
-                      onToggleSelect={(shiftKey) => {
-                        if (shiftKey) {
-                          multiSelect.selectRange(n.id, allVisibleIds);
-                        } else {
-                          multiSelect.toggleSelect(n.id);
-                        }
-                      }}
-                      onOpen={() => setEditingId(n.id)}
-                      onDelete={(e) => {
-                        e.stopPropagation();
-                        handleDelete(n.id);
-                      }}
-                      onContextMenu={(e) => {
-                        if (multiSelect.isSelecting) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setMenuState({ id: n.id, x: e.clientX, y: e.clientY });
-                      }}
+                      onToggleSelect={handleToggleSelect}
+                      onOpen={handleOpen}
+                      onDelete={handleDelete}
+                      onContextMenu={handleContextMenu}
                     />
                   )}
                 </React.Fragment>

@@ -1,24 +1,25 @@
 import React from "react";
-import type { Note } from "../../../../types";
-import { groupColor, timeAgo } from "../../../../types";
+import type { ClipboardEntry, Note } from "../../../../types";
+import { groupColor } from "../../../../types";
 import { CheckIcon, PinIcon, TrashIcon } from "../../../icons";
 import { deriveNoteTitle } from "../notes-utils";
+import { useRelativeTime } from "../../../../hooks/useRelativeTime";
 import NotePreview from "../NotePreview";
 import "./note-card.css";
 
 interface NoteCardProps {
   note: Note;
-  entries: any[];
+  entries: ClipboardEntry[];
   isSelecting: boolean;
   isSelected: boolean;
   isExpanded: boolean;
-  onToggleSelect: (shiftKey: boolean) => void;
-  onOpen: () => void;
-  onDelete: (e: React.MouseEvent) => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onToggleSelect: (id: string, shiftKey: boolean) => void;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+  onContextMenu: (id: string, x: number, y: number) => void;
 }
 
-const NoteCard: React.FC<NoteCardProps> = ({
+const NoteCardImpl: React.FC<NoteCardProps> = ({
   note,
   entries,
   isSelecting,
@@ -30,6 +31,7 @@ const NoteCard: React.FC<NoteCardProps> = ({
   onContextMenu,
 }) => {
   const content = note.content ?? "";
+  const relTime = useRelativeTime(note.updated_at);
 
   return (
     <div
@@ -40,13 +42,18 @@ const NoteCard: React.FC<NoteCardProps> = ({
       ]
         .filter(Boolean)
         .join(" ")}
-      onContextMenu={onContextMenu}
+      onContextMenu={(e) => {
+        if (isSelecting) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(note.id, e.clientX, e.clientY);
+      }}
       onClick={(e) => {
         if (isSelecting) {
-          onToggleSelect(e.shiftKey);
+          onToggleSelect(note.id, e.shiftKey);
           return;
         }
-        onOpen();
+        onOpen(note.id);
       }}
     >
       {isSelecting && (
@@ -90,13 +97,16 @@ const NoteCard: React.FC<NoteCardProps> = ({
             className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
           >
             {note.pinned && <PinIcon size={8} />}
-            {timeAgo(note.updated_at)}
+            {relTime}
           </span>
         </div>
       </div>
       <button
         className="ns-card-delete"
-        onClick={onDelete}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(note.id);
+        }}
         data-tooltip="Delete"
         data-tooltip-pos="left"
       >
@@ -105,5 +115,11 @@ const NoteCard: React.FC<NoteCardProps> = ({
     </div>
   );
 };
+
+// Memoised so a single note edit / select toggle doesn't re-render (and
+// re-walk the Tiptap preview tree of) every other card in the list. Parent
+// callbacks are id-based and useCallback-stable, so shallow comparison holds.
+const NoteCard = React.memo(NoteCardImpl);
+NoteCard.displayName = "NoteCard";
 
 export default NoteCard;

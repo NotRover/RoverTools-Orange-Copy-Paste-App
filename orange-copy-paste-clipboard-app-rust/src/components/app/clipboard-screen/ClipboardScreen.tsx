@@ -5,6 +5,7 @@ import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/Sear
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
+import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "./bulk-actions/BulkActionsBar";
 import { sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
@@ -278,33 +279,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     return () => document.removeEventListener("keydown", handler);
   }, [multiSelect.isSelecting]);
 
-  // Compute groups common to ALL selected entries (for bulk group toggle UI)
-  const commonGroups = (() => {
-    if (multiSelect.selectedCount === 0) return [] as string[];
-    const selectedEntries = entries.filter((e) =>
-      multiSelect.selectedIds.has(e.id),
-    );
-    if (selectedEntries.length === 0) return [] as string[];
-    const first = new Set(selectedEntries[0].groups);
-    return [...first].filter((g) =>
-      selectedEntries.every((e) => e.groups.includes(g)),
-    );
-  })();
-
-  // Compute whether ALL selected entries are pinned / saved
-  const allPinned = (() => {
-    if (multiSelect.selectedCount === 0) return false;
-    return entries
-      .filter((e) => multiSelect.selectedIds.has(e.id))
-      .every((e) => e.pinned);
-  })();
-
-  const allSaved = (() => {
-    if (multiSelect.selectedCount === 0) return false;
-    return entries
-      .filter((e) => multiSelect.selectedIds.has(e.id))
-      .every((e) => e.groups.includes("Saved"));
-  })();
+  // Bulk-selection state (common groups, all-pinned, all-saved) for the toolbar.
+  const { allPinned, allSaved, commonGroups } = useSelectionSummary(
+    entries,
+    multiSelect.selectedIds,
+  );
 
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
