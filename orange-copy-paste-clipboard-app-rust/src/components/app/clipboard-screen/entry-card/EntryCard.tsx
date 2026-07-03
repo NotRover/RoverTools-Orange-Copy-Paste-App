@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../../types";
 import {
   fileNameFromPath,
@@ -18,6 +18,7 @@ import { CheckIcon } from "../../../icons";
 import ChipBar from "./ChipBar";
 import VideoPlayer from "./VideoPlayer";
 import { useRelativeTime } from "../../../../hooks/useRelativeTime";
+import { useImagePreviews, useMissingFiles } from "../../../../hooks/useFileMeta";
 import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
@@ -251,11 +252,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
     }
   };
   const relTime = useRelativeTime(entry.timestamp);
-  const [imagePreviews, setImagePreviews] = useState<
-    Record<string, string | null>
-  >({});
   const [showFileList, setShowFileList] = useState(false);
-  const [missingFiles, setMissingFiles] = useState<Set<string>>(new Set());
   const [contentExpanded, setContentExpanded] = useState(false);
   const [htmlOverflows, setHtmlOverflows] = useState(false);
   const htmlPreviewRef = useRef<HTMLDivElement>(null);
@@ -275,52 +272,15 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   const entryGroups = entry.groups ?? [];
   const displayGroups = entryGroups.filter((g) => g !== "Saved");
 
-  // Load image previews for file entries (single or multi)
-  useEffect(() => {
-    if (entry.type !== "file") {
-      setImagePreviews({});
-      return;
-    }
-    const toLoad = isMulti
-      ? imageFiles.slice(0, 4)
-      : firstFile && isImageFile(firstFile)
-        ? [firstFile]
-        : [];
-    if (toLoad.length === 0) {
-      setImagePreviews({});
-      return;
-    }
-    let active = true;
-    Promise.all(
-      toLoad.map((path) =>
-        invoke<string | null>("get_image_file_preview", { path })
-          .then((p) => [path, p] as const)
-          .catch(() => [path, null] as const),
-      ),
-    ).then((results) => {
-      if (active) setImagePreviews(Object.fromEntries(results));
-    });
-    return () => {
-      active = false;
-    };
-  }, [entry.type, entry.content]);
-
-  // Check whether referenced files still exist on disk
-  useEffect(() => {
-    if (entry.type !== "file" || files.length === 0) {
-      setMissingFiles(new Set());
-      return;
-    }
-    let active = true;
-    invoke<string[]>("check_missing_files", { paths: files })
-      .then((missing) => {
-        if (active) setMissingFiles(new Set(missing));
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [entry.type, entry.content]);
+  // Image previews + missing-file checks go through shared, batched, cached
+  // loaders so many cards mounting at once don't each fire their own IPC.
+  const previewPaths = isMulti
+    ? imageFiles.slice(0, 4)
+    : firstFile && isImageFile(firstFile)
+      ? [firstFile]
+      : [];
+  const imagePreviews = useImagePreviews(previewPaths);
+  const missingFiles = useMissingFiles(files);
 
   useEffect(() => {
     return () => {
