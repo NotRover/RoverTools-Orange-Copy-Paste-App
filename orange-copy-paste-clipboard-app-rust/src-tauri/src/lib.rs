@@ -60,95 +60,85 @@ fn read_bool_setting(path: &std::path::Path, key: &str, default: bool) -> bool {
 /// Kill any other running instance of this executable before we start.
 /// This releases OS-level global hotkeys held by the old process, preventing
 /// the "HotKey already registered" panic on rapid restarts during development.
-#[cfg(windows)]
+/// Failures are silently ignored.
 fn kill_previous_instance() {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
     let exe = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_default();
-
     if exe.is_empty() {
         return;
     }
 
     let current_pid = std::process::id();
-
-    // Use tasklist (available on all Windows versions) to find PIDs for our
-    // executable, then kill any that aren't us. Failure is silently ignored.
-    let Ok(output) = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {exe}"), "/FO", "CSV", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
-        return;
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut killed = false;
-    for line in stdout.lines() {
-        // CSV lines look like: "executable.exe","12345","Console","1","10,000 K"
-        let mut parts = line.splitn(3, ',');
-        let _ = parts.next(); // executable name
-        if let Some(pid_field) = parts.next() {
-            let pid_str = pid_field.trim().trim_matches('"');
-            if let Ok(pid) = pid_str.parse::<u32>() {
-                if pid != current_pid && pid != 0 {
-                    let _ = std::process::Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/F"])
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output();
-                    killed = true;
-                }
-            }
+    for pid in list_instance_pids(&exe) {
+        if pid != current_pid && pid != 0 {
+            kill_pid(pid);
+            killed = true;
         }
     }
 
     if killed {
         // Give the OS a moment to reclaim the global hotkeys.
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        let ms = if cfg!(windows) { 400 } else { 300 };
+        std::thread::sleep(std::time::Duration::from_millis(ms));
     }
 }
 
-#[cfg(not(windows))]
-fn kill_previous_instance() {
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_default();
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    if exe.is_empty() {
-        return;
-    }
-
-    let current_pid = std::process::id();
-
-    // Use `pgrep` to find other instances.  Silently ignore failures.
-    let Ok(output) = std::process::Command::new("pgrep")
-        .args(["-x", &exe])
+/// PIDs of all running processes whose image name is `exe`.
+#[cfg(windows)]
+fn list_instance_pids(exe: &str) -> Vec<u32> {
+    use std::os::windows::process::CommandExt;
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {exe}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
     else {
-        return;
+        return Vec::new();
     };
+    // CSV lines look like: "executable.exe","12345","Console","1","10,000 K"
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            line.splitn(3, ',')
+                .nth(1)?
+                .trim()
+                .trim_matches('"')
+                .parse()
+                .ok()
+        })
+        .collect()
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut killed = false;
-    for line in stdout.lines() {
-        if let Ok(pid) = line.trim().parse::<u32>() {
-            if pid != current_pid && pid != 0 {
-                let _ = std::process::Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .output();
-                killed = true;
-            }
-        }
-    }
+#[cfg(windows)]
+fn kill_pid(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
 
-    if killed {
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
+#[cfg(not(windows))]
+fn list_instance_pids(exe: &str) -> Vec<u32> {
+    let Ok(output) = std::process::Command::new("pgrep").args(["-x", exe]).output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse().ok())
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn kill_pid(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output();
 }
 
 fn create_shared_history() -> SharedHistory {
@@ -253,36 +243,28 @@ fn setup_runtime(
         let persist = Arc::clone(&state.keep_history);
         let notes_store = Arc::clone(&state.notes);
         let notes_dirty = Arc::clone(&state.notes_dirty);
-        let app_handle = app.handle().clone();
+        // Paths are stable for the app's lifetime — resolve once, not per tick.
+        let history_file = history_file.clone();
+        let saved_file = saved_file.clone();
+        let notes_file = notes_file.clone();
 
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
 
-            // Flush clipboard history.
+            // Flush clipboard history (plus the saved-entries file).
             if persist.load(Ordering::Relaxed) && dirty.swap(false, Ordering::Relaxed) {
-                if let Some(path) = crate::clipboard::commands::get_history_file_path(&app_handle) {
-                    let _ = hist.lock().save_all_to_file(&path);
+                if let Some(hf) = &history_file {
+                    let _ = hist.lock().save_all_to_file(hf);
                 }
-                // Also keep the saved entries file up-to-date.
-                if let Some(pf) = app_handle
-                    .path()
-                    .app_data_dir()
-                    .ok()
-                    .map(|d| d.join("pinned_entries.bin"))
-                {
-                    let _ = hist.lock().save_saved_to_file(&pf);
+                if let Some(pf) = &saved_file {
+                    let _ = hist.lock().save_saved_to_file(pf);
                 }
             }
 
             // Flush notes.
             if notes_dirty.swap(false, Ordering::Relaxed) {
-                if let Some(nf) = app_handle
-                    .path()
-                    .app_data_dir()
-                    .ok()
-                    .map(|d| d.join("notes.bin"))
-                {
-                    let _ = notes_store.lock().save_to_file(&nf);
+                if let Some(nf) = &notes_file {
+                    let _ = notes_store.lock().save_to_file(nf);
                 }
             }
         });

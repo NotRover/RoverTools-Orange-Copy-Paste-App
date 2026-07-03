@@ -248,6 +248,58 @@ pub fn set_setting(
 
 // ── Bulk operations ─────────────────────────────────────────────────
 
+/// Shared tail of the bulk update commands: persist, then propagate the
+/// updated entries to sync.
+fn finish_bulk_update(
+    app: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    ids: &[String],
+    group_change: bool,
+) {
+    if group_change {
+        save_after_group_change(app, state);
+    } else {
+        auto_save_history(app, &state.history);
+    }
+    let sync = state.sync_client.lock().clone();
+    if let Some(s) = sync {
+        for id in ids {
+            if let Some(entry) = state.history.lock().find(id).cloned() {
+                s.on_update_clipboard_entry(entry);
+            }
+        }
+    }
+}
+
+/// Shared body of the bulk group commands: apply `mutate` per entry, emit
+/// `clipboard:entry-groups-changed` with the entry's resulting groups, then
+/// persist and sync. Returns the number of entries changed.
+fn bulk_modify_groups(
+    ids: &[String],
+    state: &State<'_, AppState>,
+    app: &tauri::AppHandle,
+    mutate: impl Fn(&mut crate::clipboard::history::ClipboardHistory, &str) -> bool,
+) -> u32 {
+    let mut hist = state.history.lock();
+    let mut changed = 0u32;
+    for id in ids {
+        if mutate(&mut hist, id) {
+            if let Some(e) = hist.find(id) {
+                let _ = app.emit(
+                    "clipboard:entry-groups-changed",
+                    serde_json::json!({ "id": id, "groups": e.groups }),
+                );
+            }
+            changed += 1;
+        }
+    }
+    drop(hist);
+    if changed > 0 {
+        finish_bulk_update(app, state, ids, true);
+    }
+    changed
+}
+
 /// Delete multiple entries at once. Returns the number of entries actually removed.
 #[tauri::command]
 pub fn bulk_delete_entries(
@@ -314,15 +366,7 @@ pub fn bulk_pin_entries(
 
     drop(hist);
     if changed > 0 {
-        auto_save_history(&app, &state.history);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
+        finish_bulk_update(&app, &state, &ids, false);
     }
     changed
 }
@@ -336,32 +380,9 @@ pub fn bulk_set_groups(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    let mut hist = state.history.lock();
-    let mut changed = 0u32;
-
-    for id in &ids {
-        if hist.set_groups(id, groups.clone()) {
-            let _ = app.emit(
-                "clipboard:entry-groups-changed",
-                serde_json::json!({ "id": id, "groups": &groups }),
-            );
-            changed += 1;
-        }
-    }
-
-    drop(hist);
-    if changed > 0 {
-        save_after_group_change(&app, &state);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
-    }
-    changed
+    bulk_modify_groups(&ids, &state, &app, |hist, id| {
+        hist.set_groups(id, groups.clone())
+    })
 }
 
 /// Add a single group to multiple entries (without replacing existing groups).
@@ -373,35 +394,7 @@ pub fn bulk_add_group(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    let mut hist = state.history.lock();
-    let mut changed = 0u32;
-
-    for id in &ids {
-        if hist.add_group(id, &group) {
-            if let Some(e) = hist.find(id) {
-                let groups = e.groups.clone();
-                let _ = app.emit(
-                    "clipboard:entry-groups-changed",
-                    serde_json::json!({ "id": id, "groups": groups }),
-                );
-            }
-            changed += 1;
-        }
-    }
-
-    drop(hist);
-    if changed > 0 {
-        save_after_group_change(&app, &state);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
-    }
-    changed
+    bulk_modify_groups(&ids, &state, &app, |hist, id| hist.add_group(id, &group))
 }
 
 /// Remove a single group from multiple entries.
@@ -413,35 +406,7 @@ pub fn bulk_remove_group(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> u32 {
-    let mut hist = state.history.lock();
-    let mut changed = 0u32;
-
-    for id in &ids {
-        if hist.remove_group(id, &group) {
-            if let Some(e) = hist.find(id) {
-                let groups = e.groups.clone();
-                let _ = app.emit(
-                    "clipboard:entry-groups-changed",
-                    serde_json::json!({ "id": id, "groups": groups }),
-                );
-            }
-            changed += 1;
-        }
-    }
-
-    drop(hist);
-    if changed > 0 {
-        save_after_group_change(&app, &state);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for id in &ids {
-                if let Some(entry) = state.history.lock().find(id).cloned() {
-                    s.on_update_clipboard_entry(entry);
-                }
-            }
-        }
-    }
-    changed
+    bulk_modify_groups(&ids, &state, &app, |hist, id| hist.remove_group(id, &group))
 }
 
 /// Trigger an immediate flush of the full history to disk.
