@@ -84,7 +84,12 @@ export function useMissingFiles(paths: string[]): Set<string> {
 const previewCache = new Map<string, string | null>();
 const previewInflight = new Map<string, Promise<string | null>>();
 
-function loadPreview(path: string): Promise<string | null> {
+/**
+ * Load (or return cached) base64 preview for one image path. Deduped per path
+ * and cached for the session — safe to call from many components. Resolves to
+ * null when no preview is available (or on error).
+ */
+export function loadImagePreview(path: string): Promise<string | null> {
   if (previewCache.has(path)) return Promise.resolve(previewCache.get(path)!);
   const existing = previewInflight.get(path);
   if (existing) return existing;
@@ -120,7 +125,7 @@ export function useImagePreviews(
     }
     let active = true;
     Promise.all(
-      paths.map((p) => loadPreview(p).then((res) => [p, res] as const)),
+      paths.map((p) => loadImagePreview(p).then((res) => [p, res] as const)),
     ).then((entries) => {
       if (active) setPreviews(Object.fromEntries(entries));
     });

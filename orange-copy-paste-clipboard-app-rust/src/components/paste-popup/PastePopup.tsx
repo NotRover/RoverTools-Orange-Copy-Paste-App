@@ -15,6 +15,7 @@ import {
   readTheme,
   resolveImageSrc,
 } from "../../types";
+import { loadImagePreview, useMissingFiles } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import {
   CloseIcon,
@@ -76,12 +77,22 @@ const PastePopup: React.FC = () => {
   const [filePreviews, setFilePreviews] = useState<
     Record<string, string | null>
   >({});
-  const [missingFiles, setMissingFiles] = useState<Set<string>>(new Set());
 
   const entries = useMemo(() => {
     const src = tab === "pinned" ? pinnedAll : recentAll;
     return src.slice(0, slots);
   }, [tab, recentAll, pinnedAll, slots]);
+
+  // Missing-file checks via the shared batched/cached loader — dedupes across
+  // the recent/pinned lists and survives tab switches without re-invoking.
+  const missingPaths = useMemo(
+    () =>
+      entries
+        .filter((e) => e.type === "file")
+        .flatMap((e) => getFilePaths(e.content)),
+    [entries],
+  );
+  const missingFiles = useMissingFiles(missingPaths);
 
   // Resize popup whenever entry count or expanded state changes
   useEffect(() => {
@@ -113,9 +124,9 @@ const PastePopup: React.FC = () => {
     Promise.all(
       toLoad.map((e) => {
         const path = getFilePaths(e.content)[0];
-        return invoke<string | null>("get_image_file_preview", { path })
-          .then((p) => [e.id, p ?? convertFileSrc(path)] as const)
-          .catch(() => [e.id, convertFileSrc(path)] as const);
+        return loadImagePreview(path).then(
+          (p) => [e.id, p ?? convertFileSrc(path)] as const,
+        );
       }),
     ).then((results) => {
       if (active)
@@ -124,25 +135,6 @@ const PastePopup: React.FC = () => {
           ...Object.fromEntries(results),
         }));
     });
-    return () => {
-      active = false;
-    };
-  }, [entries]);
-
-  // Check for missing files in file entries
-  useEffect(() => {
-    const fileEntries = entries.filter((e) => e.type === "file");
-    if (fileEntries.length === 0) {
-      setMissingFiles(new Set());
-      return;
-    }
-    let active = true;
-    const allPaths = fileEntries.flatMap((e) => getFilePaths(e.content));
-    invoke<string[]>("check_missing_files", { paths: allPaths })
-      .then((missing) => {
-        if (active) setMissingFiles(new Set(missing));
-      })
-      .catch(() => {});
     return () => {
       active = false;
     };
