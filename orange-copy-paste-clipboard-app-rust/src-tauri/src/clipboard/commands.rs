@@ -1,12 +1,15 @@
 //! Tauri command handlers for clipboard history operations, plus internal
 //! helpers for reading and writing clipboard content.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::Ordering;
+use std::sync::LazyLock;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
 use arboard::Clipboard;
+use parking_lot::Mutex;
 use tauri::{Emitter, Manager, State};
 
 use crate::clipboard::files::{
@@ -549,9 +552,109 @@ fn get_file_preview(
     Some(format!("data:{mime};base64,{}", B64.encode(bytes)))
 }
 
+// ── Image preview cache ──────────────────────────────────────────────
+//
+// Encoding an image preview reads the whole file and base64-encodes it. This
+// cache lets repeat requests — including from separate windows (grid, copy /
+// paste popups), which don't share JS memory — skip that work. Bounded by total
+// bytes to respect the app's file-backed / low-RAM image strategy, and keyed by
+// (path, mtime, len) so an on-disk change transparently refreshes the entry.
+const PREVIEW_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+struct PreviewEntry {
+    mtime: u64,
+    len: u64,
+    data_url: String,
+}
+
+#[derive(Default)]
+struct PreviewCache {
+    entries: HashMap<String, PreviewEntry>,
+    /// Access order, front = least-recently used.
+    order: Vec<String>,
+    bytes: usize,
+}
+
+impl PreviewCache {
+    fn detach(&mut self, path: &str) {
+        if let Some(pos) = self.order.iter().position(|p| p == path) {
+            self.order.remove(pos);
+        }
+    }
+
+    fn get(&mut self, path: &str, mtime: u64, len: u64) -> Option<String> {
+        match self.entries.get(path) {
+            Some(e) if e.mtime == mtime && e.len == len => {
+                let url = e.data_url.clone();
+                self.detach(path);
+                self.order.push(path.to_string());
+                Some(url)
+            }
+            // Missing or stale (file changed): drop any stale copy.
+            Some(_) => {
+                self.remove(path);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn remove(&mut self, path: &str) {
+        if let Some(e) = self.entries.remove(path) {
+            self.bytes -= e.data_url.len();
+            self.detach(path);
+        }
+    }
+
+    fn insert(&mut self, path: String, mtime: u64, len: u64, data_url: String) {
+        // A single item larger than the whole budget is served but not cached.
+        if data_url.len() > PREVIEW_CACHE_MAX_BYTES {
+            return;
+        }
+        self.remove(&path);
+        self.bytes += data_url.len();
+        self.entries
+            .insert(path.clone(), PreviewEntry { mtime, len, data_url });
+        self.order.push(path);
+        while self.bytes > PREVIEW_CACHE_MAX_BYTES {
+            let Some(lru) = self.order.first().cloned() else {
+                break;
+            };
+            self.remove(&lru);
+        }
+    }
+}
+
+static PREVIEW_CACHE: LazyLock<Mutex<PreviewCache>> =
+    LazyLock::new(|| Mutex::new(PreviewCache::default()));
+
+/// Current (mtime-secs, len) stamp for cache validation, or None if missing.
+fn file_stamp(path: &Path) -> Option<(u64, u64)> {
+    let md = std::fs::metadata(path).ok()?;
+    let mtime = md
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Some((mtime, md.len()))
+}
+
 #[tauri::command]
 pub fn get_image_file_preview(path: String) -> Option<String> {
-    get_file_preview(&path, mime_from_image_ext, MAX_IMAGE_PREVIEW_BYTES)
+    let stamp = file_stamp(Path::new(&path));
+    if let Some((mtime, len)) = stamp {
+        if let Some(hit) = PREVIEW_CACHE.lock().get(&path, mtime, len) {
+            return Some(hit);
+        }
+    }
+    let data_url = get_file_preview(&path, mime_from_image_ext, MAX_IMAGE_PREVIEW_BYTES)?;
+    if let Some((mtime, len)) = stamp {
+        PREVIEW_CACHE
+            .lock()
+            .insert(path, mtime, len, data_url.clone());
+    }
+    Some(data_url)
 }
 
 #[tauri::command]
