@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useClickOutside } from "../../../../hooks/useClickOutside";
 import type { ClipboardEntry } from "../../../../types";
 import { PinIcon } from "../../../entry-types/EntryTypePill";
 import {
@@ -72,16 +73,8 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
     }
   }, [groups, selectedGroup]);
 
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+  // Close on outside click (this card only mounts while open)
+  useClickOutside(cardRef, true, onClose);
 
   const validate = (
     trimmed: string,

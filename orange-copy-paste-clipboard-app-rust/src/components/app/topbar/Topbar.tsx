@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState } from "react";
+import { useClickOutside } from "../../../hooks/useClickOutside";
 import type { ClipboardEntry } from "../../../types";
 import type { SortMode } from "../sort-options";
 import { SORT_OPTIONS } from "../sort-options";
@@ -84,15 +85,7 @@ export const SortDropdown: React.FC<{
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  useClickOutside(ref, open, () => setOpen(false));
 
   return (
     <div className="sort-dropdown" ref={ref}>
@@ -178,15 +171,7 @@ export const GroupsButton: React.FC<{
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  useClickOutside(ref, open, () => setOpen(false));
 
   return (
     <div className="sort-dropdown" ref={ref}>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note, ClipboardEntry } from "../../../types";
 
 import type { SortMode } from "../sort-options";
@@ -17,6 +17,8 @@ import {
   MultiSelectIcon,
 } from "../../icons";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import { useClickOutside } from "../../../hooks/useClickOutside";
+import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
 import NoteEditor from "./note-editor/NoteEditor";
@@ -76,8 +78,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [fading, setFading] = useState(false);
-  const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const nf = useNotesFilter();
 
@@ -86,9 +86,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
   });
-  const [layout, setLayout] = useState<ClipboardLayout>(() => {
-    return (localStorage.getItem("ns-layout") as ClipboardLayout) ?? "tiles";
-  });
+  const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
+    "ns-layout",
+    "tiles",
+  );
   const [collapsedSections, setCollapsedSections] = useState({
     pinned: false,
     notes: false,
@@ -110,50 +111,42 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const mainRef = useRef<HTMLDivElement>(null);
 
   // Close filter dropdown on outside click
-  useEffect(() => {
-    if (!nf.filtersOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        nf.filterRef.current &&
-        !nf.filterRef.current.contains(e.target as Node)
-      )
-        nf.setFiltersOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [nf.filtersOpen]);
+  useClickOutside(nf.filterRef, nf.filtersOpen, () => nf.setFiltersOpen(false));
 
-  const filteredNotes = notes.filter((n) => {
-    if (nf.pinnedOnly && !n.pinned) return false;
-    if (
-      nf.selectedGroups.size > 0 &&
-      !n.groups.some((g) => nf.selectedGroups.has(g))
-    )
-      return false;
-    if (search) {
-      const q = search.toLowerCase();
+  // Filter + sort memoised so they only recompute when inputs change, not on
+  // every keystroke / select-mode toggle / resize.
+  const sortedNotes = useMemo(() => {
+    const filtered = notes.filter((n) => {
+      if (nf.pinnedOnly && !n.pinned) return false;
       if (
-        !n.title.toLowerCase().includes(q) &&
-        !stripHtml(n.content).toLowerCase().includes(q)
+        nf.selectedGroups.size > 0 &&
+        !n.groups.some((g) => nf.selectedGroups.has(g))
       )
         return false;
-    }
-    return true;
-  });
-
-  const sortedNotes = [...filteredNotes].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    switch (sort) {
-      case "oldest":
-        return a.updated_at - b.updated_at;
-      case "a-z":
-        return (a.title || "").localeCompare(b.title || "");
-      case "z-a":
-        return (b.title || "").localeCompare(a.title || "");
-      default:
-        return b.updated_at - a.updated_at;
-    }
-  });
+      if (search) {
+        const q = search.toLowerCase();
+        if (
+          !n.title.toLowerCase().includes(q) &&
+          !stripHtml(n.content).toLowerCase().includes(q)
+        )
+          return false;
+      }
+      return true;
+    });
+    return filtered.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      switch (sort) {
+        case "oldest":
+          return a.updated_at - b.updated_at;
+        case "a-z":
+          return (a.title || "").localeCompare(b.title || "");
+        case "z-a":
+          return (b.title || "").localeCompare(a.title || "");
+        default:
+          return b.updated_at - a.updated_at;
+      }
+    });
+  }, [notes, nf.pinnedOnly, nf.selectedGroups, search, sort]);
 
   const editingNote = editingId
     ? (notes.find((n) => n.id === editingId) ?? null)
@@ -225,37 +218,26 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     [onDelete, editingId],
   );
 
-  useEffect(
-    () => () => {
-      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
-    },
-    [],
+  const pinnedCount = useMemo(
+    () => sortedNotes.filter((n) => n.pinned).length,
+    [sortedNotes],
   );
-
-  const selectLayout = useCallback(
-    (l: ClipboardLayout) => {
-      if (l === layout) return;
-      setFading(true);
-      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
-      layoutTimerRef.current = setTimeout(() => {
-        setLayout(l);
-        localStorage.setItem("ns-layout", l);
-        setFading(false);
-      }, 160);
-    },
-    [layout],
-  );
-
-  const pinnedCount = sortedNotes.filter((n) => n.pinned).length;
   const showSections = pinnedCount > 0 && pinnedCount < sortedNotes.length;
-  const visibleNotes = showSections
-    ? sortedNotes.filter((n) => {
-        if (n.pinned && collapsedSections.pinned) return false;
-        if (!n.pinned && collapsedSections.notes) return false;
-        return true;
-      })
-    : sortedNotes;
-  const allVisibleIds = visibleNotes.map((n) => n.id);
+  const visibleNotes = useMemo(
+    () =>
+      showSections
+        ? sortedNotes.filter((n) => {
+            if (n.pinned && collapsedSections.pinned) return false;
+            if (!n.pinned && collapsedSections.notes) return false;
+            return true;
+          })
+        : sortedNotes,
+    [sortedNotes, showSections, collapsedSections],
+  );
+  const allVisibleIds = useMemo(
+    () => visibleNotes.map((n) => n.id),
+    [visibleNotes],
+  );
 
   // Prune stale selections when notes change
   useEffect(() => {

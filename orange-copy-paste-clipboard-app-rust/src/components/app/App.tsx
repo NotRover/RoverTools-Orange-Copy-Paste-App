@@ -1048,19 +1048,14 @@ const App: React.FC = () => {
     }
   }, [notes]);
 
-  const syncPillLabel =
+  const syncPill =
     syncConnected === true
-      ? "Sync connected"
+      ? { label: "Sync connected", modifier: "connected" }
       : syncConnected === false
-        ? "Sync offline"
-        : "Sync inactive";
-
-  const syncPillClass =
-    syncConnected === true
-      ? "sync-pill sync-pill--connected"
-      : syncConnected === false
-        ? "sync-pill sync-pill--offline"
-        : "sync-pill sync-pill--inactive";
+        ? { label: "Sync offline", modifier: "offline" }
+        : { label: "Sync inactive", modifier: "inactive" };
+  const syncPillLabel = syncPill.label;
+  const syncPillClass = `sync-pill sync-pill--${syncPill.modifier}`;
 
   return (
     <div className="app" data-theme={theme}>

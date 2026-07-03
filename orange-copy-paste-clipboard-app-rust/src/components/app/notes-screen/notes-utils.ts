@@ -31,7 +31,3 @@ export function hasMeaningfulContent(rawContent: string): boolean {
 export function isNoteExpandable(note: { content: string }): boolean {
   return contentPlainText(note.content).length > 180;
 }
-
-export function fileName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}

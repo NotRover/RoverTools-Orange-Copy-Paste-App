@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useClickOutside } from "../../../hooks/useClickOutside";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SyncUser, SyncGroup, SyncStatusInfo, SharingSession } from "../../../types";
@@ -32,14 +33,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ value, options, onChange })
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  useClickOutside(ref, open, () => setOpen(false));
 
   return (
     <div className={`settings-select-wrap${open ? " open" : ""}`} ref={ref}>

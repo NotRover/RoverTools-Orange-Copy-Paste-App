@@ -14,13 +14,14 @@ import {
 import {
   classifyFileEntry,
   deriveDisplayKind,
+  fileNameFromPath,
   filePaths,
   isImageFile,
   resolveImageSrc,
   timeAgo,
   truncateText,
 } from "../../../../../types";
-import { fileName, stripHtml } from "../../notes-utils";
+import { stripHtml } from "../../notes-utils";
 import { useEmbedContext } from "../embed-context";
 
 type EntryType = "text" | "image" | "file" | "html";
@@ -51,7 +52,7 @@ function entryLabel(
   if (entry.type === "file") {
     const paths = filePaths(entry.content);
     const kind = classifyFileEntry(entry.content);
-    return kind === "image" ? "Image file" : paths[0] ? fileName(paths[0]) : "File";
+    return kind === "image" ? "Image file" : paths[0] ? fileNameFromPath(paths[0]) : "File";
   }
   const raw =
     entry.type === "html" ? stripHtml(entry.content) : entry.content;
@@ -109,7 +110,7 @@ const PanelContent: React.FC<{
               key={p}
               className="ee-embed-panel-img"
               src={convertFileSrc(p)}
-              alt={fileName(p)}
+              alt={fileNameFromPath(p)}
             />
           ))}
           {otherFiles.length > 0 && (

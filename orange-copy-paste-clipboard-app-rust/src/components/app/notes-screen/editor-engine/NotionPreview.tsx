@@ -7,6 +7,7 @@ import type { ClipboardEntry } from "../../../../types";
 import {
   classifyFileEntry,
   deriveDisplayKind,
+  fileNameFromPath,
   filePaths,
   groupColor,
   truncateText,
@@ -25,7 +26,7 @@ const SYSTEM_GROUP_META: Record<string, { label: string; bg: string; fg: string;
   pinned: { label: "Pinned", bg: "var(--accent-dim)", fg: "var(--accent)", Icon: PinIcon },
   Saved: { label: "Saved", bg: "rgba(34, 197, 94, 0.12)", fg: "#22c55e", Icon: SaveStarIcon },
 };
-import { fileName, stripHtml } from "../notes-utils";
+import { stripHtml } from "../notes-utils";
 import {
   resolveAttachmentUrl,
   subscribeAttachmentResolver,
@@ -256,7 +257,7 @@ function getLabel(id: string, entry: ClipboardEntry | undefined): string {
   if (entry.type === "file") {
     const paths = filePaths(entry.content);
     const kind = classifyFileEntry(entry.content);
-    return kind === "image" ? "Image file" : paths[0] ? fileName(paths[0]) : "File";
+    return kind === "image" ? "Image file" : paths[0] ? fileNameFromPath(paths[0]) : "File";
   }
   const raw =
     entry.type === "html" ? stripHtml(entry.content) : entry.content;
