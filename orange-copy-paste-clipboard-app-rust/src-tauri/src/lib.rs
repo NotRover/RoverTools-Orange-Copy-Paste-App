@@ -104,7 +104,7 @@ fn list_instance_pids(exe: &str) -> Vec<u32> {
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
-            line.splitn(3, ',')
+            line.split(',')
                 .nth(1)?
                 .trim()
                 .trim_matches('"')

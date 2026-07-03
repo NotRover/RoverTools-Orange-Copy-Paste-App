@@ -51,6 +51,12 @@ pub struct Note {
     pub sync_status: crate::sync::types::SyncStatus,
 }
 
+impl Default for Note {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Note {
     pub fn new() -> Self {
         let now = now_ms();
@@ -79,7 +85,7 @@ fn write_binary(path: &std::path::Path, data: &[u8]) -> Result<(), std::io::Erro
 
 fn save_notes_binary(notes: &[Note], path: &std::path::Path) -> Result<(), std::io::Error> {
     let msgpack =
-        rmp_serde::to_vec(notes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        rmp_serde::to_vec(notes).map_err(std::io::Error::other)?;
     write_binary(path, &msgpack)
 }
 

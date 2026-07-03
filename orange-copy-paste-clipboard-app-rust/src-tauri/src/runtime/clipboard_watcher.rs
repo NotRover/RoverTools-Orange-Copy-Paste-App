@@ -85,7 +85,7 @@ pub(crate) fn after_new_entry(
         history.lock().add_group(&entry.id, "Saved");
     }
     let _ = app.emit("clipboard:new-entry", entry);
-    crate::clipboard::commands::auto_save_history(app, history);
+    crate::clipboard::commands::auto_save_history(app);
     let sync = state.sync_client.lock().clone();
     if let Some(s) = sync {
         s.on_new_clipboard_entry(entry.clone());

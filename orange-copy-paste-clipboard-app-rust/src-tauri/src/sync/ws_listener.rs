@@ -138,47 +138,27 @@ impl WsListener {
             return;
         };
 
-        match msg.event.as_str() {
-            "sync:entry" => {
-                // Entry pushed by another device. Emit to frontend for merge.
-                // The frontend invokes a Rust command to decrypt & insert.
-                let _ = self.app.emit("sync:remote-entry", &msg.payload);
-            }
-            "sync:delete" => {
-                let _ = self.app.emit("sync:remote-delete", &msg.payload);
-            }
-            "settings:updated" => {
-                // Another device changed settings — pull and apply.
-                let _ = self.app.emit("sync:settings-updated", &msg.payload);
-            }
-            "device:online" | "device:offline" => {
-                let _ = self.app.emit("sync:device-presence", &msg.payload);
-            }
-            "group:rekey" => {
-                let _ = self.app.emit("sync:group-rekey", &msg.payload);
-            }
-            "sharing:invite" => {
-                let _ = self.app.emit("sharing:invite-received", &msg.payload);
-            }
-            "sharing:accepted" => {
-                let _ = self.app.emit("sharing:accepted", &msg.payload);
-            }
-            "sharing:ended" => {
-                let _ = self.app.emit("sharing:ended", &msg.payload);
-            }
-            "sharing:member_left" => {
-                let _ = self.app.emit("sharing:member-left", &msg.payload);
-            }
-            "sharing:scope_changed" => {
-                let _ = self.app.emit("sharing:scope-changed", &msg.payload);
-            }
-            "ping" => {
-                // Server keepalive — pong is handled at the Message::Ping level above.
-                // Some servers also send text "ping".
-            }
+        // Server event → frontend event.  Every event is forwarded verbatim;
+        // the frontend owns the decrypt/merge/apply logic.
+        let emitted = match msg.event.as_str() {
+            "sync:entry" => "sync:remote-entry",
+            "sync:delete" => "sync:remote-delete",
+            "settings:updated" => "sync:settings-updated",
+            "device:online" | "device:offline" => "sync:device-presence",
+            "group:rekey" => "sync:group-rekey",
+            "sharing:invite" => "sharing:invite-received",
+            "sharing:accepted" => "sharing:accepted",
+            "sharing:ended" => "sharing:ended",
+            "sharing:member_left" => "sharing:member-left",
+            "sharing:scope_changed" => "sharing:scope-changed",
+            // Server keepalive — pong is handled at the Message::Ping level
+            // above.  Some servers also send text "ping".
+            "ping" => return,
             other => {
                 eprintln!("[sync:ws] unknown event: {other}");
+                return;
             }
-        }
+        };
+        let _ = self.app.emit(emitted, &msg.payload);
     }
 }

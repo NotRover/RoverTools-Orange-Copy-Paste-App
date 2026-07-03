@@ -7,20 +7,17 @@ use serde::{Deserialize, Serialize};
 /// Tracks whether a clipboard entry or note has been pushed to the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SyncStatus {
     /// Pushed and confirmed by the server (server_id is set).
     Synced,
     /// Queued in sync_pending.json, waiting for connectivity.
     Pending,
     /// Sync disabled or entry predates sync enrollment.
+    #[default]
     LocalOnly,
 }
 
-impl Default for SyncStatus {
-    fn default() -> Self {
-        Self::LocalOnly
-    }
-}
 
 // ── User & auth ─────────────────────────────────────────────────────
 
@@ -43,6 +40,7 @@ pub struct SyncGroup {
 // ── Sync status info ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct SyncStatusInfo {
     pub connected: bool,
     pub last_synced_at: Option<u64>,
@@ -50,16 +48,6 @@ pub struct SyncStatusInfo {
     pub skipped_count: usize,
 }
 
-impl Default for SyncStatusInfo {
-    fn default() -> Self {
-        Self {
-            connected: false,
-            last_synced_at: None,
-            pending_count: 0,
-            skipped_count: 0,
-        }
-    }
-}
 
 // ── Live Share (real-time cross-user sharing) ────────────────────────
 

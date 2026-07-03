@@ -84,7 +84,7 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
-        auto_save_history(&app, &state.history);
+        auto_save_history(&app);
         // Tombstone must propagate to sync even when offline (invariant #5)
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
@@ -107,7 +107,7 @@ pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool 
         .collect();
 
     state.history.lock().clear();
-    auto_save_history(&app, &state.history);
+    auto_save_history(&app);
 
     if !deleted_ids.is_empty() {
         let sync = state.sync_client.lock().clone();
@@ -162,7 +162,7 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
         }
     };
     if success {
-        auto_save_history(app, &state.history);
+        auto_save_history(app);
         let _ = app.emit(
             "clipboard:entry-pinned",
             serde_json::json!({ "id": id, "pinned": pin }),
@@ -259,7 +259,7 @@ fn finish_bulk_update(
     if group_change {
         save_after_group_change(app, state);
     } else {
-        auto_save_history(app, &state.history);
+        auto_save_history(app);
     }
     let sync = state.sync_client.lock().clone();
     if let Some(s) = sync {
@@ -319,7 +319,7 @@ pub fn bulk_delete_entries(
     }
     drop(hist);
     if removed > 0 {
-        auto_save_history(&app, &state.history);
+        auto_save_history(&app);
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
             for id in deleted_ids {
@@ -472,13 +472,13 @@ fn save_after_group_change(app: &tauri::AppHandle, state: &State<'_, AppState>) 
     if let Some(path) = get_saved_file_path(app) {
         let _ = state.history.lock().save_saved_to_file(&path);
     }
-    auto_save_history(app, &state.history);
+    auto_save_history(app);
 }
 
 /// Mark the history as needing a flush to disk.  The actual I/O happens on
 /// a background timer (~2 s) so rapid clipboard changes are coalesced into a
 /// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
-pub(crate) fn auto_save_history(app: &tauri::AppHandle, _history: &crate::SharedHistory) {
+pub(crate) fn auto_save_history(app: &tauri::AppHandle) {
     let state: tauri::State<'_, AppState> = app.state();
     if state.keep_history.load(Ordering::Relaxed) {
         state.history_dirty.store(true, Ordering::Relaxed);
@@ -625,7 +625,7 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
                     // File-backed image: write as CF_HDROP so the paste target
                     // receives the file directly — no image decode or pixel
                     // conversion, matching Explorer-copy performance.
-                    write_files_to_clipboard(&[entry.content.clone()])?;
+                    write_files_to_clipboard(std::slice::from_ref(&entry.content))?;
                 }
             }
             #[cfg(not(windows))]
