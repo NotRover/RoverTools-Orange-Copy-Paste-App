@@ -97,10 +97,11 @@ function groupByDay(entries: ClipboardEntry[]): DayGroup[] {
   }));
 }
 
-// How many cards to render initially and per "load more" step as the user
-// scrolls. Keeps the DOM light with large histories instead of mounting every
-// entry up front. Grows on scroll via an IntersectionObserver sentinel.
-const RENDER_PAGE_SIZE = 100;
+// Progressive rendering keeps the DOM light with large histories instead of
+// mounting every entry up front. Render a solid first screenful, then grow in
+// small steps as the user scrolls (smaller steps feel smoother than big jumps).
+const RENDER_INITIAL_COUNT = 200;
+const RENDER_PAGE_SIZE = 50;
 
 // Clipboard Screen
 
@@ -157,8 +158,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  // Progressive rendering window (see RENDER_PAGE_SIZE).
-  const [visibleCount, setVisibleCount] = useState(RENDER_PAGE_SIZE);
+  // Progressive rendering window (see RENDER_INITIAL_COUNT / RENDER_PAGE_SIZE).
+  const [visibleCount, setVisibleCount] = useState(RENDER_INITIAL_COUNT);
   const viewportRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -230,7 +231,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     ],
   );
   useEffect(() => {
-    setVisibleCount(RENDER_PAGE_SIZE);
+    setVisibleCount(RENDER_INITIAL_COUNT);
     viewportRef.current?.scrollTo({ top: 0 });
   }, [viewKey]);
 
