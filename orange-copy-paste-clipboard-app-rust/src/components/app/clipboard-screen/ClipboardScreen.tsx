@@ -3,6 +3,8 @@ import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import { useClickOutside } from "../../../hooks/useClickOutside";
+import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import BulkActionsBar from "./bulk-actions/BulkActionsBar";
 import { sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
@@ -145,14 +147,13 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onBulkRemoveGroup,
   activeClipboardId,
 }) => {
-  const [layout, setLayout] = useState<ClipboardLayout>(() => {
-    return (localStorage.getItem("sc-layout") as ClipboardLayout) ?? "tiles";
-  });
+  const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
+    "sc-layout",
+    "tiles",
+  );
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("sc-sort") as SortMode) ?? "newest";
   });
-  const [fading, setFading] = useState(false);
-  const layoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   // Progressive rendering window (see RENDER_PAGE_SIZE).
@@ -314,33 +315,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     });
   };
 
-  useEffect(() => {
-    return () => {
-      if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
-    };
-  }, []);
-
   // Close filter dropdown on outside click
-  useEffect(() => {
-    if (!sf.filtersOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (sf.filterRef.current && !sf.filterRef.current.contains(e.target as Node))
-        sf.setFiltersOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [sf.filtersOpen]);
-
-  const selectLayout = (l: ClipboardLayout) => {
-    if (l === layout) return;
-    setFading(true);
-    if (layoutTimerRef.current) clearTimeout(layoutTimerRef.current);
-    layoutTimerRef.current = setTimeout(() => {
-      setLayout(l);
-      localStorage.setItem("sc-layout", l);
-      setFading(false);
-    }, 160);
-  };
+  useClickOutside(sf.filterRef, sf.filtersOpen, () => sf.setFiltersOpen(false));
 
   if (entries.length === 0) {
     return (

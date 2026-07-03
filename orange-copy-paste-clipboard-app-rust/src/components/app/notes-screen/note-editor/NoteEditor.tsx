@@ -41,7 +41,7 @@ import {
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
-import { groupColor, timeAgo, truncateText } from "../../../../types";
+import { fileNameFromPath, groupColor, timeAgo, truncateText } from "../../../../types";
 import {
   CloseIcon,
   TrashIcon,
@@ -446,8 +446,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         text: markdown,
         filename: `${safeTitle}.md`,
       });
-      const name = savedPath.replace(/\\/g, "/").split("/").pop() ?? "note.md";
-      showToast(`Saved: ${name}`);
+      showToast(`Saved: ${fileNameFromPath(savedPath)}`);
     } catch (err) {
       console.error("[notes] export failed", err);
       showToast("Export failed");

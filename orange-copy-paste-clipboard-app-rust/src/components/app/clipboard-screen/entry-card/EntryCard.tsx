@@ -7,7 +7,6 @@ import {
   isImageFile,
   isVideoFile,
   truncateText,
-  timeAgo,
   deriveDisplayKind,
   htmlFragment,
   imageDisplayName,
@@ -18,10 +17,10 @@ import CardMenu from "../../card-menu/CardMenu";
 import { CheckIcon } from "../../../icons";
 import ChipBar from "./ChipBar";
 import VideoPlayer from "./VideoPlayer";
+import { useRelativeTime } from "../../../../hooks/useRelativeTime";
 import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
-const REL_TIME_REFRESH_MS = 15_000;
 const TEXT_PREVIEW_LENGTH = 160;
 
 // Allow-list based HTML sanitiser for safe rendering of rich-text clipboard
@@ -251,7 +250,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
       );
     }
   };
-  const [relTime, setRelTime] = useState(timeAgo(entry.timestamp));
+  const relTime = useRelativeTime(entry.timestamp);
   const [imagePreviews, setImagePreviews] = useState<
     Record<string, string | null>
   >({});
@@ -322,14 +321,6 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
       active = false;
     };
   }, [entry.type, entry.content]);
-
-  useEffect(() => {
-    const timer = setInterval(
-      () => setRelTime(timeAgo(entry.timestamp)),
-      REL_TIME_REFRESH_MS,
-    );
-    return () => clearInterval(timer);
-  }, [entry.timestamp]);
 
   useEffect(() => {
     return () => {
