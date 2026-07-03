@@ -350,17 +350,21 @@ pub fn write_image_bytes_to_clipboard(raw_bytes: &[u8]) -> Result<(), String> {
     dib.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
     dib.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
 
-    // Pixel rows:  RGBA top-down → BGRA bottom-up
-    for y in (0..height).rev() {
-        let row_start = y * row_bytes;
-        for x in 0..width {
-            let i = row_start + x * 4;
-            dib.push(rgba[i + 2]); // B
-            dib.push(rgba[i + 1]); // G
-            dib.push(rgba[i]); // R
-            dib.push(rgba[i + 3]); // A
+    // Pixel rows:  RGBA top-down → BGRA bottom-up.  Row-wise slice copies
+    // instead of per-byte pushes so large images convert quickly.
+    let mut pixels = vec![0u8; pixel_bytes];
+    for (dst_row, src_row) in pixels
+        .chunks_exact_mut(row_bytes)
+        .zip(rgba.chunks_exact(row_bytes).rev())
+    {
+        for (dst, src) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+            dst[0] = src[2]; // B
+            dst[1] = src[1]; // G
+            dst[2] = src[0]; // R
+            dst[3] = src[3]; // A
         }
     }
+    dib.extend_from_slice(&pixels);
 
     //  Prepare registered "PNG" blob.
     // If the source bytes are already PNG we reuse them directly (zero copy).

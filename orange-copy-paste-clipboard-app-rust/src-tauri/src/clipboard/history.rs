@@ -150,7 +150,7 @@ fn save_entries_binary(
     path: &std::path::Path,
 ) -> Result<(), std::io::Error> {
     let msgpack = rmp_serde::to_vec(entries)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     write_binary_file(path, &msgpack)
 }
 
