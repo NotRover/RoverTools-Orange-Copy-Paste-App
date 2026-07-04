@@ -73,6 +73,14 @@ export interface SyncStatusInfo {
   last_synced_at?: number;
 }
 
+export interface SyncDevice {
+  id: string;
+  device_name: string;
+  platform: string;
+  app_version: string;
+  last_seen_at: number;
+}
+
 // ── Group tag colors ────────────────────────────────────────────────
 
 export const GROUP_COLORS: { bg: string; fg: string }[] = [

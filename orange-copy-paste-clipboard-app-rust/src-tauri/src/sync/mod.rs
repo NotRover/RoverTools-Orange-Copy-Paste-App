@@ -18,6 +18,7 @@ pub mod crypto;
 pub mod id_map;
 pub mod pending_queue;
 pub(crate) mod persist;
+pub mod supabase;
 pub mod sync_state;
 pub mod types;
 pub mod ws_listener;
@@ -30,12 +31,18 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 use zeroize::Zeroizing;
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
+
 use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
-use crate::sync::client::{PushEntryRequest, SyncHttpClient};
+use crate::sync::client::{
+    BlobUploadRequest, DistributeKeysRequest, PushEntryRequest, RegisterDeviceRequest,
+    SyncHttpClient, WrappedKeyEntry,
+};
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
+use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{EntryType, ShareScope, SharingSession, SyncStatusInfo, SyncUser};
 use crate::sync::ws_listener::WsListener;
@@ -57,10 +64,63 @@ struct PushJob {
     client_id: String,
     content: String,
     metadata_json: String,
-    /// "clipboard" | "notes"
+    /// Backend wire discriminator: "clipboard" | "note".
     entry_type: &'static str,
     kind: String,
+    created_at: u64,
+    updated_at: u64,
+    pinned: bool,
     group_ids: Vec<String>,
+    /// Blob storage key + ciphertext size for image entries; `None` for text.
+    blob_key: Option<String>,
+    blob_size: Option<u64>,
+}
+
+/// Decode a base64 X25519 public key into a fixed 32-byte array.
+fn decode_pubkey(b64: &str) -> Option<[u8; 32]> {
+    B64.decode(b64).ok()?.try_into().ok()
+}
+
+/// Fields needed to materialize a downloaded image blob into the history store.
+struct ImageMergeMeta {
+    client_id: String,
+    server_id: String,
+    blob_key: String,
+    mime: String,
+    label: Option<String>,
+    groups: Vec<String>,
+    created_at: u64,
+    pinned: bool,
+}
+
+/// Current Unix time in milliseconds.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Build a tombstone push for `client_id`.  Deletions have no dedicated route:
+/// the server keys entries by `(client_id, entry_type)`, so a push with
+/// `deleted_at` set marks the row deleted and always wins LWW.  The content is
+/// an encrypted empty string because the server requires a non-null ciphertext.
+fn tombstone_req(umk: &[u8; 32], client_id: &str, entry_type: &str) -> Option<PushEntryRequest> {
+    let ts = now_ms();
+    Some(PushEntryRequest {
+        client_id: client_id.to_string(),
+        entry_type: entry_type.to_string(),
+        kind: String::new(),
+        encrypted_content: crypto::encrypt(umk, "", client_id).ok()?,
+        encrypted_metadata: crypto::encrypt(umk, "{}", client_id).ok()?,
+        created_at: ts,
+        updated_at: ts,
+        pinned: false,
+        deleted_at: Some(ts),
+        blob_key: None,
+        blob_size: None,
+        group_ids: Vec::new(),
+    })
 }
 
 // ── SyncClient ───────────────────────────────────────────────────────
@@ -69,6 +129,9 @@ pub struct SyncClient {
     pub server_url: String,
     app: tauri::AppHandle,
     app_data: PathBuf,
+
+    /// Supabase Auth (GoTrue) handle — owns identity/login/refresh.
+    supabase: Arc<SupabaseAuth>,
 
     /// User Master Key — in memory only, zeroed on logout or drop.
     umk: Mutex<Option<Zeroizing<[u8; 32]>>>,
@@ -104,7 +167,7 @@ pub struct SyncClient {
 
 impl SyncClient {
     /// Create a new `SyncClient`.  Does not authenticate — call
-    /// [`initialize_after_login`] after a successful `sync_login` command.
+    /// [`Self::perform_login`] from the `sync_login` command to sign in.
     pub fn new(app: tauri::AppHandle, config: SyncConfig) -> Result<Self, String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -160,10 +223,16 @@ impl SyncClient {
             });
         }
 
+        let supabase = Arc::new(SupabaseAuth::new(
+            &config.supabase_url,
+            &config.supabase_anon_key,
+        ));
+
         Ok(Self {
             server_url: config.server_url,
             app,
             app_data,
+            supabase,
             umk: Mutex::new(None),
             user: Mutex::new(None),
             http: Mutex::new(None),
@@ -182,47 +251,125 @@ impl SyncClient {
 
     // ── Auth lifecycle ────────────────────────────────────────────
 
-    /// Wire up state after a successful login response from the server.
-    pub fn initialize_after_login(
+    /// Full login flow against Supabase Auth + our backend:
+    ///   1. Supabase password grant (access + refresh tokens, user id).
+    ///   2. `POST /auth/bootstrap` → KDF salt + display name.
+    ///   3. Derive the UMK from password + salt (deterministic per account).
+    ///   4. Generate a device keypair and register the device → device_id.
+    ///   5. Persist secrets (device key + refresh token) to the OS keychain.
+    ///   6. Wire in-memory state and start the WebSocket listener.
+    pub async fn perform_login(
         &self,
-        user: SyncUser,
-        access_token: String,
-        refresh_token: &str,
-        kdf_salt_b64: &str,
+        email: String,
+        password: String,
+        device_name: String,
+    ) -> Result<SyncUser, String> {
+        let session = self.supabase.sign_in_password(&email, &password).await?;
+        self.finalize_session(session, &email, &password, device_name)
+            .await
+    }
+
+    /// Register a new account with Supabase, then finalize the session.  When
+    /// the project requires email confirmation, no session is issued yet and an
+    /// explanatory error is returned so the UI can prompt the user to confirm.
+    pub async fn perform_signup(
+        &self,
+        email: String,
+        password: String,
+        device_name: String,
+    ) -> Result<SyncUser, String> {
+        match self.supabase.sign_up(&email, &password).await? {
+            SignUpOutcome::Session(session) => {
+                self.finalize_session(*session, &email, &password, device_name)
+                    .await
+            }
+            SignUpOutcome::ConfirmationRequired => {
+                Err("Account created — check your email to confirm it, then log in.".into())
+            }
+        }
+    }
+
+    /// Shared post-authentication flow for both login and signup.
+    async fn finalize_session(
+        &self,
+        session: SupabaseSession,
+        email: &str,
         password: &str,
-        device_id: &str,
-    ) -> Result<(), String> {
-        use base64::{engine::general_purpose::STANDARD as B64, Engine};
-        let kdf_salt = B64.decode(kdf_salt_b64).map_err(|e| format!("kdf_salt b64: {e}"))?;
+        device_name: String,
+    ) -> Result<SyncUser, String> {
+        let user_id = session.user.id.clone();
+        let user_email = if session.user.email.is_empty() {
+            email.to_string()
+        } else {
+            session.user.email.clone()
+        };
+
+        // 2. Build the authenticated backend client.
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        http.set_access_token(session.access_token);
+        http.set_refresh_token(session.refresh_token.clone());
+        http.set_user_id(user_id.clone());
+
+        // 3. Ensure a profile exists and fetch the KDF salt; derive the UMK.
+        let boot = http.bootstrap(None).await?;
+        let kdf_salt = B64
+            .decode(&boot.kdf_salt)
+            .map_err(|e| format!("kdf_salt b64: {e}"))?;
         let umk = crypto::derive_umk(password, &kdf_salt);
 
-        // Generate and store device keypair
-        let (priv_key, _pub_key) = crypto::generate_device_keypair();
-        crypto::store_device_private_key(&user.user_id, &priv_key)?;
-        crypto::store_refresh_token(&user.user_id, refresh_token)?;
+        // 4. Register this device (fresh X25519 keypair for group key exchange).
+        let (device_priv, device_pub) = crypto::generate_device_keypair();
+        let dev = http
+            .register_device(RegisterDeviceRequest {
+                device_name,
+                platform: std::env::consts::OS.to_string(),
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                device_pubkey: Some(B64.encode(device_pub)),
+            })
+            .await?;
+        http.set_device_id(dev.device_id.clone());
 
-        // Update sync state
+        // 5. Register public keys for E2E group-key exchange.  The identity key
+        //    is derived from the UMK (identical on every device), so we register
+        //    its public half alongside this device's public key.  Best-effort:
+        //    a failure here only disables group sharing, not core sync.
+        let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
+        if let Err(e) = http
+            .register_keys(client::RegisterKeysRequest {
+                identity_pubkey: B64.encode(identity_pub),
+                device_pubkey: B64.encode(device_pub),
+            })
+            .await
         {
-            let mut state = self.sync_state.lock();
-            state.set_device_id(device_id);
-            state.set_user_id(&user.user_id);
+            eprintln!("[sync] register_keys failed (group sharing disabled): {e}");
         }
 
-        // Set in-memory state
+        // 6. Persist secrets to the OS keychain.
+        crypto::store_device_private_key(&user_id, &device_priv)?;
+        crypto::store_refresh_token(&user_id, &session.refresh_token)?;
+
+        // 7. Update persisted sync state.
+        {
+            let mut state = self.sync_state.lock();
+            state.set_device_id(&dev.device_id);
+            state.set_user_id(&user_id);
+        }
+
+        // 8. Wire in-memory state.
+        let user = SyncUser {
+            user_id,
+            email: user_email,
+            display_name: boot.display_name,
+        };
         *self.umk.lock() = Some(umk);
-
-        let http = SyncHttpClient::new(self.server_url.clone());
-        http.set_access_token(access_token);
-        http.set_user_id(user.user_id.clone());
         *self.http.lock() = Some(Arc::clone(&http));
-
-        *self.user.lock() = Some(user);
+        *self.user.lock() = Some(user.clone());
         self.status.lock().connected = true;
 
-        // Start WebSocket listener
+        // 9. Start the realtime listener.
         self.start_ws_listener();
 
-        Ok(())
+        Ok(user)
     }
 
     /// Clear all in-memory state and delete keychain entries.
@@ -241,10 +388,7 @@ impl SyncClient {
         }
 
         if let Some(http) = self.http.lock().take() {
-            let http2 = Arc::clone(&http);
-            self.handle.spawn(async move {
-                let _ = http2.logout().await;
-            });
+            http.logout();
         }
 
         *self.user.lock() = None;
@@ -347,16 +491,6 @@ impl SyncClient {
         }
     }
 
-    /// Live Share group IDs whose scope matches `scope_matches`.
-    fn session_group_ids(&self, scope_matches: impl Fn(&SharingSession) -> bool) -> Vec<String> {
-        self.sharing_sessions
-            .lock()
-            .iter()
-            .filter(|s| scope_matches(s))
-            .map(|s| s.share_group_id.clone())
-            .collect()
-    }
-
     fn spawn_push_clipboard_entry(
         &self,
         entry: ClipboardEntry,
@@ -364,7 +498,9 @@ impl SyncClient {
         is_update: bool,
     ) {
         let ctx = self.push_ctx();
-        let group_ids = self.session_group_ids(|s| s.my_scope.includes_clipboard());
+        // Shared entries encrypt under the session Group Key (§15.2); personal
+        // ones under the UMK.
+        let (enc_key, group_ids) = self.share_target(umk, |s| s.my_scope.includes_clipboard());
 
         self.handle.spawn(async move {
             // Skip file entries larger than 5 MB (Phase 7 enforcement)
@@ -392,21 +528,48 @@ impl SyncClient {
                 "label": entry.label,
             })
             .to_string();
+
+            // Image entries store their (encrypted) bytes in a blob and keep only
+            // a small descriptor inline; text/html/file keep content inline.
+            let (content, blob_key, blob_size) = if entry.kind == EntryKind::Image {
+                let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) else {
+                    return; // image sync needs connectivity — nothing to queue
+                };
+                match upload_image_blob(http, &enc_key, &entry.id, &entry.content).await {
+                    Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
+                    Err(e) => {
+                        eprintln!("[sync] image blob upload failed: {e}");
+                        ctx.status.lock().skipped_count += 1;
+                        return;
+                    }
+                }
+            } else {
+                (entry.content, None, None)
+            };
+
             let job = PushJob {
                 client_id: entry.id.clone(),
-                content: entry.content,
+                content,
                 metadata_json,
                 entry_type: "clipboard",
                 kind: entry.kind.label().to_string(),
+                // Clipboard content is immutable; use its capture time as
+                // created_at and "now" as the last-write-wins clock so pin /
+                // group edits (which fire on_update) always win server-side.
+                created_at: entry.timestamp,
+                updated_at: now_ms(),
+                pinned: entry.pinned,
                 group_ids,
+                blob_key,
+                blob_size,
             };
-            push_entry_task(ctx, umk, is_update, job).await;
+            push_entry_task(ctx, enc_key, is_update, job).await;
         });
     }
 
     fn spawn_push_note(&self, note: Note, umk: Zeroizing<[u8; 32]>, is_update: bool) {
         let ctx = self.push_ctx();
-        let group_ids = self.session_group_ids(|s| s.my_scope.includes_notes());
+        let (enc_key, group_ids) = self.share_target(umk, |s| s.my_scope.includes_notes());
 
         self.handle.spawn(async move {
             let metadata_json = serde_json::json!({
@@ -419,16 +582,22 @@ impl SyncClient {
                 client_id: note.id.clone(),
                 content: note.content,
                 metadata_json,
-                entry_type: "notes",
+                entry_type: "note",
                 kind: "note".into(),
+                created_at: note.created_at,
+                updated_at: note.updated_at,
+                pinned: note.pinned,
                 group_ids,
+                blob_key: None,
+                blob_size: None,
             };
-            push_entry_task(ctx, umk, is_update, job).await;
+            push_entry_task(ctx, enc_key, is_update, job).await;
         });
     }
 
     fn spawn_delete_entry(&self, client_id: String, entry_type: EntryType) {
         let http = self.http.lock().clone();
+        let umk = self.umk.lock().clone();
         let queue = Arc::clone(&self.pending_queue);
         let id_map = Arc::clone(&self.id_map);
         let status = Arc::clone(&self.status);
@@ -436,30 +605,216 @@ impl SyncClient {
         let map_key = format!("{type_str}:{client_id}");
 
         self.handle.spawn(async move {
-            // Always tombstone — even if offline (invariant #5)
-            if let Some(http) = http.as_ref().filter(|h| h.is_authenticated()) {
-                let server_id = {
-                    let map = id_map.lock();
-                    map.get_server_id(&map_key).map(|s| s.to_string())
-                };
-                if let Some(server_id) = server_id {
-                    match http.delete_entry(&server_id).await {
-                        Ok(()) => {
+            // Always tombstone — even if offline (invariant #5).  A tombstone is
+            // a push with deleted_at set, keyed by client_id (no server_id).
+            if let (Some(http), Some(umk)) =
+                (http.as_ref().filter(|h| h.is_authenticated()), umk.as_ref())
+            {
+                if let Some(req) = tombstone_req(umk, &client_id, &type_str) {
+                    match http.push_entries(vec![req]).await {
+                        Ok(_) => {
                             id_map.lock().remove_entry(&map_key);
                             status.lock().pending_count = queue.lock().len();
                             return;
                         }
-                        Err(e) => eprintln!("[sync] delete failed: {e}"),
+                        Err(e) => eprintln!("[sync] tombstone push failed: {e}"),
                     }
                 }
             }
-            // Queue tombstone for later
+            // Offline / not logged in — queue the tombstone for the next flush.
             queue.lock().push(PendingOp::Delete {
                 client_id,
                 entry_type: type_str,
             });
             status.lock().pending_count = queue.lock().len();
         });
+    }
+
+    // ── Pull merge ────────────────────────────────────────────────
+
+    /// Decrypt a batch of pulled entries and merge them into the local stores.
+    ///
+    /// Writes **directly** to the history / notes stores (never through the
+    /// command hooks) so a merge never echoes back as a new push.  Tombstones
+    /// remove the local entry; live entries upsert by id (which is the shared
+    /// `client_id`).  Image/file clipboard bodies live in blobs and are skipped
+    /// until blob download is wired (Phase 5).
+    pub(crate) fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry]) {
+        use std::sync::atomic::Ordering;
+        let Some(umk) = self.umk_clone() else {
+            return;
+        };
+        let state = self.app.state::<crate::state::AppState>();
+        let my_device = self.sync_state.lock().data.device_id.clone();
+
+        let mut clip_changed = false;
+        let mut notes_changed = false;
+
+        for e in entries {
+            // Skip entries this device originated (echoed back over the user
+            // channel); they are already present locally.
+            if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
+                continue;
+            }
+            let is_note = e.entry_type == "note";
+
+            // Tombstone → remove locally.
+            if e.deleted_at.is_some() {
+                if is_note {
+                    notes_changed |= state.notes.lock().delete(&e.client_id);
+                } else {
+                    clip_changed |= state.history.lock().remove(&e.client_id);
+                }
+                self.id_map.lock().remove_entry(&format!(
+                    "{}:{}",
+                    if is_note { "note" } else { "clipboard" },
+                    e.client_id
+                ));
+                continue;
+            }
+
+            // Shared entries are encrypted under the session Group Key; personal
+            // ones under the UMK.  Choose per entry by its group tags.
+            let content_key = self.decryption_key_for(&umk, &e.group_ids);
+            let Ok(content) = crypto::decrypt(&content_key, &e.encrypted_content, &e.client_id)
+            else {
+                eprintln!("[sync] merge: decrypt content failed for {}", e.client_id);
+                continue;
+            };
+            let meta: serde_json::Value = e
+                .encrypted_metadata
+                .as_ref()
+                .and_then(|m| crypto::decrypt(&content_key, m, &e.client_id).ok())
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or(serde_json::Value::Null);
+            let groups: Vec<String> = meta
+                .get("groups")
+                .and_then(|g| serde_json::from_value(g.clone()).ok())
+                .unwrap_or_default();
+
+            if is_note {
+                let title = meta
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                state.notes.lock().upsert_synced(Note {
+                    id: e.client_id.clone(),
+                    title,
+                    content,
+                    created_at: e.created_at,
+                    updated_at: e.updated_at,
+                    pinned: e.pinned,
+                    groups,
+                    server_id: Some(e.server_id.clone()),
+                    sync_status: crate::sync::types::SyncStatus::Synced,
+                });
+                notes_changed = true;
+            } else {
+                let kind = EntryKind::from_label(e.kind.as_deref().unwrap_or("text"));
+                let label = meta.get("label").and_then(|l| l.as_str()).map(str::to_string);
+                // Image bodies live in a blob: download + decrypt + materialize
+                // asynchronously (this fn is sync).  `content` here is the small
+                // descriptor `{"mime":...}` we stored inline at push time.
+                if kind == EntryKind::Image {
+                    if let Some(blob_key) = e.blob_key.clone() {
+                        if let Some(http) = self.http.lock().clone() {
+                            let mime = serde_json::from_str::<serde_json::Value>(&content)
+                                .ok()
+                                .and_then(|v| v.get("mime").and_then(|m| m.as_str()).map(String::from))
+                                .unwrap_or_else(|| "image/png".into());
+                            self.spawn_blob_image_merge(
+                                http,
+                                content_key.clone(),
+                                ImageMergeMeta {
+                                    client_id: e.client_id.clone(),
+                                    server_id: e.server_id.clone(),
+                                    blob_key,
+                                    mime,
+                                    label,
+                                    groups,
+                                    created_at: e.created_at,
+                                    pinned: e.pinned,
+                                },
+                            );
+                        }
+                    }
+                    continue;
+                }
+                // File-content sync is not wired (paths are machine-specific);
+                // file entries remain local-only on the receiving device.
+                if kind == EntryKind::File {
+                    continue;
+                }
+                state.history.lock().upsert_synced(ClipboardEntry {
+                    id: e.client_id.clone(),
+                    kind,
+                    content,
+                    timestamp: e.created_at,
+                    pinned: e.pinned,
+                    groups,
+                    label,
+                    content_hash: None,
+                    server_id: Some(e.server_id.clone()),
+                    sync_status: crate::sync::types::SyncStatus::Synced,
+                });
+                clip_changed = true;
+            }
+
+            let key = format!(
+                "{}:{}",
+                if is_note { "note" } else { "clipboard" },
+                e.client_id
+            );
+            self.id_map.lock().set_entry(&key, &e.server_id);
+        }
+
+        if clip_changed {
+            state.history.lock().sort_recent();
+            state.history_dirty.store(true, Ordering::Relaxed);
+            let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
+        }
+        if notes_changed {
+            state.notes.lock().sort_recent();
+            state.notes_dirty.store(true, Ordering::Relaxed);
+            let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
+        }
+    }
+
+    /// Apply a `sync:delete` event (keyed only by `server_id`) by removing the
+    /// matching local entry from whichever store holds it.  Best-effort — the
+    /// primary delete path is a tombstone `sync:entry` (keyed by client_id).
+    pub(crate) fn apply_remote_delete(&self, server_id: &str) {
+        use std::sync::atomic::Ordering;
+        let state = self.app.state::<crate::state::AppState>();
+
+        let clip_id = state
+            .history
+            .lock()
+            .all()
+            .iter()
+            .find(|e| e.server_id.as_deref() == Some(server_id))
+            .map(|e| e.id.clone());
+        if let Some(id) = clip_id {
+            if state.history.lock().remove(&id) {
+                state.history_dirty.store(true, Ordering::Relaxed);
+                let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
+            }
+        }
+
+        let note_id = state
+            .notes
+            .lock()
+            .all()
+            .iter()
+            .find(|n| n.server_id.as_deref() == Some(server_id))
+            .map(|n| n.id.clone());
+        if let Some(id) = note_id {
+            if state.notes.lock().delete(&id) {
+                state.notes_dirty.store(true, Ordering::Relaxed);
+                let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
+            }
+        }
     }
 
     // ── Manual sync trigger ───────────────────────────────────────
@@ -476,11 +831,11 @@ impl SyncClient {
         for op in ops {
             match op {
                 PendingOp::Push { entry_json, .. } | PendingOp::Update { entry_json, .. } => {
-                    if let Ok(req) =
-                        serde_json::from_str::<PushEntryRequest>(&entry_json)
-                    {
-                        if let Ok(responses) = http.push_entries(vec![req]).await {
-                            for r in responses {
+                    if let Ok(req) = serde_json::from_str::<PushEntryRequest>(&entry_json) {
+                        if let Ok(result) = http.push_entries(vec![req]).await {
+                            for r in result.accepted {
+                                // client_id is unique across types; the row is
+                                // keyed by (client_id, entry_type) server-side.
                                 let key = format!("clipboard:{}", r.client_id);
                                 self.id_map.lock().set_entry(&key, &r.server_id);
                             }
@@ -488,14 +843,13 @@ impl SyncClient {
                     }
                 }
                 PendingOp::Delete { client_id, entry_type } => {
-                    let key = format!("{entry_type}:{client_id}");
-                    let server_id = {
-                        let map = self.id_map.lock();
-                        map.get_server_id(&key).map(|s| s.to_string())
-                    };
-                    if let Some(sid) = server_id {
-                        let _ = http.delete_entry(&sid).await;
-                        self.id_map.lock().remove_entry(&key);
+                    if let Some(umk) = self.umk_clone() {
+                        if let Some(req) = tombstone_req(&umk, &client_id, &entry_type) {
+                            let _ = http.push_entries(vec![req]).await;
+                            self.id_map
+                                .lock()
+                                .remove_entry(&format!("{entry_type}:{client_id}"));
+                        }
                     }
                 }
             }
@@ -507,7 +861,7 @@ impl SyncClient {
         loop {
             match http.pull_entries(cursor, 200).await {
                 Ok(pull) => {
-                    // TODO: decrypt entries, merge into local store, emit events
+                    self.merge_pulled(&pull.entries);
                     if let Some(last) = pull.entries.last() {
                         let ts = last.server_ts;
                         self.sync_state.lock().set_last_server_ts(ts);
@@ -577,6 +931,256 @@ impl SyncClient {
         self.id_map.lock().set_group(name, server_id);
     }
 
+    /// Spawn a background flush + delta pull on the sync runtime.  Called right
+    /// after login so a freshly-signed-in device catches up without blocking
+    /// the `sync_login` command's return.
+    pub fn trigger_initial_sync(self: Arc<Self>) {
+        let handle = self.handle.clone();
+        handle.spawn(async move {
+            if let Err(e) = self.flush_and_pull().await {
+                eprintln!("[sync] initial sync failed: {e}");
+            }
+        });
+    }
+
+    // ── Group key exchange (§7.4) ─────────────────────────────────
+
+    /// Derive this user's identity keypair `(private, public)` from the
+    /// in-memory UMK.  Identical on every device; `None` when logged out.
+    pub fn identity_keypair(&self) -> Option<(Zeroizing<[u8; 32]>, [u8; 32])> {
+        let umk = self.umk_clone()?;
+        Some(crypto::derive_identity_keypair(&umk))
+    }
+
+    /// The cached Group Key for a session, if we currently hold one.
+    fn session_group_key(&self, share_group_id: &str) -> Option<[u8; 32]> {
+        self.sharing_sessions
+            .lock()
+            .iter()
+            .find(|s| s.share_group_id == share_group_id)
+            .and_then(|s| s.group_key)
+    }
+
+    /// Store the Group Key for a session, preserving an existing session's
+    /// scope/members or creating a placeholder if we don't know it yet.  Kept
+    /// in memory only (never persisted); Live Share keys are ephemeral.
+    pub(crate) fn set_session_group_key(&self, share_group_id: &str, key: [u8; 32]) {
+        let mut guard = self.sharing_sessions.lock();
+        if let Some(s) = guard.iter_mut().find(|s| s.share_group_id == share_group_id) {
+            s.group_key = Some(key);
+        } else {
+            guard.push(SharingSession {
+                share_group_id: share_group_id.to_string(),
+                name: String::new(),
+                my_scope: ShareScope::Both,
+                members: Vec::new(),
+                group_key: Some(key),
+            });
+        }
+    }
+
+    /// Pick the content-encryption key + fan-out target for an outgoing entry.
+    /// If the user is in a Live Share session (matching `want`) whose Group Key
+    /// we hold, encrypt under that key and tag the entry with that group;
+    /// otherwise it's a personal entry encrypted under the UMK (no group_ids).
+    fn share_target(
+        &self,
+        umk: Zeroizing<[u8; 32]>,
+        want: impl Fn(&SharingSession) -> bool,
+    ) -> (Zeroizing<[u8; 32]>, Vec<String>) {
+        let guard = self.sharing_sessions.lock();
+        match guard.iter().find(|s| want(s) && s.group_key.is_some()) {
+            Some(s) => (
+                Zeroizing::new(s.group_key.expect("checked is_some")),
+                vec![s.share_group_id.clone()],
+            ),
+            None => (umk, Vec::new()),
+        }
+    }
+
+    /// The key to decrypt a pulled entry: a session Group Key when the entry is
+    /// tagged with a session we hold a key for, else the personal UMK.
+    fn decryption_key_for(
+        &self,
+        umk: &Zeroizing<[u8; 32]>,
+        group_ids: &[String],
+    ) -> Zeroizing<[u8; 32]> {
+        group_ids
+            .iter()
+            .find_map(|gid| self.session_group_key(gid).map(Zeroizing::new))
+            .unwrap_or_else(|| umk.clone())
+    }
+
+    /// Owner side (`sharing:accepted`): a member joined our Live Share.  Wrap
+    /// our cached Group Key against their identity key and distribute it via
+    /// `POST /groups/{id}/keys` (fans back out to them as `group:rekey`).
+    pub(crate) fn handle_sharing_accepted(self: &Arc<Self>, payload: &serde_json::Value) {
+        let share_group_id = payload
+            .get("share_group_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let member = payload.get("new_member");
+        let member_id = member
+            .and_then(|m| m.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let member_pub_b64 = member
+            .and_then(|m| m.get("identity_pubkey"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let Some(group_key) = self.session_group_key(&share_group_id) else {
+            eprintln!("[sync] sharing:accepted for unknown/keyless session {share_group_id}");
+            return;
+        };
+        let (Some((id_priv, _)), Some(member_pub_b64)) =
+            (self.identity_keypair(), member_pub_b64)
+        else {
+            eprintln!("[sync] sharing:accepted: member {member_id} has no identity key yet");
+            return;
+        };
+        let Some(http) = self.http.lock().clone() else {
+            return;
+        };
+
+        let this = Arc::clone(self);
+        self.handle.spawn(async move {
+            let Some(member_pub) = decode_pubkey(&member_pub_b64) else {
+                return;
+            };
+            let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
+            let wrapped = match crypto::wrap_key(&shared, &group_key) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("[sync] wrap group key: {e}");
+                    return;
+                }
+            };
+            let req = DistributeKeysRequest {
+                wrapped_keys: vec![WrappedKeyEntry {
+                    user_id: member_id.clone(),
+                    wrapped_group_key: wrapped,
+                }],
+            };
+            match http.distribute_group_keys(&share_group_id, req).await {
+                Ok(()) => {
+                    let _ = this.app.emit(
+                        "sharing:member-joined",
+                        serde_json::json!({ "share_group_id": share_group_id, "user_id": member_id }),
+                    );
+                }
+                Err(e) => eprintln!("[sync] distribute group key failed: {e}"),
+            }
+        });
+    }
+
+    /// Member side (`group:rekey`): the owner sent us a Group Key wrapped
+    /// against our identity key.  Unwrap with `X25519(my_priv, sender_pubkey)`
+    /// and cache it so matching entries encrypt/decrypt under it.
+    pub(crate) fn handle_group_rekey(&self, payload: &serde_json::Value) {
+        let group_id = payload
+            .get("group_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let wrapped = payload
+            .get("wrapped_group_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let sender_pub_b64 = payload
+            .get("sender_pubkey")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let (Some((id_priv, _)), Some(sender_pub_b64)) =
+            (self.identity_keypair(), sender_pub_b64)
+        else {
+            eprintln!("[sync] group:rekey for {group_id} missing keys");
+            return;
+        };
+        let Some(sender_pub) = decode_pubkey(&sender_pub_b64) else {
+            return;
+        };
+        let shared = crypto::x25519_shared_secret(&id_priv, &sender_pub);
+        match crypto::unwrap_key(&shared, &wrapped) {
+            Ok(key) => {
+                self.set_session_group_key(&group_id, *key);
+                let _ = self.app.emit(
+                    "sharing:key-received",
+                    serde_json::json!({ "share_group_id": group_id }),
+                );
+            }
+            Err(e) => eprintln!("[sync] unwrap group key for {group_id} failed: {e}"),
+        }
+    }
+
+    /// Download, decrypt, and materialize an image blob to the images dir, then
+    /// upsert the entry into history.  Runs on the background runtime because
+    /// `merge_pulled` (its caller) is synchronous.  A download failure (e.g. a
+    /// blob owned by another Live Share member — download URLs are owner-only)
+    /// is logged and skipped, not fatal.
+    fn spawn_blob_image_merge(
+        &self,
+        http: Arc<SyncHttpClient>,
+        key: Zeroizing<[u8; 32]>,
+        meta: ImageMergeMeta,
+    ) {
+        use std::sync::atomic::Ordering;
+        let app = self.app.clone();
+        let images_dir = self
+            .app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|d| d.join("images"));
+        let id_map = Arc::clone(&self.id_map);
+
+        self.handle.spawn(async move {
+            let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
+                eprintln!("[sync] image blob {} download-url failed (skipped)", meta.blob_key);
+                return;
+            };
+            let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
+                return;
+            };
+            let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
+                eprintln!("[sync] image blob {} decrypt failed", meta.client_id);
+                return;
+            };
+            let Some(dir) = images_dir else { return };
+            if std::fs::create_dir_all(&dir).is_err() {
+                return;
+            }
+            let path = dir.join(format!("{}.{}", meta.client_id, ext_for_mime(&meta.mime)));
+            if std::fs::write(&path, &bytes).is_err() {
+                return;
+            }
+
+            let state = app.state::<crate::state::AppState>();
+            state.history.lock().upsert_synced(ClipboardEntry {
+                id: meta.client_id.clone(),
+                kind: EntryKind::Image,
+                content: path.to_string_lossy().to_string(),
+                timestamp: meta.created_at,
+                pinned: meta.pinned,
+                groups: meta.groups,
+                label: meta.label,
+                content_hash: None,
+                server_id: Some(meta.server_id.clone()),
+                sync_status: crate::sync::types::SyncStatus::Synced,
+            });
+            state.history.lock().sort_recent();
+            state.history_dirty.store(true, Ordering::Relaxed);
+            id_map
+                .lock()
+                .set_entry(&format!("clipboard:{}", meta.client_id), &meta.server_id);
+            let _ = app.emit("sync:history-merged", serde_json::Value::Null);
+        });
+    }
+
     pub fn http(&self) -> Option<Arc<SyncHttpClient>> {
         self.http.lock().clone()
     }
@@ -586,26 +1190,101 @@ impl SyncClient {
     }
 }
 
+/// Resolve an image entry's raw bytes + MIME type.  `content` is either a
+/// `data:<mime>;base64,…` URL (fresh capture) or an on-disk path (externalized).
+fn read_image_bytes(content: &str) -> Result<(Vec<u8>, String), String> {
+    if let Some(pos) = content.find(";base64,") {
+        let mime = content.get(5..pos).unwrap_or("image/png").to_string();
+        let raw = B64
+            .decode(&content[pos + 8..])
+            .map_err(|e| format!("image b64: {e}"))?;
+        Ok((raw, mime))
+    } else {
+        let bytes = std::fs::read(content).map_err(|e| format!("read image file: {e}"))?;
+        Ok((bytes, mime_from_path(content)))
+    }
+}
+
+/// Guess an image MIME type from a file path extension.
+fn mime_from_path(path: &str) -> String {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    }
+    .to_string()
+}
+
+/// File extension for an image MIME type (for the materialized filename).
+fn ext_for_mime(mime: &str) -> &'static str {
+    match mime {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        _ => "png",
+    }
+}
+
+/// Encrypt an image entry's bytes and upload them as a blob.  Returns
+/// `(blob_key, ciphertext_size, descriptor_json)` — the descriptor (`{"mime":…}`)
+/// is what gets stored inline as the entry's `encrypted_content`.
+async fn upload_image_blob(
+    http: &SyncHttpClient,
+    enc_key: &[u8; 32],
+    client_id: &str,
+    content: &str,
+) -> Result<(String, u64, String), String> {
+    let (bytes, mime) = read_image_bytes(content)?;
+    let ciphertext = crypto::encrypt_bytes(enc_key, &bytes, client_id)?;
+    let size = ciphertext.len() as u64;
+    let checksum = crypto::sha256_hex(&ciphertext);
+    let up = http
+        .request_blob_upload(BlobUploadRequest {
+            mime_type: mime.clone(),
+            size_bytes: size,
+            checksum,
+        })
+        .await?;
+    http.upload_blob_bytes(&up.presigned_put_url, ciphertext).await?;
+    http.confirm_blob_upload(&up.blob_key).await?;
+    let descriptor = serde_json::json!({ "mime": mime }).to_string();
+    Ok((up.blob_key, size, descriptor))
+}
+
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
-/// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.
-async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
+/// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.  `enc_key`
+/// is the session Group Key for shared entries or the UMK for personal ones.
+async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
     let PushJob {
         client_id,
         content,
         metadata_json,
         entry_type,
         kind,
+        created_at,
+        updated_at,
+        pinned,
         group_ids,
+        blob_key,
+        blob_size,
     } = job;
 
-    let encrypted_content = match crypto::encrypt(&umk, &content, &client_id) {
+    let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[sync] {entry_type} encrypt content: {e}");
             return;
         }
     };
-    let encrypted_metadata = match crypto::encrypt(&umk, &metadata_json, &client_id) {
+    let encrypted_metadata = match crypto::encrypt(&enc_key, &metadata_json, &client_id) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("[sync] {entry_type} encrypt metadata: {e}");
@@ -615,19 +1294,24 @@ async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool
 
     let push_req = PushEntryRequest {
         client_id: client_id.clone(),
-        encrypted_content,
-        encrypted_metadata,
         entry_type: entry_type.into(),
         kind,
-        blob_key: None,
+        encrypted_content,
+        encrypted_metadata,
+        created_at,
+        updated_at,
+        pinned,
+        deleted_at: None,
+        blob_key,
+        blob_size,
         group_ids,
     };
 
     if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {
         match http.push_entries(vec![push_req.clone()]).await {
-            Ok(responses) => {
-                if let Some(r) = responses.into_iter().find(|r| r.client_id == client_id) {
-                    if entry_type == "notes" {
+            Ok(result) => {
+                if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
+                    if entry_type == "note" {
                         ctx.id_map
                             .lock()
                             .set_entry(&format!("note:{client_id}"), &r.server_id);

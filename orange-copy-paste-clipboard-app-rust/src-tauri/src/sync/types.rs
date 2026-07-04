@@ -35,6 +35,28 @@ pub struct SyncGroup {
     pub id: String,
     pub name: String,
     pub member_count: u32,
+    /// Present after create / for owners; used to share the group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_code: Option<String>,
+}
+
+// ── Blob quota ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncQuota {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
+}
+
+// ── Devices (presence UI) ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncDevice {
+    pub id: String,
+    pub device_name: String,
+    pub platform: String,
+    pub app_version: String,
+    pub last_seen_at: u64,
 }
 
 // ── Sync status info ────────────────────────────────────────────────
@@ -119,10 +141,11 @@ pub enum EntryType {
 }
 
 impl EntryType {
+    /// Backend wire discriminator — `"clipboard"` or `"note"` (singular).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Clipboard => "clipboard",
-            Self::Notes => "notes",
+            Self::Notes => "note",
         }
     }
 }

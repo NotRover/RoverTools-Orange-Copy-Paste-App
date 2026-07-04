@@ -378,6 +378,7 @@ pub fn run() {
             crate::notes::commands::export_note_text,
             // Cloud sync commands
             crate::sync::commands::sync_login,
+            crate::sync::commands::sync_signup,
             crate::sync::commands::sync_logout,
             crate::sync::commands::sync_get_user,
             crate::sync::commands::sync_get_status,
@@ -391,6 +392,8 @@ pub fn run() {
             crate::sync::commands::sync_create_group,
             crate::sync::commands::sync_join_group,
             crate::sync::commands::sync_leave_group,
+            crate::sync::commands::sync_get_quota,
+            crate::sync::commands::sync_list_devices,
             crate::sync::commands::sharing_invite,
             crate::sync::commands::sharing_accept,
             crate::sync::commands::sharing_get_sessions,

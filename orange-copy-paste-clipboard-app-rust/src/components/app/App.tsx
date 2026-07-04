@@ -344,6 +344,50 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Reload local state whenever the sync engine merges entries from another
+  // device. Rust holds the UMK, so it decrypts + writes the store directly
+  // (on delta pull and on live WebSocket fan-out) and then emits these events;
+  // the UI just re-reads the now-updated store.
+  useEffect(() => {
+    let cancelled = false;
+    const win = getCurrentWindow();
+    const unlisteners: Array<() => void> = [];
+
+    const track = (p: Promise<() => void>) => {
+      p.then((fn) => {
+        if (cancelled) fn();
+        else unlisteners.push(fn);
+      });
+    };
+
+    track(
+      win.listen("sync:history-merged", () => {
+        invoke<ClipboardEntry[]>("get_history").then((h) => {
+          if (!cancelled) setEntries(h);
+        });
+      }),
+    );
+    track(
+      win.listen("sync:notes-merged", () => {
+        invoke<Note[]>("get_notes").then((ns) => {
+          if (!cancelled) setNotes(ns);
+        });
+      }),
+    );
+    // Another device changed settings: pull the new blob (which re-emits
+    // `sync:settings`, applied by the effect below).
+    track(
+      win.listen("sync:settings-updated", () => {
+        invoke("sync_pull_settings").catch(() => {});
+      }),
+    );
+
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, []);
+
   // Re-sync with the Rust history whenever the main window regains focus or
   // becomes visible. This is a safety-net: if an event was missed for any
   // reason, the clipboard screen catches up as soon as the user switches back
