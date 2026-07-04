@@ -168,26 +168,30 @@ src-tauri/
 └── capabilities/default.json
 
 src/
-├── types.ts                    # Shared types (ClipboardEntry, helpers)
+├── types.ts                    # Shared types (ClipboardEntry, AppScreen, helpers)
+├── hooks/                      # Shared React hooks (see "Shared Hooks" below)
 ├── components/
 │   ├── app/
 │   │   ├── index.html          # Main window HTML entry
 │   │   ├── App.tsx             # Root component, state management, event listeners
 │   │   ├── App.css
 │   │   ├── sidebar/            # Navigation sidebar
-│   │   ├── clipboard-screen/   # Main history view (tiles/list, day groups)
+│   │   ├── clipboard-screen/   # Main history view (tiles/list, day groups; progressive render)
 │   │   │   ├── bulk-actions/   # Multi-select actions bar
 │   │   │   ├── group-manager/  # Group CRUD card
 │   │   │   ├── search-filter/  # Search + filters panel
-│   │   │   ├── topbar/         # Sort/layout/filter/group controls
-│   │   │   └── entry-card/     # Individual entry cards (text/image/file)
-│   │   ├── notes-screen/       # Notes UI (editor, list, filters, groups)
-│   │   ├── settings-screen/    # User preferences (paste slots, notifications)
+│   │   │   └── entry-card/     # Entry cards (EntryCard, ChipBar, VideoPlayer)
+│   │   ├── topbar/             # Sort/layout/filter/group controls (shared)
+│   │   ├── notes-screen/       # Notes UI (editor-engine, list, filters, groups)
+│   │   ├── sync-screen/        # Cloud sync + Live Share content browser (Phase 6/8)
+│   │   ├── settings-screen/    # User preferences + Cloud Sync controls
 │   │   ├── shortcuts-screen/   # Keyboard shortcut reference
 │   │   ├── card-menu/          # Right-click context menu (portal)
 │   │   ├── status-pill/        # Entry count summary bar
 │   │   ├── toast/              # Toast notifications (undo clear)
 │   │   └── tooltip/            # Tooltip portal
+│   ├── entry-types/            # EntryTypePill (shared type badge)
+│   ├── splash/                 # SplashScreen (startup)
 │   ├── copy-popup/
 │   │   ├── copy-popup.html     # Copy popup HTML entry
 │   │   ├── CopyPopup.tsx       # Copy confirmation popup (preview, pin, delete)
@@ -329,6 +333,10 @@ ClipboardEntry {
 | `get_video_file_preview`   | `(path) → Option<String>`     | Read video file → data-URL (max 36 MB)                                                               |
 | `check_missing_files`      | `(paths) → Vec<String>`       | Returns paths that do not exist (used by paste popup before paste)                                   |
 
+`get_image_file_preview` results are served from a bounded in-process **LRU cache**
+(~32 MB, keyed by path + mtime + length) so repeated previews across the grid and the
+copy/paste popups don't re-read the file — see `src-tauri/src/clipboard/commands.rs`.
+
 #### `notes/commands.rs` — Notes Command Handlers
 
 | Command                  | Signature                     | Description                     |
@@ -342,6 +350,10 @@ ClipboardEntry {
 | `set_note_groups`        | `(id, groups) → bool`         | Replace note groups             |
 | `purge_group_from_notes` | `(group) → ()`                | Remove a group from all notes   |
 | `rename_group_in_notes`  | `(old_name, new_name) → ()`   | Rename a group across all notes |
+| `save_note_image`        | `(bytes, ext) → String`       | Save an image attachment; returns its stored path |
+| `save_note_file`         | `(bytes, name) → String`      | Save a file attachment; returns its stored path |
+| `get_note_attachments_dirs` | `() → NoteAttachmentDirs`  | Return the note image/file attachment directories |
+| `export_note_text`       | `(text, filename) → String`   | Export a note's plain text to a file |
 
 **Internal helpers:**
 
@@ -528,7 +540,7 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `sync_login`           | `(email, password, device_name) → Result<SyncUser>` | Sign in via **Supabase Auth**; `POST /auth/bootstrap` (derive UMK from `kdf_salt`); `POST /auth/devices` (register device); cache the Supabase session |
 | `sync_logout`          | `() → ()`                                           | Sign out of Supabase; clear UMK; optionally deactivate the device                        |
 | `sync_get_user`        | `() → Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
-| `sync_get_status`      | `() → SyncStatus`                                   | `{ connected, last_synced_at, pending_count }`                                           |
+| `sync_get_status`      | `() → SyncStatusInfo`                               | `{ connected, pending_count, skipped_count, last_synced_at }`                            |
 | `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
 | `sync_set_enabled`     | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                                 |
 | `sync_set_server_url`  | `(url: String) → ()`                                | Override default server URL (self-hosted)                                                |
@@ -721,11 +733,24 @@ interface ClipboardEntry {
   label?: string; // e.g. "Image Mar 17, 2:45 PM"
 }
 
-type AppScreen = "clipboard" | "notes" | "shortcuts" | "settings";
+type AppScreen = "clipboard" | "notes" | "sync" | "shortcuts" | "settings";
 type AppTheme = "dark" | "light";
 ```
 
 Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `fileExtension()`, `fileNameFromPath()`, `isImageFile()`, `isVideoFile()`, `isDocumentFile()`, `isUrl()`, `classifyFileEntry()`, `deriveDisplayKind()`, `imageDisplayName()`, `resolveImageSrc()`, `htmlFragment()`, `htmlPlainText()`, `groupColorIndex()`, `groupColor()`, `setGroupColorIndex()`, `removeGroupColor()`, `renameGroupColor()`.
+
+### Shared Hooks
+
+Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen logic and cut re-renders:
+
+| Hook | Purpose |
+| --- | --- |
+| `useClickOutside` | Dismiss dropdowns/menus on an outside click |
+| `useMultiSelect` | Multi-select state (selected ids, toggle, range-select, clear) |
+| `useSelectionSummary` | Derived counts/metadata for the current selection |
+| `useRelativeTime` | Relative timestamps driven by one shared ticker (not a timer per card) |
+| `useLayoutTransition` | Animate the tiles ↔ list layout change |
+| `useFileMeta` | Batched + cached file preview / missing-file lookups (dedupes IPC across cards and popups) |
 
 ### Main App
 
@@ -761,6 +786,8 @@ The main history view. Entries are grouped by day ("Today", "Yesterday", "Mar 6"
 - **Day groups**: Collapsible with animated transitions.
 - **Toolbar**: Sort dropdown + layout toggle + clear-all button.
 - **Empty state**: Placeholder with Ctrl+Shift+C hint.
+- **Progressive rendering**: renders `RENDER_INITIAL_COUNT = 200` cards upfront and grows by `RENDER_PAGE_SIZE = 50` as the user scrolls (IntersectionObserver, ~600px `rootMargin`), so 1k+ histories stay responsive; a "You're all caught up" footer appears at the true end.
+- **Memoized cards**: `EntryCard` (and `NoteCard`) are wrapped in `React.memo`, so typing in search or toggling selection no longer re-renders the whole list.
 
 #### Entry Card (`EntryCard.tsx`)
 
@@ -816,6 +843,15 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Pinning and groups**: Pin notes and assign shared group tags.
 - **Filtering**: Search and filter notes by query, groups, date range, and pin state.
 - **Bulk actions**: Multi-select delete/pin/group operations.
+
+#### Sync Screen (`SyncScreen.tsx`)
+
+A dedicated sidebar screen (`screen === "sync"`) for **browsing synced & shared
+content**: joined shared groups and active Live Share sessions, with the clipboard/
+note entries in each rendered using the same preview components as the clipboard
+screen (its own search, sort, and tiles/list layout). Account-level sync management —
+login/logout, enable toggle, server URL, connected devices, create/join group, and
+Live Share invite/scope/leave/end — lives in the Settings screen's Cloud Sync section.
 
 #### Shortcuts Screen (`ShortcutsScreen.tsx`)
 
