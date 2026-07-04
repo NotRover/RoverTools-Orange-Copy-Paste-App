@@ -119,10 +119,11 @@ pub enum EntryType {
 }
 
 impl EntryType {
+    /// Backend wire discriminator — `"clipboard"` or `"note"` (singular).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Clipboard => "clipboard",
-            Self::Notes => "notes",
+            Self::Notes => "note",
         }
     }
 }

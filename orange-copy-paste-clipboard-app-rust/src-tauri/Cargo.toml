@@ -38,6 +38,7 @@ rmp-serde = "1"
 
 # Ergonomic lock primitives (no poisoning, direct lock() → MutexGuard)
 parking_lot = "0.12"
+uuid = { version = "1.23.4", features = ["v4"] }
 
 #  Windows-only  key simulation (keybd_event / GetCursorPos / monitor info)
 [target.'cfg(windows)'.dependencies]

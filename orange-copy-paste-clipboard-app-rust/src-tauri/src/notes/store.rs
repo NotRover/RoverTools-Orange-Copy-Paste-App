@@ -61,7 +61,8 @@ impl Note {
     pub fn new() -> Self {
         let now = now_ms();
         Self {
-            id: NEXT_NOTE_ID.fetch_add(1, Ordering::Relaxed).to_string(),
+            // Globally-unique so it doubles as the cross-device sync client_id.
+            id: uuid::Uuid::new_v4().to_string(),
             title: String::new(),
             content: String::new(),
             created_at: now,

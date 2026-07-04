@@ -64,36 +64,80 @@ pub struct RegisterKeysRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PushEntryRequest {
     pub client_id: String,
+    /// Backend discriminator: `"clipboard"` | `"note"` (singular).
+    pub entry_type: String,
+    /// `"text" | "image" | "html" | "file"` for clipboard; `"note"` for notes.
+    pub kind: String,
     pub encrypted_content: String,
     pub encrypted_metadata: String,
-    pub entry_type: String,
-    pub kind: String,
-    /// For file entries: first file's blob_key; otherwise None.
+    /// Unix ms — set once on insert.
+    pub created_at: u64,
+    /// Unix ms — the last-write-wins clock; a push wins only when strictly newer.
+    pub updated_at: u64,
+    #[serde(default)]
+    pub pinned: bool,
+    /// Unix ms when this entry was deleted (tombstone); `None` for live entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<u64>,
+    /// For file/image entries: the blob's storage key; otherwise None.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_key: Option<String>,
-    /// Live Share group UUIDs this entry should fan out to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob_size: Option<u64>,
+    /// Live Share / pool group UUIDs this entry should fan out to.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub group_ids: Vec<String>,
 }
 
+/// Request body for `POST /sync/push` — the backend expects `{ "entries": [...] }`.
+#[derive(Debug, Serialize)]
+struct PushBody<'a> {
+    entries: &'a [PushEntryRequest],
+}
+
 #[derive(Debug, Deserialize)]
-pub struct PushEntryResponse {
+pub struct AcceptedEntry {
     pub client_id: String,
     pub server_id: String,
     pub server_ts: u64,
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ConflictEntry {
+    pub client_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PushResult {
+    pub accepted: Vec<AcceptedEntry>,
+    pub conflicts: Vec<ConflictEntry>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PulledEntry {
+    #[serde(rename = "id")]
     pub server_id: String,
     pub client_id: String,
-    pub encrypted_content: String,
-    pub encrypted_metadata: String,
     pub entry_type: String,
-    pub kind: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+    pub encrypted_content: String,
+    #[serde(default)]
+    pub encrypted_metadata: Option<String>,
+    pub created_at: u64,
+    pub updated_at: u64,
     pub server_ts: u64,
     #[serde(default)]
+    pub deleted_at: Option<u64>,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
     pub group_ids: Vec<String>,
+    #[serde(default)]
+    pub blob_key: Option<String>,
+    #[serde(default)]
+    pub blob_size: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -425,11 +469,12 @@ impl SyncHttpClient {
     pub async fn push_entries(
         &self,
         entries: Vec<PushEntryRequest>,
-    ) -> Result<Vec<PushEntryResponse>, String> {
+    ) -> Result<PushResult, String> {
+        let body = PushBody { entries: &entries };
         self.get_json("push", || {
             Ok(self
                 .authed(Method::POST, "/api/v1/sync/push")?
-                .json(&entries))
+                .json(&body))
         })
         .await
     }
@@ -454,12 +499,9 @@ impl SyncHttpClient {
         .await
     }
 
-    pub async fn delete_entry(&self, server_id: &str) -> Result<(), String> {
-        self.get_ok("delete", true, || {
-            self.authed(Method::DELETE, &format!("/api/v1/sync/entries/{server_id}"))
-        })
-        .await
-    }
+    // Note: there is no dedicated delete route. Deletions are propagated as
+    // tombstones — a normal `push` with `deleted_at` set (keyed by client_id +
+    // entry_type). See `SyncClient::spawn_delete_entry`.
 
     // ── Settings ──────────────────────────────────────────────────
 

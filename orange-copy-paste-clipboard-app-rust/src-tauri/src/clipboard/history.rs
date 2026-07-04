@@ -247,7 +247,8 @@ impl ClipboardEntry {
             None
         };
         Self {
-            id: NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string(),
+            // Globally-unique so it doubles as the cross-device sync client_id.
+            id: uuid::Uuid::new_v4().to_string(),
             kind,
             content,
             timestamp,

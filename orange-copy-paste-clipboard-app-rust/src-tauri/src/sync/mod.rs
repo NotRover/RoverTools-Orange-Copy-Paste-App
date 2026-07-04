@@ -61,10 +61,43 @@ struct PushJob {
     client_id: String,
     content: String,
     metadata_json: String,
-    /// "clipboard" | "notes"
+    /// Backend wire discriminator: "clipboard" | "note".
     entry_type: &'static str,
     kind: String,
+    created_at: u64,
+    updated_at: u64,
+    pinned: bool,
     group_ids: Vec<String>,
+}
+
+/// Current Unix time in milliseconds.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Build a tombstone push for `client_id`.  Deletions have no dedicated route:
+/// the server keys entries by `(client_id, entry_type)`, so a push with
+/// `deleted_at` set marks the row deleted and always wins LWW.  The content is
+/// an encrypted empty string because the server requires a non-null ciphertext.
+fn tombstone_req(umk: &[u8; 32], client_id: &str, entry_type: &str) -> Option<PushEntryRequest> {
+    let ts = now_ms();
+    Some(PushEntryRequest {
+        client_id: client_id.to_string(),
+        entry_type: entry_type.to_string(),
+        kind: String::new(),
+        encrypted_content: crypto::encrypt(umk, "", client_id).ok()?,
+        encrypted_metadata: crypto::encrypt(umk, "{}", client_id).ok()?,
+        created_at: ts,
+        updated_at: ts,
+        pinned: false,
+        deleted_at: Some(ts),
+        blob_key: None,
+        blob_size: None,
+        group_ids: Vec::new(),
+    })
 }
 
 // ── SyncClient ───────────────────────────────────────────────────────
@@ -471,6 +504,12 @@ impl SyncClient {
                 metadata_json,
                 entry_type: "clipboard",
                 kind: entry.kind.label().to_string(),
+                // Clipboard content is immutable; use its capture time as
+                // created_at and "now" as the last-write-wins clock so pin /
+                // group edits (which fire on_update) always win server-side.
+                created_at: entry.timestamp,
+                updated_at: now_ms(),
+                pinned: entry.pinned,
                 group_ids,
             };
             push_entry_task(ctx, umk, is_update, job).await;
@@ -492,8 +531,11 @@ impl SyncClient {
                 client_id: note.id.clone(),
                 content: note.content,
                 metadata_json,
-                entry_type: "notes",
+                entry_type: "note",
                 kind: "note".into(),
+                created_at: note.created_at,
+                updated_at: note.updated_at,
+                pinned: note.pinned,
                 group_ids,
             };
             push_entry_task(ctx, umk, is_update, job).await;
@@ -502,6 +544,7 @@ impl SyncClient {
 
     fn spawn_delete_entry(&self, client_id: String, entry_type: EntryType) {
         let http = self.http.lock().clone();
+        let umk = self.umk.lock().clone();
         let queue = Arc::clone(&self.pending_queue);
         let id_map = Arc::clone(&self.id_map);
         let status = Arc::clone(&self.status);
@@ -509,24 +552,23 @@ impl SyncClient {
         let map_key = format!("{type_str}:{client_id}");
 
         self.handle.spawn(async move {
-            // Always tombstone — even if offline (invariant #5)
-            if let Some(http) = http.as_ref().filter(|h| h.is_authenticated()) {
-                let server_id = {
-                    let map = id_map.lock();
-                    map.get_server_id(&map_key).map(|s| s.to_string())
-                };
-                if let Some(server_id) = server_id {
-                    match http.delete_entry(&server_id).await {
-                        Ok(()) => {
+            // Always tombstone — even if offline (invariant #5).  A tombstone is
+            // a push with deleted_at set, keyed by client_id (no server_id).
+            if let (Some(http), Some(umk)) =
+                (http.as_ref().filter(|h| h.is_authenticated()), umk.as_ref())
+            {
+                if let Some(req) = tombstone_req(umk, &client_id, &type_str) {
+                    match http.push_entries(vec![req]).await {
+                        Ok(_) => {
                             id_map.lock().remove_entry(&map_key);
                             status.lock().pending_count = queue.lock().len();
                             return;
                         }
-                        Err(e) => eprintln!("[sync] delete failed: {e}"),
+                        Err(e) => eprintln!("[sync] tombstone push failed: {e}"),
                     }
                 }
             }
-            // Queue tombstone for later
+            // Offline / not logged in — queue the tombstone for the next flush.
             queue.lock().push(PendingOp::Delete {
                 client_id,
                 entry_type: type_str,
@@ -549,11 +591,11 @@ impl SyncClient {
         for op in ops {
             match op {
                 PendingOp::Push { entry_json, .. } | PendingOp::Update { entry_json, .. } => {
-                    if let Ok(req) =
-                        serde_json::from_str::<PushEntryRequest>(&entry_json)
-                    {
-                        if let Ok(responses) = http.push_entries(vec![req]).await {
-                            for r in responses {
+                    if let Ok(req) = serde_json::from_str::<PushEntryRequest>(&entry_json) {
+                        if let Ok(result) = http.push_entries(vec![req]).await {
+                            for r in result.accepted {
+                                // client_id is unique across types; the row is
+                                // keyed by (client_id, entry_type) server-side.
                                 let key = format!("clipboard:{}", r.client_id);
                                 self.id_map.lock().set_entry(&key, &r.server_id);
                             }
@@ -561,14 +603,13 @@ impl SyncClient {
                     }
                 }
                 PendingOp::Delete { client_id, entry_type } => {
-                    let key = format!("{entry_type}:{client_id}");
-                    let server_id = {
-                        let map = self.id_map.lock();
-                        map.get_server_id(&key).map(|s| s.to_string())
-                    };
-                    if let Some(sid) = server_id {
-                        let _ = http.delete_entry(&sid).await;
-                        self.id_map.lock().remove_entry(&key);
+                    if let Some(umk) = self.umk_clone() {
+                        if let Some(req) = tombstone_req(&umk, &client_id, &entry_type) {
+                            let _ = http.push_entries(vec![req]).await;
+                            self.id_map
+                                .lock()
+                                .remove_entry(&format!("{entry_type}:{client_id}"));
+                        }
                     }
                 }
             }
@@ -668,6 +709,9 @@ async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool
         metadata_json,
         entry_type,
         kind,
+        created_at,
+        updated_at,
+        pinned,
         group_ids,
     } = job;
 
@@ -688,19 +732,24 @@ async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool
 
     let push_req = PushEntryRequest {
         client_id: client_id.clone(),
-        encrypted_content,
-        encrypted_metadata,
         entry_type: entry_type.into(),
         kind,
+        encrypted_content,
+        encrypted_metadata,
+        created_at,
+        updated_at,
+        pinned,
+        deleted_at: None,
         blob_key: None,
+        blob_size: None,
         group_ids,
     };
 
     if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {
         match http.push_entries(vec![push_req.clone()]).await {
-            Ok(responses) => {
-                if let Some(r) = responses.into_iter().find(|r| r.client_id == client_id) {
-                    if entry_type == "notes" {
+            Ok(result) => {
+                if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
+                    if entry_type == "note" {
                         ctx.id_map
                             .lock()
                             .set_entry(&format!("note:{client_id}"), &r.server_id);
