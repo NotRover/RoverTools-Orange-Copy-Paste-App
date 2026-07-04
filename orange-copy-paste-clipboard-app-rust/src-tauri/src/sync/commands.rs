@@ -184,6 +184,30 @@ pub fn sync_oauth_cancel(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Send a password-reset email via Supabase.
+#[tauri::command]
+pub async fn sync_reset_password(
+    email: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let sync = {
+        let guard = state.sync_client.lock();
+        match guard.clone() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                let config = SyncConfig::load(&app);
+                let client = SyncClient::new(app.clone(), config)?;
+                let arc = Arc::new(client);
+                *state.sync_client.lock() = Some(Arc::clone(&arc));
+                arc
+            }
+        }
+    };
+    sync.reset_password(email).await
+}
+
 #[tauri::command]
 pub async fn sync_logout(
     state: State<'_, AppState>,

@@ -57,6 +57,13 @@ const AccountScreen: React.FC = () => {
   const [oauthPassword, setOauthPassword] = useState("");
   const [oauthConfirm, setOauthConfirm] = useState("");
 
+  // Forgot / reset password
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
   // Group management
   const [newGroupName, setNewGroupName] = useState("");
   const [joinCode, setJoinCode] = useState("");
@@ -233,6 +240,39 @@ const AccountScreen: React.FC = () => {
     invoke("sync_oauth_cancel").catch(() => {});
     resetOauth();
     setLoginError(null);
+  };
+
+  const switchAuthMode = (mode: "login" | "signup") => {
+    setAuthMode(mode);
+    setLoginError(null);
+    setAuthNotice(null);
+  };
+
+  const openForgot = () => {
+    setForgotOpen(true);
+    setResetEmail(loginEmail);
+    setResetSent(false);
+    setResetError(null);
+  };
+
+  const closeForgot = () => {
+    setForgotOpen(false);
+    setResetSent(false);
+    setResetError(null);
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetEmail.trim()) return;
+    setResetLoading(true);
+    setResetError(null);
+    try {
+      await invoke("sync_reset_password", { email: resetEmail.trim() });
+      setResetSent(true);
+    } catch (e) {
+      setResetError(typeof e === "string" ? e : "Could not send the reset email.");
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -511,52 +551,72 @@ const AccountScreen: React.FC = () => {
             {/* Auth panel */}
             {!syncUser ? (
               /* Login form */
-              <div className="sync-auth-card">
-                <div className="sync-auth-card-header">
-                  <CloudSyncIcon size={16} />
-                  <span>
+              <div className="auth-card">
+                <div className="auth-brand">
+                  <div className="auth-brand-badge">
+                    <CloudSyncIcon size={20} />
+                  </div>
+                  <h3 className="auth-title">
                     {oauthStage === "password"
                       ? oauthIsNew
-                        ? "Set your account password"
-                        : "Enter your account password"
-                      : authMode === "signup"
-                        ? "Create an account"
-                        : "Sign in to sync"}
-                  </span>
+                        ? "Set your password"
+                        : "Enter your password"
+                      : forgotOpen
+                        ? "Reset your password"
+                        : authMode === "signup"
+                          ? "Create your account"
+                          : "Welcome back"}
+                  </h3>
+                  <p className="auth-subtitle">
+                    {oauthStage === "password"
+                      ? `Signed in as ${oauthEmail}`
+                      : forgotOpen
+                        ? "We'll email you a link to set a new password."
+                        : authMode === "signup"
+                          ? "Sync your clipboard & notes — end-to-end encrypted."
+                          : "Sign in to sync across your devices."}
+                  </p>
                 </div>
+
                 {oauthStage === "password" ? (
                   /* OAuth: account-password step (the E2E secret) */
-                  <div className="sync-login-form">
-                    <span className="sync-notice">
+                  <div className="auth-form">
+                    <p className="auth-hint">
                       {oauthIsNew
-                        ? `Signed in as ${oauthEmail}. Set a password to encrypt your data — you'll enter it on each device, and it also lets you sign in with email.`
-                        : `Signed in as ${oauthEmail}. Enter your account password to unlock your encrypted data.`}
-                    </span>
-                    <input
-                      className="sync-input"
-                      type="password"
-                      placeholder={oauthIsNew ? "New password" : "Password"}
-                      value={oauthPassword}
-                      autoFocus
-                      onChange={(e) => setOauthPassword(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter" && !oauthIsNew) handleOauthComplete(); }}
-                      disabled={oauthLoading}
-                    />
-                    {oauthIsNew && (
+                        ? "Set a password to encrypt your data — you'll enter it on each device, and it also lets you sign in with email."
+                        : "Enter your account password to unlock your encrypted data."}
+                    </p>
+                    <label className="auth-field">
+                      <span className="auth-label">{oauthIsNew ? "New password" : "Password"}</span>
                       <input
-                        className="sync-input"
+                        className="auth-input"
                         type="password"
-                        placeholder="Confirm password"
-                        value={oauthConfirm}
-                        onChange={(e) => setOauthConfirm(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleOauthComplete(); }}
+                        placeholder="••••••••"
+                        value={oauthPassword}
+                        autoFocus
+                        onChange={(e) => setOauthPassword(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter" && !oauthIsNew) handleOauthComplete(); }}
                         disabled={oauthLoading}
                       />
+                    </label>
+                    {oauthIsNew && (
+                      <label className="auth-field">
+                        <span className="auth-label">Confirm password</span>
+                        <input
+                          className="auth-input"
+                          type="password"
+                          placeholder="••••••••"
+                          value={oauthConfirm}
+                          onChange={(e) => setOauthConfirm(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleOauthComplete(); }}
+                          disabled={oauthLoading}
+                        />
+                      </label>
                     )}
-                    {loginError && <span className="sync-error">{loginError}</span>}
+                    {loginError && <span className="auth-error">{loginError}</span>}
                     <button
                       type="button"
-                      className="sync-primary-btn"
+                      className="auth-submit"
                       onClick={handleOauthComplete}
                       disabled={oauthLoading || !oauthPassword}
                     >
@@ -568,76 +628,154 @@ const AccountScreen: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      className="sync-auth-toggle"
+                      className="auth-textlink auth-textlink--center"
                       onClick={handleOauthCancel}
                       disabled={oauthLoading}
                     >
                       Cancel
                     </button>
                   </div>
-                ) : (
-                  <div className="sync-login-form">
-                    <input
-                      className="sync-input"
-                      type="email"
-                      placeholder="Email"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-                      disabled={loginLoading || oauthLoading}
-                    />
-                    <input
-                      className="sync-input"
-                      type="password"
-                      placeholder="Password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-                      disabled={loginLoading || oauthLoading}
-                    />
-                    {loginError && <span className="sync-error">{loginError}</span>}
-                    {authNotice && <span className="sync-notice">{authNotice}</span>}
+                ) : forgotOpen ? (
+                  /* Forgot / reset password */
+                  <div className="auth-form">
+                    {resetSent ? (
+                      <div className="auth-reset-done">
+                        <span className="auth-reset-check"><CheckIcon size={16} strokeWidth={2.6} /></span>
+                        <p>
+                          If an account exists for <strong>{resetEmail}</strong>, a password-reset
+                          link is on its way. Check your inbox.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <label className="auth-field">
+                          <span className="auth-label">Email</span>
+                          <input
+                            className="auth-input"
+                            type="email"
+                            placeholder="you@example.com"
+                            value={resetEmail}
+                            autoFocus
+                            onChange={(e) => setResetEmail(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleResetPassword(); }}
+                            disabled={resetLoading}
+                          />
+                        </label>
+                        {resetError && <span className="auth-error">{resetError}</span>}
+                        <button
+                          type="button"
+                          className="auth-submit"
+                          onClick={handleResetPassword}
+                          disabled={resetLoading || !resetEmail.trim()}
+                        >
+                          {resetLoading ? "Sending…" : "Send reset link"}
+                        </button>
+                      </>
+                    )}
+                    <p className="auth-note">
+                      Because your data is end-to-end encrypted, resetting your password restores
+                      sign-in but can't recover previously synced data unless another device is
+                      still signed in.
+                    </p>
                     <button
                       type="button"
-                      className="sync-primary-btn"
-                      onClick={handleLogin}
-                      disabled={loginLoading || oauthLoading || !loginEmail || !loginPassword}
+                      className="auth-textlink auth-textlink--center"
+                      onClick={closeForgot}
                     >
-                      {loginLoading
-                        ? authMode === "signup"
-                          ? "Creating…"
-                          : "Signing in…"
-                        : authMode === "signup"
-                          ? "Sign Up"
-                          : "Sign In"}
-                    </button>
-
-                    <div className="sync-auth-divider"><span>or</span></div>
-                    <button
-                      type="button"
-                      className="sync-google-btn"
-                      onClick={handleGoogleSignIn}
-                      disabled={loginLoading || oauthLoading}
-                    >
-                      <GoogleIcon size={16} />
-                      {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="sync-auth-toggle"
-                      onClick={() => {
-                        setAuthMode((m) => (m === "signup" ? "login" : "signup"));
-                        setLoginError(null);
-                        setAuthNotice(null);
-                      }}
-                      disabled={loginLoading || oauthLoading}
-                    >
-                      {authMode === "signup"
-                        ? "Already have an account? Sign in"
-                        : "New here? Create an account"}
+                      ← Back to sign in
                     </button>
                   </div>
+                ) : (
+                  <>
+                    <div className="auth-tabs" role="tablist">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={authMode === "login"}
+                        className={`auth-tab${authMode === "login" ? " active" : ""}`}
+                        onClick={() => switchAuthMode("login")}
+                      >
+                        Sign In
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={authMode === "signup"}
+                        className={`auth-tab${authMode === "signup" ? " active" : ""}`}
+                        onClick={() => switchAuthMode("signup")}
+                      >
+                        Sign Up
+                      </button>
+                      <span
+                        className="auth-tabs-slider"
+                        style={{ transform: `translateX(${authMode === "signup" ? "100%" : "0"})` }}
+                      />
+                    </div>
+
+                    <div className="auth-form">
+                      <label className="auth-field">
+                        <span className="auth-label">Email</span>
+                        <input
+                          className="auth-input"
+                          type="email"
+                          placeholder="you@example.com"
+                          value={loginEmail}
+                          onChange={(e) => setLoginEmail(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+                          disabled={loginLoading || oauthLoading}
+                        />
+                      </label>
+                      <label className="auth-field">
+                        <div className="auth-label-row">
+                          <span className="auth-label">Password</span>
+                          {authMode === "login" && (
+                            <button type="button" className="auth-textlink" onClick={openForgot}>
+                              Forgot?
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          className="auth-input"
+                          type="password"
+                          placeholder="••••••••"
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+                          disabled={loginLoading || oauthLoading}
+                        />
+                      </label>
+
+                      {loginError && <span className="auth-error">{loginError}</span>}
+                      {authNotice && <span className="auth-notice">{authNotice}</span>}
+
+                      <button
+                        type="button"
+                        className="auth-submit"
+                        onClick={handleLogin}
+                        disabled={loginLoading || oauthLoading || !loginEmail || !loginPassword}
+                      >
+                        {loginLoading
+                          ? authMode === "signup"
+                            ? "Creating account…"
+                            : "Signing in…"
+                          : authMode === "signup"
+                            ? "Create account"
+                            : "Sign in"}
+                      </button>
+
+                      <div className="auth-divider"><span>or</span></div>
+
+                      <button
+                        type="button"
+                        className="auth-google"
+                        onClick={handleGoogleSignIn}
+                        disabled={loginLoading || oauthLoading}
+                      >
+                        <GoogleIcon size={16} />
+                        {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             ) : (
