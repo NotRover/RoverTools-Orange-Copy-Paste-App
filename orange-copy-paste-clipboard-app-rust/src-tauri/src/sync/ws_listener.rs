@@ -185,9 +185,12 @@ impl WsListener {
                     &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": false }),
                 );
             }
-            // Group / Live Share events — forwarded for Phase 4 handling.
+            // Owner distributed a Group Key to us — unwrap + cache it (Rust owns
+            // the identity key), then let the UI know.
             "group:rekey" => {
-                let _ = self.app.emit("sync:group-rekey", &msg.payload);
+                if let Some(sync) = self.sync_client() {
+                    sync.handle_group_rekey(&msg.payload);
+                }
             }
             "group:membership_changed" => {
                 let _ = self.app.emit("sync:group-membership", &msg.payload);
@@ -195,7 +198,12 @@ impl WsListener {
             "sharing:invite" => {
                 let _ = self.app.emit("sharing:invite-received", &msg.payload);
             }
+            // A member accepted our invite — wrap the Group Key for them and
+            // distribute it (owner-side handshake).
             "sharing:accepted" => {
+                if let Some(sync) = self.sync_client() {
+                    sync.handle_sharing_accepted(&msg.payload);
+                }
                 let _ = self.app.emit("sharing:accepted", &msg.payload);
             }
             "sharing:ended" => {

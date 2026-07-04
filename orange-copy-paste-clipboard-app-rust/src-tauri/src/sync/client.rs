@@ -173,6 +173,8 @@ pub struct SettingsPullResponse {
     pub updated_at: u64,
 }
 
+// ── Pool groups ───────────────────────────────────────────────────────
+
 #[derive(Debug, Serialize)]
 pub struct CreateGroupRequest {
     pub name: String,
@@ -180,60 +182,99 @@ pub struct CreateGroupRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ServerGroup {
+pub struct CreateGroupResponse {
+    pub group_id: String,
+    pub invite_code: String,
+}
+
+/// One member of a pool group; `identity_pubkey` is null until they register keys.
+#[derive(Debug, Deserialize)]
+pub struct GroupMemberOut {
+    pub user_id: String,
+    pub role: String,
+    pub joined_at: u64,
+    #[serde(default)]
+    pub identity_pubkey: Option<String>,
+}
+
+/// Full group record (`GET /groups` / `GET /groups/{id}`).
+#[derive(Debug, Deserialize)]
+pub struct GroupOut {
     pub id: String,
+    pub owner_id: String,
     pub name: String,
     pub group_type: String,
-    pub member_count: u32,
+    #[serde(default)]
+    pub invite_code: Option<String>,
+    #[serde(default)]
+    pub members: Vec<GroupMemberOut>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct JoinGroupRequest {
     pub invite_code: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CreateSharingRequest {
+    /// A member's own wrapped Group Key, when re-joining a group they already
+    /// hold a key for; `None` on a fresh join (the owner distributes the key).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub scope: String,
+    pub wrapped_group_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateSharingResponse {
-    pub share_group_id: String,
+pub struct JoinGroupResponse {
+    pub group_id: String,
     pub name: String,
+    pub group_type: String,
 }
+
+// ── Group key distribution (§7.4) ───────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-pub struct SharingInviteRequest {
-    pub email: String,
-    pub scope: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SharingInviteResponse {
-    pub invite_code: String,
-    pub share_group_id: String,
-    pub expires_at: u64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct JoinSharingRequest {
-    pub invite_code: String,
-    pub scope: String,
-    pub device_public_key: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct JoinSharingResponse {
-    pub share_group_id: String,
+pub struct WrappedKeyEntry {
+    pub user_id: String,
     pub wrapped_group_key: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct UpdateScopeRequest {
+pub struct DistributeKeysRequest {
+    pub wrapped_keys: Vec<WrappedKeyEntry>,
+}
+
+// ── Live Share ──────────────────────────────────────────────────────────
+
+/// `POST /sharing/invite` — creates a live_share group *and* emails the invite.
+#[derive(Debug, Serialize)]
+pub struct SharingInviteRequest {
+    pub email: String,
+    pub share_scope: String, // "clipboard" | "notes" | "both"
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SharingInviteResponse {
+    pub share_group_id: String,
+    pub invite_code: String,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SessionMemberOut {
+    pub user_id: String,
+    pub display_name: String,
     pub scope: String,
+    #[serde(default)]
+    pub identity_pubkey: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SessionOut {
+    pub share_group_id: String,
+    pub members: Vec<SessionMemberOut>,
+    pub my_scope: String,
+    pub active_since: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateScopeRequest {
+    pub share_scope: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -536,63 +577,88 @@ impl SyncHttpClient {
 
     // ── Pool groups ───────────────────────────────────────────────
 
-    pub async fn list_groups(&self) -> Result<Vec<ServerGroup>, String> {
+    pub async fn list_groups(&self) -> Result<Vec<GroupOut>, String> {
         self.get_json("list groups", || self.authed(Method::GET, "/api/v1/groups"))
             .await
     }
 
-    pub async fn create_group(&self, req: CreateGroupRequest) -> Result<ServerGroup, String> {
+    pub async fn get_group(&self, group_id: &str) -> Result<GroupOut, String> {
+        self.get_json("get group", || {
+            self.authed(Method::GET, &format!("/api/v1/groups/{group_id}"))
+        })
+        .await
+    }
+
+    pub async fn create_group(
+        &self,
+        req: CreateGroupRequest,
+    ) -> Result<CreateGroupResponse, String> {
         self.get_json("create group", || {
             Ok(self.authed(Method::POST, "/api/v1/groups")?.json(&req))
         })
         .await
     }
 
-    pub async fn join_group(&self, req: JoinGroupRequest) -> Result<ServerGroup, String> {
+    pub async fn join_group(&self, req: JoinGroupRequest) -> Result<JoinGroupResponse, String> {
         self.get_json("join group", || {
             Ok(self.authed(Method::POST, "/api/v1/groups/join")?.json(&req))
         })
         .await
     }
 
-    pub async fn leave_group(&self, group_id: &str) -> Result<(), String> {
-        self.get_ok("leave group", true, || {
+    /// Distribute per-member wrapped Group Keys (owner action, §7.4).
+    pub async fn distribute_group_keys(
+        &self,
+        group_id: &str,
+        req: DistributeKeysRequest,
+    ) -> Result<(), String> {
+        self.get_ok("distribute keys", false, || {
+            Ok(self
+                .authed(Method::POST, &format!("/api/v1/groups/{group_id}/keys"))?
+                .json(&req))
+        })
+        .await
+    }
+
+    /// Delete a group the caller owns.
+    pub async fn delete_group(&self, group_id: &str) -> Result<(), String> {
+        self.get_ok("delete group", true, || {
             self.authed(Method::DELETE, &format!("/api/v1/groups/{group_id}"))
+        })
+        .await
+    }
+
+    /// Leave a pool group (self-removal) — the owner may also remove others.
+    pub async fn remove_group_member(
+        &self,
+        group_id: &str,
+        member_user_id: &str,
+    ) -> Result<(), String> {
+        self.get_ok("remove member", true, || {
+            self.authed(
+                Method::DELETE,
+                &format!("/api/v1/groups/{group_id}/members/{member_user_id}"),
+            )
         })
         .await
     }
 
     // ── Live Share ────────────────────────────────────────────────
 
-    pub async fn create_sharing_session(
+    /// Create a live_share group and email an invite in one call.
+    pub async fn create_sharing_invite(
         &self,
-        req: CreateSharingRequest,
-    ) -> Result<CreateSharingResponse, String> {
-        self.get_json("create sharing", || {
-            Ok(self.authed(Method::POST, "/api/v1/sharing")?.json(&req))
-        })
-        .await
-    }
-
-    pub async fn invite_to_sharing(
-        &self,
-        share_group_id: &str,
         req: SharingInviteRequest,
     ) -> Result<SharingInviteResponse, String> {
         self.get_json("sharing invite", || {
-            Ok(self
-                .authed(Method::POST, &format!("/api/v1/sharing/{share_group_id}/invite"))?
-                .json(&req))
+            Ok(self.authed(Method::POST, "/api/v1/sharing/invite")?.json(&req))
         })
         .await
     }
 
-    pub async fn join_sharing(
-        &self,
-        req: JoinSharingRequest,
-    ) -> Result<JoinSharingResponse, String> {
-        self.get_json("join sharing", || {
-            Ok(self.authed(Method::POST, "/api/v1/sharing/join")?.json(&req))
+    pub async fn list_sharing_sessions(&self) -> Result<Vec<SessionOut>, String> {
+        self.get_json("list sessions", || {
+            self.authed(Method::GET, "/api/v1/sharing/sessions")
         })
         .await
     }
@@ -600,10 +666,10 @@ impl SyncHttpClient {
     pub async fn update_sharing_scope(
         &self,
         share_group_id: &str,
-        scope: &str,
+        share_scope: &str,
     ) -> Result<(), String> {
         let body = UpdateScopeRequest {
-            scope: scope.to_string(),
+            share_scope: share_scope.to_string(),
         };
         self.get_ok("update scope", false, || {
             Ok(self

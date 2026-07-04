@@ -35,7 +35,9 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
 use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
-use crate::sync::client::{PushEntryRequest, RegisterDeviceRequest, SyncHttpClient};
+use crate::sync::client::{
+    DistributeKeysRequest, PushEntryRequest, RegisterDeviceRequest, SyncHttpClient, WrappedKeyEntry,
+};
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
@@ -68,6 +70,11 @@ struct PushJob {
     updated_at: u64,
     pinned: bool,
     group_ids: Vec<String>,
+}
+
+/// Decode a base64 X25519 public key into a fixed 32-byte array.
+fn decode_pubkey(b64: &str) -> Option<[u8; 32]> {
+    B64.decode(b64).ok()?.try_into().ok()
 }
 
 /// Current Unix time in milliseconds.
@@ -306,18 +313,33 @@ impl SyncClient {
             .await?;
         http.set_device_id(dev.device_id.clone());
 
-        // 5. Persist secrets to the OS keychain.
+        // 5. Register public keys for E2E group-key exchange.  The identity key
+        //    is derived from the UMK (identical on every device), so we register
+        //    its public half alongside this device's public key.  Best-effort:
+        //    a failure here only disables group sharing, not core sync.
+        let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
+        if let Err(e) = http
+            .register_keys(client::RegisterKeysRequest {
+                identity_pubkey: B64.encode(identity_pub),
+                device_pubkey: B64.encode(device_pub),
+            })
+            .await
+        {
+            eprintln!("[sync] register_keys failed (group sharing disabled): {e}");
+        }
+
+        // 6. Persist secrets to the OS keychain.
         crypto::store_device_private_key(&user_id, &device_priv)?;
         crypto::store_refresh_token(&user_id, &session.refresh_token)?;
 
-        // 6. Update persisted sync state.
+        // 7. Update persisted sync state.
         {
             let mut state = self.sync_state.lock();
             state.set_device_id(&dev.device_id);
             state.set_user_id(&user_id);
         }
 
-        // 7. Wire in-memory state.
+        // 8. Wire in-memory state.
         let user = SyncUser {
             user_id,
             email: user_email,
@@ -328,7 +350,7 @@ impl SyncClient {
         *self.user.lock() = Some(user.clone());
         self.status.lock().connected = true;
 
-        // 8. Start the realtime listener.
+        // 9. Start the realtime listener.
         self.start_ws_listener();
 
         Ok(user)
@@ -453,16 +475,6 @@ impl SyncClient {
         }
     }
 
-    /// Live Share group IDs whose scope matches `scope_matches`.
-    fn session_group_ids(&self, scope_matches: impl Fn(&SharingSession) -> bool) -> Vec<String> {
-        self.sharing_sessions
-            .lock()
-            .iter()
-            .filter(|s| scope_matches(s))
-            .map(|s| s.share_group_id.clone())
-            .collect()
-    }
-
     fn spawn_push_clipboard_entry(
         &self,
         entry: ClipboardEntry,
@@ -470,7 +482,9 @@ impl SyncClient {
         is_update: bool,
     ) {
         let ctx = self.push_ctx();
-        let group_ids = self.session_group_ids(|s| s.my_scope.includes_clipboard());
+        // Shared entries encrypt under the session Group Key (§15.2); personal
+        // ones under the UMK.
+        let (enc_key, group_ids) = self.share_target(umk, |s| s.my_scope.includes_clipboard());
 
         self.handle.spawn(async move {
             // Skip file entries larger than 5 MB (Phase 7 enforcement)
@@ -512,13 +526,13 @@ impl SyncClient {
                 pinned: entry.pinned,
                 group_ids,
             };
-            push_entry_task(ctx, umk, is_update, job).await;
+            push_entry_task(ctx, enc_key, is_update, job).await;
         });
     }
 
     fn spawn_push_note(&self, note: Note, umk: Zeroizing<[u8; 32]>, is_update: bool) {
         let ctx = self.push_ctx();
-        let group_ids = self.session_group_ids(|s| s.my_scope.includes_notes());
+        let (enc_key, group_ids) = self.share_target(umk, |s| s.my_scope.includes_notes());
 
         self.handle.spawn(async move {
             let metadata_json = serde_json::json!({
@@ -538,7 +552,7 @@ impl SyncClient {
                 pinned: note.pinned,
                 group_ids,
             };
-            push_entry_task(ctx, umk, is_update, job).await;
+            push_entry_task(ctx, enc_key, is_update, job).await;
         });
     }
 
@@ -620,14 +634,18 @@ impl SyncClient {
                 continue;
             }
 
-            let Ok(content) = crypto::decrypt(&umk, &e.encrypted_content, &e.client_id) else {
+            // Shared entries are encrypted under the session Group Key; personal
+            // ones under the UMK.  Choose per entry by its group tags.
+            let content_key = self.decryption_key_for(&umk, &e.group_ids);
+            let Ok(content) = crypto::decrypt(&content_key, &e.encrypted_content, &e.client_id)
+            else {
                 eprintln!("[sync] merge: decrypt content failed for {}", e.client_id);
                 continue;
             };
             let meta: serde_json::Value = e
                 .encrypted_metadata
                 .as_ref()
-                .and_then(|m| crypto::decrypt(&umk, m, &e.client_id).ok())
+                .and_then(|m| crypto::decrypt(&content_key, m, &e.client_id).ok())
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or(serde_json::Value::Null);
             let groups: Vec<String> = meta
@@ -857,6 +875,180 @@ impl SyncClient {
         });
     }
 
+    // ── Group key exchange (§7.4) ─────────────────────────────────
+
+    /// Derive this user's identity keypair `(private, public)` from the
+    /// in-memory UMK.  Identical on every device; `None` when logged out.
+    pub fn identity_keypair(&self) -> Option<(Zeroizing<[u8; 32]>, [u8; 32])> {
+        let umk = self.umk_clone()?;
+        Some(crypto::derive_identity_keypair(&umk))
+    }
+
+    /// The cached Group Key for a session, if we currently hold one.
+    fn session_group_key(&self, share_group_id: &str) -> Option<[u8; 32]> {
+        self.sharing_sessions
+            .lock()
+            .iter()
+            .find(|s| s.share_group_id == share_group_id)
+            .and_then(|s| s.group_key)
+    }
+
+    /// Store the Group Key for a session, preserving an existing session's
+    /// scope/members or creating a placeholder if we don't know it yet.  Kept
+    /// in memory only (never persisted); Live Share keys are ephemeral.
+    pub(crate) fn set_session_group_key(&self, share_group_id: &str, key: [u8; 32]) {
+        let mut guard = self.sharing_sessions.lock();
+        if let Some(s) = guard.iter_mut().find(|s| s.share_group_id == share_group_id) {
+            s.group_key = Some(key);
+        } else {
+            guard.push(SharingSession {
+                share_group_id: share_group_id.to_string(),
+                name: String::new(),
+                my_scope: ShareScope::Both,
+                members: Vec::new(),
+                group_key: Some(key),
+            });
+        }
+    }
+
+    /// Pick the content-encryption key + fan-out target for an outgoing entry.
+    /// If the user is in a Live Share session (matching `want`) whose Group Key
+    /// we hold, encrypt under that key and tag the entry with that group;
+    /// otherwise it's a personal entry encrypted under the UMK (no group_ids).
+    fn share_target(
+        &self,
+        umk: Zeroizing<[u8; 32]>,
+        want: impl Fn(&SharingSession) -> bool,
+    ) -> (Zeroizing<[u8; 32]>, Vec<String>) {
+        let guard = self.sharing_sessions.lock();
+        match guard.iter().find(|s| want(s) && s.group_key.is_some()) {
+            Some(s) => (
+                Zeroizing::new(s.group_key.expect("checked is_some")),
+                vec![s.share_group_id.clone()],
+            ),
+            None => (umk, Vec::new()),
+        }
+    }
+
+    /// The key to decrypt a pulled entry: a session Group Key when the entry is
+    /// tagged with a session we hold a key for, else the personal UMK.
+    fn decryption_key_for(
+        &self,
+        umk: &Zeroizing<[u8; 32]>,
+        group_ids: &[String],
+    ) -> Zeroizing<[u8; 32]> {
+        group_ids
+            .iter()
+            .find_map(|gid| self.session_group_key(gid).map(Zeroizing::new))
+            .unwrap_or_else(|| umk.clone())
+    }
+
+    /// Owner side (`sharing:accepted`): a member joined our Live Share.  Wrap
+    /// our cached Group Key against their identity key and distribute it via
+    /// `POST /groups/{id}/keys` (fans back out to them as `group:rekey`).
+    pub(crate) fn handle_sharing_accepted(self: &Arc<Self>, payload: &serde_json::Value) {
+        let share_group_id = payload
+            .get("share_group_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let member = payload.get("new_member");
+        let member_id = member
+            .and_then(|m| m.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let member_pub_b64 = member
+            .and_then(|m| m.get("identity_pubkey"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let Some(group_key) = self.session_group_key(&share_group_id) else {
+            eprintln!("[sync] sharing:accepted for unknown/keyless session {share_group_id}");
+            return;
+        };
+        let (Some((id_priv, _)), Some(member_pub_b64)) =
+            (self.identity_keypair(), member_pub_b64)
+        else {
+            eprintln!("[sync] sharing:accepted: member {member_id} has no identity key yet");
+            return;
+        };
+        let Some(http) = self.http.lock().clone() else {
+            return;
+        };
+
+        let this = Arc::clone(self);
+        self.handle.spawn(async move {
+            let Some(member_pub) = decode_pubkey(&member_pub_b64) else {
+                return;
+            };
+            let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
+            let wrapped = match crypto::wrap_key(&shared, &group_key) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("[sync] wrap group key: {e}");
+                    return;
+                }
+            };
+            let req = DistributeKeysRequest {
+                wrapped_keys: vec![WrappedKeyEntry {
+                    user_id: member_id.clone(),
+                    wrapped_group_key: wrapped,
+                }],
+            };
+            match http.distribute_group_keys(&share_group_id, req).await {
+                Ok(()) => {
+                    let _ = this.app.emit(
+                        "sharing:member-joined",
+                        serde_json::json!({ "share_group_id": share_group_id, "user_id": member_id }),
+                    );
+                }
+                Err(e) => eprintln!("[sync] distribute group key failed: {e}"),
+            }
+        });
+    }
+
+    /// Member side (`group:rekey`): the owner sent us a Group Key wrapped
+    /// against our identity key.  Unwrap with `X25519(my_priv, sender_pubkey)`
+    /// and cache it so matching entries encrypt/decrypt under it.
+    pub(crate) fn handle_group_rekey(&self, payload: &serde_json::Value) {
+        let group_id = payload
+            .get("group_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let wrapped = payload
+            .get("wrapped_group_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let sender_pub_b64 = payload
+            .get("sender_pubkey")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let (Some((id_priv, _)), Some(sender_pub_b64)) =
+            (self.identity_keypair(), sender_pub_b64)
+        else {
+            eprintln!("[sync] group:rekey for {group_id} missing keys");
+            return;
+        };
+        let Some(sender_pub) = decode_pubkey(&sender_pub_b64) else {
+            return;
+        };
+        let shared = crypto::x25519_shared_secret(&id_priv, &sender_pub);
+        match crypto::unwrap_key(&shared, &wrapped) {
+            Ok(key) => {
+                self.set_session_group_key(&group_id, *key);
+                let _ = self.app.emit(
+                    "sharing:key-received",
+                    serde_json::json!({ "share_group_id": group_id }),
+                );
+            }
+            Err(e) => eprintln!("[sync] unwrap group key for {group_id} failed: {e}"),
+        }
+    }
+
     pub fn http(&self) -> Option<Arc<SyncHttpClient>> {
         self.http.lock().clone()
     }
@@ -867,8 +1059,9 @@ impl SyncClient {
 }
 
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
-/// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.
-async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
+/// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.  `enc_key`
+/// is the session Group Key for shared entries or the UMK for personal ones.
+async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
     let PushJob {
         client_id,
         content,
@@ -881,14 +1074,14 @@ async fn push_entry_task(ctx: PushCtx, umk: Zeroizing<[u8; 32]>, is_update: bool
         group_ids,
     } = job;
 
-    let encrypted_content = match crypto::encrypt(&umk, &content, &client_id) {
+    let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[sync] {entry_type} encrypt content: {e}");
             return;
         }
     };
-    let encrypted_metadata = match crypto::encrypt(&umk, &metadata_json, &client_id) {
+    let encrypted_metadata = match crypto::encrypt(&enc_key, &metadata_json, &client_id) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("[sync] {entry_type} encrypt metadata: {e}");

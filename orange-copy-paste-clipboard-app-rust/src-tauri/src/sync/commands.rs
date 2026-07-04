@@ -7,14 +7,10 @@
 
 use std::sync::Arc;
 
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use tauri::{Emitter, Manager, State};
 
 use crate::state::AppState;
-use crate::sync::client::{
-    CreateGroupRequest, CreateSharingRequest, JoinGroupRequest, JoinSharingRequest,
-    SharingInviteRequest,
-};
+use crate::sync::client::{CreateGroupRequest, GroupOut, JoinGroupRequest, SharingInviteRequest};
 use crate::sync::config::SyncConfig;
 use crate::sync::crypto;
 use crate::sync::types::{
@@ -67,11 +63,12 @@ fn write_setting(app: &tauri::AppHandle, key: &str, value: serde_json::Value) {
     });
 }
 
-fn to_sync_group(g: crate::sync::client::ServerGroup) -> SyncGroup {
+fn to_sync_group(g: GroupOut) -> SyncGroup {
     SyncGroup {
+        member_count: g.members.len() as u32,
         id: g.id,
         name: g.name,
-        member_count: g.member_count,
+        invite_code: g.invite_code,
     }
 }
 
@@ -244,14 +241,22 @@ pub async fn sync_create_group(
     name: String,
     state: State<'_, AppState>,
 ) -> Result<SyncGroup, String> {
-    let (_sync, http) = sync_http(&state)?;
-    let g = http
+    let (sync, http) = sync_http(&state)?;
+    let created = http
         .create_group(CreateGroupRequest {
-            name,
+            name: name.clone(),
             group_type: "pool".into(),
         })
         .await?;
-    Ok(to_sync_group(g))
+    sync.register_group_mapping(&name, &created.group_id);
+    // Creator is the sole member at this point; surface the invite code so the
+    // UI can share it.
+    Ok(SyncGroup {
+        id: created.group_id,
+        name,
+        member_count: 1,
+        invite_code: Some(created.invite_code),
+    })
 }
 
 #[tauri::command]
@@ -260,8 +265,13 @@ pub async fn sync_join_group(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
-    let g = http.join_group(JoinGroupRequest { invite_code }).await?;
-    sync.register_group_mapping(&g.name, &g.id);
+    let g = http
+        .join_group(JoinGroupRequest {
+            invite_code,
+            wrapped_group_key: None,
+        })
+        .await?;
+    sync.register_group_mapping(&g.name, &g.group_id);
     Ok(())
 }
 
@@ -270,8 +280,13 @@ pub async fn sync_leave_group(
     group_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let (_sync, http) = sync_http(&state)?;
-    http.leave_group(&group_id).await?;
+    let (sync, http) = sync_http(&state)?;
+    let user_id = sync
+        .current_user()
+        .map(|u| u.user_id)
+        .ok_or("not authenticated")?;
+    // Self-removal (the owner may dissolve the group with delete instead).
+    http.remove_group_member(&group_id, &user_id).await?;
     Ok(())
 }
 
@@ -284,37 +299,29 @@ pub async fn sharing_invite(
     state: State<'_, AppState>,
 ) -> Result<SharingInvite, String> {
     let (sync, http) = sync_http(&state)?;
+    let parsed_scope = parse_scope(&scope)?;
 
-    // Create the Live Share group first, then invite
-    let created = http
-        .create_sharing_session(CreateSharingRequest {
-            name: None,
-            scope: scope.clone(),
+    // Owner generates the Group Key up front and caches it; it is wrapped for
+    // each member as they accept (see `handle_sharing_accepted`).
+    let group_key = crypto::random_key();
+
+    // One call creates the live_share group and emails the invite.
+    let invite_resp = http
+        .create_sharing_invite(SharingInviteRequest {
+            email,
+            share_scope: scope.clone(),
         })
         .await?;
 
-    let invite_resp = http
-        .invite_to_sharing(
-            &created.share_group_id,
-            SharingInviteRequest {
-                email,
-                scope: scope.clone(),
-            },
-        )
-        .await?;
-
-    // Register in id_map and sharing_sessions
     sync.id_map
         .lock()
-        .set_sharing_session(&created.share_group_id);
-
-    let parsed_scope = parse_scope(&scope)?;
+        .set_sharing_session(&invite_resp.share_group_id);
     sync.set_sharing_session(SharingSession {
-        share_group_id: created.share_group_id.clone(),
-        name: created.name,
+        share_group_id: invite_resp.share_group_id.clone(),
+        name: "Live Share".into(),
         my_scope: parsed_scope,
         members: Vec::new(),
-        group_key: None, // Group key exchanged when invite is accepted
+        group_key: Some(*group_key),
     });
 
     Ok(SharingInvite {
@@ -331,45 +338,27 @@ pub async fn sharing_accept(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
-    let _umk = sync.umk_clone().ok_or("not authenticated")?;
+    let parsed_scope = parse_scope(&scope)?;
 
-    let user_id = sync
-        .current_user()
-        .map(|u| u.user_id)
-        .ok_or("not authenticated")?;
-
-    let _device_priv = crypto::load_device_private_key(&user_id)?;
-    let (_priv2, pub_key) = crypto::generate_device_keypair();
-    let pub_key_b64 = B64.encode(pub_key);
-
+    // Live Share sessions are joined via the shared group-join route.  The
+    // Group Key is delivered afterwards over WS (`group:rekey`) once the owner
+    // wraps it against our identity key — so no key material is exchanged here.
     let join_resp = http
-        .join_sharing(JoinSharingRequest {
+        .join_group(JoinGroupRequest {
             invite_code,
-            scope: scope.clone(),
-            device_public_key: pub_key_b64,
+            wrapped_group_key: None,
         })
         .await?;
 
-    // Derive shared secret and unwrap Group Key
-    // The server returns a wrapped_group_key encrypted with a shared secret
-    // derived from our device key and the owner's device key.
-    // Full X25519 exchange is completed here.
-    let _wrapped_bytes =
-        B64.decode(&join_resp.wrapped_group_key).map_err(|e| format!("b64: {e}"))?;
-    // For now, store the wrapped key — decryption requires the peer's public key
-    // which is part of the group:rekey WebSocket flow (Phase 8).
-    eprintln!("[sync] sharing_accept: group key exchange pending WS flow");
-
-    let parsed_scope = parse_scope(&scope)?;
     sync.id_map
         .lock()
-        .set_sharing_session(&join_resp.share_group_id);
+        .set_sharing_session(&join_resp.group_id);
     sync.set_sharing_session(SharingSession {
-        share_group_id: join_resp.share_group_id,
-        name: String::new(),
+        share_group_id: join_resp.group_id,
+        name: join_resp.name,
         my_scope: parsed_scope,
         members: Vec::new(),
-        group_key: None,
+        group_key: None, // arrives via `group:rekey`
     });
 
     Ok(())

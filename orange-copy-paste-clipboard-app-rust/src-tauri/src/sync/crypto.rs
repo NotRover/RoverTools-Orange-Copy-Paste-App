@@ -14,7 +14,7 @@
 //! specific entry's `client_id`, preventing ciphertext transplanting attacks.
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng, Payload},
+    aead::{rand_core::RngCore, Aead, AeadCore, KeyInit, OsRng, Payload},
     Aes256Gcm, Key, Nonce,
 };
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -46,6 +46,14 @@ pub fn derive_umk(password: &str, kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
     argon2
         .hash_password_into(password.as_bytes(), kdf_salt, key.as_mut())
         .expect("argon2 hash");
+    key
+}
+
+/// Generate a fresh random 32-byte symmetric key (used as a Live Share /
+/// pool Group Key).  Returned in a `Zeroizing` wrapper.
+pub fn random_key() -> Zeroizing<[u8; 32]> {
+    let mut key = Zeroizing::new([0u8; 32]);
+    OsRng.fill_bytes(key.as_mut());
     key
 }
 
@@ -103,6 +111,28 @@ pub fn generate_device_keypair() -> (Zeroizing<[u8; 32]>, [u8; 32]) {
     let private = StaticSecret::random_from_rng(OsRng);
     let public = X25519Public::from(&private);
     (Zeroizing::new(private.to_bytes()), public.to_bytes())
+}
+
+/// Derive the per-user **identity** X25519 keypair deterministically from the
+/// UMK.  Because the UMK is identical on every one of a user's devices (shared
+/// via §7.3 wrapping), so is this keypair — no cross-device distribution and no
+/// server-side storage of the private half are needed.  Only the public key is
+/// registered (`POST /auth/keys/register`) so peers can wrap Group Keys for us.
+///
+/// The UMK is already a uniformly-random 256-bit key, so a memory-hard KDF is
+/// unnecessary here; we use Argon2id with minimal parameters purely for domain
+/// separation from the content-encryption use of the UMK.
+pub fn derive_identity_keypair(umk: &[u8; 32]) -> (Zeroizing<[u8; 32]>, [u8; 32]) {
+    const IDENTITY_SALT: &[u8] = b"orange-clipboard-identity-key-v1";
+    let params = Params::new(8, 1, 1, Some(32)).expect("valid argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut seed = Zeroizing::new([0u8; 32]);
+    argon2
+        .hash_password_into(umk, IDENTITY_SALT, seed.as_mut())
+        .expect("argon2 identity derive");
+    let secret = StaticSecret::from(*seed);
+    let public = X25519Public::from(&secret);
+    (Zeroizing::new(secret.to_bytes()), public.to_bytes())
 }
 
 /// Compute the X25519 shared secret for ECDH key exchange.  Used for

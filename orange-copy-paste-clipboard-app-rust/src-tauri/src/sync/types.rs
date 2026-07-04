@@ -35,6 +35,9 @@ pub struct SyncGroup {
     pub id: String,
     pub name: String,
     pub member_count: u32,
+    /// Present after create / for owners; used to share the group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_code: Option<String>,
 }
 
 // ── Sync status info ────────────────────────────────────────────────
