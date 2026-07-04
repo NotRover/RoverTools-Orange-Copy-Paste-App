@@ -61,7 +61,8 @@ impl Note {
     pub fn new() -> Self {
         let now = now_ms();
         Self {
-            id: NEXT_NOTE_ID.fetch_add(1, Ordering::Relaxed).to_string(),
+            // Globally-unique so it doubles as the cross-device sync client_id.
+            id: uuid::Uuid::new_v4().to_string(),
             title: String::new(),
             content: String::new(),
             created_at: now,
@@ -156,6 +157,23 @@ impl NoteStore {
         } else {
             false
         }
+    }
+
+    /// Insert or replace a synced note by id, keeping the newer version (LWW).
+    /// Used by the cloud-sync merge; call [`Self::sort_recent`] after a batch.
+    pub fn upsert_synced(&mut self, note: Note) {
+        if let Some(pos) = self.notes.iter().position(|n| n.id == note.id) {
+            if note.updated_at >= self.notes[pos].updated_at {
+                self.notes[pos] = note;
+            }
+        } else {
+            self.notes.push(note);
+        }
+    }
+
+    /// Re-sort most-recently-updated first.
+    pub fn sort_recent(&mut self) {
+        self.notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     }
 
     /// Look up a note by ID.

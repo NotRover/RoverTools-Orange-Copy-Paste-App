@@ -521,7 +521,8 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 | Function                                                | Description                                             |
 | ------------------------------------------------------- | ------------------------------------------------------- |
-| `derive_umk(password, kdf_salt) → [u8; 32]`             | Argon2id(password, salt, m=65536, t=3, p=4)             |
+| `derive_kek(password, kdf_salt) → [u8; 32]`             | Argon2id(password, salt, m=65536, t=3, p=4) — wrapping key |
+| `wrap_umk(kek, umk) → String` / `unwrap_umk(kek, b64)`  | Wrap/unwrap the random UMK envelope; unwrap fails ⇒ wrong password |
 | `encrypt(key, plaintext, aad) → String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
 | `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
 | `generate_x25519_keypair() → (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |

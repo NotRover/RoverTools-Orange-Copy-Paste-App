@@ -542,6 +542,12 @@
   color: #ef4444;
 }
 
+.sync-notice {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted, #9ca3af);
+}
+
 /* ── Cloud Sync: Primary button ───────────────────────────────── */
 
 .sync-primary-btn {
@@ -565,6 +571,53 @@
 
 .sync-primary-btn:disabled {
   opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Cloud Sync: OAuth divider + Google button ────────────────── */
+
+.sync-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  color: var(--text-muted, #9ca3af);
+  font-size: 11px;
+}
+
+.sync-auth-divider::before,
+.sync-auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.sync-google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.sync-google-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.sync-google-btn:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 

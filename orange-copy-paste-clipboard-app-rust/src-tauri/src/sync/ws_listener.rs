@@ -14,12 +14,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 
-use crate::sync::client::SyncHttpClient;
+use crate::state::AppState;
+use crate::sync::client::{PulledEntry, SyncHttpClient};
 
 const INITIAL_BACKOFF_SECS: u64 = 5;
 const MAX_BACKOFF_SECS: u64 = 60;
@@ -86,6 +87,7 @@ impl WsListener {
             .http
             .current_access_token()
             .ok_or("no access token")?;
+        let device_id = self.http.device_id().ok_or("no device id")?;
 
         let base = self
             .http
@@ -93,7 +95,12 @@ impl WsListener {
             // Strip http(s) scheme and replace with ws(s)
             .replacen("https://", "wss://", 1)
             .replacen("http://", "ws://", 1);
-        let url = format!("{}/ws?token={}", base.trim_end_matches('/'), token);
+        let url = format!(
+            "{}/ws?token={}&device_id={}",
+            base.trim_end_matches('/'),
+            token,
+            device_id
+        );
 
         let (ws_stream, _) = connect_async(&url)
             .await
@@ -126,10 +133,16 @@ impl WsListener {
         Err("ws stream ended unexpectedly".into())
     }
 
+    /// Look up the live `SyncClient` from managed state (it owns the UMK and
+    /// the merge path).  Returns `None` if sync was disabled meanwhile.
+    fn sync_client(&self) -> Option<Arc<crate::sync::SyncClient>> {
+        self.app.state::<AppState>().sync_client.lock().clone()
+    }
+
     async fn dispatch<S>(
         &self,
         raw: &str,
-        _write: &mut S,
+        write: &mut S,
     ) where
         S: SinkExt<Message> + Unpin,
         <S as futures_util::Sink<Message>>::Error: std::fmt::Display,
@@ -138,27 +151,75 @@ impl WsListener {
             return;
         };
 
-        // Server event → frontend event.  Every event is forwarded verbatim;
-        // the frontend owns the decrypt/merge/apply logic.
-        let emitted = match msg.event.as_str() {
-            "sync:entry" => "sync:remote-entry",
-            "sync:delete" => "sync:remote-delete",
-            "settings:updated" => "sync:settings-updated",
-            "device:online" | "device:offline" => "sync:device-presence",
-            "group:rekey" => "sync:group-rekey",
-            "sharing:invite" => "sharing:invite-received",
-            "sharing:accepted" => "sharing:accepted",
-            "sharing:ended" => "sharing:ended",
-            "sharing:member_left" => "sharing:member-left",
-            "sharing:scope_changed" => "sharing:scope-changed",
-            // Server keepalive — pong is handled at the Message::Ping level
-            // above.  Some servers also send text "ping".
-            "ping" => return,
-            other => {
-                eprintln!("[sync:ws] unknown event: {other}");
-                return;
+        match msg.event.as_str() {
+            // Entry fan-out: only Rust holds the UMK, so decrypt + merge here
+            // (tombstones — deleted_at set — are handled inside merge_pulled).
+            "sync:entry" => {
+                if let Ok(entry) = serde_json::from_value::<PulledEntry>(msg.payload.clone()) {
+                    if let Some(sync) = self.sync_client() {
+                        sync.merge_pulled(std::slice::from_ref(&entry));
+                    }
+                }
             }
-        };
-        let _ = self.app.emit(emitted, &msg.payload);
+            // Best-effort delete keyed only by server_id.
+            "sync:delete" => {
+                if let Some(server_id) = msg.payload.get("server_id").and_then(|v| v.as_str()) {
+                    if let Some(sync) = self.sync_client() {
+                        sync.apply_remote_delete(server_id);
+                    }
+                }
+            }
+            // Another device changed settings — ask the frontend to re-pull.
+            "settings:updated" => {
+                let _ = self.app.emit("sync:settings-updated", &msg.payload);
+            }
+            "device:online" => {
+                let _ = self.app.emit(
+                    "sync:device-presence",
+                    &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": true }),
+                );
+            }
+            "device:offline" => {
+                let _ = self.app.emit(
+                    "sync:device-presence",
+                    &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": false }),
+                );
+            }
+            // Owner distributed a Group Key to us — unwrap + cache it (Rust owns
+            // the identity key), then let the UI know.
+            "group:rekey" => {
+                if let Some(sync) = self.sync_client() {
+                    sync.handle_group_rekey(&msg.payload);
+                }
+            }
+            "group:membership_changed" => {
+                let _ = self.app.emit("sync:group-membership", &msg.payload);
+            }
+            "sharing:invite" => {
+                let _ = self.app.emit("sharing:invite-received", &msg.payload);
+            }
+            // A member accepted our invite — wrap the Group Key for them and
+            // distribute it (owner-side handshake).
+            "sharing:accepted" => {
+                if let Some(sync) = self.sync_client() {
+                    sync.handle_sharing_accepted(&msg.payload);
+                }
+                let _ = self.app.emit("sharing:accepted", &msg.payload);
+            }
+            "sharing:ended" => {
+                let _ = self.app.emit("sharing:ended", &msg.payload);
+            }
+            "sharing:scope_changed" => {
+                let _ = self.app.emit("sharing:scope-changed", &msg.payload);
+            }
+            // Application-level keepalive — reply so the server refreshes our
+            // presence TTL (otherwise we're marked offline after ~5 min).
+            "ping" => {
+                let _ = write
+                    .send(Message::Text(r#"{"event":"pong"}"#.into()))
+                    .await;
+            }
+            other => eprintln!("[sync:ws] unknown event: {other}"),
+        }
     }
 }

@@ -225,8 +225,9 @@ Sign-up / login:
   App → Supabase Auth (GoTrue): sign up / verify email / log in
         → holds a Supabase access token (JWT, sub = user id) + refresh token
   App → POST /api/v1/auth/bootstrap { display_name? }   (Authorization: Bearer <JWT>)
-        → returns kdf_salt (created on first call, stable thereafter)
-  App derives UMK = Argon2id(password, kdf_salt)  [in memory only]
+        → returns kdf_salt + wrapped_umk (created on first call, stable thereafter)
+  App derives KEK = Argon2id(password, kdf_salt); unwraps random UMK from wrapped_umk
+        (or, if wrapped_umk is null, generates a UMK, wraps it, PUT /auth/umk)  [memory only]
   App → POST /api/v1/auth/devices { device_name, platform, ... } → { device_id }
         (persist device_id; send as X-Device-Id on subsequent calls)
   App generates X25519 device keypair
@@ -417,8 +418,8 @@ Device A (clipboard capture)
 │                                  │    │  relayed to other devices     │
 │  decrypt(UMK, ciphertext)    ◄───┼────│                               │
 │                                  │    │                               │
-│  UMK = Argon2id(password,        │    │  server sees: timestamps,     │
-│          kdf_salt)               │    │  entry type, blob keys,       │
+│  UMK = random; wrapped under     │    │  server sees: timestamps,     │
+│    KEK=Argon2id(password,salt)   │    │  entry type, blob keys,       │
 │  [memory only, never on disk]    │    │  group membership             │
 │                                  │    │  NEVER: plaintext             │
 └──────────────────────────────────┘    └───────────────────────────────┘
