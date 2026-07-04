@@ -15,7 +15,7 @@ import {
   ShareIcon,
   GoogleIcon,
 } from "../../icons";
-// Account/sync UI reuses the settings styles (toggles, rows, sync-* cards).
+// The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
 import "./AccountScreen.css";
 
@@ -468,689 +468,591 @@ const AccountScreen: React.FC = () => {
     return `${hrs}h ago`;
   };
 
-  const syncStatusLabel = () => {
-    if (!syncUser) return null;
-    if (!syncStatus) return "Checking…";
-    if (syncStatus.connected) return "Connected";
-    if (syncStatus.pending_count > 0) return `${syncStatus.pending_count} pending`;
-    return "Offline";
-  };
+  const status = !syncStatus
+    ? { kind: "checking", label: "Checking…" }
+    : syncStatus.connected
+      ? { kind: "connected", label: "Connected" }
+      : syncStatus.pending_count > 0
+        ? { kind: "pending", label: `${syncStatus.pending_count} pending` }
+        : { kind: "offline", label: "Offline" };
 
-  const syncStatusClass = () => {
-    if (!syncUser || !syncStatus) return "sync-status-dot--inactive";
-    if (syncStatus.connected) return "sync-status-dot--connected";
-    return "sync-status-dot--offline";
-  };
+  const scopePills = (value: string, onPick: (v: string) => void) => (
+    <div className="acct-scope">
+      <span className="acct-scope-label">Scope</span>
+      <div className="acct-scope-pills">
+        {SCOPE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`acct-scope-pill${value === opt.value ? " active" : ""}`}
+            onClick={() => onPick(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  // Advanced footer (server URL + turn sync off) — shown once signed in or ready.
+  const advanced = (
+    <div className="acct-card acct-advanced">
+      <div className="acct-adv-row">
+        <div className="acct-adv-info">
+          <span className="acct-adv-label">Server</span>
+          <span className="acct-adv-value">{serverUrl || "https://api.orangeclipboard.app"}</span>
+        </div>
+        {editingUrl ? (
+          <div className="acct-url-edit">
+            <input
+              className="auth-input acct-url-input"
+              value={serverUrlDraft}
+              onChange={(e) => setServerUrlDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveUrl(); if (e.key === "Escape") setEditingUrl(false); }}
+              autoFocus
+              spellCheck={false}
+            />
+            <button type="button" className="acct-btn acct-btn--primary acct-btn--sm" onClick={handleSaveUrl}>Save</button>
+            <button type="button" className="acct-btn acct-btn--sm" onClick={() => setEditingUrl(false)}>Cancel</button>
+          </div>
+        ) : (
+          <button type="button" className="acct-btn acct-btn--sm" onClick={() => setEditingUrl(true)}>Change</button>
+        )}
+      </div>
+      <div className="acct-adv-divider" />
+      <div className="acct-adv-row">
+        <div className="acct-adv-info">
+          <span className="acct-adv-label">Cloud Sync</span>
+          <span className="acct-adv-hint">Turn off syncing on this device.</span>
+        </div>
+        <button type="button" className="acct-btn acct-btn--danger acct-btn--sm" onClick={handleSyncToggle}>Turn off</button>
+      </div>
+    </div>
+  );
+
+  // Short states (enable hero / signed-out auth) get centered vertically and
+  // rely on the card's own heading, so the page header is hidden there.
+  const centered = !syncEnabled || !syncUser;
 
   // ── Render ──────────────────────────────────────────────────────
   return (
-    <div className="settings-screen account-screen">
-      <div className="settings-header">
-        <h2 className="settings-title">Account &amp; Sync</h2>
-        <p className="settings-subtitle">
-          Sign in, manage your devices, and share across the cloud — end-to-end encrypted.
-        </p>
-      </div>
+    <div className={`settings-screen account-screen${centered ? " account-screen--center" : ""}`}>
+      <div className="acct-inner">
+        {!centered && (
+          <header className="acct-head">
+            <h2 className="acct-title">Account &amp; Sync</h2>
+            <p className="acct-subtitle">
+              Sign in, manage your devices, and share across the cloud — end-to-end encrypted.
+            </p>
+          </header>
+        )}
 
-      {/* ── Cloud Sync ── */}
-      <div className="settings-section">
-        <h3 className="settings-section-title">Cloud Sync</h3>
-
-        {/* Enable toggle */}
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Enable Cloud Sync</span>
-            <span className="settings-row-desc">
-              Sync clipboard history and notes across devices end-to-end encrypted.
-            </span>
+        {!syncEnabled ? (
+          /* ── Sync disabled: enable hero ── */
+          <div className="acct-card acct-hero">
+            <div className="acct-hero-badge"><CloudSyncIcon size={26} /></div>
+            <h3 className="acct-hero-title">Sync across your devices</h3>
+            <p className="acct-hero-desc">
+              Keep your clipboard history and notes in sync on every device — end-to-end
+              encrypted, so only you can read them.
+            </p>
+            <button type="button" className="auth-submit acct-hero-btn" onClick={handleSyncToggle}>
+              Enable Cloud Sync
+            </button>
           </div>
-          <button
-            type="button"
-            className={`settings-toggle${syncEnabled ? " active" : ""}`}
-            onClick={handleSyncToggle}
-            aria-pressed={syncEnabled}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-
-        {syncEnabled && (
+        ) : !syncUser ? (
+          /* ── Enabled but signed out: auth card + advanced ── */
           <>
-            {/* Server URL */}
-            <div className="settings-row sync-url-row">
-              <div className="settings-row-info">
-                <span className="settings-row-label">Server URL</span>
-                <span className="settings-row-desc">Leave default for the official server, or enter your own.</span>
+            <div className="auth-card">
+              <div className="auth-brand">
+                <div className="auth-brand-badge">
+                  <CloudSyncIcon size={20} />
+                </div>
+                <h3 className="auth-title">
+                  {oauthStage === "password"
+                    ? oauthIsNew
+                      ? "Set your password"
+                      : "Enter your password"
+                    : forgotOpen
+                      ? "Reset your password"
+                      : authMode === "signup"
+                        ? "Create your account"
+                        : "Welcome back"}
+                </h3>
+                <p className="auth-subtitle">
+                  {oauthStage === "password"
+                    ? `Signed in as ${oauthEmail}`
+                    : forgotOpen
+                      ? "We'll email you a link to set a new password."
+                      : authMode === "signup"
+                        ? "Sync your clipboard & notes — end-to-end encrypted."
+                        : "Sign in to sync across your devices."}
+                </p>
               </div>
-              {editingUrl ? (
-                <div className="sync-url-edit">
-                  <input
-                    className="sync-url-input"
-                    value={serverUrlDraft}
-                    onChange={(e) => setServerUrlDraft(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSaveUrl(); if (e.key === "Escape") setEditingUrl(false); }}
-                    autoFocus
-                    spellCheck={false}
-                  />
-                  <button type="button" className="settings-action-btn" onClick={handleSaveUrl}>Save</button>
-                  <button type="button" className="settings-action-btn" onClick={() => setEditingUrl(false)}>Cancel</button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="settings-action-btn sync-url-display"
-                  onClick={() => setEditingUrl(true)}
-                  title="Click to edit"
-                >
-                  <span className="sync-url-text">{serverUrl || "https://api.orangeclipboard.app"}</span>
-                  <span className="sync-url-edit-hint">Edit</span>
-                </button>
-              )}
-            </div>
 
-            {/* Auth panel */}
-            {!syncUser ? (
-              /* Login form */
-              <div className="auth-card">
-                <div className="auth-brand">
-                  <div className="auth-brand-badge">
-                    <CloudSyncIcon size={20} />
-                  </div>
-                  <h3 className="auth-title">
-                    {oauthStage === "password"
-                      ? oauthIsNew
-                        ? "Set your password"
-                        : "Enter your password"
-                      : forgotOpen
-                        ? "Reset your password"
-                        : authMode === "signup"
-                          ? "Create your account"
-                          : "Welcome back"}
-                  </h3>
-                  <p className="auth-subtitle">
-                    {oauthStage === "password"
-                      ? `Signed in as ${oauthEmail}`
-                      : forgotOpen
-                        ? "We'll email you a link to set a new password."
-                        : authMode === "signup"
-                          ? "Sync your clipboard & notes — end-to-end encrypted."
-                          : "Sign in to sync across your devices."}
+              {oauthStage === "password" ? (
+                /* OAuth: account-password step (the E2E secret) */
+                <div className="auth-form">
+                  <p className="auth-hint">
+                    {oauthIsNew
+                      ? "Set a password to encrypt your data — you'll enter it on each device, and it also lets you sign in with email."
+                      : "Enter your account password to unlock your encrypted data."}
                   </p>
-                </div>
-
-                {oauthStage === "password" ? (
-                  /* OAuth: account-password step (the E2E secret) */
-                  <div className="auth-form">
-                    <p className="auth-hint">
-                      {oauthIsNew
-                        ? "Set a password to encrypt your data — you'll enter it on each device, and it also lets you sign in with email."
-                        : "Enter your account password to unlock your encrypted data."}
-                    </p>
+                  <label className="auth-field">
+                    <span className="auth-label">{oauthIsNew ? "New password" : "Password"}</span>
+                    <input
+                      className="auth-input"
+                      type="password"
+                      placeholder="••••••••"
+                      value={oauthPassword}
+                      autoFocus
+                      onChange={(e) => setOauthPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !oauthIsNew) handleOauthComplete(); }}
+                      disabled={oauthLoading}
+                    />
+                  </label>
+                  {oauthIsNew && (
                     <label className="auth-field">
-                      <span className="auth-label">{oauthIsNew ? "New password" : "Password"}</span>
+                      <span className="auth-label">Confirm password</span>
                       <input
                         className="auth-input"
                         type="password"
                         placeholder="••••••••"
-                        value={oauthPassword}
-                        autoFocus
-                        onChange={(e) => setOauthPassword(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter" && !oauthIsNew) handleOauthComplete(); }}
+                        value={oauthConfirm}
+                        onChange={(e) => setOauthConfirm(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleOauthComplete(); }}
                         disabled={oauthLoading}
                       />
                     </label>
-                    {oauthIsNew && (
-                      <label className="auth-field">
-                        <span className="auth-label">Confirm password</span>
-                        <input
-                          className="auth-input"
-                          type="password"
-                          placeholder="••••••••"
-                          value={oauthConfirm}
-                          onChange={(e) => setOauthConfirm(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleOauthComplete(); }}
-                          disabled={oauthLoading}
-                        />
-                      </label>
-                    )}
-                    {loginError && <span className="auth-error">{loginError}</span>}
-                    <button
-                      type="button"
-                      className="auth-submit"
-                      onClick={handleOauthComplete}
-                      disabled={oauthLoading || !oauthPassword}
-                    >
-                      {oauthLoading
-                        ? "Unlocking…"
-                        : oauthIsNew
-                          ? "Set password & continue"
-                          : "Unlock"}
-                    </button>
-                    <button
-                      type="button"
-                      className="auth-textlink auth-textlink--center"
-                      onClick={handleOauthCancel}
-                      disabled={oauthLoading}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : forgotOpen ? (
-                  /* Forgot / reset password */
-                  <div className="auth-form">
-                    {resetSent ? (
-                      <div className="auth-reset-done">
-                        <span className="auth-reset-check"><CheckIcon size={16} strokeWidth={2.6} /></span>
-                        <p>
-                          If an account exists for <strong>{resetEmail}</strong>, a password-reset
-                          link is on its way. Check your inbox.
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <label className="auth-field">
-                          <span className="auth-label">Email</span>
-                          <input
-                            className="auth-input"
-                            type="email"
-                            placeholder="you@example.com"
-                            value={resetEmail}
-                            autoFocus
-                            onChange={(e) => setResetEmail(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") handleResetPassword(); }}
-                            disabled={resetLoading}
-                          />
-                        </label>
-                        {resetError && <span className="auth-error">{resetError}</span>}
-                        <button
-                          type="button"
-                          className="auth-submit"
-                          onClick={handleResetPassword}
-                          disabled={resetLoading || !resetEmail.trim()}
-                        >
-                          {resetLoading ? "Sending…" : "Send reset link"}
-                        </button>
-                      </>
-                    )}
-                    <p className="auth-note">
-                      Because your data is end-to-end encrypted, resetting your password restores
-                      sign-in but can't recover previously synced data unless another device is
-                      still signed in.
-                    </p>
-                    <button
-                      type="button"
-                      className="auth-textlink auth-textlink--center"
-                      onClick={closeForgot}
-                    >
-                      ← Back to sign in
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="auth-tabs" role="tablist">
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={authMode === "login"}
-                        className={`auth-tab${authMode === "login" ? " active" : ""}`}
-                        onClick={() => switchAuthMode("login")}
-                      >
-                        Sign In
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={authMode === "signup"}
-                        className={`auth-tab${authMode === "signup" ? " active" : ""}`}
-                        onClick={() => switchAuthMode("signup")}
-                      >
-                        Sign Up
-                      </button>
-                      <span
-                        className="auth-tabs-slider"
-                        style={{ transform: `translateX(${authMode === "signup" ? "100%" : "0"})` }}
-                      />
+                  )}
+                  {loginError && <span className="auth-error">{loginError}</span>}
+                  <button
+                    type="button"
+                    className="auth-submit"
+                    onClick={handleOauthComplete}
+                    disabled={oauthLoading || !oauthPassword}
+                  >
+                    {oauthLoading
+                      ? "Unlocking…"
+                      : oauthIsNew
+                        ? "Set password & continue"
+                        : "Unlock"}
+                  </button>
+                  <button
+                    type="button"
+                    className="auth-textlink auth-textlink--center"
+                    onClick={handleOauthCancel}
+                    disabled={oauthLoading}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : forgotOpen ? (
+                /* Forgot / reset password */
+                <div className="auth-form">
+                  {resetSent ? (
+                    <div className="auth-reset-done">
+                      <span className="auth-reset-check"><CheckIcon size={16} strokeWidth={2.6} /></span>
+                      <p>
+                        If an account exists for <strong>{resetEmail}</strong>, a password-reset
+                        link is on its way. Check your inbox.
+                      </p>
                     </div>
-
-                    <div className="auth-form">
+                  ) : (
+                    <>
                       <label className="auth-field">
                         <span className="auth-label">Email</span>
                         <input
                           className="auth-input"
                           type="email"
                           placeholder="you@example.com"
-                          value={loginEmail}
-                          onChange={(e) => setLoginEmail(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-                          disabled={loginLoading || oauthLoading}
+                          value={resetEmail}
+                          autoFocus
+                          onChange={(e) => setResetEmail(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleResetPassword(); }}
+                          disabled={resetLoading}
                         />
                       </label>
-                      <label className="auth-field">
-                        <div className="auth-label-row">
-                          <span className="auth-label">Password</span>
-                          {authMode === "login" && (
-                            <button type="button" className="auth-textlink" onClick={openForgot}>
-                              Forgot?
-                            </button>
-                          )}
-                        </div>
-                        <input
-                          className="auth-input"
-                          type="password"
-                          placeholder="••••••••"
-                          value={loginPassword}
-                          onChange={(e) => setLoginPassword(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-                          disabled={loginLoading || oauthLoading}
-                        />
-                      </label>
-
-                      {loginError && <span className="auth-error">{loginError}</span>}
-                      {authNotice && <span className="auth-notice">{authNotice}</span>}
-
+                      {resetError && <span className="auth-error">{resetError}</span>}
                       <button
                         type="button"
                         className="auth-submit"
-                        onClick={handleLogin}
-                        disabled={loginLoading || oauthLoading || !loginEmail || !loginPassword}
+                        onClick={handleResetPassword}
+                        disabled={resetLoading || !resetEmail.trim()}
                       >
-                        {loginLoading
-                          ? authMode === "signup"
-                            ? "Creating account…"
-                            : "Signing in…"
-                          : authMode === "signup"
-                            ? "Create account"
-                            : "Sign in"}
+                        {resetLoading ? "Sending…" : "Send reset link"}
                       </button>
+                    </>
+                  )}
+                  <p className="auth-note">
+                    Because your data is end-to-end encrypted, resetting your password restores
+                    sign-in but can't recover previously synced data unless another device is
+                    still signed in.
+                  </p>
+                  <button
+                    type="button"
+                    className="auth-textlink auth-textlink--center"
+                    onClick={closeForgot}
+                  >
+                    ← Back to sign in
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="auth-tabs" role="tablist">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={authMode === "login"}
+                      className={`auth-tab${authMode === "login" ? " active" : ""}`}
+                      onClick={() => switchAuthMode("login")}
+                    >
+                      Sign In
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={authMode === "signup"}
+                      className={`auth-tab${authMode === "signup" ? " active" : ""}`}
+                      onClick={() => switchAuthMode("signup")}
+                    >
+                      Sign Up
+                    </button>
+                    <span
+                      className="auth-tabs-slider"
+                      style={{ transform: `translateX(${authMode === "signup" ? "100%" : "0"})` }}
+                    />
+                  </div>
 
-                      <div className="auth-divider"><span>or</span></div>
-
-                      <button
-                        type="button"
-                        className="auth-google"
-                        onClick={handleGoogleSignIn}
+                  <div className="auth-form">
+                    <label className="auth-field">
+                      <span className="auth-label">Email</span>
+                      <input
+                        className="auth-input"
+                        type="email"
+                        placeholder="you@example.com"
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
                         disabled={loginLoading || oauthLoading}
-                      >
-                        <GoogleIcon size={16} />
-                        {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              /* Logged-in panel */
-              <>
-                {/* User info + status */}
-                <div className="sync-user-card">
-                  <div className="sync-user-info">
-                    <div className="sync-user-avatar">
-                      {syncUser.display_name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="sync-user-text">
-                      <span className="sync-user-name">{syncUser.display_name}</span>
-                      <span className="sync-user-email">{syncUser.email}</span>
-                    </div>
-                    <div className="sync-user-actions">
-                      <div className="sync-status-row">
-                        <span className={`sync-status-dot ${syncStatusClass()}`} />
-                        <span className="sync-status-label">{syncStatusLabel()}</span>
-                        {lastSynced && (
-                          <span className="sync-last-synced">· {formatLastSynced(lastSynced)}</span>
+                      />
+                    </label>
+                    <label className="auth-field">
+                      <div className="auth-label-row">
+                        <span className="auth-label">Password</span>
+                        {authMode === "login" && (
+                          <button type="button" className="auth-textlink" onClick={openForgot}>
+                            Forgot?
+                          </button>
                         )}
                       </div>
-                      <div className="sync-user-btns">
+                      <input
+                        className="auth-input"
+                        type="password"
+                        placeholder="••••••••"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+                        disabled={loginLoading || oauthLoading}
+                      />
+                    </label>
+
+                    {loginError && <span className="auth-error">{loginError}</span>}
+                    {authNotice && <span className="auth-notice">{authNotice}</span>}
+
+                    <button
+                      type="button"
+                      className="auth-submit"
+                      onClick={handleLogin}
+                      disabled={loginLoading || oauthLoading || !loginEmail || !loginPassword}
+                    >
+                      {loginLoading
+                        ? authMode === "signup"
+                          ? "Creating account…"
+                          : "Signing in…"
+                        : authMode === "signup"
+                          ? "Create account"
+                          : "Sign in"}
+                    </button>
+
+                    <div className="auth-divider"><span>or</span></div>
+
+                    <button
+                      type="button"
+                      className="auth-google"
+                      onClick={handleGoogleSignIn}
+                      disabled={loginLoading || oauthLoading}
+                    >
+                      <GoogleIcon size={16} />
+                      {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            {advanced}
+          </>
+        ) : (
+          /* ── Signed in ── */
+          <>
+            {/* Profile */}
+            <div className="acct-card acct-profile">
+              <div className="acct-avatar">
+                {(syncUser.display_name || syncUser.email || "?").charAt(0).toUpperCase()}
+              </div>
+              <div className="acct-profile-text">
+                <span className="acct-profile-name">{syncUser.display_name || "Your account"}</span>
+                <span className="acct-profile-email">{syncUser.email}</span>
+              </div>
+              <span className={`acct-status acct-status--${status.kind}`}>
+                <span className="acct-status-dot" />
+                {status.label}
+                {status.kind === "connected" && lastSynced ? ` · ${formatLastSynced(lastSynced)}` : ""}
+              </span>
+              <div className="acct-profile-actions">
+                <button
+                  type="button"
+                  className="acct-btn"
+                  onClick={handleSyncNow}
+                  disabled={syncNowLoading}
+                >
+                  {syncNowLoading ? "Syncing…" : "Sync now"}
+                </button>
+                <button type="button" className="acct-btn acct-btn--danger" onClick={handleLogout}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            {/* Devices */}
+            <div className="acct-card">
+              <div className="acct-card-head">
+                <span className="acct-card-icon"><CloudSyncIcon size={15} /></span>
+                <h3 className="acct-card-title">Devices</h3>
+                {devices.length > 0 && <span className="acct-card-count">{devices.length}</span>}
+              </div>
+              {devices.length > 0 ? (
+                <div className="acct-list">
+                  {devices.map((d) => {
+                    const online = onlineDevices.has(d.id);
+                    return (
+                      <div key={d.id} className="acct-row">
+                        <span className={`acct-dot${online ? " online" : ""}`} />
+                        <div className="acct-row-main">
+                          <span className="acct-row-name">{d.device_name || "Unknown device"}</span>
+                          <span className="acct-row-meta">{d.platform}{online ? " · online" : " · offline"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="acct-empty">No devices registered yet.</p>
+              )}
+            </div>
+
+            {/* Shared Groups */}
+            <div className="acct-card">
+              <div className="acct-card-head">
+                <span className="acct-card-icon"><UsersIcon size={15} /></span>
+                <h3 className="acct-card-title">Shared Groups</h3>
+                {syncGroups.length > 0 && <span className="acct-card-count">{syncGroups.length}</span>}
+              </div>
+              {syncGroups.length > 0 && (
+                <div className="acct-list">
+                  {syncGroups.map((g) => (
+                    <div key={g.id} className="acct-row">
+                      <div className="acct-row-main">
+                        <span className="acct-row-name">{g.name}</span>
+                        <span className="acct-row-meta">{g.member_count} member{g.member_count !== 1 ? "s" : ""}</span>
+                      </div>
+                      <div className="acct-row-actions">
                         <button
                           type="button"
-                          className="settings-action-btn"
-                          onClick={handleSyncNow}
-                          disabled={syncNowLoading}
+                          className="acct-btn acct-btn--sm"
+                          onClick={() => handleCopyInvite(g.id)}
                         >
-                          {syncNowLoading ? "Syncing…" : "Sync Now"}
+                          {copiedGroupId === g.id ? (
+                            <><CheckIcon size={11} /> Copied</>
+                          ) : (
+                            <><ShareIcon size={11} /> Invite</>
+                          )}
                         </button>
                         <button
                           type="button"
-                          className="settings-action-btn sync-logout-btn"
-                          onClick={handleLogout}
+                          className="acct-btn acct-btn--sm acct-btn--danger"
+                          onClick={() => handleLeaveGroup(g.id)}
                         >
-                          Sign Out
+                          Leave
                         </button>
                       </div>
                     </div>
-                  </div>
+                  ))}
                 </div>
+              )}
+              <div className="acct-field-row">
+                <input
+                  className="auth-input"
+                  placeholder="New group name"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroup(); }}
+                  disabled={groupLoading}
+                />
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--primary"
+                  onClick={handleCreateGroup}
+                  disabled={groupLoading || !newGroupName.trim()}
+                >
+                  Create
+                </button>
+              </div>
+              <div className="acct-field-row">
+                <input
+                  className="auth-input"
+                  placeholder="Invite code to join"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleJoinGroup(); }}
+                  disabled={groupLoading}
+                />
+                <button
+                  type="button"
+                  className="acct-btn"
+                  onClick={handleJoinGroup}
+                  disabled={groupLoading || !joinCode.trim()}
+                >
+                  Join
+                </button>
+              </div>
+            </div>
 
-                {/* Devices */}
-                {devices.length > 0 && (
-                  <div className="sync-sub-section">
-                    <div className="sync-sub-section-header">
-                      <CloudSyncIcon size={13} />
-                      <span className="sync-sub-section-title">Devices</span>
-                    </div>
-                    <div className="sync-groups-list">
-                      {devices.map((d) => {
-                        const online = onlineDevices.has(d.id);
-                        return (
-                          <div key={d.id} className="sync-group-row">
-                            <div className="sync-group-info">
-                              <span
-                                className="sync-status-dot"
-                                title={online ? "Online" : "Offline"}
-                                style={{
-                                  background: online ? "#22c55e" : "#9ca3af",
-                                  flex: "0 0 auto",
-                                }}
-                              />
-                              <span className="sync-group-name">
-                                {d.device_name || "Unknown device"}
-                              </span>
-                              <span className="sync-group-meta">
-                                {d.platform}
-                                {online ? " · online" : ""}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+            {/* Live Share */}
+            <div className="acct-card">
+              <div className="acct-card-head">
+                <span className="acct-card-icon"><ShareIcon size={15} /></span>
+                <h3 className="acct-card-title">Live Share</h3>
+              </div>
+              <p className="acct-card-desc">
+                Share your clipboard or notes in real time with another person (up to 5 members).
+              </p>
 
-                {/* Shared Groups */}
-                <div className="sync-sub-section">
-                  <div className="sync-sub-section-header">
-                    <UsersIcon size={13} />
-                    <span className="sync-sub-section-title">Shared Groups</span>
-                  </div>
-
-                  {syncGroups.length > 0 && (
-                    <div className="sync-groups-list">
-                      {syncGroups.map((g) => (
-                        <div key={g.id} className="sync-group-row">
-                          <div className="sync-group-info">
-                            <span className="sync-group-name">{g.name}</span>
-                            <span className="sync-group-members">{g.member_count} member{g.member_count !== 1 ? "s" : ""}</span>
-                          </div>
-                          <div className="sync-group-actions">
-                            <button
-                              type="button"
-                              className="settings-action-btn sync-invite-btn"
-                              onClick={() => handleCopyInvite(g.id)}
-                              data-tooltip="Copy invite link"
-                            >
-                              {copiedGroupId === g.id ? (
-                                <><CheckIcon size={11} /> Copied</>
-                              ) : (
-                                <><ShareIcon size={11} /> Invite</>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              className="settings-action-btn sync-leave-btn"
-                              onClick={() => handleLeaveGroup(g.id)}
-                            >
-                              Leave
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+              {incomingInvite && (
+                <div className="acct-invite-banner">
+                  <div className="acct-invite-head"><ShareIcon size={13} /> Incoming invite</div>
+                  <p className="acct-invite-code">{incomingInvite.invite_code}</p>
+                  {incomingInvite.from_email && (
+                    <p className="acct-row-meta">From {incomingInvite.from_email}</p>
                   )}
-
-                  {/* Create group */}
-                  <div className="sync-input-row">
-                    <input
-                      className="sync-input sync-input--flex"
-                      placeholder="New group name"
-                      value={newGroupName}
-                      onChange={(e) => setNewGroupName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroup(); }}
-                      disabled={groupLoading}
-                    />
+                  {scopePills(acceptScope, setAcceptScope)}
+                  <div className="acct-row-actions acct-invite-actions">
                     <button
                       type="button"
-                      className="settings-action-btn"
-                      onClick={handleCreateGroup}
-                      disabled={groupLoading || !newGroupName.trim()}
+                      className="acct-btn acct-btn--primary acct-btn--sm"
+                      disabled={sharingLoading}
+                      onClick={() => handleAcceptInvite(incomingInvite.invite_code, acceptScope)}
                     >
-                      Create
+                      {sharingLoading ? "Accepting…" : "Accept"}
                     </button>
-                  </div>
-
-                  {/* Join group */}
-                  <div className="sync-input-row">
-                    <input
-                      className="sync-input sync-input--flex"
-                      placeholder="Invite code to join"
-                      value={joinCode}
-                      onChange={(e) => setJoinCode(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleJoinGroup(); }}
-                      disabled={groupLoading}
-                    />
-                    <button
-                      type="button"
-                      className="settings-action-btn"
-                      onClick={handleJoinGroup}
-                      disabled={groupLoading || !joinCode.trim()}
-                    >
-                      Join
+                    <button type="button" className="acct-btn acct-btn--sm" onClick={() => setIncomingInvite(null)}>
+                      Dismiss
                     </button>
                   </div>
                 </div>
-              </>
-            )}
+              )}
+
+              {sharingSessions.length > 0 && (
+                <div className="acct-list">
+                  {sharingSessions.map((session) => (
+                    <div key={session.share_group_id} className="acct-session">
+                      <div className="acct-row">
+                        <div className="acct-row-main">
+                          <span className="acct-row-name">{session.name || "Live Share session"}</span>
+                          <span className="acct-row-meta">
+                            {session.members.length} member{session.members.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+                        <div className="acct-row-actions">
+                          <button type="button" className="acct-btn acct-btn--sm" onClick={() => handleLeaveSession(session.share_group_id)}>Leave</button>
+                          <button type="button" className="acct-btn acct-btn--sm acct-btn--danger" onClick={() => handleEndSession(session.share_group_id)}>End</button>
+                        </div>
+                      </div>
+                      {scopePills(session.my_scope, (v) => handleUpdateScope(session.share_group_id, v))}
+                      {session.members.length > 0 && (
+                        <div className="acct-members">
+                          {session.members.map((m) => (
+                            <div key={m.user_id} className="acct-member">
+                              <span className={`acct-dot${m.online ? " online" : ""}`} />
+                              <span className="acct-row-name">{m.display_name}</span>
+                              <span className="acct-row-meta">{m.scope}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="acct-subhead">Invite someone</div>
+              <div className="acct-field-row">
+                <input
+                  className="auth-input"
+                  type="email"
+                  placeholder="Email address"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  disabled={sharingLoading}
+                />
+              </div>
+              {scopePills(inviteScope, setInviteScope)}
+              <button
+                type="button"
+                className="acct-btn acct-btn--primary acct-btn--wide"
+                onClick={handleShareInvite}
+                disabled={sharingLoading || !inviteEmail.trim()}
+              >
+                {sharingLoading ? "Sending…" : "Send invite"}
+              </button>
+              {inviteResult && (
+                <div className="acct-invite-result">
+                  <span className="acct-row-meta">Invite code</span>
+                  <code className="acct-invite-code-inline">{inviteResult.invite_code}</code>
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--sm"
+                    onClick={() => navigator.clipboard.writeText(inviteResult.invite_code).catch(() => {})}
+                  >
+                    <ShareIcon size={11} /> Copy
+                  </button>
+                </div>
+              )}
+
+              <div className="acct-subhead">Join by code</div>
+              <div className="acct-field-row">
+                <input
+                  className="auth-input"
+                  placeholder="Paste invite code"
+                  value={acceptCode}
+                  onChange={(e) => setAcceptCode(e.target.value)}
+                  disabled={sharingLoading}
+                />
+                <button
+                  type="button"
+                  className="acct-btn"
+                  onClick={() => handleAcceptInvite(acceptCode, acceptScope)}
+                  disabled={sharingLoading || !acceptCode.trim()}
+                >
+                  {sharingLoading ? "Joining…" : "Join"}
+                </button>
+              </div>
+            </div>
+
+            {advanced}
           </>
         )}
       </div>
-
-      {/* ── Live Share ── */}
-      {syncEnabled && syncUser && (
-        <div className="settings-section">
-          <h3 className="settings-section-title">Live Share</h3>
-          <p className="settings-section-desc">
-            Share your clipboard or notes in real time with another person (up to 5 members per session).
-          </p>
-
-          {/* Incoming invite */}
-          {incomingInvite && (
-            <div className="sync-auth-card sync-invite-incoming">
-              <div className="sync-auth-card-header">
-                <ShareIcon size={14} />
-                <span>Incoming Live Share invite</span>
-              </div>
-              <p className="sync-invite-code-display">{incomingInvite.invite_code}</p>
-              {incomingInvite.from_email && (
-                <p className="sync-invite-from">From: {incomingInvite.from_email}</p>
-              )}
-              <div className="sync-scope-row">
-                <span className="sync-scope-label">Share scope:</span>
-                <div className="sync-scope-pills">
-                  {SCOPE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`sync-scope-pill${acceptScope === opt.value ? " active" : ""}`}
-                      onClick={() => setAcceptScope(opt.value)}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="sync-invite-btns">
-                <button
-                  type="button"
-                  className="sync-primary-btn"
-                  disabled={sharingLoading}
-                  onClick={() => handleAcceptInvite(incomingInvite.invite_code, acceptScope)}
-                >
-                  {sharingLoading ? "Accepting…" : "Accept"}
-                </button>
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  onClick={() => setIncomingInvite(null)}
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Active sessions */}
-          {sharingSessions.length > 0 && (
-            <div className="sync-sessions-list">
-              {sharingSessions.map((session) => (
-                <div key={session.share_group_id} className="sync-session-card">
-                  <div className="sync-session-header">
-                    <span className="sync-session-name">{session.name || "Live Share Session"}</span>
-                    <div className="sync-session-actions">
-                      <button
-                        type="button"
-                        className="settings-action-btn sync-leave-btn"
-                        onClick={() => handleLeaveSession(session.share_group_id)}
-                      >
-                        Leave
-                      </button>
-                      <button
-                        type="button"
-                        className="settings-action-btn sync-end-btn"
-                        onClick={() => handleEndSession(session.share_group_id)}
-                      >
-                        End
-                      </button>
-                    </div>
-                  </div>
-                  {/* Scope selector */}
-                  <div className="sync-scope-row">
-                    <span className="sync-scope-label">My scope:</span>
-                    <div className="sync-scope-pills">
-                      {SCOPE_OPTIONS.map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          className={`sync-scope-pill${session.my_scope === opt.value ? " active" : ""}`}
-                          onClick={() => handleUpdateScope(session.share_group_id, opt.value)}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Members */}
-                  {session.members.length > 0 && (
-                    <div className="sync-session-members">
-                      {session.members.map((m) => (
-                        <div key={m.user_id} className="sync-member-row">
-                          <span className={`sync-member-dot${m.online ? " online" : ""}`} />
-                          <span className="sync-member-name">{m.display_name}</span>
-                          <span className="sync-member-scope">{m.scope}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Invite form */}
-          <div className="sync-sub-section">
-            <div className="sync-sub-section-header">
-              <ShareIcon size={13} />
-              <span className="sync-sub-section-title">Invite to Live Share</span>
-            </div>
-            <div className="sync-input-row">
-              <input
-                className="sync-input sync-input--flex"
-                type="email"
-                placeholder="Email address"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                disabled={sharingLoading}
-              />
-            </div>
-            <div className="sync-scope-row">
-              <span className="sync-scope-label">Share scope:</span>
-              <div className="sync-scope-pills">
-                {SCOPE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`sync-scope-pill${inviteScope === opt.value ? " active" : ""}`}
-                    onClick={() => setInviteScope(opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="sync-primary-btn sync-invite-send-btn"
-              onClick={handleShareInvite}
-              disabled={sharingLoading || !inviteEmail.trim()}
-            >
-              {sharingLoading ? "Sending…" : "Send Invite"}
-            </button>
-            {inviteResult && (
-              <div className="sync-invite-result">
-                <span className="sync-invite-result-label">Invite code:</span>
-                <span className="sync-invite-result-code">{inviteResult.invite_code}</span>
-                <button
-                  type="button"
-                  className="settings-action-btn"
-                  onClick={() => {
-                    navigator.clipboard.writeText(inviteResult.invite_code).catch(() => {});
-                  }}
-                >
-                  <ShareIcon size={11} /> Copy
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Accept by code */}
-          <div className="sync-sub-section">
-            <div className="sync-sub-section-header">
-              <UsersIcon size={13} />
-              <span className="sync-sub-section-title">Join by invite code</span>
-            </div>
-            <div className="sync-input-row">
-              <input
-                className="sync-input sync-input--flex"
-                placeholder="Paste invite code"
-                value={acceptCode}
-                onChange={(e) => setAcceptCode(e.target.value)}
-                disabled={sharingLoading}
-              />
-            </div>
-            <div className="sync-scope-row">
-              <span className="sync-scope-label">Share scope:</span>
-              <div className="sync-scope-pills">
-                {SCOPE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`sync-scope-pill${acceptScope === opt.value ? " active" : ""}`}
-                    onClick={() => setAcceptScope(opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="settings-action-btn"
-              onClick={() => handleAcceptInvite(acceptCode, acceptScope)}
-              disabled={sharingLoading || !acceptCode.trim()}
-            >
-              {sharingLoading ? "Joining…" : "Join Session"}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
