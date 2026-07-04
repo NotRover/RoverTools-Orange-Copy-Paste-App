@@ -55,6 +55,16 @@ pub struct RegisterDeviceResponse {
     pub device_id: String,
 }
 
+/// A registered device (`GET /auth/devices`), for the presence UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceOut {
+    pub id: String,
+    pub device_name: String,
+    pub platform: String,
+    pub app_version: String,
+    pub last_seen_at: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct RegisterKeysRequest {
     pub identity_pubkey: String,
@@ -279,20 +289,34 @@ pub struct UpdateScopeRequest {
 
 #[derive(Debug, Serialize)]
 pub struct BlobUploadRequest {
-    pub filename: String,
-    pub content_type: String,
+    pub mime_type: String,
     pub size_bytes: u64,
+    /// SHA-256 hex of the (encrypted) bytes being uploaded.
+    pub checksum: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BlobUploadResponse {
     pub blob_key: String,
-    pub upload_url: String,
+    pub presigned_put_url: String,
+    pub expires_in_seconds: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct BlobConfirmRequest {
     pub blob_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BlobDownloadResponse {
+    pub presigned_get_url: String,
+    pub expires_in_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QuotaResponse {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
 }
 
 // ── Client ───────────────────────────────────────────────────────────
@@ -741,5 +765,49 @@ impl SyncHttpClient {
                 .json(&body))
         })
         .await
+    }
+
+    /// Fetch a presigned GET URL for a blob (owner-only server-side).
+    pub async fn blob_download_url(
+        &self,
+        blob_key: &str,
+    ) -> Result<BlobDownloadResponse, String> {
+        self.get_json("blob download-url", || {
+            self.authed(
+                Method::GET,
+                &format!("/api/v1/blobs/{blob_key}/download-url"),
+            )
+        })
+        .await
+    }
+
+    /// Download raw blob bytes from a presigned GET URL (no auth, no retry).
+    pub async fn download_blob_bytes(&self, get_url: &str) -> Result<Vec<u8>, String> {
+        let resp = self
+            .inner
+            .get(get_url)
+            .send()
+            .await
+            .map_err(|e| format!("blob download: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("blob download {}", resp.status().as_u16()));
+        }
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| format!("blob download body: {e}"))
+    }
+
+    pub async fn blob_quota(&self) -> Result<QuotaResponse, String> {
+        self.get_json("blob quota", || self.authed(Method::GET, "/api/v1/blobs/quota"))
+            .await
+    }
+
+    // ── Devices ───────────────────────────────────────────────────
+
+    /// List the current user's registered devices (for the presence UI).
+    pub async fn list_devices(&self) -> Result<Vec<DeviceOut>, String> {
+        self.get_json("list devices", || self.authed(Method::GET, "/api/v1/auth/devices"))
+            .await
     }
 }

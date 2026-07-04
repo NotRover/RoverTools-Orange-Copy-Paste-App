@@ -14,7 +14,8 @@ use crate::sync::client::{CreateGroupRequest, GroupOut, JoinGroupRequest, Sharin
 use crate::sync::config::SyncConfig;
 use crate::sync::crypto;
 use crate::sync::types::{
-    ShareScope, SharingInvite, SharingSession, SyncGroup, SyncStatusInfo, SyncUser,
+    ShareScope, SharingInvite, SharingSession, SyncDevice, SyncGroup, SyncQuota, SyncStatusInfo,
+    SyncUser,
 };
 use crate::sync::SyncClient;
 
@@ -288,6 +289,34 @@ pub async fn sync_leave_group(
     // Self-removal (the owner may dissolve the group with delete instead).
     http.remove_group_member(&group_id, &user_id).await?;
     Ok(())
+}
+
+// ── Blobs & devices ─────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn sync_get_quota(state: State<'_, AppState>) -> Result<SyncQuota, String> {
+    let (_sync, http) = sync_http(&state)?;
+    let q = http.blob_quota().await?;
+    Ok(SyncQuota {
+        used_bytes: q.used_bytes,
+        quota_bytes: q.quota_bytes,
+    })
+}
+
+#[tauri::command]
+pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDevice>, String> {
+    let (_sync, http) = sync_http(&state)?;
+    let devices = http.list_devices().await?;
+    Ok(devices
+        .into_iter()
+        .map(|d| SyncDevice {
+            id: d.id,
+            device_name: d.device_name,
+            platform: d.platform,
+            app_version: d.app_version,
+            last_seen_at: d.last_seen_at,
+        })
+        .collect())
 }
 
 // ── Live Share ────────────────────────────────────────────────────────

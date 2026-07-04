@@ -73,6 +73,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 argon2 = "0.5"
 # AES-256-GCM — symmetric content encryption
 aes-gcm = "0.10"
+# SHA-256 — blob checksum for the upload contract
+sha2 = "0.10"
 # X25519 ECDH — multi-device key exchange and group key wrapping
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 # OS credential store (Windows Credential Manager / macOS Keychain / libsecret)

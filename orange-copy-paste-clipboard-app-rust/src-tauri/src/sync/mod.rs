@@ -36,7 +36,8 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
 use crate::sync::client::{
-    DistributeKeysRequest, PushEntryRequest, RegisterDeviceRequest, SyncHttpClient, WrappedKeyEntry,
+    BlobUploadRequest, DistributeKeysRequest, PushEntryRequest, RegisterDeviceRequest,
+    SyncHttpClient, WrappedKeyEntry,
 };
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
@@ -70,11 +71,26 @@ struct PushJob {
     updated_at: u64,
     pinned: bool,
     group_ids: Vec<String>,
+    /// Blob storage key + ciphertext size for image entries; `None` for text.
+    blob_key: Option<String>,
+    blob_size: Option<u64>,
 }
 
 /// Decode a base64 X25519 public key into a fixed 32-byte array.
 fn decode_pubkey(b64: &str) -> Option<[u8; 32]> {
     B64.decode(b64).ok()?.try_into().ok()
+}
+
+/// Fields needed to materialize a downloaded image blob into the history store.
+struct ImageMergeMeta {
+    client_id: String,
+    server_id: String,
+    blob_key: String,
+    mime: String,
+    label: Option<String>,
+    groups: Vec<String>,
+    created_at: u64,
+    pinned: bool,
 }
 
 /// Current Unix time in milliseconds.
@@ -512,9 +528,28 @@ impl SyncClient {
                 "label": entry.label,
             })
             .to_string();
+
+            // Image entries store their (encrypted) bytes in a blob and keep only
+            // a small descriptor inline; text/html/file keep content inline.
+            let (content, blob_key, blob_size) = if entry.kind == EntryKind::Image {
+                let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) else {
+                    return; // image sync needs connectivity — nothing to queue
+                };
+                match upload_image_blob(http, &enc_key, &entry.id, &entry.content).await {
+                    Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
+                    Err(e) => {
+                        eprintln!("[sync] image blob upload failed: {e}");
+                        ctx.status.lock().skipped_count += 1;
+                        return;
+                    }
+                }
+            } else {
+                (entry.content, None, None)
+            };
+
             let job = PushJob {
                 client_id: entry.id.clone(),
-                content: entry.content,
+                content,
                 metadata_json,
                 entry_type: "clipboard",
                 kind: entry.kind.label().to_string(),
@@ -525,6 +560,8 @@ impl SyncClient {
                 updated_at: now_ms(),
                 pinned: entry.pinned,
                 group_ids,
+                blob_key,
+                blob_size,
             };
             push_entry_task(ctx, enc_key, is_update, job).await;
         });
@@ -551,6 +588,8 @@ impl SyncClient {
                 updated_at: note.updated_at,
                 pinned: note.pinned,
                 group_ids,
+                blob_key: None,
+                blob_size: None,
             };
             push_entry_task(ctx, enc_key, is_update, job).await;
         });
@@ -673,11 +712,40 @@ impl SyncClient {
                 notes_changed = true;
             } else {
                 let kind = EntryKind::from_label(e.kind.as_deref().unwrap_or("text"));
-                // Image/file bodies are blob-backed; skip until Phase 5.
-                if matches!(kind, EntryKind::Image | EntryKind::File) {
+                let label = meta.get("label").and_then(|l| l.as_str()).map(str::to_string);
+                // Image bodies live in a blob: download + decrypt + materialize
+                // asynchronously (this fn is sync).  `content` here is the small
+                // descriptor `{"mime":...}` we stored inline at push time.
+                if kind == EntryKind::Image {
+                    if let Some(blob_key) = e.blob_key.clone() {
+                        if let Some(http) = self.http.lock().clone() {
+                            let mime = serde_json::from_str::<serde_json::Value>(&content)
+                                .ok()
+                                .and_then(|v| v.get("mime").and_then(|m| m.as_str()).map(String::from))
+                                .unwrap_or_else(|| "image/png".into());
+                            self.spawn_blob_image_merge(
+                                http,
+                                content_key.clone(),
+                                ImageMergeMeta {
+                                    client_id: e.client_id.clone(),
+                                    server_id: e.server_id.clone(),
+                                    blob_key,
+                                    mime,
+                                    label,
+                                    groups,
+                                    created_at: e.created_at,
+                                    pinned: e.pinned,
+                                },
+                            );
+                        }
+                    }
                     continue;
                 }
-                let label = meta.get("label").and_then(|l| l.as_str()).map(str::to_string);
+                // File-content sync is not wired (paths are machine-specific);
+                // file entries remain local-only on the receiving device.
+                if kind == EntryKind::File {
+                    continue;
+                }
                 state.history.lock().upsert_synced(ClipboardEntry {
                     id: e.client_id.clone(),
                     kind,
@@ -1049,6 +1117,70 @@ impl SyncClient {
         }
     }
 
+    /// Download, decrypt, and materialize an image blob to the images dir, then
+    /// upsert the entry into history.  Runs on the background runtime because
+    /// `merge_pulled` (its caller) is synchronous.  A download failure (e.g. a
+    /// blob owned by another Live Share member — download URLs are owner-only)
+    /// is logged and skipped, not fatal.
+    fn spawn_blob_image_merge(
+        &self,
+        http: Arc<SyncHttpClient>,
+        key: Zeroizing<[u8; 32]>,
+        meta: ImageMergeMeta,
+    ) {
+        use std::sync::atomic::Ordering;
+        let app = self.app.clone();
+        let images_dir = self
+            .app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|d| d.join("images"));
+        let id_map = Arc::clone(&self.id_map);
+
+        self.handle.spawn(async move {
+            let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
+                eprintln!("[sync] image blob {} download-url failed (skipped)", meta.blob_key);
+                return;
+            };
+            let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
+                return;
+            };
+            let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
+                eprintln!("[sync] image blob {} decrypt failed", meta.client_id);
+                return;
+            };
+            let Some(dir) = images_dir else { return };
+            if std::fs::create_dir_all(&dir).is_err() {
+                return;
+            }
+            let path = dir.join(format!("{}.{}", meta.client_id, ext_for_mime(&meta.mime)));
+            if std::fs::write(&path, &bytes).is_err() {
+                return;
+            }
+
+            let state = app.state::<crate::state::AppState>();
+            state.history.lock().upsert_synced(ClipboardEntry {
+                id: meta.client_id.clone(),
+                kind: EntryKind::Image,
+                content: path.to_string_lossy().to_string(),
+                timestamp: meta.created_at,
+                pinned: meta.pinned,
+                groups: meta.groups,
+                label: meta.label,
+                content_hash: None,
+                server_id: Some(meta.server_id.clone()),
+                sync_status: crate::sync::types::SyncStatus::Synced,
+            });
+            state.history.lock().sort_recent();
+            state.history_dirty.store(true, Ordering::Relaxed);
+            id_map
+                .lock()
+                .set_entry(&format!("clipboard:{}", meta.client_id), &meta.server_id);
+            let _ = app.emit("sync:history-merged", serde_json::Value::Null);
+        });
+    }
+
     pub fn http(&self) -> Option<Arc<SyncHttpClient>> {
         self.http.lock().clone()
     }
@@ -1056,6 +1188,75 @@ impl SyncClient {
     pub fn umk_clone(&self) -> Option<Zeroizing<[u8; 32]>> {
         self.umk.lock().clone()
     }
+}
+
+/// Resolve an image entry's raw bytes + MIME type.  `content` is either a
+/// `data:<mime>;base64,…` URL (fresh capture) or an on-disk path (externalized).
+fn read_image_bytes(content: &str) -> Result<(Vec<u8>, String), String> {
+    if let Some(pos) = content.find(";base64,") {
+        let mime = content.get(5..pos).unwrap_or("image/png").to_string();
+        let raw = B64
+            .decode(&content[pos + 8..])
+            .map_err(|e| format!("image b64: {e}"))?;
+        Ok((raw, mime))
+    } else {
+        let bytes = std::fs::read(content).map_err(|e| format!("read image file: {e}"))?;
+        Ok((bytes, mime_from_path(content)))
+    }
+}
+
+/// Guess an image MIME type from a file path extension.
+fn mime_from_path(path: &str) -> String {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    }
+    .to_string()
+}
+
+/// File extension for an image MIME type (for the materialized filename).
+fn ext_for_mime(mime: &str) -> &'static str {
+    match mime {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        _ => "png",
+    }
+}
+
+/// Encrypt an image entry's bytes and upload them as a blob.  Returns
+/// `(blob_key, ciphertext_size, descriptor_json)` — the descriptor (`{"mime":…}`)
+/// is what gets stored inline as the entry's `encrypted_content`.
+async fn upload_image_blob(
+    http: &SyncHttpClient,
+    enc_key: &[u8; 32],
+    client_id: &str,
+    content: &str,
+) -> Result<(String, u64, String), String> {
+    let (bytes, mime) = read_image_bytes(content)?;
+    let ciphertext = crypto::encrypt_bytes(enc_key, &bytes, client_id)?;
+    let size = ciphertext.len() as u64;
+    let checksum = crypto::sha256_hex(&ciphertext);
+    let up = http
+        .request_blob_upload(BlobUploadRequest {
+            mime_type: mime.clone(),
+            size_bytes: size,
+            checksum,
+        })
+        .await?;
+    http.upload_blob_bytes(&up.presigned_put_url, ciphertext).await?;
+    http.confirm_blob_upload(&up.blob_key).await?;
+    let descriptor = serde_json::json!({ "mime": mime }).to_string();
+    Ok((up.blob_key, size, descriptor))
 }
 
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
@@ -1072,6 +1273,8 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
         updated_at,
         pinned,
         group_ids,
+        blob_key,
+        blob_size,
     } = job;
 
     let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
@@ -1099,8 +1302,8 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
         updated_at,
         pinned,
         deleted_at: None,
-        blob_key: None,
-        blob_size: None,
+        blob_key,
+        blob_size,
         group_ids,
     };
 

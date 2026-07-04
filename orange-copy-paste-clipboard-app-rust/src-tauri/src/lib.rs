@@ -392,6 +392,8 @@ pub fn run() {
             crate::sync::commands::sync_create_group,
             crate::sync::commands::sync_join_group,
             crate::sync::commands::sync_leave_group,
+            crate::sync::commands::sync_get_quota,
+            crate::sync::commands::sync_list_devices,
             crate::sync::commands::sharing_invite,
             crate::sync::commands::sharing_accept,
             crate::sync::commands::sharing_get_sessions,

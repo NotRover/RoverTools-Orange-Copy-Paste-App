@@ -40,6 +40,25 @@ pub struct SyncGroup {
     pub invite_code: Option<String>,
 }
 
+// ── Blob quota ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncQuota {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
+}
+
+// ── Devices (presence UI) ───────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncDevice {
+    pub id: String,
+    pub device_name: String,
+    pub platform: String,
+    pub app_version: String,
+    pub last_seen_at: u64,
+}
+
 // ── Sync status info ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -78,6 +78,45 @@ pub fn encrypt(key: &[u8; 32], plaintext: &str, aad: &str) -> Result<String, Str
     Ok(B64.encode(out))
 }
 
+/// Encrypt raw bytes (e.g. a blob body) with AES-256-GCM.  Returns the raw
+/// `nonce[12] || ciphertext_and_tag` bytes (not base64) ready for blob upload.
+pub fn encrypt_bytes(key: &[u8; 32], plaintext: &[u8], aad: &str) -> Result<Vec<u8>, String> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(&nonce, Payload { msg: plaintext, aad: aad.as_bytes() })
+        .map_err(|e| format!("encrypt_bytes: {e}"))?;
+    let mut out = nonce.to_vec();
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+/// Decrypt raw bytes produced by [`encrypt_bytes`].
+pub fn decrypt_bytes(key: &[u8; 32], combined: &[u8], aad: &str) -> Result<Vec<u8>, String> {
+    if combined.len() < NONCE_LEN {
+        return Err("ciphertext too short".into());
+    }
+    let (nonce_bytes, payload_bytes) = combined.split_at(NONCE_LEN);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    cipher
+        .decrypt(
+            Nonce::from_slice(nonce_bytes),
+            Payload { msg: payload_bytes, aad: aad.as_bytes() },
+        )
+        .map_err(|e| format!("decrypt_bytes: {e}"))
+}
+
+/// Lowercase hex SHA-256 of `data` — the checksum the blob upload contract wants.
+pub fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(data);
+    let mut s = String::with_capacity(64);
+    for b in digest {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
 /// Decrypt a base64-encoded blob produced by [`encrypt`].
 pub fn decrypt(key: &[u8; 32], ciphertext_b64: &str, aad: &str) -> Result<String, String> {
     let combined = B64
