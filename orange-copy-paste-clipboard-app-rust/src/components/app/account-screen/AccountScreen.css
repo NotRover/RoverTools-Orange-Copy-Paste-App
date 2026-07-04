@@ -1,0 +1,7 @@
+/* Account & Sync screen.
+   Layout and sync-* card styles are inherited from SettingsScreen.css (imported
+   by AccountScreen.tsx). This file holds only account-screen-specific tweaks. */
+
+.account-screen {
+  /* Reserved for account-specific overrides. */
+}

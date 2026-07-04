@@ -1,6 +1,12 @@
 import React from "react";
-import { Cloud, CloudCheck, CloudWarning } from "@phosphor-icons/react";
-import type { AppScreen, AppTheme } from "../../../types";
+import {
+  Cloud,
+  CloudCheck,
+  CloudWarning,
+  CloudArrowUp,
+  UserCircle,
+} from "@phosphor-icons/react";
+import type { AppScreen, AppTheme, SyncIndicator } from "../../../types";
 import {
   ClipboardIcon,
   NotesIcon,
@@ -14,7 +20,7 @@ import "./Sidebar.css";
 interface SidebarProps {
   screen: AppScreen;
   theme: AppTheme;
-  syncConnected: boolean | null;
+  syncState: SyncIndicator;
   onNavigate: (screen: AppScreen) => void;
   onToggleTheme: () => void;
 }
@@ -22,27 +28,31 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({
   screen,
   theme,
-  syncConnected,
+  syncState,
   onNavigate,
   onToggleTheme,
 }) => {
   const syncActive = screen === "sync";
 
   const syncIcon =
-    syncConnected === true  ? <CloudCheck   size={20} weight="duotone" /> :
-    syncConnected === false ? <CloudWarning size={20} weight="duotone" /> :
-                              <Cloud        size={20} weight="regular"  />;
+    syncState === "connected" ? <CloudCheck   size={20} weight="duotone" /> :
+    syncState === "syncing"   ? <CloudArrowUp size={20} weight="duotone" /> :
+    syncState === "offline"   ? <CloudWarning size={20} weight="duotone" /> :
+                                <Cloud        size={20} weight="regular"  />;
 
+  // Status colour — suppressed while the Sync screen is active (use active style).
   const syncColor =
-    syncActive               ? undefined :
-    syncConnected === true   ? "#22c55e" :
-    syncConnected === false  ? "#f59e0b" :
-    undefined;
+    syncActive                ? undefined :
+    syncState === "connected" ? "#22c55e" :
+    syncState === "syncing"   ? "#3b82f6" :
+    syncState === "offline"   ? "#f59e0b" :
+                                undefined;
 
   const syncTooltip =
-    syncConnected === true  ? "Sync & Groups · Connected" :
-    syncConnected === false ? "Sync & Groups · Offline" :
-                              "Sync & Groups";
+    syncState === "connected" ? "Sync & Groups · Connected" :
+    syncState === "syncing"   ? "Sync & Groups · Syncing…" :
+    syncState === "offline"   ? "Sync & Groups · Offline" :
+                                "Sync & Groups";
 
   return (
   <aside className="sidebar">
@@ -81,7 +91,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <NotesIcon />
       </button>
       <button
-        className={`nav-btn ${syncActive ? "active" : ""}`}
+        className={`nav-btn ${syncActive ? "active" : ""} ${syncState === "syncing" ? "nav-btn--syncing" : ""}`}
         onClick={() => onNavigate("sync")}
         data-tooltip={syncTooltip}
         data-tooltip-pos="right"
@@ -108,6 +118,15 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip-pos="right"
       >
         {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+      </button>
+
+      <button
+        className={`nav-btn ${screen === "account" ? "active" : ""}`}
+        onClick={() => onNavigate("account")}
+        data-tooltip="Account & Sync"
+        data-tooltip-pos="right"
+      >
+        <UserCircle size={22} weight={screen === "account" ? "fill" : "regular"} />
       </button>
 
       <button
