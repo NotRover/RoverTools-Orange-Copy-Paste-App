@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ClipboardEntry, Note, AppScreen, AppTheme } from "../../types";
+import type { ClipboardEntry, Note, AppScreen, AppTheme, SyncIndicator } from "../../types";
 import {
   classifyFileEntry,
   removeGroupColor,
@@ -12,6 +12,7 @@ import {
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
 import SyncScreen from "./sync-screen/SyncScreen";
+import AccountScreen from "./account-screen/AccountScreen";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
@@ -143,6 +144,9 @@ const App: React.FC = () => {
 
   // null = sync inactive/not logged in; true/false = WS connected state
   const [syncConnected, setSyncConnected] = useState<boolean | null>(null);
+  // Bumped whenever a merge lands, to briefly show a "syncing" pulse.
+  const [syncTick, setSyncTick] = useState(0);
+  const [syncActivity, setSyncActivity] = useState(false);
 
   // Undo state for group deletion
   const [deletedGroup, setDeletedGroup] = useState<{
@@ -362,6 +366,7 @@ const App: React.FC = () => {
 
     track(
       win.listen("sync:history-merged", () => {
+        if (!cancelled) setSyncTick((t) => t + 1);
         invoke<ClipboardEntry[]>("get_history").then((h) => {
           if (!cancelled) setEntries(h);
         });
@@ -369,6 +374,7 @@ const App: React.FC = () => {
     );
     track(
       win.listen("sync:notes-merged", () => {
+        if (!cancelled) setSyncTick((t) => t + 1);
         invoke<Note[]>("get_notes").then((ns) => {
           if (!cancelled) setNotes(ns);
         });
@@ -438,6 +444,14 @@ const App: React.FC = () => {
       unlisten?.();
     };
   }, []);
+
+  // Show a brief "syncing" pulse on the sidebar after each merge, then decay.
+  useEffect(() => {
+    if (syncTick === 0) return;
+    setSyncActivity(true);
+    const t = setTimeout(() => setSyncActivity(false), 1200);
+    return () => clearTimeout(t);
+  }, [syncTick]);
 
   // Receive remote entries pushed from the sync WS listener.
   useEffect(() => {
@@ -1101,13 +1115,23 @@ const App: React.FC = () => {
   const syncPillLabel = syncPill.label;
   const syncPillClass = `sync-pill sync-pill--${syncPill.modifier}`;
 
+  // Richer status for the sidebar cloud icon.
+  const syncState: SyncIndicator =
+    syncConnected === null
+      ? "signedOut"
+      : syncActivity
+        ? "syncing"
+        : syncConnected
+          ? "connected"
+          : "offline";
+
   return (
     <div className="app" data-theme={theme}>
       <TooltipPortal />
       <Sidebar
         screen={screen}
         theme={theme}
-        syncConnected={syncConnected}
+        syncState={syncState}
         onNavigate={(s) => {
           setScreen(s);
           if (s === "clipboard" || s === "notes" || s === "sync") {
@@ -1125,6 +1149,8 @@ const App: React.FC = () => {
 
         {screen === "settings" ? (
           <SettingsScreen />
+        ) : screen === "account" ? (
+          <AccountScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
         ) : screen === "sync" ? (
@@ -1187,7 +1213,7 @@ const App: React.FC = () => {
               total={entries.length}
             />
           )}
-          {screen !== "sync" && (
+          {screen !== "sync" && screen !== "account" && (
             <div
               className={syncPillClass}
               data-tooltip={syncPillLabel}
