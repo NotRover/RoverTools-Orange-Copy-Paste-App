@@ -99,7 +99,14 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **Phase 6, sync module only**           |
 | aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **Phase 6, sync module only**                   |
 | x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and group key wrapping — **Phase 6, sync module only** |
-| keyring                      | 2       | OS credential store for refresh token and device private key — **Phase 6, sync module only** |
+| keyring                      | 2       | OS credential store for the device private key and cached Supabase session — **Phase 6, sync module only** |
+
+> **Auth is delegated to Supabase.** The backend moved to **Supabase Auth (GoTrue) +
+> Supabase Postgres**. The client performs sign-up / login / refresh / email
+> verification / password reset against Supabase directly, then attaches the Supabase
+> access token to backend calls. There is no backend-issued JWT and no
+> `/auth/login` or `/auth/refresh` on our server. A Supabase auth client (GoTrue REST
+> or an SDK) is required in the sync module.
 
 ### Frontend
 
@@ -407,9 +414,18 @@ Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sy
 
 ### Cloud Sync Module
 
-> **Status:** Rust client implemented (Phase 6). React UI pending.
+> **Status:** Rust client implemented (Phase 6) against the *previous* backend
+> contract. React UI pending.
 > **Location:** `src-tauri/src/sync/`
 > **Principle:** Additive only — no existing capture, storage, or popup logic changes.
+>
+> **⚠ Backend contract updated (Supabase).** The backend now uses Supabase Auth +
+> Postgres. The module below must be reworked to: authenticate via **Supabase Auth**
+> (not a backend `/auth/login`), call `POST /auth/bootstrap` to fetch `kdf_salt`,
+> call `POST /auth/devices` to obtain a `device_id`, send the `X-Device-Id` header on
+> every device-scoped request, and open the WebSocket as
+> `/ws?token=<supabase jwt>&device_id=…`. Deletes are tombstones via `POST /sync/push`
+> (no dedicated delete route). See `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md §14`.
 
 #### Overview
 
@@ -440,24 +456,26 @@ Clipboard capture (existing, unchanged)
 - `flush_pending()` — manually trigger offline queue flush
 - `connect_ws()` / `disconnect_ws()` — WebSocket lifecycle
 
-On startup (when sync is enabled and a valid refresh token exists in the OS keychain):
+On startup (when sync is enabled and a Supabase session can be restored):
 
-1. Authenticate: exchange refresh token → access token
-2. Pull delta: `GET /sync/pull?after_ts={last_cursor}` (paginated)
+1. Restore the Supabase session (the Supabase client manages token refresh). On first
+   login: `POST /auth/bootstrap` (fetch `kdf_salt`, derive UMK) and `POST /auth/devices`
+   (obtain `device_id`)
+2. Pull delta: `GET /sync/pull?after_ts={last_cursor}` (paginated), with `X-Device-Id`
 3. Decrypt and merge remote entries into local store
 4. Flush `sync_pending.json`
-5. Open WebSocket connection
+5. Open WebSocket connection (`/ws?token=<supabase jwt>&device_id=…`)
 
 #### `client.rs` — HTTP Client
 
-- Wraps `reqwest::Client` with base URL, default auth header, and automatic token refresh on 401
-- Refresh flow: intercepts 401 → `POST /auth/refresh` → retries original request transparently
+- Wraps `reqwest::Client` with base URL, the `Authorization: Bearer <supabase access token>` header, and the `X-Device-Id` header on device-scoped calls
+- Token refresh is owned by the Supabase auth client; on 401 the client refreshes the Supabase session and retries the original request transparently
 - All requests have a 10s timeout
 - Connection errors → logged, backed off (1s → 2s → 4s → max 60s exponential)
 
 #### `ws_listener.rs` — WebSocket Listener
 
-Maintains a persistent `tokio-tungstenite` WebSocket connection to `wss://{server}/ws?token=<access_token>`.
+Maintains a persistent `tokio-tungstenite` WebSocket connection to `wss://{server}/ws?token=<supabase access token>&device_id=<device_id>`.
 
 On each received message, dispatches to:
 
@@ -467,7 +485,7 @@ On each received message, dispatches to:
 | `sync:delete`                      | Find entry by `server_id` → remove from local store → emit `clipboard:entry-deleted`                                                                          |
 | `device:online` / `device:offline` | Update sync status indicator via Tauri event                                                                                                                  |
 | `group:rekey`                      | Replace cached Group Key → decrypt future entries with new key                                                                                                |
-| `ping`                             | Respond with `pong`; refresh Redis presence TTL                                                                                                               |
+| `ping`                             | Respond with `pong`; this refreshes the device's presence TTL server-side                                                                                     |
 
 Connection drop → automatic reconnect after 5s backoff, then exponential up to 60s.
 
@@ -507,8 +525,8 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 | Command                | Signature                                           | Description                                                                              |
 | ---------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `sync_login`           | `(email, password, device_name) → Result<SyncUser>` | Authenticate; derives UMK in memory; stores refresh token in OS keychain                 |
-| `sync_logout`          | `() → ()`                                           | Revoke device token; clear UMK; delete keychain entry                                    |
+| `sync_login`           | `(email, password, device_name) → Result<SyncUser>` | Sign in via **Supabase Auth**; `POST /auth/bootstrap` (derive UMK from `kdf_salt`); `POST /auth/devices` (register device); cache the Supabase session |
+| `sync_logout`          | `() → ()`                                           | Sign out of Supabase; clear UMK; optionally deactivate the device                        |
 | `sync_get_user`        | `() → Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
 | `sync_get_status`      | `() → SyncStatus`                                   | `{ connected, last_synced_at, pending_count }`                                           |
 | `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
@@ -577,10 +595,12 @@ Four settings are added to the existing `settings.json` store:
 
 | Key               | Type   | Default                             | Description                                                                |
 | ----------------- | ------ | ----------------------------------- | -------------------------------------------------------------------------- |
-| `sync_enabled`    | bool   | false                               | Master toggle for all sync behavior                                        |
-| `sync_server_url` | string | `"https://api.orangeclipboard.app"` | API base URL (self-hosted override)                                        |
-| `sharing_enabled` | bool   | true                                | Whether Live Share is active (false = ignore all Live Share group fan-out) |
-| `sharing_notify`  | bool   | true                                | Show notification when a peer copies something                             |
+| `sync_enabled`      | bool   | false                               | Master toggle for all sync behavior                                        |
+| `sync_server_url`   | string | `"https://api.orangeclipboard.app"` | Backend API base URL (self-hosted override)                                |
+| `supabase_url`      | string | `""`                                | Supabase project URL — used for auth (GoTrue)                              |
+| `supabase_anon_key` | string | `""`                                | Supabase anon (publishable) key — client-side auth only                    |
+| `sharing_enabled`   | bool   | true                                | Whether Live Share is active (false = ignore all Live Share group fan-out) |
+| `sharing_notify`    | bool   | true                                | Show notification when a peer copies something                             |
 
 ### Runtime Module
 
@@ -951,6 +971,9 @@ User presses Ctrl+Shift+V
 
 ### Cloud Sync — Push (Local Capture → Server)
 
+> All backend calls below carry `Authorization: Bearer <supabase access token>` and,
+> on device-scoped routes, `X-Device-Id: <device_id>`.
+
 ```
 capture_clipboard_change() → history.push(entry)
          │
@@ -1105,7 +1128,20 @@ The following constraints span both this app and the backend. Violating any of t
 
 ## TODO — Implementation Checklist
 
-Tracks all client-side work not yet implemented. Organized by phase matching the backend sequencing (see `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md §13`).
+Tracks all client-side work not yet implemented. Organized by phase matching the backend sequencing (see `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`).
+
+> **⚠ Auth migrated to Supabase — supersedes the auth items below.** Many Phase 6/8
+> items are marked done, but they were built against the previous custom-auth backend.
+> Regardless of the checkmarks, the auth path needs rework before the client works
+> against the current backend:
+>
+> - [ ] Integrate a Supabase Auth (GoTrue) client for sign-up / login / refresh / verify / reset
+> - [ ] `sync_login` → Supabase login **+** `POST /auth/bootstrap` (kdf_salt → UMK) **+** `POST /auth/devices` (device_id)
+> - [ ] Attach `Authorization: Bearer <supabase jwt>` **+** `X-Device-Id` to every device-scoped call
+> - [ ] Connect the WebSocket as `?token=<supabase jwt>&device_id=…`
+> - [ ] Drop the old `/auth/login` `/auth/refresh` `/auth/register` paths and the keychain refresh-token flow
+> - [ ] Point sharing at the current backend routes: `POST /sharing/invite` (create+invite) and `POST /groups/join` (accept)
+> - [ ] Confirm deletes push a tombstone via `POST /sync/push` (no `DELETE /sync/entries/{id}`)
 
 ---
 
@@ -1255,8 +1291,8 @@ Tracks all client-side work not yet implemented. Organized by phase matching the
 
 #### Rust: sync Tauri commands to implement
 
-- [x] `sharing_invite(email: String, scope: String) → Result<SharingInvite>` — `POST /sharing` then `POST /sharing/{id}/invite`
-- [x] `sharing_accept(invite_code: String, scope: String) → Result<()>` — `POST /sharing/join`; X25519 key exchange skeleton (full GK decryption pending WS `group:rekey` flow)
+- [x] `sharing_invite(email: String, scope: String) → Result<SharingInvite>` — **backend now: `POST /sharing/invite`** (was `POST /sharing` + `POST /sharing/{id}/invite`) — needs update
+- [x] `sharing_accept(invite_code: String, scope: String) → Result<()>` — **backend now: `POST /groups/join`** (was `POST /sharing/join`); X25519 key exchange skeleton (full GK decryption pending WS `group:rekey` flow) — needs update
 - [x] `sharing_get_sessions() → Vec<SharingSession>`
 - [x] `sharing_update_scope(share_group_id: String, scope: String) → ()` — `PATCH /sharing/sessions/{id}/scope`
 - [x] `sharing_end_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}`; remove from `id_map.json`
