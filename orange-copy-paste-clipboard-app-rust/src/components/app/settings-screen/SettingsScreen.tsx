@@ -11,6 +11,7 @@ import {
   CloudSyncIcon,
   UsersIcon,
   ShareIcon,
+  GoogleIcon,
 } from "../../icons";
 import "./SettingsScreen.css";
 
@@ -99,6 +100,14 @@ const SettingsScreen: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authNotice, setAuthNotice] = useState<string | null>(null);
+
+  // OAuth (Google) — two-step: browser handshake, then account password.
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const [oauthStage, setOauthStage] = useState<"password" | null>(null);
+  const [oauthEmail, setOauthEmail] = useState("");
+  const [oauthIsNew, setOauthIsNew] = useState(false);
+  const [oauthPassword, setOauthPassword] = useState("");
+  const [oauthConfirm, setOauthConfirm] = useState("");
 
   // Group management
   const [newGroupName, setNewGroupName] = useState("");
@@ -266,6 +275,80 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
+  // Post-authentication: hydrate account state (shared by password + OAuth).
+  const loadPostLogin = (user: SyncUser) => {
+    setSyncUser(user);
+    invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
+    invoke<SharingSession[]>("sharing_get_sessions").then(setSharingSessions).catch(() => {});
+    invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
+    invoke<SyncStatusInfo>("sync_get_status").then((s) => {
+      setSyncStatus(s);
+      if (s.last_synced_at) setLastSynced(s.last_synced_at);
+    }).catch(() => {});
+  };
+
+  const resetOauth = () => {
+    setOauthStage(null);
+    setOauthEmail("");
+    setOauthIsNew(false);
+    setOauthPassword("");
+    setOauthConfirm("");
+  };
+
+  // Step 1: launch the Google handshake in the browser.
+  const handleGoogleSignIn = async () => {
+    setOauthLoading(true);
+    setLoginError(null);
+    setAuthNotice(null);
+    try {
+      const res = await invoke<{ email: string; is_new: boolean }>("sync_oauth_begin", {
+        provider: "google",
+        deviceName: `Orange CP — ${navigator.platform || "Desktop"}`,
+      });
+      setOauthEmail(res.email);
+      setOauthIsNew(res.is_new);
+      setOauthStage("password");
+    } catch (e) {
+      setLoginError(typeof e === "string" ? e : "Google sign-in failed.");
+    } finally {
+      setOauthLoading(false);
+    }
+  };
+
+  // Step 2: finalize with the account password (the E2E secret).
+  const handleOauthComplete = async () => {
+    if (!oauthPassword) return;
+    if (oauthIsNew) {
+      if (oauthPassword.length < 8) {
+        setLoginError("Password must be at least 8 characters.");
+        return;
+      }
+      if (oauthPassword !== oauthConfirm) {
+        setLoginError("Passwords don't match.");
+        return;
+      }
+    }
+    setOauthLoading(true);
+    setLoginError(null);
+    try {
+      const user = await invoke<SyncUser>("sync_oauth_complete", {
+        password: oauthPassword,
+      });
+      resetOauth();
+      loadPostLogin(user);
+    } catch (e) {
+      setLoginError(typeof e === "string" ? e : "Could not complete sign-in.");
+    } finally {
+      setOauthLoading(false);
+    }
+  };
+
+  const handleOauthCancel = () => {
+    invoke("sync_oauth_cancel").catch(() => {});
+    resetOauth();
+    setLoginError(null);
+  };
+
   const handleLogin = async () => {
     if (!loginEmail || !loginPassword) return;
     setLoginLoading(true);
@@ -281,17 +364,9 @@ const SettingsScreen: React.FC = () => {
         password: loginPassword,
         deviceName: `Orange CP — ${navigator.platform || "Desktop"}`,
       });
-      setSyncUser(user);
       setLoginEmail("");
       setLoginPassword("");
-      // Load groups, sessions, and devices after login
-      invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
-      invoke<SharingSession[]>("sharing_get_sessions").then(setSharingSessions).catch(() => {});
-      invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
-      invoke<SyncStatusInfo>("sync_get_status").then((s) => {
-        setSyncStatus(s);
-        if (s.last_synced_at) setLastSynced(s.last_synced_at);
-      }).catch(() => {});
+      loadPostLogin(user);
     } catch (e) {
       const msg = typeof e === "string" ? e : null;
       // Email-confirmation flow: not an error — guide the user back to sign-in.
@@ -725,61 +800,130 @@ const SettingsScreen: React.FC = () => {
                 <div className="sync-auth-card-header">
                   <CloudSyncIcon size={16} />
                   <span>
-                    {authMode === "signup"
-                      ? "Create an account"
-                      : "Sign in to sync"}
+                    {oauthStage === "password"
+                      ? oauthIsNew
+                        ? "Set your account password"
+                        : "Enter your account password"
+                      : authMode === "signup"
+                        ? "Create an account"
+                        : "Sign in to sync"}
                   </span>
                 </div>
-                <div className="sync-login-form">
-                  <input
-                    className="sync-input"
-                    type="email"
-                    placeholder="Email"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-                    disabled={loginLoading}
-                  />
-                  <input
-                    className="sync-input"
-                    type="password"
-                    placeholder="Password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-                    disabled={loginLoading}
-                  />
-                  {loginError && <span className="sync-error">{loginError}</span>}
-                  {authNotice && <span className="sync-notice">{authNotice}</span>}
-                  <button
-                    type="button"
-                    className="sync-primary-btn"
-                    onClick={handleLogin}
-                    disabled={loginLoading || !loginEmail || !loginPassword}
-                  >
-                    {loginLoading
-                      ? authMode === "signup"
-                        ? "Creating…"
-                        : "Signing in…"
-                      : authMode === "signup"
-                        ? "Sign Up"
-                        : "Sign In"}
-                  </button>
-                  <button
-                    type="button"
-                    className="sync-auth-toggle"
-                    onClick={() => {
-                      setAuthMode((m) => (m === "signup" ? "login" : "signup"));
-                      setLoginError(null);
-                      setAuthNotice(null);
-                    }}
-                    disabled={loginLoading}
-                  >
-                    {authMode === "signup"
-                      ? "Already have an account? Sign in"
-                      : "New here? Create an account"}
-                  </button>
-                </div>
+                {oauthStage === "password" ? (
+                  /* OAuth: account-password step (the E2E secret) */
+                  <div className="sync-login-form">
+                    <span className="sync-notice">
+                      {oauthIsNew
+                        ? `Signed in as ${oauthEmail}. Set a password to encrypt your data — you'll enter it on each device, and it also lets you sign in with email.`
+                        : `Signed in as ${oauthEmail}. Enter your account password to unlock your encrypted data.`}
+                    </span>
+                    <input
+                      className="sync-input"
+                      type="password"
+                      placeholder={oauthIsNew ? "New password" : "Password"}
+                      value={oauthPassword}
+                      autoFocus
+                      onChange={(e) => setOauthPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !oauthIsNew) handleOauthComplete(); }}
+                      disabled={oauthLoading}
+                    />
+                    {oauthIsNew && (
+                      <input
+                        className="sync-input"
+                        type="password"
+                        placeholder="Confirm password"
+                        value={oauthConfirm}
+                        onChange={(e) => setOauthConfirm(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleOauthComplete(); }}
+                        disabled={oauthLoading}
+                      />
+                    )}
+                    {loginError && <span className="sync-error">{loginError}</span>}
+                    <button
+                      type="button"
+                      className="sync-primary-btn"
+                      onClick={handleOauthComplete}
+                      disabled={oauthLoading || !oauthPassword}
+                    >
+                      {oauthLoading
+                        ? "Unlocking…"
+                        : oauthIsNew
+                          ? "Set password & continue"
+                          : "Unlock"}
+                    </button>
+                    <button
+                      type="button"
+                      className="sync-auth-toggle"
+                      onClick={handleOauthCancel}
+                      disabled={oauthLoading}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="sync-login-form">
+                    <input
+                      className="sync-input"
+                      type="email"
+                      placeholder="Email"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+                      disabled={loginLoading || oauthLoading}
+                    />
+                    <input
+                      className="sync-input"
+                      type="password"
+                      placeholder="Password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+                      disabled={loginLoading || oauthLoading}
+                    />
+                    {loginError && <span className="sync-error">{loginError}</span>}
+                    {authNotice && <span className="sync-notice">{authNotice}</span>}
+                    <button
+                      type="button"
+                      className="sync-primary-btn"
+                      onClick={handleLogin}
+                      disabled={loginLoading || oauthLoading || !loginEmail || !loginPassword}
+                    >
+                      {loginLoading
+                        ? authMode === "signup"
+                          ? "Creating…"
+                          : "Signing in…"
+                        : authMode === "signup"
+                          ? "Sign Up"
+                          : "Sign In"}
+                    </button>
+
+                    <div className="sync-auth-divider"><span>or</span></div>
+                    <button
+                      type="button"
+                      className="sync-google-btn"
+                      onClick={handleGoogleSignIn}
+                      disabled={loginLoading || oauthLoading}
+                    >
+                      <GoogleIcon size={16} />
+                      {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="sync-auth-toggle"
+                      onClick={() => {
+                        setAuthMode((m) => (m === "signup" ? "login" : "signup"));
+                        setLoginError(null);
+                        setAuthNotice(null);
+                      }}
+                      disabled={loginLoading || oauthLoading}
+                    >
+                      {authMode === "signup"
+                        ? "Already have an account? Sign in"
+                        : "New here? Create an account"}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               /* Logged-in panel */

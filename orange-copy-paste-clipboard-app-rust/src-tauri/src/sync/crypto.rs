@@ -32,12 +32,18 @@ const NONCE_LEN: usize = 12;
 
 // ── Key derivation ──────────────────────────────────────────────────
 
-/// Derive the 32-byte User Master Key from the user's password and the
-/// per-account KDF salt returned by the server at login.
+/// Additional-authenticated-data tag binding a wrapped UMK to its purpose.
+const UMK_WRAP_AAD: &str = "umk-envelope-v1";
+
+/// Derive the 32-byte **key-wrapping key (KEK)** from the account password and
+/// the per-account KDF salt.
 ///
-/// The resulting key is returned in a `Zeroizing` wrapper so memory is
-/// automatically scrubbed on drop.
-pub fn derive_umk(password: &str, kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
+/// The KEK never encrypts user data directly — it only wraps/unwraps the random
+/// User Master Key (see [`wrap_umk`] / [`unwrap_umk`]).  Decoupling the two means
+/// a password change only re-wraps the UMK instead of re-encrypting everything.
+///
+/// Returned in a `Zeroizing` wrapper so memory is scrubbed on drop.
+pub fn derive_kek(password: &str, kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
     let params =
         Params::new(A2_MEMORY_KB, A2_ITERATIONS, A2_PARALLELISM, Some(32))
             .expect("valid argon2 params");
@@ -47,6 +53,30 @@ pub fn derive_umk(password: &str, kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
         .hash_password_into(password.as_bytes(), kdf_salt, key.as_mut())
         .expect("argon2 hash");
     key
+}
+
+/// Wrap the random UMK under the password-derived `kek`.  Returns the base64
+/// envelope blob stored server-side (`nonce || ciphertext || tag`).
+pub fn wrap_umk(kek: &[u8; 32], umk: &[u8; 32]) -> Result<String, String> {
+    Ok(B64.encode(encrypt_bytes(kek, umk, UMK_WRAP_AAD)?))
+}
+
+/// Unwrap the UMK from its base64 envelope using `kek`.  A GCM authentication
+/// failure means the password was wrong, surfaced as a clear message.
+pub fn unwrap_umk(kek: &[u8; 32], wrapped_b64: &str) -> Result<Zeroizing<[u8; 32]>, String> {
+    let combined = B64
+        .decode(wrapped_b64)
+        .map_err(|e| format!("wrapped_umk base64: {e}"))?;
+    let bytes = decrypt_bytes(kek, &combined, UMK_WRAP_AAD).map_err(|_| {
+        "Incorrect password — it doesn't match the one this account was encrypted with."
+            .to_string()
+    })?;
+    if bytes.len() != 32 {
+        return Err("unwrapped UMK has an unexpected length".into());
+    }
+    let mut umk = Zeroizing::new([0u8; 32]);
+    umk.copy_from_slice(&bytes);
+    Ok(umk)
 }
 
 /// Generate a fresh random 32-byte symmetric key (used as a Live Share /
@@ -115,6 +145,23 @@ pub fn sha256_hex(data: &[u8]) -> String {
         s.push_str(&format!("{b:02x}"));
     }
     s
+}
+
+/// Generate a PKCE `(code_verifier, code_challenge)` pair for the OAuth 2.0
+/// authorization-code flow (RFC 7636, S256 method).
+///
+/// The verifier is 32 bytes of CSPRNG output, base64url-encoded (43 chars,
+/// unreserved set).  The challenge is `BASE64URL(SHA256(ASCII(verifier)))`.
+/// The verifier is held only in memory until the token exchange completes.
+pub fn pkce_pair() -> (String, String) {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
+    use sha2::{Digest, Sha256};
+
+    let mut raw = [0u8; 32];
+    OsRng.fill_bytes(&mut raw);
+    let verifier = B64URL.encode(raw);
+    let challenge = B64URL.encode(Sha256::digest(verifier.as_bytes()));
+    (verifier, challenge)
 }
 
 /// Decrypt a base64-encoded blob produced by [`encrypt`].

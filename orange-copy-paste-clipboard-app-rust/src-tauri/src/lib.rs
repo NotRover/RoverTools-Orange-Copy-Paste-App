@@ -379,6 +379,9 @@ pub fn run() {
             // Cloud sync commands
             crate::sync::commands::sync_login,
             crate::sync::commands::sync_signup,
+            crate::sync::commands::sync_oauth_begin,
+            crate::sync::commands::sync_oauth_complete,
+            crate::sync::commands::sync_oauth_cancel,
             crate::sync::commands::sync_logout,
             crate::sync::commands::sync_get_user,
             crate::sync::commands::sync_get_status,
