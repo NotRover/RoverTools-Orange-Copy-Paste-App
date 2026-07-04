@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { SyncUser, SyncGroup, SyncStatusInfo, SharingSession } from "../../../types";
+import type { SyncUser, SyncGroup, SyncStatusInfo, SharingSession, SyncDevice } from "../../../types";
 import { readSlots } from "../../../types";
 import {
   ChevronDownIcon,
@@ -89,12 +89,16 @@ const SettingsScreen: React.FC = () => {
   const [syncUser, setSyncUser] = useState<SyncUser | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo | null>(null);
   const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
+  const [devices, setDevices] = useState<SyncDevice[]>([]);
+  const [onlineDevices, setOnlineDevices] = useState<Set<string>>(new Set());
 
   // Login form
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   // Group management
   const [newGroupName, setNewGroupName] = useState("");
@@ -157,12 +161,32 @@ const SettingsScreen: React.FC = () => {
       if (u) {
         invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
         invoke<SharingSession[]>("sharing_get_sessions").then(setSharingSessions).catch(() => {});
+        invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
         invoke<SyncStatusInfo>("sync_get_status").then((s) => {
           setSyncStatus(s);
           if (s.last_synced_at) setLastSynced(s.last_synced_at);
         }).catch(() => {});
       }
     });
+  }, []);
+
+  // ── Device presence: mark devices online/offline as events arrive ──
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ device_id?: string; online?: boolean }>(
+      "sync:device-presence",
+      (event) => {
+        const { device_id, online } = event.payload;
+        if (!device_id) return;
+        setOnlineDevices((prev) => {
+          const next = new Set(prev);
+          if (online) next.add(device_id);
+          else next.delete(device_id);
+          return next;
+        });
+      },
+    ).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
   }, []);
 
   // ── Listen for incoming sharing invites ─────────────────────────
@@ -246,8 +270,13 @@ const SettingsScreen: React.FC = () => {
     if (!loginEmail || !loginPassword) return;
     setLoginLoading(true);
     setLoginError(null);
+    setAuthNotice(null);
     try {
-      const user = await invoke<SyncUser>("sync_login", {
+      // sync_signup returns the same SyncUser on projects without email
+      // confirmation; when confirmation is required it errors with guidance
+      // (surfaced below as a notice, not a hard failure).
+      const command = authMode === "signup" ? "sync_signup" : "sync_login";
+      const user = await invoke<SyncUser>(command, {
         email: loginEmail,
         password: loginPassword,
         deviceName: `Orange CP — ${navigator.platform || "Desktop"}`,
@@ -255,15 +284,28 @@ const SettingsScreen: React.FC = () => {
       setSyncUser(user);
       setLoginEmail("");
       setLoginPassword("");
-      // Load groups and sessions after login
+      // Load groups, sessions, and devices after login
       invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
       invoke<SharingSession[]>("sharing_get_sessions").then(setSharingSessions).catch(() => {});
+      invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
       invoke<SyncStatusInfo>("sync_get_status").then((s) => {
         setSyncStatus(s);
         if (s.last_synced_at) setLastSynced(s.last_synced_at);
       }).catch(() => {});
     } catch (e) {
-      setLoginError(typeof e === "string" ? e : "Login failed. Check your credentials.");
+      const msg = typeof e === "string" ? e : null;
+      // Email-confirmation flow: not an error — guide the user back to sign-in.
+      if (authMode === "signup" && msg && /confirm/i.test(msg)) {
+        setAuthNotice(msg);
+        setAuthMode("login");
+      } else {
+        setLoginError(
+          msg ??
+            (authMode === "signup"
+              ? "Sign up failed. Try a different email."
+              : "Login failed. Check your credentials."),
+        );
+      }
     } finally {
       setLoginLoading(false);
     }
@@ -276,6 +318,8 @@ const SettingsScreen: React.FC = () => {
       setSyncStatus(null);
       setSyncGroups([]);
       setSharingSessions([]);
+      setDevices([]);
+      setOnlineDevices(new Set());
     } catch (e) {
       console.error("sync_logout failed", e);
     }
@@ -680,7 +724,11 @@ const SettingsScreen: React.FC = () => {
               <div className="sync-auth-card">
                 <div className="sync-auth-card-header">
                   <CloudSyncIcon size={16} />
-                  <span>Sign in to sync</span>
+                  <span>
+                    {authMode === "signup"
+                      ? "Create an account"
+                      : "Sign in to sync"}
+                  </span>
                 </div>
                 <div className="sync-login-form">
                   <input
@@ -702,13 +750,34 @@ const SettingsScreen: React.FC = () => {
                     disabled={loginLoading}
                   />
                   {loginError && <span className="sync-error">{loginError}</span>}
+                  {authNotice && <span className="sync-notice">{authNotice}</span>}
                   <button
                     type="button"
                     className="sync-primary-btn"
                     onClick={handleLogin}
                     disabled={loginLoading || !loginEmail || !loginPassword}
                   >
-                    {loginLoading ? "Signing in…" : "Sign In"}
+                    {loginLoading
+                      ? authMode === "signup"
+                        ? "Creating…"
+                        : "Signing in…"
+                      : authMode === "signup"
+                        ? "Sign Up"
+                        : "Sign In"}
+                  </button>
+                  <button
+                    type="button"
+                    className="sync-auth-toggle"
+                    onClick={() => {
+                      setAuthMode((m) => (m === "signup" ? "login" : "signup"));
+                      setLoginError(null);
+                      setAuthNotice(null);
+                    }}
+                    disabled={loginLoading}
+                  >
+                    {authMode === "signup"
+                      ? "Already have an account? Sign in"
+                      : "New here? Create an account"}
                   </button>
                 </div>
               </div>
@@ -753,6 +822,42 @@ const SettingsScreen: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* Devices */}
+                {devices.length > 0 && (
+                  <div className="sync-sub-section">
+                    <div className="sync-sub-section-header">
+                      <CloudSyncIcon size={13} />
+                      <span className="sync-sub-section-title">Devices</span>
+                    </div>
+                    <div className="sync-groups-list">
+                      {devices.map((d) => {
+                        const online = onlineDevices.has(d.id);
+                        return (
+                          <div key={d.id} className="sync-group-row">
+                            <div className="sync-group-info">
+                              <span
+                                className="sync-status-dot"
+                                title={online ? "Online" : "Offline"}
+                                style={{
+                                  background: online ? "#22c55e" : "#9ca3af",
+                                  flex: "0 0 auto",
+                                }}
+                              />
+                              <span className="sync-group-name">
+                                {d.device_name || "Unknown device"}
+                              </span>
+                              <span className="sync-group-meta">
+                                {d.platform}
+                                {online ? " · online" : ""}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Shared Groups */}
                 <div className="sync-sub-section">

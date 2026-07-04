@@ -374,6 +374,13 @@ const App: React.FC = () => {
         });
       }),
     );
+    // Another device changed settings: pull the new blob (which re-emits
+    // `sync:settings`, applied by the effect below).
+    track(
+      win.listen("sync:settings-updated", () => {
+        invoke("sync_pull_settings").catch(() => {});
+      }),
+    );
 
     return () => {
       cancelled = true;
