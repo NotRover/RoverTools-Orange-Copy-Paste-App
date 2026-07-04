@@ -577,6 +577,118 @@ impl SyncClient {
         });
     }
 
+    // ── Pull merge ────────────────────────────────────────────────
+
+    /// Decrypt a batch of pulled entries and merge them into the local stores.
+    ///
+    /// Writes **directly** to the history / notes stores (never through the
+    /// command hooks) so a merge never echoes back as a new push.  Tombstones
+    /// remove the local entry; live entries upsert by id (which is the shared
+    /// `client_id`).  Image/file clipboard bodies live in blobs and are skipped
+    /// until blob download is wired (Phase 5).
+    fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry]) {
+        use std::sync::atomic::Ordering;
+        let Some(umk) = self.umk_clone() else {
+            return;
+        };
+        let state = self.app.state::<crate::state::AppState>();
+
+        let mut clip_changed = false;
+        let mut notes_changed = false;
+
+        for e in entries {
+            let is_note = e.entry_type == "note";
+
+            // Tombstone → remove locally.
+            if e.deleted_at.is_some() {
+                if is_note {
+                    notes_changed |= state.notes.lock().delete(&e.client_id);
+                } else {
+                    clip_changed |= state.history.lock().remove(&e.client_id);
+                }
+                self.id_map.lock().remove_entry(&format!(
+                    "{}:{}",
+                    if is_note { "note" } else { "clipboard" },
+                    e.client_id
+                ));
+                continue;
+            }
+
+            let Ok(content) = crypto::decrypt(&umk, &e.encrypted_content, &e.client_id) else {
+                eprintln!("[sync] merge: decrypt content failed for {}", e.client_id);
+                continue;
+            };
+            let meta: serde_json::Value = e
+                .encrypted_metadata
+                .as_ref()
+                .and_then(|m| crypto::decrypt(&umk, m, &e.client_id).ok())
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or(serde_json::Value::Null);
+            let groups: Vec<String> = meta
+                .get("groups")
+                .and_then(|g| serde_json::from_value(g.clone()).ok())
+                .unwrap_or_default();
+
+            if is_note {
+                let title = meta
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                state.notes.lock().upsert_synced(Note {
+                    id: e.client_id.clone(),
+                    title,
+                    content,
+                    created_at: e.created_at,
+                    updated_at: e.updated_at,
+                    pinned: e.pinned,
+                    groups,
+                    server_id: Some(e.server_id.clone()),
+                    sync_status: crate::sync::types::SyncStatus::Synced,
+                });
+                notes_changed = true;
+            } else {
+                let kind = EntryKind::from_label(e.kind.as_deref().unwrap_or("text"));
+                // Image/file bodies are blob-backed; skip until Phase 5.
+                if matches!(kind, EntryKind::Image | EntryKind::File) {
+                    continue;
+                }
+                let label = meta.get("label").and_then(|l| l.as_str()).map(str::to_string);
+                state.history.lock().upsert_synced(ClipboardEntry {
+                    id: e.client_id.clone(),
+                    kind,
+                    content,
+                    timestamp: e.created_at,
+                    pinned: e.pinned,
+                    groups,
+                    label,
+                    content_hash: None,
+                    server_id: Some(e.server_id.clone()),
+                    sync_status: crate::sync::types::SyncStatus::Synced,
+                });
+                clip_changed = true;
+            }
+
+            let key = format!(
+                "{}:{}",
+                if is_note { "note" } else { "clipboard" },
+                e.client_id
+            );
+            self.id_map.lock().set_entry(&key, &e.server_id);
+        }
+
+        if clip_changed {
+            state.history.lock().sort_recent();
+            state.history_dirty.store(true, Ordering::Relaxed);
+            let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
+        }
+        if notes_changed {
+            state.notes.lock().sort_recent();
+            state.notes_dirty.store(true, Ordering::Relaxed);
+            let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
+        }
+    }
+
     // ── Manual sync trigger ───────────────────────────────────────
 
     /// Flush the pending queue and do a delta pull.  Called by `sync_now`.
@@ -621,7 +733,7 @@ impl SyncClient {
         loop {
             match http.pull_entries(cursor, 200).await {
                 Ok(pull) => {
-                    // TODO: decrypt entries, merge into local store, emit events
+                    self.merge_pulled(&pull.entries);
                     if let Some(last) = pull.entries.last() {
                         let ts = last.server_ts;
                         self.sync_state.lock().set_last_server_ts(ts);
@@ -689,6 +801,18 @@ impl SyncClient {
 
     pub fn register_group_mapping(&self, name: &str, server_id: &str) {
         self.id_map.lock().set_group(name, server_id);
+    }
+
+    /// Spawn a background flush + delta pull on the sync runtime.  Called right
+    /// after login so a freshly-signed-in device catches up without blocking
+    /// the `sync_login` command's return.
+    pub fn trigger_initial_sync(self: Arc<Self>) {
+        let handle = self.handle.clone();
+        handle.spawn(async move {
+            if let Err(e) = self.flush_and_pull().await {
+                eprintln!("[sync] initial sync failed: {e}");
+            }
+        });
     }
 
     pub fn http(&self) -> Option<Arc<SyncHttpClient>> {

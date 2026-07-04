@@ -103,7 +103,10 @@ pub async fn sync_login(
     };
 
     // Supabase login → bootstrap → device registration, all inside the client.
-    sync.perform_login(email, password, device_name).await
+    let user = sync.perform_login(email, password, device_name).await?;
+    // Catch up on entries created elsewhere, in the background.
+    Arc::clone(&sync).trigger_initial_sync();
+    Ok(user)
 }
 
 #[tauri::command]
@@ -130,7 +133,9 @@ pub async fn sync_signup(
     };
 
     // Supabase signup → (if confirmed) bootstrap → device registration.
-    sync.perform_signup(email, password, device_name).await
+    let user = sync.perform_signup(email, password, device_name).await?;
+    Arc::clone(&sync).trigger_initial_sync();
+    Ok(user)
 }
 
 #[tauri::command]

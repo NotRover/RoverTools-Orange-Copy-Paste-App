@@ -159,6 +159,23 @@ impl NoteStore {
         }
     }
 
+    /// Insert or replace a synced note by id, keeping the newer version (LWW).
+    /// Used by the cloud-sync merge; call [`Self::sort_recent`] after a batch.
+    pub fn upsert_synced(&mut self, note: Note) {
+        if let Some(pos) = self.notes.iter().position(|n| n.id == note.id) {
+            if note.updated_at >= self.notes[pos].updated_at {
+                self.notes[pos] = note;
+            }
+        } else {
+            self.notes.push(note);
+        }
+    }
+
+    /// Re-sort most-recently-updated first.
+    pub fn sort_recent(&mut self) {
+        self.notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    }
+
     /// Look up a note by ID.
     pub fn find(&self, id: &str) -> Option<&Note> {
         self.notes.iter().find(|n| n.id == id)

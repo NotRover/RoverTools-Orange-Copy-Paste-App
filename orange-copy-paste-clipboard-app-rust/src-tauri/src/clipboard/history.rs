@@ -183,6 +183,16 @@ impl EntryKind {
             Self::Html => "html",
         }
     }
+
+    /// Parse a wire label back into an `EntryKind` (defaults to `Text`).
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "image" => Self::Image,
+            "file" => Self::File,
+            "html" => Self::Html,
+            _ => Self::Text,
+        }
+    }
 }
 
 /// A single clipboard history entry.
@@ -366,6 +376,23 @@ impl ClipboardHistory {
         }
 
         (self.push(entry), true)
+    }
+
+    /// Insert or replace a synced entry by id.  Used by the cloud-sync merge:
+    /// entries arrive already materialised, so this bypasses image
+    /// externalisation and the MAX_HISTORY trim.  Call [`Self::sort_recent`]
+    /// once after a merge batch to restore ordering.
+    pub fn upsert_synced(&mut self, entry: ClipboardEntry) {
+        if let Some(pos) = self.entries.iter().position(|e| e.id == entry.id) {
+            self.entries[pos] = entry;
+        } else {
+            self.entries.push(entry);
+        }
+    }
+
+    /// Re-sort most-recent first by timestamp.
+    pub fn sort_recent(&mut self) {
+        self.entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     }
 
     /// Return the full history slice (most-recent first).
