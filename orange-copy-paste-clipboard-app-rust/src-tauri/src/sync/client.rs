@@ -119,6 +119,9 @@ pub struct PulledEntry {
     #[serde(rename = "id")]
     pub server_id: String,
     pub client_id: String,
+    /// Originating device — used to skip our own entries echoed back over WS.
+    #[serde(default)]
+    pub device_id: Option<String>,
     pub entry_type: String,
     #[serde(default)]
     pub kind: Option<String>,

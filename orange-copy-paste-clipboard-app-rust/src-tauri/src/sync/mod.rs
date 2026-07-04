@@ -586,17 +586,23 @@ impl SyncClient {
     /// remove the local entry; live entries upsert by id (which is the shared
     /// `client_id`).  Image/file clipboard bodies live in blobs and are skipped
     /// until blob download is wired (Phase 5).
-    fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry]) {
+    pub(crate) fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry]) {
         use std::sync::atomic::Ordering;
         let Some(umk) = self.umk_clone() else {
             return;
         };
         let state = self.app.state::<crate::state::AppState>();
+        let my_device = self.sync_state.lock().data.device_id.clone();
 
         let mut clip_changed = false;
         let mut notes_changed = false;
 
         for e in entries {
+            // Skip entries this device originated (echoed back over the user
+            // channel); they are already present locally.
+            if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
+                continue;
+            }
             let is_note = e.entry_type == "note";
 
             // Tombstone → remove locally.
@@ -686,6 +692,42 @@ impl SyncClient {
             state.notes.lock().sort_recent();
             state.notes_dirty.store(true, Ordering::Relaxed);
             let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
+        }
+    }
+
+    /// Apply a `sync:delete` event (keyed only by `server_id`) by removing the
+    /// matching local entry from whichever store holds it.  Best-effort — the
+    /// primary delete path is a tombstone `sync:entry` (keyed by client_id).
+    pub(crate) fn apply_remote_delete(&self, server_id: &str) {
+        use std::sync::atomic::Ordering;
+        let state = self.app.state::<crate::state::AppState>();
+
+        let clip_id = state
+            .history
+            .lock()
+            .all()
+            .iter()
+            .find(|e| e.server_id.as_deref() == Some(server_id))
+            .map(|e| e.id.clone());
+        if let Some(id) = clip_id {
+            if state.history.lock().remove(&id) {
+                state.history_dirty.store(true, Ordering::Relaxed);
+                let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
+            }
+        }
+
+        let note_id = state
+            .notes
+            .lock()
+            .all()
+            .iter()
+            .find(|n| n.server_id.as_deref() == Some(server_id))
+            .map(|n| n.id.clone());
+        if let Some(id) = note_id {
+            if state.notes.lock().delete(&id) {
+                state.notes_dirty.store(true, Ordering::Relaxed);
+                let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
+            }
         }
     }
 
