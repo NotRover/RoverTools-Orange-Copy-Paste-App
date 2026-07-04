@@ -378,6 +378,7 @@ pub fn run() {
             crate::notes::commands::export_note_text,
             // Cloud sync commands
             crate::sync::commands::sync_login,
+            crate::sync::commands::sync_signup,
             crate::sync::commands::sync_logout,
             crate::sync::commands::sync_get_user,
             crate::sync::commands::sync_get_status,

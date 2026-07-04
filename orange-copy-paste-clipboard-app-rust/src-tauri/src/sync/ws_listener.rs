@@ -86,6 +86,7 @@ impl WsListener {
             .http
             .current_access_token()
             .ok_or("no access token")?;
+        let device_id = self.http.device_id().ok_or("no device id")?;
 
         let base = self
             .http
@@ -93,7 +94,12 @@ impl WsListener {
             // Strip http(s) scheme and replace with ws(s)
             .replacen("https://", "wss://", 1)
             .replacen("http://", "ws://", 1);
-        let url = format!("{}/ws?token={}", base.trim_end_matches('/'), token);
+        let url = format!(
+            "{}/ws?token={}&device_id={}",
+            base.trim_end_matches('/'),
+            token,
+            device_id
+        );
 
         let (ws_stream, _) = connect_async(&url)
             .await

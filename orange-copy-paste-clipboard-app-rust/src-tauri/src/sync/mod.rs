@@ -18,6 +18,7 @@ pub mod crypto;
 pub mod id_map;
 pub mod pending_queue;
 pub(crate) mod persist;
+pub mod supabase;
 pub mod sync_state;
 pub mod types;
 pub mod ws_listener;
@@ -30,12 +31,15 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 use zeroize::Zeroizing;
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
+
 use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
-use crate::sync::client::{PushEntryRequest, SyncHttpClient};
+use crate::sync::client::{PushEntryRequest, RegisterDeviceRequest, SyncHttpClient};
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
+use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{EntryType, ShareScope, SharingSession, SyncStatusInfo, SyncUser};
 use crate::sync::ws_listener::WsListener;
@@ -69,6 +73,9 @@ pub struct SyncClient {
     pub server_url: String,
     app: tauri::AppHandle,
     app_data: PathBuf,
+
+    /// Supabase Auth (GoTrue) handle — owns identity/login/refresh.
+    supabase: Arc<SupabaseAuth>,
 
     /// User Master Key — in memory only, zeroed on logout or drop.
     umk: Mutex<Option<Zeroizing<[u8; 32]>>>,
@@ -104,7 +111,7 @@ pub struct SyncClient {
 
 impl SyncClient {
     /// Create a new `SyncClient`.  Does not authenticate — call
-    /// [`initialize_after_login`] after a successful `sync_login` command.
+    /// [`Self::perform_login`] from the `sync_login` command to sign in.
     pub fn new(app: tauri::AppHandle, config: SyncConfig) -> Result<Self, String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -160,10 +167,16 @@ impl SyncClient {
             });
         }
 
+        let supabase = Arc::new(SupabaseAuth::new(
+            &config.supabase_url,
+            &config.supabase_anon_key,
+        ));
+
         Ok(Self {
             server_url: config.server_url,
             app,
             app_data,
+            supabase,
             umk: Mutex::new(None),
             user: Mutex::new(None),
             http: Mutex::new(None),
@@ -182,47 +195,110 @@ impl SyncClient {
 
     // ── Auth lifecycle ────────────────────────────────────────────
 
-    /// Wire up state after a successful login response from the server.
-    pub fn initialize_after_login(
+    /// Full login flow against Supabase Auth + our backend:
+    ///   1. Supabase password grant (access + refresh tokens, user id).
+    ///   2. `POST /auth/bootstrap` → KDF salt + display name.
+    ///   3. Derive the UMK from password + salt (deterministic per account).
+    ///   4. Generate a device keypair and register the device → device_id.
+    ///   5. Persist secrets (device key + refresh token) to the OS keychain.
+    ///   6. Wire in-memory state and start the WebSocket listener.
+    pub async fn perform_login(
         &self,
-        user: SyncUser,
-        access_token: String,
-        refresh_token: &str,
-        kdf_salt_b64: &str,
+        email: String,
+        password: String,
+        device_name: String,
+    ) -> Result<SyncUser, String> {
+        let session = self.supabase.sign_in_password(&email, &password).await?;
+        self.finalize_session(session, &email, &password, device_name)
+            .await
+    }
+
+    /// Register a new account with Supabase, then finalize the session.  When
+    /// the project requires email confirmation, no session is issued yet and an
+    /// explanatory error is returned so the UI can prompt the user to confirm.
+    pub async fn perform_signup(
+        &self,
+        email: String,
+        password: String,
+        device_name: String,
+    ) -> Result<SyncUser, String> {
+        match self.supabase.sign_up(&email, &password).await? {
+            SignUpOutcome::Session(session) => {
+                self.finalize_session(*session, &email, &password, device_name)
+                    .await
+            }
+            SignUpOutcome::ConfirmationRequired => {
+                Err("Account created — check your email to confirm it, then log in.".into())
+            }
+        }
+    }
+
+    /// Shared post-authentication flow for both login and signup.
+    async fn finalize_session(
+        &self,
+        session: SupabaseSession,
+        email: &str,
         password: &str,
-        device_id: &str,
-    ) -> Result<(), String> {
-        use base64::{engine::general_purpose::STANDARD as B64, Engine};
-        let kdf_salt = B64.decode(kdf_salt_b64).map_err(|e| format!("kdf_salt b64: {e}"))?;
+        device_name: String,
+    ) -> Result<SyncUser, String> {
+        let user_id = session.user.id.clone();
+        let user_email = if session.user.email.is_empty() {
+            email.to_string()
+        } else {
+            session.user.email.clone()
+        };
+
+        // 2. Build the authenticated backend client.
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        http.set_access_token(session.access_token);
+        http.set_refresh_token(session.refresh_token.clone());
+        http.set_user_id(user_id.clone());
+
+        // 3. Ensure a profile exists and fetch the KDF salt; derive the UMK.
+        let boot = http.bootstrap(None).await?;
+        let kdf_salt = B64
+            .decode(&boot.kdf_salt)
+            .map_err(|e| format!("kdf_salt b64: {e}"))?;
         let umk = crypto::derive_umk(password, &kdf_salt);
 
-        // Generate and store device keypair
-        let (priv_key, _pub_key) = crypto::generate_device_keypair();
-        crypto::store_device_private_key(&user.user_id, &priv_key)?;
-        crypto::store_refresh_token(&user.user_id, refresh_token)?;
+        // 4. Register this device (fresh X25519 keypair for group key exchange).
+        let (device_priv, device_pub) = crypto::generate_device_keypair();
+        let dev = http
+            .register_device(RegisterDeviceRequest {
+                device_name,
+                platform: std::env::consts::OS.to_string(),
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                device_pubkey: Some(B64.encode(device_pub)),
+            })
+            .await?;
+        http.set_device_id(dev.device_id.clone());
 
-        // Update sync state
+        // 5. Persist secrets to the OS keychain.
+        crypto::store_device_private_key(&user_id, &device_priv)?;
+        crypto::store_refresh_token(&user_id, &session.refresh_token)?;
+
+        // 6. Update persisted sync state.
         {
             let mut state = self.sync_state.lock();
-            state.set_device_id(device_id);
-            state.set_user_id(&user.user_id);
+            state.set_device_id(&dev.device_id);
+            state.set_user_id(&user_id);
         }
 
-        // Set in-memory state
+        // 7. Wire in-memory state.
+        let user = SyncUser {
+            user_id,
+            email: user_email,
+            display_name: boot.display_name,
+        };
         *self.umk.lock() = Some(umk);
-
-        let http = SyncHttpClient::new(self.server_url.clone());
-        http.set_access_token(access_token);
-        http.set_user_id(user.user_id.clone());
         *self.http.lock() = Some(Arc::clone(&http));
-
-        *self.user.lock() = Some(user);
+        *self.user.lock() = Some(user.clone());
         self.status.lock().connected = true;
 
-        // Start WebSocket listener
+        // 8. Start the realtime listener.
         self.start_ws_listener();
 
-        Ok(())
+        Ok(user)
     }
 
     /// Clear all in-memory state and delete keychain entries.
@@ -241,10 +317,7 @@ impl SyncClient {
         }
 
         if let Some(http) = self.http.lock().take() {
-            let http2 = Arc::clone(&http);
-            self.handle.spawn(async move {
-                let _ = http2.logout().await;
-            });
+            http.logout();
         }
 
         *self.user.lock() = None;

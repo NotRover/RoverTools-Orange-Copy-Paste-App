@@ -102,36 +102,35 @@ pub async fn sync_login(
         }
     };
 
-    // Generate a fresh device keypair for the server handshake
-    let (_priv_key, pub_key) = crypto::generate_device_keypair();
-    let pub_key_b64 = B64.encode(pub_key);
+    // Supabase login → bootstrap → device registration, all inside the client.
+    sync.perform_login(email, password, device_name).await
+}
 
-    let http_client = crate::sync::client::SyncHttpClient::new(sync.server_url.clone());
-    let resp = http_client
-        .login(crate::sync::client::LoginRequest {
-            email,
-            password: password.clone(),
-            device_name,
-            device_public_key: pub_key_b64,
-        })
-        .await?;
-
-    let user = SyncUser {
-        user_id: resp.user_id.clone(),
-        email: resp.email.clone(),
-        display_name: resp.display_name.clone(),
+#[tauri::command]
+pub async fn sync_signup(
+    email: String,
+    password: String,
+    device_name: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<SyncUser, String> {
+    let sync = {
+        let guard = state.sync_client.lock();
+        match guard.clone() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                let config = SyncConfig::load(&app);
+                let client = SyncClient::new(app.clone(), config)?;
+                let arc = Arc::new(client);
+                *state.sync_client.lock() = Some(Arc::clone(&arc));
+                arc
+            }
+        }
     };
 
-    sync.initialize_after_login(
-        user.clone(),
-        resp.access_token,
-        &resp.refresh_token,
-        &resp.kdf_salt,
-        &password,
-        &resp.device_id,
-    )?;
-
-    Ok(user)
+    // Supabase signup → (if confirmed) bootstrap → device registration.
+    sync.perform_signup(email, password, device_name).await
 }
 
 #[tauri::command]
