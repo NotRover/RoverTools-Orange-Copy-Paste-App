@@ -400,6 +400,14 @@ impl SyncClient {
         *self.pending_oauth.lock() = None;
     }
 
+    /// Send a Supabase password-reset email.  Restores account *access*; note
+    /// that under the E2E envelope model a new password re-derives the KEK, so
+    /// existing data only remains decryptable if the UMK is re-wrapped from a
+    /// still-signed-in device (a future recovery path).
+    pub async fn reset_password(&self, email: String) -> Result<(), String> {
+        self.supabase.recover(&email).await
+    }
+
     /// Shared post-authentication flow for both login and signup.
     async fn finalize_session(
         &self,

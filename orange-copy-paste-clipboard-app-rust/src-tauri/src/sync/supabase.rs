@@ -206,6 +206,37 @@ impl SupabaseAuth {
         Ok(())
     }
 
+    /// Request a password-reset email: `POST /recover`.  GoTrue emails the user a
+    /// recovery link (targeting the project's Site URL).  Returns `Ok` on 200
+    /// even though the body is empty, so we don't route through `send_json`.
+    pub async fn recover(&self, email: &str) -> Result<(), String> {
+        self.ensure_configured()?;
+        let resp = self
+            .inner
+            .post(self.url("/recover"))
+            .header("apikey", &self.anon_key)
+            .json(&serde_json::json!({ "email": email }))
+            .send()
+            .await
+            .map_err(|e| format!("supabase recover: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let msg = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| {
+                    v.get("error_description")
+                        .or_else(|| v.get("msg"))
+                        .or_else(|| v.get("error"))
+                        .and_then(|m| m.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or(body);
+            return Err(format!("supabase recover ({}): {msg}", status.as_u16()));
+        }
+        Ok(())
+    }
+
     /// Register a new account: `POST /signup`.  When the project requires email
     /// confirmation, no session is issued and we return `ConfirmationRequired`.
     pub async fn sign_up(&self, email: &str, password: &str) -> Result<SignUpOutcome, String> {
