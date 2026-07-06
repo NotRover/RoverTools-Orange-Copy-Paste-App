@@ -6,6 +6,9 @@ import {
   ChevronDownIcon,
   CheckIcon,
   FolderIcon,
+  SlidersIcon,
+  ClipboardPasteIcon,
+  ClockIcon,
 } from "../../icons";
 import "./SettingsScreen.css";
 
@@ -53,6 +56,32 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ value, options, onChange })
     </div>
   );
 };
+
+// ── Row primitives ─────────────────────────────────────────────────────
+
+const ToggleRow: React.FC<{
+  label: string;
+  desc: string;
+  active: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}> = ({ label, desc, active, onToggle, disabled }) => (
+  <div className="set-row">
+    <div className="set-row-info">
+      <span className="set-row-label">{label}</span>
+      <span className="set-row-desc">{desc}</span>
+    </div>
+    <button
+      type="button"
+      className={`settings-toggle${active ? " active" : ""}`}
+      onClick={onToggle}
+      aria-pressed={active}
+      disabled={disabled}
+    >
+      <span className="settings-toggle-knob" />
+    </button>
+  </div>
+);
 
 // ── Main component ────────────────────────────────────────────────────
 
@@ -137,203 +166,160 @@ const SettingsScreen: React.FC = () => {
   // ── Render ──────────────────────────────────────────────────────
   return (
     <div className="settings-screen">
-      <div className="settings-header">
-        <h2 className="settings-title">Settings</h2>
-        <p className="settings-subtitle">Manage your Orange Copy Paste preferences.</p>
-      </div>
+      <div className="settings-inner">
+        <header className="scr-head">
+          <span className="scr-eyebrow">Preferences</span>
+          <h2 className="scr-title">Settings</h2>
+          <p className="scr-subtitle">Tune how Orange Copy Paste behaves on this device.</p>
+        </header>
 
-      {/* ── General ── */}
-      <div className="settings-section">
-        <h3 className="settings-section-title">General</h3>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Close to system tray</span>
-            <span className="settings-row-desc">
-              Closing the window minimizes the app to the system tray instead of quitting.
-            </span>
+        {/* ── General ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><SlidersIcon size={13} /></span>
+            <h3 className="set-section-title">General</h3>
           </div>
-          <button
-            type="button"
-            className={`settings-toggle${closeToTray ? " active" : ""}`}
-            onClick={handleCloseToTrayToggle}
-            aria-pressed={closeToTray}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Run on startup</span>
-            <span className="settings-row-desc">
-              Automatically launch when you sign in to Windows.
-              {import.meta.env.DEV ? " Disabled in dev builds." : ""}
-            </span>
-          </div>
-          <button
-            type="button"
-            className={`settings-toggle${runOnStartup ? " active" : ""}`}
-            onClick={handleRunOnStartupToggle}
-            aria-pressed={runOnStartup}
-            disabled={autostartEnableBlocked}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Start minimized</span>
-            <span className="settings-row-desc">
-              Start hidden in the system tray instead of showing the main window.
-            </span>
-          </div>
-          <button
-            type="button"
-            className={`settings-toggle${startMinimized ? " active" : ""}`}
-            onClick={handleStartMinimizedToggle}
-            aria-pressed={startMinimized}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Show splash screen on startup</span>
-            <span className="settings-row-desc">
-              Display a brief startup screen when the app launches.
-            </span>
-          </div>
-          <button
-            type="button"
-            className={`settings-toggle${showSplash ? " active" : ""}`}
-            onClick={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
-            aria-pressed={showSplash}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-
-        <div className="settings-row-with-children">
-          <div className="settings-row-header">
-            <div className="settings-row-info">
-              <span className="settings-row-label">Notifications</span>
-              <span className="settings-row-desc">
-                Show a popup at the bottom-right for clipboard operations.
-              </span>
-            </div>
-            <button
-              type="button"
-              className={`settings-toggle${notificationEnabled ? " active" : ""}`}
-              onClick={handleNotificationToggle}
-              aria-pressed={notificationEnabled}
-            >
-              <span className="settings-toggle-knob" />
-            </button>
-          </div>
-          {(notificationEnabled || notifClosing) && (
-            <div className={`settings-child-checks${notifClosing ? " closing" : ""}`}>
-              <label className="settings-checkbox-row">
-                <span
-                  className={`settings-checkbox${notifCopy ? " checked" : ""}`}
-                  onClick={() => toggleBoolSetting(notifCopy, setNotifCopy, "notif_copy")}
-                >
-                  {notifCopy && <CheckIcon size={9} strokeWidth={3} />}
-                </span>
-                <div className="settings-checkbox-info">
-                  <span className="settings-checkbox-label">Copy operations</span>
-                  <span className="settings-checkbox-desc">Show notification on Ctrl+C</span>
+          <div className="set-group">
+            <ToggleRow
+              label="Close to system tray"
+              desc="Closing the window minimizes the app to the system tray instead of quitting."
+              active={closeToTray}
+              onToggle={handleCloseToTrayToggle}
+            />
+            <ToggleRow
+              label="Run on startup"
+              desc={`Automatically launch when you sign in to Windows.${import.meta.env.DEV ? " Disabled in dev builds." : ""}`}
+              active={runOnStartup}
+              onToggle={handleRunOnStartupToggle}
+              disabled={autostartEnableBlocked}
+            />
+            <ToggleRow
+              label="Start minimized"
+              desc="Start hidden in the system tray instead of showing the main window."
+              active={startMinimized}
+              onToggle={handleStartMinimizedToggle}
+            />
+            <ToggleRow
+              label="Show splash screen on startup"
+              desc="Display a brief startup screen when the app launches."
+              active={showSplash}
+              onToggle={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
+            />
+            <div className="set-row set-row--stack">
+              <div className="set-row-header">
+                <div className="set-row-info">
+                  <span className="set-row-label">Notifications</span>
+                  <span className="set-row-desc">
+                    Show a popup at the bottom-right for clipboard operations.
+                  </span>
                 </div>
-              </label>
-              <label className="settings-checkbox-row">
-                <span
-                  className={`settings-checkbox${notifPaste ? " checked" : ""}`}
-                  onClick={() => toggleBoolSetting(notifPaste, setNotifPaste, "notif_paste")}
+                <button
+                  type="button"
+                  className={`settings-toggle${notificationEnabled ? " active" : ""}`}
+                  onClick={handleNotificationToggle}
+                  aria-pressed={notificationEnabled}
                 >
-                  {notifPaste && <CheckIcon size={9} strokeWidth={3} />}
-                </span>
-                <div className="settings-checkbox-info">
-                  <span className="settings-checkbox-label">Paste operations</span>
-                  <span className="settings-checkbox-desc">Show notification on Ctrl+Shift+V</span>
+                  <span className="settings-toggle-knob" />
+                </button>
+              </div>
+              {(notificationEnabled || notifClosing) && (
+                <div className={`set-child-checks${notifClosing ? " closing" : ""}`}>
+                  <label className="settings-checkbox-row">
+                    <span
+                      className={`settings-checkbox${notifCopy ? " checked" : ""}`}
+                      onClick={() => toggleBoolSetting(notifCopy, setNotifCopy, "notif_copy")}
+                    >
+                      {notifCopy && <CheckIcon size={9} strokeWidth={3} />}
+                    </span>
+                    <div className="settings-checkbox-info">
+                      <span className="settings-checkbox-label">Copy operations</span>
+                      <span className="settings-checkbox-desc">Show notification on Ctrl+C</span>
+                    </div>
+                  </label>
+                  <label className="settings-checkbox-row">
+                    <span
+                      className={`settings-checkbox${notifPaste ? " checked" : ""}`}
+                      onClick={() => toggleBoolSetting(notifPaste, setNotifPaste, "notif_paste")}
+                    >
+                      {notifPaste && <CheckIcon size={9} strokeWidth={3} />}
+                    </span>
+                    <div className="settings-checkbox-info">
+                      <span className="settings-checkbox-label">Paste operations</span>
+                      <span className="settings-checkbox-desc">Show notification on Ctrl+Shift+V</span>
+                    </div>
+                  </label>
                 </div>
-              </label>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </section>
 
-      {/* ── Quick Paste ── */}
-      <div className="settings-section">
-        <h3 className="settings-section-title">Quick Paste</h3>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Paste Slots</span>
-            <span className="settings-row-desc">
-              Number of entries shown in the quick paste popup (Ctrl+Shift+V).
-            </span>
+        {/* ── Quick Paste ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><ClipboardPasteIcon size={13} /></span>
+            <h3 className="set-section-title">Quick Paste</h3>
           </div>
-          <CustomSelect value={pasteSlots} options={SLOT_OPTIONS} onChange={handleSlotsChange} />
-        </div>
-      </div>
+          <div className="set-group">
+            <div className="set-row">
+              <div className="set-row-info">
+                <span className="set-row-label">Paste slots</span>
+                <span className="set-row-desc">
+                  Number of entries shown in the quick paste popup.
+                </span>
+              </div>
+              <CustomSelect value={pasteSlots} options={SLOT_OPTIONS} onChange={handleSlotsChange} />
+            </div>
+          </div>
+        </section>
 
-      {/* ── History ── */}
-      <div className="settings-section">
-        <h3 className="settings-section-title">History</h3>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Keep history across app restarts</span>
-            <span className="settings-row-desc">
-              Clipboard history is preserved when the app restarts (cleared after reboot).
-            </span>
+        {/* ── History ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><ClockIcon size={13} /></span>
+            <h3 className="set-section-title">History</h3>
           </div>
-          <button
-            type="button"
-            className={`settings-toggle${keepHistory ? " active" : ""}`}
-            onClick={handleKeepToggle}
-            aria-pressed={keepHistory}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Auto-save copied entries</span>
-            <span className="settings-row-desc">
-              Automatically add every new clipboard entry to the Saved group.
-            </span>
+          <div className="set-group">
+            <ToggleRow
+              label="Keep history across app restarts"
+              desc="Clipboard history is preserved when the app restarts (cleared after reboot)."
+              active={keepHistory}
+              onToggle={handleKeepToggle}
+            />
+            <ToggleRow
+              label="Auto-save copied entries"
+              desc="Automatically add every new clipboard entry to the Saved group."
+              active={autosave}
+              onToggle={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
+            />
           </div>
-          <button
-            type="button"
-            className={`settings-toggle${autosave ? " active" : ""}`}
-            onClick={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
-            aria-pressed={autosave}
-          >
-            <span className="settings-toggle-knob" />
-          </button>
-        </div>
-      </div>
+        </section>
 
-      {/* ── Data ── */}
-      <div className="settings-section">
-        <h3 className="settings-section-title">Data</h3>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-row-label">Open data folder</span>
-            <span className="settings-row-desc">
-              Open the folder where clipboard history, pinned entries, and settings are stored.
-            </span>
+        {/* ── Data ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><FolderIcon size={13} /></span>
+            <h3 className="set-section-title">Data</h3>
           </div>
-          <button
-            type="button"
-            className="settings-action-btn"
-            onClick={() => invoke("open_data_folder")}
-          >
-            <FolderIcon />
-            Open
-          </button>
-        </div>
+          <div className="set-group">
+            <div className="set-row">
+              <div className="set-row-info">
+                <span className="set-row-label">Open data folder</span>
+                <span className="set-row-desc">
+                  Open the folder where clipboard history, pinned entries, and settings are stored.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={() => invoke("open_data_folder")}
+              >
+                <FolderIcon />
+                Open
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

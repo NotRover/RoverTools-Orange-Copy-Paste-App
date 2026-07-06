@@ -1,11 +1,20 @@
 /* ── Sync Screen ── */
 
 .sync-screen {
+  /* Brighter CTA accent, matching the Settings/Account screens. */
+  --cta: #ff5535;
+  --cta-hover: #ff6b4d;
+
   display: flex;
   flex-direction: row;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+[data-theme="light"] .sync-screen {
+  --cta: var(--accent);
+  --cta-hover: var(--accent-hover);
 }
 
 /* ── Feed panel (left, flex-1) ── */
@@ -48,7 +57,7 @@
   width: calc(33.333% - 1.333px);
   height: calc(100% - 4px);
   border-radius: 6px;
-  background: var(--accent);
+  background: var(--cta, var(--accent));
   z-index: 0;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
@@ -294,8 +303,9 @@
 }
 
 .sync-feed-group-name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
+  letter-spacing: -0.1px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -317,21 +327,26 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 10.5px;
+  font-weight: 600;
   color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
   white-space: nowrap;
 }
 
 .sync-feed-action-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
+  gap: 5px;
+  padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
+  border-radius: 7px;
   background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
@@ -503,6 +518,17 @@
   text-align: center;
 }
 
+/* Icon-chip treatment for empty-state icons (matches acct/set card chips) */
+.sync-feed-empty > svg,
+.sync-no-selection-inner > svg {
+  box-sizing: content-box;
+  padding: 13px;
+  border-radius: 16px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  margin-bottom: 4px;
+}
+
 .sync-feed-empty-title {
   font-size: 13px;
   font-weight: 600;
@@ -549,7 +575,7 @@
 /* ── Right groups panel ── */
 
 .sync-panel-right {
-  width: 210px;
+  width: 224px;
   flex-shrink: 0;
   background: var(--sidebar-bg);
   display: flex;
@@ -564,15 +590,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 9px;
+  padding: 11px 14px 10px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .sync-panel-title {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
   color: var(--text-secondary);
 }
 
@@ -677,7 +704,7 @@
   width: 100%;
   padding: 6px 8px;
   border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  border-radius: 9px;
   background: transparent;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
@@ -886,13 +913,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 5px 8px;
+  gap: 5px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
+  border-radius: 8px;
   background: var(--surface);
   color: var(--text-secondary);
   font-size: 11px;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
@@ -961,14 +989,14 @@
 
 .sync-inline-btn--primary {
   flex: 1;
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--cta, var(--accent));
+  border-color: transparent;
   color: #fff;
 }
 
 .sync-inline-btn--primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--cta-hover, var(--accent-hover));
+  border-color: transparent;
   color: #fff;
 }
 
