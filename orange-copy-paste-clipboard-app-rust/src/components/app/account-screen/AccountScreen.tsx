@@ -539,9 +539,10 @@ const AccountScreen: React.FC = () => {
     <div className={`settings-screen account-screen${centered ? " account-screen--center" : ""}`}>
       <div className="acct-inner">
         {!centered && (
-          <header className="acct-head">
-            <h2 className="acct-title">Account &amp; Sync</h2>
-            <p className="acct-subtitle">
+          <header className="scr-head">
+            <span className="scr-eyebrow">Cloud</span>
+            <h2 className="scr-title">Account &amp; Sync</h2>
+            <p className="scr-subtitle">
               Sign in, manage your devices, and share across the cloud — end-to-end encrypted.
             </p>
           </header>
