@@ -1,11 +1,11 @@
-/* Shortcuts screen */
+/* Shortcuts screen — reuses the shared scr-* header and set-section-* headings
+   from SettingsScreen.css; only the shortcut rows are screen-specific. */
 
 .shortcuts-screen {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 24px 20px;
-  gap: 24px;
+  padding: 26px 22px 32px;
   overflow: hidden auto;
 }
 
@@ -30,24 +30,13 @@
   background-clip: padding-box;
 }
 
-.shortcuts-header {
+.shortcuts-inner {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.shortcuts-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.2px;
-}
-
-.shortcuts-subtitle {
-  font-size: 12.5px;
-  color: var(--text-muted);
+  gap: 22px;
 }
 
 /*  Sections  */
@@ -55,27 +44,28 @@
 .shortcuts-sections {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 22px;
 }
 
 .shortcuts-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
+  animation: setSectionIn 0.26s ease both;
 }
 
-.shortcuts-section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.shortcuts-section:nth-child(2) { animation-delay: 0.03s; }
+.shortcuts-section:nth-child(3) { animation-delay: 0.06s; }
+.shortcuts-section:nth-child(4) { animation-delay: 0.09s; }
+.shortcuts-section:nth-child(5) { animation-delay: 0.12s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcuts-section {
+    animation: none;
+  }
 }
 
-/*  Shortcut rows  */
+/*  Shortcut rows — grouped in a single flat surface box  */
 
 .shortcuts-list {
   display: flex;
@@ -91,12 +81,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
 }
 
-.shortcut-row:last-child {
-  border-bottom: none;
+.shortcut-row:first-child {
+  border-top: none;
 }
 
 .shortcut-desc {
@@ -121,7 +111,7 @@
   background: var(--bg);
   border: 1px solid var(--border-light);
   border-bottom-width: 2px;
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 11px;
   font-family: inherit;
   font-weight: 600;
