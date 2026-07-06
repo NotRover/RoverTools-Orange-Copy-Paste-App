@@ -14,6 +14,7 @@ import {
   UsersIcon,
   ShareIcon,
   GoogleIcon,
+  KeyIcon,
 } from "../../icons";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
@@ -32,9 +33,6 @@ const SCOPE_OPTIONS: { value: string; label: string }[] = [
 const AccountScreen: React.FC = () => {
   // ── Cloud Sync ─────────────────────────────────────────────────
   const [syncEnabled, setSyncEnabled] = useState(false);
-  const [serverUrl, setServerUrl] = useState("https://api.orangeclipboard.app");
-  const [serverUrlDraft, setServerUrlDraft] = useState("https://api.orangeclipboard.app");
-  const [editingUrl, setEditingUrl] = useState(false);
   const [syncUser, setSyncUser] = useState<SyncUser | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo | null>(null);
   const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
@@ -97,11 +95,6 @@ const AccountScreen: React.FC = () => {
     invoke<boolean | null>("get_setting", { key: "sync_enabled" }).then((v) =>
       setSyncEnabled(v === true),
     );
-    invoke<string | null>("get_setting", { key: "sync_server_url" }).then((v) => {
-      const url = typeof v === "string" && v ? v : "https://api.orangeclipboard.app";
-      setServerUrl(url);
-      setServerUrlDraft(url);
-    });
 
     invoke<SyncUser | null>("sync_get_user").then((u) => {
       setSyncUser(u);
@@ -158,15 +151,6 @@ const AccountScreen: React.FC = () => {
     }
   };
 
-  const handleSaveUrl = async () => {
-    setServerUrl(serverUrlDraft);
-    setEditingUrl(false);
-    try {
-      await invoke("sync_set_server_url", { url: serverUrlDraft });
-    } catch (e) {
-      console.error("sync_set_server_url failed", e);
-    }
-  };
 
   // Post-authentication: hydrate account state (shared by password + OAuth).
   const loadPostLogin = (user: SyncUser) => {
@@ -494,42 +478,6 @@ const AccountScreen: React.FC = () => {
     </div>
   );
 
-  // Advanced footer (server URL + turn sync off) — shown once signed in or ready.
-  const advanced = (
-    <div className="acct-card acct-advanced">
-      <div className="acct-adv-row">
-        <div className="acct-adv-info">
-          <span className="acct-adv-label">Server</span>
-          <span className="acct-adv-value">{serverUrl || "https://api.orangeclipboard.app"}</span>
-        </div>
-        {editingUrl ? (
-          <div className="acct-url-edit">
-            <input
-              className="auth-input acct-url-input"
-              value={serverUrlDraft}
-              onChange={(e) => setServerUrlDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleSaveUrl(); if (e.key === "Escape") setEditingUrl(false); }}
-              autoFocus
-              spellCheck={false}
-            />
-            <button type="button" className="acct-btn acct-btn--primary acct-btn--sm" onClick={handleSaveUrl}>Save</button>
-            <button type="button" className="acct-btn acct-btn--sm" onClick={() => setEditingUrl(false)}>Cancel</button>
-          </div>
-        ) : (
-          <button type="button" className="acct-btn acct-btn--sm" onClick={() => setEditingUrl(true)}>Change</button>
-        )}
-      </div>
-      <div className="acct-adv-divider" />
-      <div className="acct-adv-row">
-        <div className="acct-adv-info">
-          <span className="acct-adv-label">Cloud Sync</span>
-          <span className="acct-adv-hint">Turn off syncing on this device.</span>
-        </div>
-        <button type="button" className="acct-btn acct-btn--danger acct-btn--sm" onClick={handleSyncToggle}>Turn off</button>
-      </div>
-    </div>
-  );
-
   // Short states (enable hero / signed-out auth) get centered vertically and
   // rely on the card's own heading, so the page header is hidden there.
   const centered = !syncEnabled || !syncUser;
@@ -790,8 +738,12 @@ const AccountScreen: React.FC = () => {
                   </div>
                 </>
               )}
+
+              <div className="auth-secure">
+                <KeyIcon size={12} />
+                End-to-end encrypted — only you can read your data
+              </div>
             </div>
-            {advanced}
           </>
         ) : (
           /* ── Signed in ── */
@@ -1049,8 +1001,6 @@ const AccountScreen: React.FC = () => {
                 </button>
               </div>
             </div>
-
-            {advanced}
           </>
         )}
       </div>

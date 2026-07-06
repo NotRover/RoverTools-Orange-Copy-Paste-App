@@ -1,18 +1,20 @@
 /* Account & Sync screen.
-   Layout and sync-* card styles are inherited from SettingsScreen.css (imported
-   by AccountScreen.tsx). This file holds the polished auth-card styling. */
+   The .settings-screen scroll shell, scr-* header, and flat --card-bg /
+   --card-shadow variables come from SettingsScreen.css (imported by
+   AccountScreen.tsx). This file holds the auth-card + acct-* styling, kept in
+   the same flat surface language as Settings. */
 
 /* ── Auth card ─────────────────────────────────────────────────────── */
 
 .auth-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 392px;
   margin: 0 auto;
-  padding: 24px 22px 20px;
+  padding: 26px 24px 22px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--card-bg, var(--surface));
-  box-shadow: var(--card-shadow, var(--shadow-sm));
+  box-shadow: var(--card-shadow, none);
   animation: acctCardIn 0.28s ease both;
 }
 
@@ -22,7 +24,7 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 6px;
+  gap: 5px;
   margin-bottom: 18px;
 }
 
@@ -30,18 +32,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  margin-bottom: 4px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 6px;
+  border-radius: 11px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--accent-dim);
 }
 
 .auth-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 16.5px;
   font-weight: 650;
+  letter-spacing: -0.2px;
   color: var(--text);
 }
 
@@ -49,7 +52,25 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
+}
+
+/* End-to-end-encryption footer — the screen's signature reassurance line. */
+.auth-secure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.auth-secure svg {
+  color: var(--accent);
+  opacity: 0.85;
 }
 
 /* ── Segmented tabs (Sign In / Sign Up) ────────────────────────────── */
@@ -122,7 +143,7 @@
 .auth-label {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-secondary);
 }
 
 .auth-input {
@@ -137,6 +158,10 @@
   padding: 9px 11px;
   outline: none;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.auth-input::placeholder {
+  color: var(--text-muted);
 }
 
 .auth-input:focus {
@@ -745,55 +770,3 @@
   border-radius: 6px;
 }
 
-/* ── Advanced card ─────────────────────────────────────────────────── */
-
-.acct-adv-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.acct-adv-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.acct-adv-label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.acct-adv-value {
-  font-size: 11.5px;
-  color: var(--text-muted, #909090);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.acct-adv-hint {
-  font-size: 11.5px;
-  color: var(--text-muted, #909090);
-}
-
-.acct-adv-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 12px 0;
-}
-
-.acct-url-edit {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex: 1;
-  justify-content: flex-end;
-}
-
-.acct-url-input {
-  flex: 1;
-  max-width: 280px;
-}
