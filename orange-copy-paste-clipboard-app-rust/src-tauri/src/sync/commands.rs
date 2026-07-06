@@ -136,6 +136,78 @@ pub async fn sync_signup(
     Ok(user)
 }
 
+/// Phase 1 of OAuth sign-in (e.g. Google): runs the browser handshake and
+/// returns whether the user must create or enter their account password.
+#[tauri::command]
+pub async fn sync_oauth_begin(
+    provider: String,
+    device_name: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<crate::sync::OAuthBegin, String> {
+    let sync = {
+        let guard = state.sync_client.lock();
+        match guard.clone() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                let config = SyncConfig::load(&app);
+                let client = SyncClient::new(app.clone(), config)?;
+                let arc = Arc::new(client);
+                *state.sync_client.lock() = Some(Arc::clone(&arc));
+                arc
+            }
+        }
+    };
+    sync.begin_oauth(provider, device_name).await
+}
+
+/// Phase 2 of OAuth sign-in: finalize the stashed session with the account
+/// password (the E2E secret).
+#[tauri::command]
+pub async fn sync_oauth_complete(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<SyncUser, String> {
+    let sync = sync_client(&state)?;
+    let user = sync.complete_oauth(password).await?;
+    Arc::clone(&sync).trigger_initial_sync();
+    Ok(user)
+}
+
+/// Discard a stashed OAuth session when the user backs out of the password step.
+#[tauri::command]
+pub fn sync_oauth_cancel(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(sync) = state.sync_client.lock().clone() {
+        sync.cancel_oauth();
+    }
+    Ok(())
+}
+
+/// Send a password-reset email via Supabase.
+#[tauri::command]
+pub async fn sync_reset_password(
+    email: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let sync = {
+        let guard = state.sync_client.lock();
+        match guard.clone() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                let config = SyncConfig::load(&app);
+                let client = SyncClient::new(app.clone(), config)?;
+                let arc = Arc::new(client);
+                *state.sync_client.lock() = Some(Arc::clone(&arc));
+                arc
+            }
+        }
+    };
+    sync.reset_password(email).await
+}
+
 #[tauri::command]
 pub async fn sync_logout(
     state: State<'_, AppState>,

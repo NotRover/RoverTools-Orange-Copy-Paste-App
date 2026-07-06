@@ -143,6 +143,100 @@ impl SupabaseAuth {
         .await
     }
 
+    /// Build the browser-facing OAuth authorization URL for `provider` using the
+    /// PKCE flow.  The user opens this in their browser; GoTrue redirects to
+    /// `redirect_to` with a `?code=` once consent is granted.
+    ///
+    /// `code_challenge` is the S256 challenge from [`crate::sync::crypto::pkce_pair`].
+    pub fn authorize_url(
+        &self,
+        provider: &str,
+        redirect_to: &str,
+        code_challenge: &str,
+    ) -> Result<String, String> {
+        self.ensure_configured()?;
+        let url = reqwest::Url::parse_with_params(
+            &self.url("/authorize"),
+            &[
+                ("provider", provider),
+                ("redirect_to", redirect_to),
+                ("code_challenge", code_challenge),
+                ("code_challenge_method", "s256"),
+            ],
+        )
+        .map_err(|e| format!("authorize url: {e}"))?;
+        Ok(url.to_string())
+    }
+
+    /// Exchange an OAuth authorization `code` for a session:
+    /// `POST /token?grant_type=pkce`.  `code_verifier` is the plaintext half of
+    /// the PKCE pair generated before the browser hop.
+    pub async fn exchange_code_pkce(
+        &self,
+        code: &str,
+        code_verifier: &str,
+    ) -> Result<SupabaseSession, String> {
+        self.ensure_configured()?;
+        self.send_json(
+            self.inner
+                .post(self.url("/token?grant_type=pkce"))
+                .json(&serde_json::json!({
+                    "auth_code": code,
+                    "code_verifier": code_verifier,
+                })),
+            "supabase oauth exchange",
+        )
+        .await
+    }
+
+    /// Set (or change) the account password for the authenticated user:
+    /// `PUT /user`.  Used to give an OAuth-first account a real password that
+    /// doubles as the E2E secret and enables later email+password login.
+    pub async fn update_password(&self, access_token: &str, password: &str) -> Result<(), String> {
+        self.ensure_configured()?;
+        let _: serde_json::Value = self
+            .send_json(
+                self.inner
+                    .put(self.url("/user"))
+                    .bearer_auth(access_token)
+                    .json(&serde_json::json!({ "password": password })),
+                "supabase update password",
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Request a password-reset email: `POST /recover`.  GoTrue emails the user a
+    /// recovery link (targeting the project's Site URL).  Returns `Ok` on 200
+    /// even though the body is empty, so we don't route through `send_json`.
+    pub async fn recover(&self, email: &str) -> Result<(), String> {
+        self.ensure_configured()?;
+        let resp = self
+            .inner
+            .post(self.url("/recover"))
+            .header("apikey", &self.anon_key)
+            .json(&serde_json::json!({ "email": email }))
+            .send()
+            .await
+            .map_err(|e| format!("supabase recover: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let msg = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| {
+                    v.get("error_description")
+                        .or_else(|| v.get("msg"))
+                        .or_else(|| v.get("error"))
+                        .and_then(|m| m.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or(body);
+            return Err(format!("supabase recover ({}): {msg}", status.as_u16()));
+        }
+        Ok(())
+    }
+
     /// Register a new account: `POST /signup`.  When the project requires email
     /// confirmation, no session is issued and we return `ConfirmationRequired`.
     pub async fn sign_up(&self, email: &str, password: &str) -> Result<SignUpOutcome, String> {

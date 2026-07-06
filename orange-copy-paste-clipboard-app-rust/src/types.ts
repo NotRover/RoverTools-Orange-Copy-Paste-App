@@ -33,8 +33,11 @@ export interface Note {
   groups: string[];
 }
 
-export type AppScreen = "clipboard" | "notes" | "sync" | "shortcuts" | "settings";
+export type AppScreen = "clipboard" | "notes" | "sync" | "shortcuts" | "account" | "settings";
 export type AppTheme = "dark" | "light";
+
+/** Sync connection state surfaced by the sidebar status indicator. */
+export type SyncIndicator = "signedOut" | "connected" | "syncing" | "offline";
 
 // ── Cloud sync types ────────────────────────────────────────────────
 

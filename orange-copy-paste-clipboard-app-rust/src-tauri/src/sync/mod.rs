@@ -16,6 +16,7 @@ pub mod commands;
 pub mod config;
 pub mod crypto;
 pub mod id_map;
+pub mod oauth;
 pub mod pending_queue;
 pub(crate) mod persist;
 pub mod supabase;
@@ -123,6 +124,28 @@ fn tombstone_req(umk: &[u8; 32], client_id: &str, entry_type: &str) -> Option<Pu
     })
 }
 
+// ── OAuth (Google, etc.) ─────────────────────────────────────────────
+
+/// An OAuth login that has completed the provider handshake but still needs the
+/// account password (the E2E secret) before the session can be finalized.
+struct PendingOAuth {
+    session: SupabaseSession,
+    email: String,
+    device_name: String,
+    /// True when the account has no identity key yet — the user is setting a
+    /// password for the first time rather than re-entering an existing one.
+    is_new: bool,
+}
+
+/// Returned to the UI after the browser OAuth hop so it can prompt for the
+/// account password (creating one on first sign-in, entering it thereafter).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OAuthBegin {
+    pub email: String,
+    /// True → prompt to *create* a password; false → prompt to *enter* it.
+    pub is_new: bool,
+}
+
 // ── SyncClient ───────────────────────────────────────────────────────
 
 pub struct SyncClient {
@@ -139,6 +162,10 @@ pub struct SyncClient {
     user: Mutex<Option<SyncUser>>,
     /// Authenticated HTTP client (None when logged out).
     http: Mutex<Option<Arc<SyncHttpClient>>>,
+
+    /// An OAuth session that has authenticated but is awaiting the account
+    /// password (the E2E secret) from the user before it can be finalized.
+    pending_oauth: Mutex<Option<PendingOAuth>>,
 
     /// Pending offline operation queue.
     pending_queue: Arc<Mutex<PendingQueue>>,
@@ -236,6 +263,7 @@ impl SyncClient {
             umk: Mutex::new(None),
             user: Mutex::new(None),
             http: Mutex::new(None),
+            pending_oauth: Mutex::new(None),
             pending_queue,
             id_map,
             sync_state,
@@ -253,8 +281,9 @@ impl SyncClient {
 
     /// Full login flow against Supabase Auth + our backend:
     ///   1. Supabase password grant (access + refresh tokens, user id).
-    ///   2. `POST /auth/bootstrap` → KDF salt + display name.
-    ///   3. Derive the UMK from password + salt (deterministic per account).
+    ///   2. `POST /auth/bootstrap` → KDF salt + wrapped-UMK envelope.
+    ///   3. Derive the wrapping key from password + salt, then unwrap the random
+    ///      UMK (or generate + wrap one on a brand-new account).
     ///   4. Generate a device keypair and register the device → device_id.
     ///   5. Persist secrets (device key + refresh token) to the OS keychain.
     ///   6. Wire in-memory state and start the WebSocket listener.
@@ -289,6 +318,96 @@ impl SyncClient {
         }
     }
 
+    /// Phase 1 of OAuth sign-in: run the provider handshake in the browser and
+    /// determine whether the user needs to *create* or *enter* their account
+    /// password.  The authenticated session is stashed until [`Self::complete_oauth`].
+    ///
+    /// Steps: PKCE pair → loopback redirect server → open browser → exchange the
+    /// returned code for a session → bootstrap to learn if an identity key (and
+    /// therefore a password) already exists for this account.
+    pub async fn begin_oauth(
+        self: &Arc<Self>,
+        provider: String,
+        device_name: String,
+    ) -> Result<OAuthBegin, String> {
+        let (verifier, challenge) = crypto::pkce_pair();
+
+        // Bind the loopback redirect target *before* building the URL so the
+        // exact redirect_uri is known.
+        let loopback = oauth::bind()?;
+        let auth_url = self
+            .supabase
+            .authorize_url(&provider, &loopback.redirect_uri, &challenge)?;
+        oauth::open_browser(&auth_url)?;
+
+        // The accept loop is blocking; run it off the async worker.
+        let code = self
+            .handle
+            .spawn_blocking(move || loopback.wait_for_code())
+            .await
+            .map_err(|e| format!("oauth capture task: {e}"))??;
+
+        let session = self.supabase.exchange_code_pkce(&code, &verifier).await?;
+        let email = session.user.email.clone();
+
+        // Probe the account: does it already have a registered identity key?
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        http.set_access_token(session.access_token.clone());
+        http.set_refresh_token(session.refresh_token.clone());
+        http.set_user_id(session.user.id.clone());
+        let boot = http.bootstrap(None).await?;
+        let is_new = boot.wrapped_umk.is_none();
+
+        *self.pending_oauth.lock() = Some(PendingOAuth {
+            session,
+            email: email.clone(),
+            device_name,
+            is_new,
+        });
+
+        Ok(OAuthBegin { email, is_new })
+    }
+
+    /// Phase 2 of OAuth sign-in: take the stashed session plus the account
+    /// password and finalize.  On first sign-in the password is also written
+    /// back to Supabase so the account gains a real credential usable for later
+    /// email+password login; on return it is verified against the stored
+    /// identity key inside [`Self::finalize_session`].
+    pub async fn complete_oauth(&self, password: String) -> Result<SyncUser, String> {
+        let pending = self
+            .pending_oauth
+            .lock()
+            .take()
+            .ok_or("no pending sign-in — start again")?;
+
+        if pending.is_new {
+            self.supabase
+                .update_password(&pending.session.access_token, &password)
+                .await?;
+        }
+
+        self.finalize_session(
+            pending.session,
+            &pending.email,
+            &password,
+            pending.device_name,
+        )
+        .await
+    }
+
+    /// Discard a stashed OAuth session (user cancelled the password step).
+    pub fn cancel_oauth(&self) {
+        *self.pending_oauth.lock() = None;
+    }
+
+    /// Send a Supabase password-reset email.  Restores account *access*; note
+    /// that under the E2E envelope model a new password re-derives the KEK, so
+    /// existing data only remains decryptable if the UMK is re-wrapped from a
+    /// still-signed-in device (a future recovery path).
+    pub async fn reset_password(&self, email: String) -> Result<(), String> {
+        self.supabase.recover(&email).await
+    }
+
     /// Shared post-authentication flow for both login and signup.
     async fn finalize_session(
         &self,
@@ -310,14 +429,34 @@ impl SyncClient {
         http.set_refresh_token(session.refresh_token.clone());
         http.set_user_id(user_id.clone());
 
-        // 3. Ensure a profile exists and fetch the KDF salt; derive the UMK.
+        // 3. Bootstrap: fetch the KDF salt and (if the account is set up) the
+        //    wrapped-UMK envelope.  The password derives only the wrapping key.
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
             .map_err(|e| format!("kdf_salt b64: {e}"))?;
-        let umk = crypto::derive_umk(password, &kdf_salt);
+        let kek = crypto::derive_kek(password, &kdf_salt);
 
-        // 4. Register this device (fresh X25519 keypair for group key exchange).
+        // 4. Establish the User Master Key (envelope model).
+        //    - Returning account → unwrap the stored envelope.  A GCM auth
+        //      failure here means the password is wrong; we abort before touching
+        //      any device/key state.
+        //    - Brand-new account → generate a fresh random UMK, wrap it under the
+        //      KEK, and upload the envelope so every future login/device can
+        //      unwrap the *same* key.
+        let umk = match boot.wrapped_umk.as_deref() {
+            Some(wrapped) => crypto::unwrap_umk(&kek, wrapped)?,
+            None => {
+                let fresh = crypto::random_key();
+                let wrapped = crypto::wrap_umk(&kek, &fresh)?;
+                http.set_wrapped_umk(wrapped).await?;
+                fresh
+            }
+        };
+        let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
+        let identity_pub_b64 = B64.encode(identity_pub);
+
+        // 5. Register this device (fresh X25519 keypair for group key exchange).
         let (device_priv, device_pub) = crypto::generate_device_keypair();
         let dev = http
             .register_device(RegisterDeviceRequest {
@@ -329,14 +468,12 @@ impl SyncClient {
             .await?;
         http.set_device_id(dev.device_id.clone());
 
-        // 5. Register public keys for E2E group-key exchange.  The identity key
-        //    is derived from the UMK (identical on every device), so we register
-        //    its public half alongside this device's public key.  Best-effort:
+        // 6. Register public keys for E2E group-key exchange.  The identity key
+        //    is derived from the UMK (identical on every device).  Best-effort:
         //    a failure here only disables group sharing, not core sync.
-        let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
         if let Err(e) = http
             .register_keys(client::RegisterKeysRequest {
-                identity_pubkey: B64.encode(identity_pub),
+                identity_pubkey: identity_pub_b64,
                 device_pubkey: B64.encode(device_pub),
             })
             .await
@@ -344,18 +481,18 @@ impl SyncClient {
             eprintln!("[sync] register_keys failed (group sharing disabled): {e}");
         }
 
-        // 6. Persist secrets to the OS keychain.
+        // 7. Persist secrets to the OS keychain.
         crypto::store_device_private_key(&user_id, &device_priv)?;
         crypto::store_refresh_token(&user_id, &session.refresh_token)?;
 
-        // 7. Update persisted sync state.
+        // 8. Update persisted sync state.
         {
             let mut state = self.sync_state.lock();
             state.set_device_id(&dev.device_id);
             state.set_user_id(&user_id);
         }
 
-        // 8. Wire in-memory state.
+        // 9. Wire in-memory state.
         let user = SyncUser {
             user_id,
             email: user_email,
@@ -366,7 +503,7 @@ impl SyncClient {
         *self.user.lock() = Some(user.clone());
         self.status.lock().connected = true;
 
-        // 9. Start the realtime listener.
+        // 10. Start the realtime listener.
         self.start_ws_listener();
 
         Ok(user)

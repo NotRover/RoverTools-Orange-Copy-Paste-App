@@ -81,6 +81,8 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 keyring = "2"
 # Zeroize — scrub key material from memory on drop
 zeroize = { version = "1", features = ["derive"] }
+# Open the system browser for the OAuth authorization hop
+open = "5"
 
 [profile.release]
 opt-level = "z"   # optimize for binary size

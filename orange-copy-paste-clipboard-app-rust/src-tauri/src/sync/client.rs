@@ -36,9 +36,20 @@ pub struct BootstrapRequest {
 #[derive(Debug, Deserialize)]
 pub struct BootstrapResponse {
     pub user_id: String,
-    /// base64-encoded salt used for Argon2id UMK derivation.
+    /// base64-encoded salt used for Argon2id key derivation (the wrapping key).
     pub kdf_salt: String,
     pub display_name: String,
+    /// base64 envelope holding the random UMK wrapped under the password-derived
+    /// KEK.  `None` on a brand-new account (no UMK established yet); its presence
+    /// is how the client distinguishes first-setup from a returning login, and
+    /// its GCM tag doubles as the password verifier on unwrap.
+    #[serde(default)]
+    pub wrapped_umk: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetWrappedUmkRequest {
+    pub wrapped_umk: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -501,6 +512,16 @@ impl SyncHttpClient {
         let body = BootstrapRequest { display_name };
         self.get_json("bootstrap", || {
             Ok(self.authed(Method::POST, "/api/v1/auth/bootstrap")?.json(&body))
+        })
+        .await
+    }
+
+    /// Store the password-wrapped UMK envelope for this account.  Called once on
+    /// first setup, and again if the account password changes (re-wrap).
+    pub async fn set_wrapped_umk(&self, wrapped_umk: String) -> Result<(), String> {
+        let body = SetWrappedUmkRequest { wrapped_umk };
+        self.get_ok("set wrapped umk", false, || {
+            Ok(self.authed(Method::PUT, "/api/v1/auth/umk")?.json(&body))
         })
         .await
     }

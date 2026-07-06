@@ -100,7 +100,7 @@ These bind the client and backend. Changing one side usually means changing the 
 - Device-scoped routes require `Authorization: Bearer <jwt>` **and** `X-Device-Id`. WebSocket: `/ws?token=<jwt>&device_id=<id>`.
 
 **End-to-end encryption (client-only)**
-- UMK = Argon2id(password, `kdf_salt`); **in-memory only** (`Zeroizing`), never written to disk or logs.
+- UMK is a **random 32-byte key** (envelope model). The password derives only a wrapping key `KEK = Argon2id(password, kdf_salt)`; the UMK is stored server-side wrapped (`pw_wrapped_umk`, AES-GCM) and unwrapped on login. Both live **in-memory only** (`Zeroizing`), never written to disk or logs. A wrong password → GCM unwrap failure. OAuth (Google) users set an account password that serves as this secret.
 - Content: AES-256-GCM with **AAD = `client_id`** (binds ciphertext to its entry). The per-user **identity keypair is derived deterministically from the UMK** (same on every device, never stored server-side; only the public half is registered).
 - Group Keys are random 32-byte keys, X25519-wrapped per member; shared entries encrypt under the Group Key, personal entries under the UMK.
 - The server stores only ciphertext, public keys, and opaque wrapped keys — never plaintext.
