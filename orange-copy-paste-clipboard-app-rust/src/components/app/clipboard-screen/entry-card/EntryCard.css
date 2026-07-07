@@ -200,6 +200,13 @@
   font-weight: 400;
 }
 
+/* Expanded long text grows into a bounded, scrollable area rather than an
+   ever-taller card. */
+.entry-card--expanded .card-text {
+  max-height: min(480px, 60vh);
+  overflow: auto;
+}
+
 .card-text--file {
   font-size: 12px;
   color: var(--text);
@@ -249,7 +256,8 @@
 }
 
 .card-html-preview--expanded {
-  max-height: none;
+  max-height: min(480px, 60vh);
+  overflow: auto;
 }
 
 .card-html-preview--faded {
@@ -268,7 +276,7 @@
 }
 
 .card-html-preview--expanded img {
-  max-height: none;
+  max-height: min(360px, 45vh);
 }
 
 .card-html-img-placeholder {
