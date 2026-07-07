@@ -75,6 +75,12 @@ function daySubtitle(key: string): string {
   });
 }
 
+// Start-of-day timestamp for a day key — used to order the day buckets.
+function dayStartMs(key: string): number {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month, day).getTime();
+}
+
 interface DayGroup {
   key: string;
   label: string;
@@ -169,16 +175,19 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   // Multi-select state
   const multiSelect = useMultiSelect();
 
-  // Day groups (sorted within each day). Memoised so grouping/sorting only
-  // recomputes when the filtered set or sort mode changes.
-  const dayGroups = useMemo(
-    () =>
-      groupByDay(sf.filteredEntries).map((g) => ({
-        ...g,
-        entries: applySortWithinGroup(g.entries, sort),
-      })),
-    [sf.filteredEntries, sort],
-  );
+  // Day groups: entries sorted within each day, and the day buckets themselves
+  // ordered by date — oldest-first only for the "oldest" sort, newest-first for
+  // every other mode. Memoised so grouping/sorting only recomputes when the
+  // filtered set or sort mode changes.
+  const dayGroups = useMemo(() => {
+    const groups = groupByDay(sf.filteredEntries).map((g) => ({
+      ...g,
+      entries: applySortWithinGroup(g.entries, sort),
+    }));
+    const dir = sort === "oldest" ? 1 : -1;
+    groups.sort((a, b) => (dayStartMs(a.key) - dayStartMs(b.key)) * dir);
+    return groups;
+  }, [sf.filteredEntries, sort]);
 
   // Flat list of all filtered entry IDs (respecting sort order) for range /
   // select-all. Covers the whole filtered set, not just the rendered window.
@@ -330,7 +339,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         }
         rightSlot={
           <>
-            <LayoutSegment layout={layout} onLayoutChange={selectLayout} />
+            <LayoutSegment layout={layout} onLayoutChange={selectLayout} showSingle />
 
             <div className="cs-toolbar-sep" />
 
@@ -482,7 +491,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   <div className="timeline-group-body__inner">
                     <div
                       className={
-                        layout === "tiles" ? "entry-grid" : "entry-list"
+                        layout === "tiles"
+                          ? "entry-grid"
+                          : layout === "single"
+                            ? "entry-single"
+                            : "entry-list"
                       }
                     >
                       {group.entries.map((entry) => (

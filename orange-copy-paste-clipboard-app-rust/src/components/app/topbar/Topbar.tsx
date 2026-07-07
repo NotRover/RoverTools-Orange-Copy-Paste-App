@@ -6,7 +6,8 @@ import { SORT_OPTIONS } from "../sort-options";
 import GroupManagerCard from "../clipboard-screen/group-manager/GroupManagerCard";
 import {
   TilesIcon,
-  ListIcon,
+  SingleColumnIcon,
+  GridIcon,
   ChevronDownIcon,
   TagIcon,
   SearchIcon,
@@ -14,7 +15,7 @@ import {
 } from "../../icons";
 import "./Topbar.css";
 
-export type ClipboardLayout = "tiles" | "list";
+export type ClipboardLayout = "tiles" | "single" | "list";
 
 // Shell
 
@@ -125,33 +126,51 @@ export const SortDropdown: React.FC<{
 export const LayoutSegment: React.FC<{
   layout: ClipboardLayout;
   onLayoutChange: (l: ClipboardLayout) => void;
-}> = ({ layout, onLayoutChange }) => (
-  <div className="cs-layout-segment">
-    <div
-      className="cs-layout-slider"
-      style={{
-        transform:
-          layout === "list" ? "translateX(100%)" : "translateX(0)",
-      }}
-    />
-    <button
-      className={`cs-layout-seg-btn${layout === "tiles" ? " cs-layout-seg-btn--active" : ""}`}
-      onClick={() => onLayoutChange("tiles")}
-      data-tooltip="Tiles view"
-      data-tooltip-pos="below"
-    >
-      <TilesIcon size={12} />
-    </button>
-    <button
-      className={`cs-layout-seg-btn${layout === "list" ? " cs-layout-seg-btn--active" : ""}`}
-      onClick={() => onLayoutChange("list")}
-      data-tooltip="List view"
-      data-tooltip-pos="below"
-    >
-      <ListIcon size={12} />
-    </button>
-  </div>
-);
+  /** Show the single-column option (clipboard screen only). */
+  showSingle?: boolean;
+}> = ({ layout, onLayoutChange, showSingle }) => {
+  const sliderTransform = showSingle
+    ? layout === "single"
+      ? "translateX(200%)"
+      : layout === "list"
+        ? "translateX(100%)"
+        : "translateX(0)"
+    : layout === "list"
+      ? "translateX(100%)"
+      : "translateX(0)";
+
+  return (
+    <div className={`cs-layout-segment${showSingle ? " cs-layout-segment--3" : ""}`}>
+      <div className="cs-layout-slider" style={{ transform: sliderTransform }} />
+      <button
+        className={`cs-layout-seg-btn${layout === "tiles" ? " cs-layout-seg-btn--active" : ""}`}
+        onClick={() => onLayoutChange("tiles")}
+        data-tooltip="Tiles view"
+        data-tooltip-pos="below"
+      >
+        <TilesIcon size={12} />
+      </button>
+      <button
+        className={`cs-layout-seg-btn${layout === "list" ? " cs-layout-seg-btn--active" : ""}`}
+        onClick={() => onLayoutChange("list")}
+        data-tooltip="Grid view"
+        data-tooltip-pos="below"
+      >
+        <GridIcon size={12} />
+      </button>
+      {showSingle && (
+        <button
+          className={`cs-layout-seg-btn${layout === "single" ? " cs-layout-seg-btn--active" : ""}`}
+          onClick={() => onLayoutChange("single")}
+          data-tooltip="Single column"
+          data-tooltip-pos="below"
+        >
+          <SingleColumnIcon size={12} />
+        </button>
+      )}
+    </div>
+  );
+};
 
 export const GroupsButton: React.FC<{
   availableGroups: string[];

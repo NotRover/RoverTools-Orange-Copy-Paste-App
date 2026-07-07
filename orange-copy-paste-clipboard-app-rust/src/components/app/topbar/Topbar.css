@@ -261,6 +261,11 @@
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Three-option variant (clipboard screen: tiles / single / list) */
+.cs-layout-segment--3 .cs-layout-slider {
+  width: calc((100% - 4px) / 3);
+}
+
 .cs-layout-seg-btn {
   position: relative;
   z-index: 1;
