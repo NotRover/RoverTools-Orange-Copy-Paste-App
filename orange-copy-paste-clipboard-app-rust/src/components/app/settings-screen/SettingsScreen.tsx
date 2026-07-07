@@ -3,13 +3,13 @@ import { useClickOutside } from "../../../hooks/useClickOutside";
 import { invoke } from "@tauri-apps/api/core";
 import { readSlots } from "../../../types";
 import {
-  ChevronDownIcon,
-  CheckIcon,
-  FolderIcon,
-  SlidersIcon,
-  ClipboardPasteIcon,
-  ClockIcon,
-} from "../../icons";
+  CaretDown,
+  Check,
+  FolderOpen,
+  SlidersHorizontal,
+  ClipboardText,
+  ClockCounterClockwise,
+} from "@phosphor-icons/react";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -36,7 +36,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ value, options, onChange })
         type="button"
       >
         <span>{value}</span>
-        <ChevronDownIcon className="settings-select-chevron" size={10} strokeWidth={2.5} />
+        <CaretDown className="settings-select-chevron" size={10} weight="bold" />
       </button>
       {open && (
         <div className="settings-select-list">
@@ -48,7 +48,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ value, options, onChange })
               onMouseDown={() => { onChange(n); setOpen(false); }}
             >
               {n}
-              {n === value && <CheckIcon size={10} strokeWidth={2.8} />}
+              {n === value && <Check size={10} weight="bold" />}
             </button>
           ))}
         </div>
@@ -176,7 +176,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── General ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><SlidersIcon size={13} /></span>
+            <span className="set-section-icon"><SlidersHorizontal size={15} /></span>
             <h3 className="set-section-title">General</h3>
           </div>
           <div className="set-group">
@@ -229,7 +229,7 @@ const SettingsScreen: React.FC = () => {
                       className={`settings-checkbox${notifCopy ? " checked" : ""}`}
                       onClick={() => toggleBoolSetting(notifCopy, setNotifCopy, "notif_copy")}
                     >
-                      {notifCopy && <CheckIcon size={9} strokeWidth={3} />}
+                      {notifCopy && <Check size={9} weight="bold" />}
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Copy operations</span>
@@ -241,7 +241,7 @@ const SettingsScreen: React.FC = () => {
                       className={`settings-checkbox${notifPaste ? " checked" : ""}`}
                       onClick={() => toggleBoolSetting(notifPaste, setNotifPaste, "notif_paste")}
                     >
-                      {notifPaste && <CheckIcon size={9} strokeWidth={3} />}
+                      {notifPaste && <Check size={9} weight="bold" />}
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Paste operations</span>
@@ -257,7 +257,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Quick Paste ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><ClipboardPasteIcon size={13} /></span>
+            <span className="set-section-icon"><ClipboardText size={15} /></span>
             <h3 className="set-section-title">Quick Paste</h3>
           </div>
           <div className="set-group">
@@ -276,7 +276,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── History ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><ClockIcon size={13} /></span>
+            <span className="set-section-icon"><ClockCounterClockwise size={15} /></span>
             <h3 className="set-section-title">History</h3>
           </div>
           <div className="set-group">
@@ -298,7 +298,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Data ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><FolderIcon size={13} /></span>
+            <span className="set-section-icon"><FolderOpen size={15} /></span>
             <h3 className="set-section-title">Data</h3>
           </div>
           <div className="set-group">
@@ -314,7 +314,7 @@ const SettingsScreen: React.FC = () => {
                 className="settings-action-btn"
                 onClick={() => invoke("open_data_folder")}
               >
-                <FolderIcon />
+                <FolderOpen size={14} />
                 Open
               </button>
             </div>

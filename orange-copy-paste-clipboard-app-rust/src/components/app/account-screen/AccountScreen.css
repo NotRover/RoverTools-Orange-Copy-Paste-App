@@ -75,12 +75,15 @@
 
 /* ── Segmented tabs (Sign In / Sign Up) ────────────────────────────── */
 
+/* Segmented switcher: a pill glides under the active label inside a bordered
+   track. The active label picks up the accent so the control reads as part of
+   the brand without a heavy filled block competing with the submit button. */
 .auth-tabs {
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   padding: 3px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   border-radius: 9px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -93,12 +96,17 @@
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--text-muted, #9ca3af);
+  letter-spacing: 0.1px;
+  color: var(--text-muted);
   background: transparent;
   border: none;
   border-radius: 7px;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color 0.16s ease;
+}
+
+.auth-tab:hover:not(.active) {
+  color: var(--text-secondary);
 }
 
 .auth-tab.active {
@@ -113,11 +121,17 @@
   width: calc(50% - 3px);
   height: calc(100% - 6px);
   border-radius: 7px;
-  background: var(--surface-hover);
+  background: var(--surface);
   border: 1px solid var(--border-light);
   box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-tabs-slider {
+    transition: none;
+  }
 }
 
 /* ── Form ──────────────────────────────────────────────────────────── */
