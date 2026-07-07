@@ -1852,113 +1852,130 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
       <aside className="sync-panel-right">
         <div className="sync-panel-header">
           <span className="sync-panel-title">Groups</span>
-          <span className={`sync-conn-chip sync-conn-chip--${syncConnected === true ? "on" : syncConnected === false ? "off" : "idle"}`}>
+          <span
+            className={`sync-conn-chip sync-conn-chip--${syncConnected === true ? "on" : syncConnected === false ? "off" : "idle"}`}
+          >
             <span className="sync-conn-dot" />
             {syncConnected === true ? "Connected" : syncConnected === false ? "Offline" : "Inactive"}
           </span>
         </div>
 
         <div className="sync-panel-scroll">
-          <div className="sync-group-section">
-            {syncGroups.length > 0 && (
-              <div className="sync-section-row">
-                <span className="sync-section-label-text">Sync</span>
-                <span className="sync-section-badge">{syncGroups.length}</span>
-              </div>
-            )}
-            {syncGroups.length === 0 ? (
-              <p className="sync-group-empty-hint">
+          {syncGroups.length === 0 && sessions.length === 0 ? (
+            <div className="sync-panel-empty">
+              <span className="sync-panel-empty-icon">
+                <Users size={22} />
+              </span>
+              <span className="sync-panel-empty-title">
                 {syncConnected === null
                   ? "Not signed in"
                   : syncConnected === false
-                    ? "Offline — reconnecting…"
+                    ? "Offline"
                     : "No sync groups yet"}
-              </p>
-            ) : (
-              syncGroups.map((group) => {
-                const isActive = selected?.kind === "sync" && selected.group.id === group.id;
-                const isExpanded = expandedGroups.has(group.id);
-                const color = groupAvatarColor(group.id);
-                const initials = group.name.slice(0, 2).toUpperCase();
-                // DEMO: replace with real member list from API before production
-                const members: SharingMember[] = DEMO_GROUP_MEMBERS[group.id] ?? [];
-                return (
-                  <div key={group.id} className="sync-group-card-wrap">
-                    <div className={`sync-group-card${isActive ? " active" : ""}`}>
+              </span>
+              <span className="sync-panel-empty-sub">
+                {syncConnected === null
+                  ? "Sign in to sync across your devices."
+                  : syncConnected === false
+                    ? "Reconnecting…"
+                    : "Create a group or join one with an invite code to start syncing."}
+              </span>
+            </div>
+          ) : (
+            <>
+              {syncGroups.length > 0 && (
+                <div className="sync-group-section">
+                  <div className="sync-section-row">
+                    <span className="sync-section-label-text">Sync</span>
+                    <span className="sync-section-rule" />
+                    <span className="sync-section-badge">{syncGroups.length}</span>
+                  </div>
+                  {syncGroups.map((group) => {
+                    const isActive = selected?.kind === "sync" && selected.group.id === group.id;
+                    const isExpanded = expandedGroups.has(group.id);
+                    const color = groupAvatarColor(group.id);
+                    const initials = group.name.slice(0, 2).toUpperCase();
+                    // DEMO: replace with real member list from API before production
+                    const members: SharingMember[] = DEMO_GROUP_MEMBERS[group.id] ?? [];
+                    return (
+                      <div key={group.id} className="sync-group-card-wrap">
+                        <button
+                          className={`sync-group-card${isActive ? " active" : ""}`}
+                          onClick={() => {
+                            setSelected({ kind: "sync", group });
+                            if (members.length > 0) {
+                              setExpandedGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.id)) next.delete(group.id);
+                                else next.add(group.id);
+                                return next;
+                              });
+                            }
+                          }}
+                        >
+                          <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
+                          <span className="sync-group-card-body">
+                            <span className="sync-group-card-name">{group.name}</span>
+                            <span className="sync-group-card-meta">
+                              {group.member_count} member{group.member_count === 1 ? "" : "s"}
+                            </span>
+                          </span>
+                          {members.length > 0 && (
+                            <span
+                              className={`sync-group-caret${isExpanded ? " sync-group-caret--open" : ""}`}
+                            >
+                              <CaretRight size={9} weight="bold" />
+                            </span>
+                          )}
+                        </button>
+                        {isExpanded && members.length > 0 && (
+                          <div className="sync-group-members">
+                            {members.map((m) => (
+                              <div key={m.user_id} className="sync-group-member-row">
+                                <Circle size={5} weight="fill" color={m.online ? "#22c55e" : "#6b7280"} />
+                                <span className="sync-group-member-name">{m.display_name}</span>
+                                <span className="sync-group-member-scope">{m.scope}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {sessions.length > 0 && (
+                <div className="sync-group-section">
+                  <div className="sync-section-row">
+                    <span className="sync-section-label-text">Live Share</span>
+                    <span className="sync-section-rule" />
+                    <span className="sync-section-badge">{sessions.length}</span>
+                  </div>
+                  {sessions.map((session) => {
+                    const isActive = selected?.kind === "share" && selected.session.share_group_id === session.share_group_id;
+                    const onlineCount = session.members.filter((m) => m.online).length;
+                    return (
                       <button
-                        className="sync-group-card-main"
-                        onClick={() => setSelected({ kind: "sync", group })}
+                        key={session.share_group_id}
+                        className={`sync-group-card sync-group-card--live${isActive ? " active" : ""}`}
+                        onClick={() => setSelected({ kind: "share", session })}
                       >
-                        <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
+                        <span className="sync-group-live-avatar">
+                          <span className="sync-group-live-dot" />
+                        </span>
                         <span className="sync-group-card-body">
-                          <span className="sync-group-card-name">{group.name}</span>
-                          <span className="sync-group-card-meta">
-                            {group.member_count} member{group.member_count === 1 ? "" : "s"}
+                          <span className="sync-group-card-name">{session.name}</span>
+                          <span className="sync-group-card-meta sync-group-card-meta--online">
+                            {onlineCount}/{session.members.length} online
                           </span>
                         </span>
                       </button>
-                      {members.length > 0 && (
-                        <button
-                          className={`sync-group-expand-btn${isExpanded ? " sync-group-expand-btn--open" : ""}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedGroups((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(group.id)) next.delete(group.id);
-                              else next.add(group.id);
-                              return next;
-                            });
-                          }}
-                          data-tooltip={isExpanded ? "Hide members" : "Show members"}
-                          data-tooltip-pos="left"
-                        >
-                          <CaretRight size={9} weight="bold" />
-                        </button>
-                      )}
-                    </div>
-                    {isExpanded && members.length > 0 && (
-                      <div className="sync-group-members">
-                        {members.map((m) => (
-                          <div key={m.user_id} className="sync-group-member-row">
-                            <Circle size={5} weight="fill" color={m.online ? "#22c55e" : "#6b7280"} />
-                            <span className="sync-group-member-name">{m.display_name}</span>
-                            <span className="sync-group-member-scope">{m.scope}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {sessions.length > 0 && (
-            <div className="sync-group-section">
-              <div className="sync-section-row">
-                <span className="sync-section-label-text">Live Share</span>
-                <span className="sync-section-badge">{sessions.length}</span>
-              </div>
-              {sessions.map((session) => {
-                const isActive = selected?.kind === "share" && selected.session.share_group_id === session.share_group_id;
-                const onlineCount = session.members.filter((m) => m.online).length;
-                return (
-                  <button
-                    key={session.share_group_id}
-                    className={`sync-group-card sync-group-card--live${isActive ? " active" : ""}`}
-                    onClick={() => setSelected({ kind: "share", session })}
-                  >
-                    <span className="sync-group-live-avatar">
-                      <span className="sync-group-live-dot" />
-                    </span>
-                    <span className="sync-group-card-body">
-                      <span className="sync-group-card-name">{session.name}</span>
-                      <span className="sync-group-card-meta">{onlineCount}/{session.members.length} online</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -1982,7 +1999,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           {!showCreate && !showJoin && (
             <div className="sync-panel-btns">
               <button
-                className="sync-action-btn"
+                className="sync-action-btn sync-action-btn--primary"
                 onClick={() => {
                   setShowCreate(true);
                   setShowJoin(false);
