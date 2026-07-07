@@ -349,7 +349,9 @@ export function imageDisplayName(entry: ClipboardEntry): string {
         const time = d.toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
         return `Image ${month} ${day}, ${time}`;
       })();
-  return `#${entry.id} ${name}`;
+  // Display only: show a short prefix of the (UUID) id, not the whole thing.
+  // The underlying entry.id is unchanged.
+  return `#${entry.id.slice(0, 8)} ${name}`;
 }
 
 /** Resolve a clipboard image entry's content to a displayable `<img>` src.
