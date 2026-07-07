@@ -259,11 +259,28 @@
     visibility 0s linear 0.15s;
 }
 
-/* Entry grids/lists — reduce left padding since rail+indent already provides spacing */
-.timeline-groups .entry-grid,
-.timeline-groups .entry-list {
+/* Masonry tiles keep the rail indent and span the pane. */
+.timeline-groups .entry-grid {
   padding-left: 15px;
   flex: none;
+}
+
+/* Single column & 2-column list: a centered column like the Settings screen. */
+.timeline-groups .entry-single,
+.timeline-groups .entry-list {
+  flex: none;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Single column matches the Settings content width; the list sits a bit wider
+   to give the two row columns comfortable room. */
+.timeline-groups .entry-single {
+  max-width: 680px;
+}
+
+.timeline-groups .entry-list {
+  max-width: 960px;
 }
 
 /*  Entry grid (tiles layout)  */
@@ -303,6 +320,37 @@
   background-clip: padding-box;
 }
 
+/*  Single-column layout — full-width tile cards, one per row  */
+
+.entry-single {
+  flex: 1;
+  overflow: hidden auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.entry-single::-webkit-scrollbar {
+  width: 10px;
+}
+
+.entry-single::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.entry-single::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
+.entry-single::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  border: 3px solid var(--bg);
+  background-clip: padding-box;
+}
+
 /*  Empty state  */
 
 .empty-state {
@@ -334,9 +382,8 @@
   line-height: 1.6;
 }
 
-/*  List layout (Windows 11 Clipboard style)  */
-/* The list container is basically .entry-grid with columns: 1, so each card  */
-/* renders full-width but keeps the exact same internal structure as tiles.  */
+/*  Grid layout — 2-column masonry of vertical cards (same card shape as tiles,
+    but locked to two columns so cards keep variable heights within a row).  */
 
 .entry-list {
   flex: 1;
@@ -367,165 +414,17 @@
   background-clip: padding-box;
 }
 
-/* Text: show more content in list mode (4 lines) */
-.entry-list .card-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
-  overflow: hidden;
-  white-space: pre-wrap;
-}
-
-/* All cards: fixed uniform height, horizontal row layout */
-.entry-list .entry-card {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  height: 76px;
-  min-height: 76px;
-  max-height: 76px;
-  margin-bottom: 10px;
-  overflow: hidden;
-}
-
-/* Image thumbnail: height fills card, width adapts to image aspect ratio */
-.entry-list .card-media {
-  width: auto;
-  min-width: 60px;
-  max-width: 65%;
-  height: 100%;
-  flex-shrink: 0;
-  border-bottom: none;
-  border-right: 1px solid var(--border);
-  border-radius: var(--radius) 0 0 var(--radius);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  background: var(--bg);
-}
-
-.entry-list .card-media-img {
-  height: 100%;
-  width: auto;
-  max-width: 100%;
-  max-height: unset;
-  object-fit: contain;
-  display: block;
-}
-
-/* Multi-image strip: horizontal thumbnails, variable width */
-.entry-list .card-media--multi {
-  width: auto;
-  min-width: 80px;
-  max-width: 65%;
-  height: 100%;
-  flex-shrink: 0;
-  flex-direction: row;
-  border-bottom: none;
-  border-right: 1px solid var(--border);
-  border-radius: var(--radius) 0 0 var(--radius);
-  gap: 1px;
-}
-
-.entry-list .card-media-thumb {
-  aspect-ratio: unset;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-}
-
-/* Body: text at top, footer pinned to bottom */
-.entry-list .card-body {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
-  justify-content: space-between;
-  overflow: hidden;
-}
-
-/* Clamp text to 2 lines to fit the compact card height */
-.entry-list .card-text {
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-
-/* File preview: limit to 2 items */
-.entry-list .card-file-preview {
-  max-height: 34px;
-  overflow: hidden;
-}
-
-/* Hide expanded file list in fixed-height cards */
-.entry-list .card-file-list {
-  max-height: 30px;
-  overflow: hidden;
-}
-
-/* When a card is expanded (file list toggled), remove fixed height constraints */
-.entry-list .entry-card.entry-card--expanded {
-  height: auto;
-  min-height: 76px;
-  max-height: none;
-  flex-direction: column;
-}
-
-.entry-list .entry-card.entry-card--expanded .card-body {
-  overflow: visible;
-}
-
-/* Un-clamp text and un-limit HTML height when expanded */
-.entry-list .entry-card.entry-card--expanded .card-text {
-  display: block;
-  -webkit-line-clamp: unset;
-  line-clamp: unset;
-  overflow: visible;
-}
-
-.entry-list .entry-card.entry-card--expanded .card-html-preview {
-  max-height: none;
-}
-
-.entry-list .entry-card.entry-card--expanded .card-file-list {
-  max-height: 150px;
-  overflow: hidden auto;
-}
-
-/* Expanded media: switch to block layout so image/video renders above body */
+/* Expanded image cards (tiles & grid) grow to their natural aspect ratio. */
+.entry-grid .entry-card.entry-card--expanded .card-media,
 .entry-list .entry-card.entry-card--expanded .card-media {
-  width: 100%;
-  max-width: 100%;
   height: auto;
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) 0 0;
 }
 
+.entry-grid .entry-card.entry-card--expanded .card-media-img,
 .entry-list .entry-card.entry-card--expanded .card-media-img {
   width: 100%;
   height: auto;
-  max-height: 320px;
-  object-fit: contain;
-}
-
-/* Tiles layout: let expanded image cards grow to their natural aspect ratio. */
-.entry-grid .entry-card.entry-card--expanded .card-media {
-  height: auto;
-}
-
-.entry-grid .entry-card.entry-card--expanded .card-media-img {
-  width: 100%;
-  height: auto;
   max-height: none;
   object-fit: contain;
 }
 
-/* Footer always pinned to the bottom of the card body */
-.entry-list .card-footer {
-  margin-top: auto;
-}
-
-.entry-list .card-chips {
-  flex-wrap: nowrap;
-  overflow: hidden;
-}

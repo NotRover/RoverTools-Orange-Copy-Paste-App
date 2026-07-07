@@ -550,6 +550,44 @@ export const ListIcon: React.FC<IconProps> = ({ size = 12, className }) => (
   </svg>
 );
 
+/* ── Grid layout (two side-by-side columns) ── */
+
+export const GridIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="3" y="3" width="7.5" height="18" rx="1.5" />
+    <rect x="13.5" y="3" width="7.5" height="18" rx="1.5" />
+  </svg>
+);
+
+/* ── Single-column layout (stacked full-width cards) ── */
+
+export const SingleColumnIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="4" y="3" width="16" height="8" rx="1.5" />
+    <rect x="4" y="13" width="16" height="8" rx="1.5" />
+  </svg>
+);
+
 /* ── System groups (concentric arcs) ── */
 
 export const SystemGroupsIcon: React.FC<IconProps> = ({
