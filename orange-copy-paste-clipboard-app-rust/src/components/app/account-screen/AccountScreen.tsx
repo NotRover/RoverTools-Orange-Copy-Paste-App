@@ -9,13 +9,13 @@ import type {
   SyncDevice,
 } from "../../../types";
 import {
-  CheckIcon,
-  CloudSyncIcon,
-  UsersIcon,
-  ShareIcon,
-  GoogleIcon,
-  KeyIcon,
-} from "../../icons";
+  Check,
+  CloudCheck,
+  Users,
+  ShareNetwork,
+  Key,
+} from "@phosphor-icons/react";
+import { GoogleIcon } from "../../icons";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
 import "./AccountScreen.css";
@@ -499,7 +499,7 @@ const AccountScreen: React.FC = () => {
         {!syncEnabled ? (
           /* ── Sync disabled: enable hero ── */
           <div className="acct-card acct-hero">
-            <div className="acct-hero-badge"><CloudSyncIcon size={26} /></div>
+            <div className="acct-hero-badge"><CloudCheck size={26} /></div>
             <h3 className="acct-hero-title">Sync across your devices</h3>
             <p className="acct-hero-desc">
               Keep your clipboard history and notes in sync on every device — end-to-end
@@ -515,7 +515,7 @@ const AccountScreen: React.FC = () => {
             <div className="auth-card">
               <div className="auth-brand">
                 <div className="auth-brand-badge">
-                  <CloudSyncIcon size={20} />
+                  <CloudCheck size={20} />
                 </div>
                 <h3 className="auth-title">
                   {oauthStage === "password"
@@ -601,7 +601,7 @@ const AccountScreen: React.FC = () => {
                 <div className="auth-form">
                   {resetSent ? (
                     <div className="auth-reset-done">
-                      <span className="auth-reset-check"><CheckIcon size={16} strokeWidth={2.6} /></span>
+                      <span className="auth-reset-check"><Check size={16} weight="bold" /></span>
                       <p>
                         If an account exists for <strong>{resetEmail}</strong>, a password-reset
                         link is on its way. Check your inbox.
@@ -740,7 +740,7 @@ const AccountScreen: React.FC = () => {
               )}
 
               <div className="auth-secure">
-                <KeyIcon size={12} />
+                <Key size={12} weight="fill" />
                 End-to-end encrypted — only you can read your data
               </div>
             </div>
@@ -780,7 +780,7 @@ const AccountScreen: React.FC = () => {
             {/* Devices */}
             <div className="acct-card">
               <div className="acct-card-head">
-                <span className="acct-card-icon"><CloudSyncIcon size={15} /></span>
+                <span className="acct-card-icon"><CloudCheck size={15} /></span>
                 <h3 className="acct-card-title">Devices</h3>
                 {devices.length > 0 && <span className="acct-card-count">{devices.length}</span>}
               </div>
@@ -807,7 +807,7 @@ const AccountScreen: React.FC = () => {
             {/* Shared Groups */}
             <div className="acct-card">
               <div className="acct-card-head">
-                <span className="acct-card-icon"><UsersIcon size={15} /></span>
+                <span className="acct-card-icon"><Users size={15} /></span>
                 <h3 className="acct-card-title">Shared Groups</h3>
                 {syncGroups.length > 0 && <span className="acct-card-count">{syncGroups.length}</span>}
               </div>
@@ -826,9 +826,9 @@ const AccountScreen: React.FC = () => {
                           onClick={() => handleCopyInvite(g.id)}
                         >
                           {copiedGroupId === g.id ? (
-                            <><CheckIcon size={11} /> Copied</>
+                            <><Check size={11} /> Copied</>
                           ) : (
-                            <><ShareIcon size={11} /> Invite</>
+                            <><ShareNetwork size={11} /> Invite</>
                           )}
                         </button>
                         <button
@@ -884,7 +884,7 @@ const AccountScreen: React.FC = () => {
             {/* Live Share */}
             <div className="acct-card">
               <div className="acct-card-head">
-                <span className="acct-card-icon"><ShareIcon size={15} /></span>
+                <span className="acct-card-icon"><ShareNetwork size={15} /></span>
                 <h3 className="acct-card-title">Live Share</h3>
               </div>
               <p className="acct-card-desc">
@@ -893,7 +893,7 @@ const AccountScreen: React.FC = () => {
 
               {incomingInvite && (
                 <div className="acct-invite-banner">
-                  <div className="acct-invite-head"><ShareIcon size={13} /> Incoming invite</div>
+                  <div className="acct-invite-head"><ShareNetwork size={13} /> Incoming invite</div>
                   <p className="acct-invite-code">{incomingInvite.invite_code}</p>
                   {incomingInvite.from_email && (
                     <p className="acct-row-meta">From {incomingInvite.from_email}</p>
@@ -977,7 +977,7 @@ const AccountScreen: React.FC = () => {
                     className="acct-btn acct-btn--sm"
                     onClick={() => navigator.clipboard.writeText(inviteResult.invite_code).catch(() => {})}
                   >
-                    <ShareIcon size={11} /> Copy
+                    <ShareNetwork size={11} /> Copy
                   </button>
                 </div>
               )}
