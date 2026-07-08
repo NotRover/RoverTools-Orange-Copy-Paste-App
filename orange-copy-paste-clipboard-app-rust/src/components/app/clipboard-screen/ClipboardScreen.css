@@ -19,8 +19,9 @@
   transition: opacity 0.16s ease;
   overflow-x: hidden;
   overflow: hidden auto;
-  /* Leave a little breathing room between the scrollbar and the window edge. */
-  margin-right: 6px;
+  /* Reserve a matching gutter on both edges so the scrollbar doesn't make the
+     right side heavier than the left — keeps card gaps symmetric. */
+  scrollbar-gutter: stable both-edges;
 }
 
 .layout-viewport--fading {
@@ -290,7 +291,7 @@
 .entry-grid {
   flex: 1;
   overflow: hidden auto;
-  padding: 14px 22px 14px 14px;
+  padding: 14px;
   columns: 2;
   column-gap: 10px;
 }
@@ -327,7 +328,7 @@
 .entry-single {
   flex: 1;
   overflow: hidden auto;
-  padding: 14px 22px 14px 14px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
 }
@@ -390,7 +391,7 @@
 .entry-list {
   flex: 1;
   overflow: hidden auto;
-  padding: 14px 22px 14px 14px;
+  padding: 14px;
   columns: 2;
   column-gap: 10px;
 }
