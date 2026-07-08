@@ -22,6 +22,8 @@
   /* Reserve a matching gutter on both edges so the scrollbar doesn't make the
      right side heavier than the left — keeps card gaps symmetric. */
   scrollbar-gutter: stable both-edges;
+  /* Inset the whole scroll area (incl. the scrollbar) from the window edges. */
+  margin: 0 8px;
 }
 
 .layout-viewport--fading {
