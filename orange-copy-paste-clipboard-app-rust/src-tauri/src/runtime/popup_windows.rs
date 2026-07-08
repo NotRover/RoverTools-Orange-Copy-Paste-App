@@ -39,6 +39,23 @@ fn build_popup_window(
     Ok(())
 }
 
+/// Place a popup for display.
+///
+/// Where the platform can report the global cursor (Windows, Linux/X11) the
+/// popup anchors just below-right of the cursor. Where it cannot (Linux/Wayland
+/// forbids clients from reading the cursor *and* from self-positioning) we fall
+/// back to centering on the active monitor — `center()` is the one placement
+/// request Wayland compositors still honor, so the popup lands somewhere
+/// predictable and on-screen instead of at an ignored coordinate.
+pub(crate) fn place_popup_for_show(win: &tauri::WebviewWindow, w: i32, h: i32) {
+    if crate::runtime::platform::cursor_available() {
+        let (px, py) = crate::runtime::platform::popup_position(w, h);
+        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+    } else {
+        let _ = win.center();
+    }
+}
+
 pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
     if let Some(win) = app.get_webview_window(label) {
         // Move offscreen FIRST so the window cannot intercept clicks during

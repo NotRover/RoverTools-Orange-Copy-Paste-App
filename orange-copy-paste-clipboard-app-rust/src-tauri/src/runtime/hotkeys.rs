@@ -32,10 +32,12 @@ fn toggle_popup_if_visible(app: &tauri::AppHandle, label: &str) -> bool {
 }
 
 fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
-    let (px, py) = platform::popup_position(COPY_POPUP_W as i32, COPY_POPUP_H as i32);
-
     if let Some(win) = app.get_webview_window("copy-popup") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+        crate::runtime::popup_windows::place_popup_for_show(
+            &win,
+            COPY_POPUP_W as i32,
+            COPY_POPUP_H as i32,
+        );
         let payload = CopyPopupPayload {
             id: entry.id.clone(),
             kind: entry.kind.label().to_string(),
@@ -127,10 +129,12 @@ fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHist
     };
     drop(hist);
 
-    let (px, py) = platform::popup_position(PASTE_POPUP_W as i32, PASTE_POPUP_H as i32);
-
     if let Some(win) = app.get_webview_window("paste-popup") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+        crate::runtime::popup_windows::place_popup_for_show(
+            &win,
+            PASTE_POPUP_W as i32,
+            PASTE_POPUP_H as i32,
+        );
         let _ = win.emit("paste-popup:entries", &payload);
         let _ = win.show();
         let _ = win.set_focus();
