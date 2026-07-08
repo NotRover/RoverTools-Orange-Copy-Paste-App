@@ -191,6 +191,15 @@
   margin: 0 auto;
 }
 
+/* When a note is open the list pane collapses below the centered max-width, so
+   the 2-column grid would fill the narrow pane edge-to-edge and the right
+   column reads as clipped against the editor divider. Drop the centering while
+   editing so it behaves like the full-bleed tiles layout. */
+.notes-screen-root--editing .ns-grid--grid {
+  max-width: none;
+  margin: 0;
+}
+
 /* ── Single-column view (centered) ──────────────────────────────── */
 
 .ns-grid--single {
