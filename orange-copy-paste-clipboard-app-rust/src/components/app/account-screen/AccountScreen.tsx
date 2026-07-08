@@ -9,12 +9,13 @@ import type {
   SyncDevice,
 } from "../../../types";
 import {
-  CheckIcon,
-  CloudSyncIcon,
-  UsersIcon,
-  ShareIcon,
-  GoogleIcon,
-} from "../../icons";
+  Check,
+  CloudCheck,
+  Users,
+  ShareNetwork,
+  Key,
+} from "@phosphor-icons/react";
+import { GoogleIcon } from "../../icons";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
 import "./AccountScreen.css";
@@ -32,9 +33,6 @@ const SCOPE_OPTIONS: { value: string; label: string }[] = [
 const AccountScreen: React.FC = () => {
   // ── Cloud Sync ─────────────────────────────────────────────────
   const [syncEnabled, setSyncEnabled] = useState(false);
-  const [serverUrl, setServerUrl] = useState("https://api.orangeclipboard.app");
-  const [serverUrlDraft, setServerUrlDraft] = useState("https://api.orangeclipboard.app");
-  const [editingUrl, setEditingUrl] = useState(false);
   const [syncUser, setSyncUser] = useState<SyncUser | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo | null>(null);
   const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
@@ -97,11 +95,6 @@ const AccountScreen: React.FC = () => {
     invoke<boolean | null>("get_setting", { key: "sync_enabled" }).then((v) =>
       setSyncEnabled(v === true),
     );
-    invoke<string | null>("get_setting", { key: "sync_server_url" }).then((v) => {
-      const url = typeof v === "string" && v ? v : "https://api.orangeclipboard.app";
-      setServerUrl(url);
-      setServerUrlDraft(url);
-    });
 
     invoke<SyncUser | null>("sync_get_user").then((u) => {
       setSyncUser(u);
@@ -158,15 +151,6 @@ const AccountScreen: React.FC = () => {
     }
   };
 
-  const handleSaveUrl = async () => {
-    setServerUrl(serverUrlDraft);
-    setEditingUrl(false);
-    try {
-      await invoke("sync_set_server_url", { url: serverUrlDraft });
-    } catch (e) {
-      console.error("sync_set_server_url failed", e);
-    }
-  };
 
   // Post-authentication: hydrate account state (shared by password + OAuth).
   const loadPostLogin = (user: SyncUser) => {
@@ -494,42 +478,6 @@ const AccountScreen: React.FC = () => {
     </div>
   );
 
-  // Advanced footer (server URL + turn sync off) — shown once signed in or ready.
-  const advanced = (
-    <div className="acct-card acct-advanced">
-      <div className="acct-adv-row">
-        <div className="acct-adv-info">
-          <span className="acct-adv-label">Server</span>
-          <span className="acct-adv-value">{serverUrl || "https://api.orangeclipboard.app"}</span>
-        </div>
-        {editingUrl ? (
-          <div className="acct-url-edit">
-            <input
-              className="auth-input acct-url-input"
-              value={serverUrlDraft}
-              onChange={(e) => setServerUrlDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleSaveUrl(); if (e.key === "Escape") setEditingUrl(false); }}
-              autoFocus
-              spellCheck={false}
-            />
-            <button type="button" className="acct-btn acct-btn--primary acct-btn--sm" onClick={handleSaveUrl}>Save</button>
-            <button type="button" className="acct-btn acct-btn--sm" onClick={() => setEditingUrl(false)}>Cancel</button>
-          </div>
-        ) : (
-          <button type="button" className="acct-btn acct-btn--sm" onClick={() => setEditingUrl(true)}>Change</button>
-        )}
-      </div>
-      <div className="acct-adv-divider" />
-      <div className="acct-adv-row">
-        <div className="acct-adv-info">
-          <span className="acct-adv-label">Cloud Sync</span>
-          <span className="acct-adv-hint">Turn off syncing on this device.</span>
-        </div>
-        <button type="button" className="acct-btn acct-btn--danger acct-btn--sm" onClick={handleSyncToggle}>Turn off</button>
-      </div>
-    </div>
-  );
-
   // Short states (enable hero / signed-out auth) get centered vertically and
   // rely on the card's own heading, so the page header is hidden there.
   const centered = !syncEnabled || !syncUser;
@@ -539,9 +487,10 @@ const AccountScreen: React.FC = () => {
     <div className={`settings-screen account-screen${centered ? " account-screen--center" : ""}`}>
       <div className="acct-inner">
         {!centered && (
-          <header className="acct-head">
-            <h2 className="acct-title">Account &amp; Sync</h2>
-            <p className="acct-subtitle">
+          <header className="scr-head">
+            <span className="scr-eyebrow">Cloud</span>
+            <h2 className="scr-title">Account &amp; Sync</h2>
+            <p className="scr-subtitle">
               Sign in, manage your devices, and share across the cloud — end-to-end encrypted.
             </p>
           </header>
@@ -550,7 +499,7 @@ const AccountScreen: React.FC = () => {
         {!syncEnabled ? (
           /* ── Sync disabled: enable hero ── */
           <div className="acct-card acct-hero">
-            <div className="acct-hero-badge"><CloudSyncIcon size={26} /></div>
+            <div className="acct-hero-badge"><CloudCheck size={26} /></div>
             <h3 className="acct-hero-title">Sync across your devices</h3>
             <p className="acct-hero-desc">
               Keep your clipboard history and notes in sync on every device — end-to-end
@@ -566,7 +515,7 @@ const AccountScreen: React.FC = () => {
             <div className="auth-card">
               <div className="auth-brand">
                 <div className="auth-brand-badge">
-                  <CloudSyncIcon size={20} />
+                  <CloudCheck size={20} />
                 </div>
                 <h3 className="auth-title">
                   {oauthStage === "password"
@@ -652,7 +601,7 @@ const AccountScreen: React.FC = () => {
                 <div className="auth-form">
                   {resetSent ? (
                     <div className="auth-reset-done">
-                      <span className="auth-reset-check"><CheckIcon size={16} strokeWidth={2.6} /></span>
+                      <span className="auth-reset-check"><Check size={16} weight="bold" /></span>
                       <p>
                         If an account exists for <strong>{resetEmail}</strong>, a password-reset
                         link is on its way. Check your inbox.
@@ -789,8 +738,12 @@ const AccountScreen: React.FC = () => {
                   </div>
                 </>
               )}
+
+              <div className="auth-secure">
+                <Key size={12} weight="fill" />
+                End-to-end encrypted — only you can read your data
+              </div>
             </div>
-            {advanced}
           </>
         ) : (
           /* ── Signed in ── */
@@ -827,7 +780,7 @@ const AccountScreen: React.FC = () => {
             {/* Devices */}
             <div className="acct-card">
               <div className="acct-card-head">
-                <span className="acct-card-icon"><CloudSyncIcon size={15} /></span>
+                <span className="acct-card-icon"><CloudCheck size={15} /></span>
                 <h3 className="acct-card-title">Devices</h3>
                 {devices.length > 0 && <span className="acct-card-count">{devices.length}</span>}
               </div>
@@ -854,7 +807,7 @@ const AccountScreen: React.FC = () => {
             {/* Shared Groups */}
             <div className="acct-card">
               <div className="acct-card-head">
-                <span className="acct-card-icon"><UsersIcon size={15} /></span>
+                <span className="acct-card-icon"><Users size={15} /></span>
                 <h3 className="acct-card-title">Shared Groups</h3>
                 {syncGroups.length > 0 && <span className="acct-card-count">{syncGroups.length}</span>}
               </div>
@@ -873,9 +826,9 @@ const AccountScreen: React.FC = () => {
                           onClick={() => handleCopyInvite(g.id)}
                         >
                           {copiedGroupId === g.id ? (
-                            <><CheckIcon size={11} /> Copied</>
+                            <><Check size={11} /> Copied</>
                           ) : (
-                            <><ShareIcon size={11} /> Invite</>
+                            <><ShareNetwork size={11} /> Invite</>
                           )}
                         </button>
                         <button
@@ -931,7 +884,7 @@ const AccountScreen: React.FC = () => {
             {/* Live Share */}
             <div className="acct-card">
               <div className="acct-card-head">
-                <span className="acct-card-icon"><ShareIcon size={15} /></span>
+                <span className="acct-card-icon"><ShareNetwork size={15} /></span>
                 <h3 className="acct-card-title">Live Share</h3>
               </div>
               <p className="acct-card-desc">
@@ -940,7 +893,7 @@ const AccountScreen: React.FC = () => {
 
               {incomingInvite && (
                 <div className="acct-invite-banner">
-                  <div className="acct-invite-head"><ShareIcon size={13} /> Incoming invite</div>
+                  <div className="acct-invite-head"><ShareNetwork size={13} /> Incoming invite</div>
                   <p className="acct-invite-code">{incomingInvite.invite_code}</p>
                   {incomingInvite.from_email && (
                     <p className="acct-row-meta">From {incomingInvite.from_email}</p>
@@ -1024,7 +977,7 @@ const AccountScreen: React.FC = () => {
                     className="acct-btn acct-btn--sm"
                     onClick={() => navigator.clipboard.writeText(inviteResult.invite_code).catch(() => {})}
                   >
-                    <ShareIcon size={11} /> Copy
+                    <ShareNetwork size={11} /> Copy
                   </button>
                 </div>
               )}
@@ -1048,8 +1001,6 @@ const AccountScreen: React.FC = () => {
                 </button>
               </div>
             </div>
-
-            {advanced}
           </>
         )}
       </div>

@@ -389,9 +389,15 @@ export const KeyboardIcon: React.FC<IconProps> = ({ size = 18, className }) => (
     strokeLinejoin="round"
     className={className}
   >
-    <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-    <line x1="8" y1="21" x2="16" y2="21" />
-    <line x1="12" y1="17" x2="12" y2="21" />
+    <rect x="2" y="4" width="20" height="16" rx="2" ry="2" />
+    <path d="M6 8h.01" />
+    <path d="M10 8h.01" />
+    <path d="M14 8h.01" />
+    <path d="M18 8h.01" />
+    <path d="M8 12h.01" />
+    <path d="M12 12h.01" />
+    <path d="M16 12h.01" />
+    <path d="M7 16h10" />
   </svg>
 );
 
@@ -547,6 +553,44 @@ export const ListIcon: React.FC<IconProps> = ({ size = 12, className }) => (
     <line x1="3" y1="6" x2="3.01" y2="6" />
     <line x1="3" y1="12" x2="3.01" y2="12" />
     <line x1="3" y1="18" x2="3.01" y2="18" />
+  </svg>
+);
+
+/* ── Grid layout (two side-by-side columns) ── */
+
+export const GridIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="3" y="3" width="7.5" height="18" rx="1.5" />
+    <rect x="13.5" y="3" width="7.5" height="18" rx="1.5" />
+  </svg>
+);
+
+/* ── Single-column layout (stacked full-width cards) ── */
+
+export const SingleColumnIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="4" y="3" width="16" height="8" rx="1.5" />
+    <rect x="4" y="13" width="16" height="8" rx="1.5" />
   </svg>
 );
 

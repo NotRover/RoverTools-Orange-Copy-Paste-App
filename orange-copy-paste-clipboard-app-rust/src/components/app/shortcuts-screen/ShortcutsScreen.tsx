@@ -8,6 +8,8 @@ import {
   SystemGroupsIcon,
   SearchIcon,
 } from "../../icons";
+// Reuses the shared scr-* page header and set-section-* heading styles.
+import "../settings-screen/SettingsScreen.css";
 import "./ShortcutsScreen.css";
 
 // Data
@@ -156,39 +158,42 @@ const SECTIONS: ShortcutSection[] = [
 
 const ShortcutsScreen: React.FC = () => (
   <div className="shortcuts-screen">
-    <div className="shortcuts-header">
-      <p className="shortcuts-title">Shortcuts</p>
-      <p className="shortcuts-subtitle">
-        All keyboard shortcuts and interactions at a glance.
-      </p>
-    </div>
+    <div className="shortcuts-inner">
+      <header className="scr-head">
+        <span className="scr-eyebrow">Reference</span>
+        <h2 className="scr-title">Shortcuts</h2>
+        <p className="scr-subtitle">
+          Every keyboard shortcut and interaction, at a glance.
+        </p>
+      </header>
 
-    <div className="shortcuts-sections">
-      {SECTIONS.map((section) => (
-        <div key={section.title} className="shortcuts-section">
-          <div className="shortcuts-section-title">
-            {section.icon}
-            <span>{section.title}</span>
-          </div>
-          <div className="shortcuts-list">
-            {section.entries.map((entry) => (
-              <div key={entry.description} className="shortcut-row">
-                <span className="shortcut-desc">{entry.description}</span>
-                <span className="shortcut-keys">
-                  {entry.keys.map((k, i) => (
-                    <React.Fragment key={k}>
-                      <kbd className="shortcut-key">{k}</kbd>
-                      {i < entry.keys.length - 1 && (
-                        <span className="shortcut-plus">+</span>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="shortcuts-sections">
+        {SECTIONS.map((section) => (
+          <section key={section.title} className="shortcuts-section">
+            <div className="set-section-head">
+              <span className="set-section-icon">{section.icon}</span>
+              <h3 className="set-section-title">{section.title}</h3>
+            </div>
+            <div className="shortcuts-list">
+              {section.entries.map((entry) => (
+                <div key={entry.description} className="shortcut-row">
+                  <span className="shortcut-desc">{entry.description}</span>
+                  <span className="shortcut-keys">
+                    {entry.keys.map((k, i) => (
+                      <React.Fragment key={k}>
+                        <kbd className="shortcut-key">{k}</kbd>
+                        {i < entry.keys.length - 1 && (
+                          <span className="shortcut-plus">+</span>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   </div>
 );

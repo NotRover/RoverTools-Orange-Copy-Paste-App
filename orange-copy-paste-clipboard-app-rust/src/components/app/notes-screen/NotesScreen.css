@@ -90,6 +90,11 @@
   overflow: hidden auto;
   opacity: 1;
   transition: opacity 0.16s ease;
+  /* Reserve a matching gutter on both edges so the scrollbar doesn't make the
+     right side heavier than the left — keeps card gaps symmetric. */
+  scrollbar-gutter: stable both-edges;
+  /* Inset the whole scroll area (incl. the scrollbar) from the window edges. */
+  margin: 0 8px;
 }
 
 .ns-viewport--fading {
@@ -97,7 +102,7 @@
 }
 
 .ns-viewport::-webkit-scrollbar {
-  width: 10px;
+  width: 12px;
 }
 
 .ns-viewport::-webkit-scrollbar-track {
@@ -107,13 +112,13 @@
 .ns-viewport::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 999px;
-  border: 3px solid var(--bg);
+  border: 2px solid var(--bg);
   background-clip: padding-box;
 }
 
 .ns-viewport::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
-  border: 3px solid var(--bg);
+  border: 2px solid var(--bg);
   background-clip: padding-box;
 }
 
@@ -181,81 +186,29 @@
   margin-top: 0;
 }
 
-/* ── List view ───────────────────────────────────────────────────── */
+/* ── Grid view (centered 2-column masonry) ──────────────────────── */
 
-.ns-grid--list {
+.ns-grid--grid {
+  columns: 2 !important;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+/* When a note is open the list pane collapses below the centered max-width, so
+   the 2-column grid would fill the narrow pane edge-to-edge and the right
+   column reads as clipped against the editor divider. Drop the centering while
+   editing so it behaves like the full-bleed tiles layout. */
+.notes-screen-root--editing .ns-grid--grid {
+  max-width: none;
+  margin: 0;
+}
+
+/* ── Single-column view (centered) ──────────────────────────────── */
+
+.ns-grid--single {
   columns: 1 !important;
-}
-
-/* Horizontal row cards */
-.ns-grid--list .ns-card {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  height: auto;
-  min-height: 78px;
-  max-height: none;
-}
-
-.ns-grid--list .ns-card-body {
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  padding: 9px 12px 8px;
-  gap: 6px;
-}
-
-.ns-grid--list .ns-card-title {
-  width: 100%;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-right: 0;
-}
-
-.ns-grid--list .ns-card-preview {
-  max-height: 3.8em;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 78%, transparent 100%);
-}
-
-.ns-grid--list .ns-card-footer {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-shrink: 0;
-  width: 100%;
-  margin-left: 0;
-  padding-left: 0;
-}
-
-.ns-grid--list .ns-card-chips {
-  flex: 1;
-  min-width: 0;
-  flex-wrap: nowrap;
-  overflow: hidden;
-  justify-content: flex-start;
-}
-
-.ns-grid--list .ns-card-time {
-  margin-left: 8px;
-}
-
-/* Hide delete in list mode by default; reveal on hover without overlapping footer */
-.ns-grid--list .ns-card-delete {
-  top: 8px;
-  transform: none;
-  right: 6px;
-  opacity: 0;
-  display: flex;
-}
-
-.ns-grid--list .ns-card:hover .ns-card-delete {
-  opacity: 1;
+  max-width: 740px;
+  margin: 0 auto;
 }
 
 /* ── Note card (matches .entry-card exactly) ─────────────────────── */
@@ -324,8 +277,7 @@
   mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
 }
 
-.ns-card-preview--expanded,
-.ns-grid--list .ns-card-preview--expanded {
+.ns-card-preview--expanded {
   max-height: none;
   -webkit-mask-image: none;
   mask-image: none;

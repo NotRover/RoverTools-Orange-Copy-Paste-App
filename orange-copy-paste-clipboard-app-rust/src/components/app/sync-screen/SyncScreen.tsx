@@ -6,7 +6,6 @@ import React, {
   useState,
 } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { SquaresFour } from "@phosphor-icons/react";
 import type {
   ClipboardEntry,
   DisplayKind,
@@ -36,25 +35,26 @@ import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import {
-  PlusIcon,
-  KeyIcon,
-  UsersIcon,
-  ShareIcon,
-  CloseIcon,
-  CheckIcon,
-  LogOutIcon,
-  CopyIcon,
-  ChevronRightIcon,
-  ChevronDownIcon,
-  OnlineDotIcon,
-  NotesIcon,
-  FileIcon,
-  SearchXIcon,
-  ClipboardIcon,
-  FilterIcon,
-  PinIcon,
-  ExpandIcon,
-} from "../../icons";
+  Plus,
+  Key,
+  Users,
+  ShareNetwork,
+  X,
+  Check,
+  SignOut,
+  Copy,
+  CaretRight,
+  CaretDown,
+  Circle,
+  Note as NoteIcon,
+  File,
+  MagnifyingGlass,
+  Clipboard,
+  Funnel,
+  PushPin,
+  ArrowsOutSimple,
+  SquaresFour,
+} from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
@@ -639,12 +639,12 @@ const SyncCardMenu: React.FC<{
           className={`card-menu-item card-menu-item--copy${copied ? " card-menu-item--success" : ""}`}
           onClick={closeAfter(onCopy)}
         >
-          {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+          {copied ? <Check size={13} /> : <Copy size={13} />}
           <span>{copied ? "Copied!" : "Copy"}</span>
         </button>
       )}
       <button className="card-menu-item" onClick={closeAfter(onOpen)}>
-        <ExpandIcon size={13} />
+        <ArrowsOutSimple size={13} />
         <span>Open</span>
       </button>
     </div>,
@@ -693,7 +693,7 @@ const SyncFilterDropdown: React.FC<{
         data-tooltip="Filters"
         data-tooltip-pos="below"
       >
-        <FilterIcon size={12} />
+        <Funnel size={12} />
         {sf.activeFilterCount > 0 && (
           <span className="cs-tb-badge">{sf.activeFilterCount}</span>
         )}
@@ -762,7 +762,7 @@ const SyncFilterDropdown: React.FC<{
             <>
               <div className="cs-card-divider" />
               <button className="cs-card-clear-btn" onClick={sf.clearAll}>
-                <CloseIcon size={12} />
+                <X size={12} />
                 Clear Filters
               </button>
             </>
@@ -807,7 +807,7 @@ function ClipDetailBody({ entry }: { entry: ClipboardEntry }) {
       <div className="sync-detail-file-list">
         {paths.map((p) => (
           <div key={p} className="sync-detail-file-row">
-            <FileIcon size={11} />
+            <File size={11} />
             <span>{fileNameFromPath(p)}</span>
           </div>
         ))}
@@ -845,9 +845,8 @@ const DetailPanel: React.FC<{
     <div className="sync-detail-panel">
       <div className="sync-detail-toolbar">
         <button className="sync-detail-back" onClick={onClose}>
-          <ChevronRightIcon
+          <CaretRight
             size={11}
-            strokeWidth={2.6}
             className="sync-detail-back-chevron"
           />
           Back
@@ -861,11 +860,11 @@ const DetailPanel: React.FC<{
           >
             {copied ? (
               <>
-                <CheckIcon size={11} strokeWidth={2.5} /> Copied!
+                <Check size={11} weight="bold" /> Copied!
               </>
             ) : (
               <>
-                <CopyIcon size={11} /> Copy
+                <Copy size={11} /> Copy
               </>
             )}
           </button>
@@ -927,7 +926,7 @@ const ClipFeedCard: React.FC<{
       >
         {showSourceBadge && (
           <span className="sync-list-source-badge sync-list-source-badge--clip">
-            <ClipboardIcon size={10} />
+            <Clipboard size={10} />
           </span>
         )}
         <span className="sync-list-type-wrap">
@@ -940,9 +939,9 @@ const ClipFeedCard: React.FC<{
           onClick={handleCopy}
         >
           {copied ? (
-            <CheckIcon size={10} strokeWidth={2.5} />
+            <Check size={10} weight="bold" />
           ) : (
-            <CopyIcon size={10} />
+            <Copy size={10} />
           )}
         </button>
       </div>
@@ -981,7 +980,7 @@ const ClipFeedCard: React.FC<{
       <div className="card-file-preview">
         {paths.slice(0, 3).map((p) => (
           <div key={p} className="card-file-preview-item">
-            <FileIcon size={9} />
+            <File size={9} />
             <span className="card-file-preview-name">
               {fileNameFromPath(p)}
             </span>
@@ -1008,7 +1007,7 @@ const ClipFeedCard: React.FC<{
             <div className="card-chips">
               {showSourceBadge && (
                 <span className="card-type-chip sync-source-chip--clip">
-                  <ClipboardIcon size={9} strokeWidth={2.5} />
+                  <Clipboard size={9} weight="bold" />
                   <span className="card-type-label">Clipboard</span>
                 </span>
               )}
@@ -1016,7 +1015,7 @@ const ClipFeedCard: React.FC<{
             </div>
             {copied ? (
               <span className="card-time card-time--copied">
-                <CheckIcon size={9} strokeWidth={2.8} />
+                <Check size={9} weight="bold" />
                 Copied
               </span>
             ) : (
@@ -1028,7 +1027,7 @@ const ClipFeedCard: React.FC<{
               data-tooltip="Copy"
               data-tooltip-pos="top"
             >
-              <CopyIcon size={10} />
+              <Copy size={10} />
             </button>
           </div>
         </div>
@@ -1071,7 +1070,7 @@ const NoteFeedCard: React.FC<{
           onContextMenu={openMenu}
         >
           <span className="sync-list-note-badge">
-            <NotesIcon size={12} />
+            <NoteIcon size={12} />
           </span>
           <div className="sync-list-note-content">
             <span className="sync-list-title">
@@ -1119,7 +1118,7 @@ const NoteFeedCard: React.FC<{
             <div className="ns-card-chips">
               {showSourceBadge && (
                 <span className="card-type-chip sync-source-chip--note">
-                  <NotesIcon size={9} />
+                  <NoteIcon size={9} />
                   <span className="card-type-label">Note</span>
                 </span>
               )}
@@ -1140,7 +1139,7 @@ const NoteFeedCard: React.FC<{
             <span
               className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
             >
-              {note.pinned && <PinIcon size={8} />}
+              {note.pinned && <PushPin size={8} weight="fill" />}
               {timeAgo(note.updated_at)}
             </span>
           </div>
@@ -1166,9 +1165,8 @@ const ReadOnlyNotePanel: React.FC<{
   <div className="sync-detail-panel">
     <div className="sync-detail-toolbar">
       <button className="sync-detail-back" onClick={onClose}>
-        <ChevronRightIcon
+        <CaretRight
           size={11}
-          strokeWidth={2.6}
           className="sync-detail-back-chevron"
         />
         Back
@@ -1222,7 +1220,7 @@ const InlineForm: React.FC<{
           {loading ? "…" : mode === "create" ? "Create" : "Join"}
         </button>
         <button className="sync-inline-btn" onClick={onCancel}>
-          <CloseIcon size={10} />
+          <X size={10} />
         </button>
       </div>
     </div>
@@ -1574,7 +1572,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           data-tooltip="Clipboard only"
           data-tooltip-pos="below"
         >
-          <ClipboardIcon size={11} strokeWidth={1.8} />
+          <Clipboard size={11} />
         </button>
         <button
           className={`sync-feed-seg-btn${feedFilter === "notes" ? " sync-feed-seg-btn--active" : ""}`}
@@ -1582,7 +1580,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           data-tooltip="Notes only"
           data-tooltip-pos="below"
         >
-          <NotesIcon size={11} />
+          <NoteIcon size={11} />
         </button>
       </div>
       <div className="cs-toolbar-sep" />
@@ -1627,7 +1625,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 <span className="sync-feed-group-name">{selectedLabel}</span>
                 {selectedMemberInfo && (
                   <span className="sync-feed-member-count">
-                    <UsersIcon size={10} />
+                    <Users size={10} />
                     {selectedMemberInfo}
                   </span>
                 )}
@@ -1651,11 +1649,11 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                   >
                     {inviteCopied === selected.group.invite_code ? (
                       <>
-                        <CheckIcon size={11} /> Copied!
+                        <Check size={11} /> Copied!
                       </>
                     ) : (
                       <>
-                        <ShareIcon size={11} /> Copy Invite
+                        <ShareNetwork size={11} /> Copy Invite
                       </>
                     )}
                   </button>
@@ -1667,7 +1665,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                     data-tooltip="Leave this group"
                     data-tooltip-pos="top"
                   >
-                    <LogOutIcon size={11} />
+                    <SignOut size={11} />
                     Leave
                   </button>
                 )}
@@ -1680,7 +1678,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                     data-tooltip="Leave session"
                     data-tooltip-pos="top"
                   >
-                    <LogOutIcon size={11} />
+                    <SignOut size={11} />
                     Leave
                   </button>
                 )}
@@ -1693,7 +1691,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 <div className="sync-members-bar">
                   {selected.session.members.map((m) => (
                     <div key={m.user_id} className="sync-member-chip">
-                      <OnlineDotIcon online={m.online} size={6} />
+                      <Circle size={6} weight="fill" color={m.online ? "#22c55e" : "#6b7280"} />
                       <span>{m.display_name}</span>
                       <span className="sync-member-scope">{m.scope}</span>
                     </div>
@@ -1721,7 +1719,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
               <div className="sync-feed-scroll">
                 {feedItems.length === 0 ? (
                   <div className="sync-feed-empty">
-                    <SearchXIcon size={38} />
+                    <MagnifyingGlass size={38} />
                     <span className="sync-feed-empty-title">
                       {isFiltering ? "No results" : "Nothing here yet"}
                     </span>
@@ -1768,10 +1766,9 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                             {syncCollapsed.has(label) && (
                               <span className="sync-timeline-day-count">{items.length}</span>
                             )}
-                            <ChevronDownIcon
+                            <CaretDown
                               className="sync-timeline-day-chevron"
                               size={10}
-                              strokeWidth={2.5}
                             />
                           </button>
                           <div
@@ -1831,7 +1828,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
             <div className="sync-no-selection-inner">
               {syncGroups.length === 0 && sessions.length === 0 ? (
                 <>
-                  <UsersIcon size={40} strokeWidth={1.3} />
+                  <Users size={40} />
                   <span className="sync-no-selection-title">No groups yet</span>
                   <span className="sync-no-selection-sub">
                     Create a sync group or join one with an invite code.
@@ -1839,7 +1836,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 </>
               ) : (
                 <>
-                  <UsersIcon size={40} strokeWidth={1.3} />
+                  <Users size={40} />
                   <span className="sync-no-selection-title">Select a group</span>
                   <span className="sync-no-selection-sub">
                     Pick a group from the right to view its shared content.
@@ -1855,113 +1852,130 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
       <aside className="sync-panel-right">
         <div className="sync-panel-header">
           <span className="sync-panel-title">Groups</span>
-          <span className={`sync-conn-chip sync-conn-chip--${syncConnected === true ? "on" : syncConnected === false ? "off" : "idle"}`}>
+          <span
+            className={`sync-conn-chip sync-conn-chip--${syncConnected === true ? "on" : syncConnected === false ? "off" : "idle"}`}
+          >
             <span className="sync-conn-dot" />
             {syncConnected === true ? "Connected" : syncConnected === false ? "Offline" : "Inactive"}
           </span>
         </div>
 
         <div className="sync-panel-scroll">
-          <div className="sync-group-section">
-            {syncGroups.length > 0 && (
-              <div className="sync-section-row">
-                <span className="sync-section-label-text">Sync</span>
-                <span className="sync-section-badge">{syncGroups.length}</span>
-              </div>
-            )}
-            {syncGroups.length === 0 ? (
-              <p className="sync-group-empty-hint">
+          {syncGroups.length === 0 && sessions.length === 0 ? (
+            <div className="sync-panel-empty">
+              <span className="sync-panel-empty-icon">
+                <Users size={22} />
+              </span>
+              <span className="sync-panel-empty-title">
                 {syncConnected === null
                   ? "Not signed in"
                   : syncConnected === false
-                    ? "Offline — reconnecting…"
+                    ? "Offline"
                     : "No sync groups yet"}
-              </p>
-            ) : (
-              syncGroups.map((group) => {
-                const isActive = selected?.kind === "sync" && selected.group.id === group.id;
-                const isExpanded = expandedGroups.has(group.id);
-                const color = groupAvatarColor(group.id);
-                const initials = group.name.slice(0, 2).toUpperCase();
-                // DEMO: replace with real member list from API before production
-                const members: SharingMember[] = DEMO_GROUP_MEMBERS[group.id] ?? [];
-                return (
-                  <div key={group.id} className="sync-group-card-wrap">
-                    <div className={`sync-group-card${isActive ? " active" : ""}`}>
+              </span>
+              <span className="sync-panel-empty-sub">
+                {syncConnected === null
+                  ? "Sign in to sync across your devices."
+                  : syncConnected === false
+                    ? "Reconnecting…"
+                    : "Create a group or join one with an invite code to start syncing."}
+              </span>
+            </div>
+          ) : (
+            <>
+              {syncGroups.length > 0 && (
+                <div className="sync-group-section">
+                  <div className="sync-section-row">
+                    <span className="sync-section-label-text">Sync</span>
+                    <span className="sync-section-rule" />
+                    <span className="sync-section-badge">{syncGroups.length}</span>
+                  </div>
+                  {syncGroups.map((group) => {
+                    const isActive = selected?.kind === "sync" && selected.group.id === group.id;
+                    const isExpanded = expandedGroups.has(group.id);
+                    const color = groupAvatarColor(group.id);
+                    const initials = group.name.slice(0, 2).toUpperCase();
+                    // DEMO: replace with real member list from API before production
+                    const members: SharingMember[] = DEMO_GROUP_MEMBERS[group.id] ?? [];
+                    return (
+                      <div key={group.id} className="sync-group-card-wrap">
+                        <button
+                          className={`sync-group-card${isActive ? " active" : ""}`}
+                          onClick={() => {
+                            setSelected({ kind: "sync", group });
+                            if (members.length > 0) {
+                              setExpandedGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.id)) next.delete(group.id);
+                                else next.add(group.id);
+                                return next;
+                              });
+                            }
+                          }}
+                        >
+                          <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
+                          <span className="sync-group-card-body">
+                            <span className="sync-group-card-name">{group.name}</span>
+                            <span className="sync-group-card-meta">
+                              {group.member_count} member{group.member_count === 1 ? "" : "s"}
+                            </span>
+                          </span>
+                          {members.length > 0 && (
+                            <span
+                              className={`sync-group-caret${isExpanded ? " sync-group-caret--open" : ""}`}
+                            >
+                              <CaretRight size={9} weight="bold" />
+                            </span>
+                          )}
+                        </button>
+                        {isExpanded && members.length > 0 && (
+                          <div className="sync-group-members">
+                            {members.map((m) => (
+                              <div key={m.user_id} className="sync-group-member-row">
+                                <Circle size={5} weight="fill" color={m.online ? "#22c55e" : "#6b7280"} />
+                                <span className="sync-group-member-name">{m.display_name}</span>
+                                <span className="sync-group-member-scope">{m.scope}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {sessions.length > 0 && (
+                <div className="sync-group-section">
+                  <div className="sync-section-row">
+                    <span className="sync-section-label-text">Live Share</span>
+                    <span className="sync-section-rule" />
+                    <span className="sync-section-badge">{sessions.length}</span>
+                  </div>
+                  {sessions.map((session) => {
+                    const isActive = selected?.kind === "share" && selected.session.share_group_id === session.share_group_id;
+                    const onlineCount = session.members.filter((m) => m.online).length;
+                    return (
                       <button
-                        className="sync-group-card-main"
-                        onClick={() => setSelected({ kind: "sync", group })}
+                        key={session.share_group_id}
+                        className={`sync-group-card sync-group-card--live${isActive ? " active" : ""}`}
+                        onClick={() => setSelected({ kind: "share", session })}
                       >
-                        <span className="sync-group-avatar" style={{ background: color }}>{initials}</span>
+                        <span className="sync-group-live-avatar">
+                          <span className="sync-group-live-dot" />
+                        </span>
                         <span className="sync-group-card-body">
-                          <span className="sync-group-card-name">{group.name}</span>
-                          <span className="sync-group-card-meta">
-                            {group.member_count} member{group.member_count === 1 ? "" : "s"}
+                          <span className="sync-group-card-name">{session.name}</span>
+                          <span className="sync-group-card-meta sync-group-card-meta--online">
+                            {onlineCount}/{session.members.length} online
                           </span>
                         </span>
                       </button>
-                      {members.length > 0 && (
-                        <button
-                          className={`sync-group-expand-btn${isExpanded ? " sync-group-expand-btn--open" : ""}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedGroups((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(group.id)) next.delete(group.id);
-                              else next.add(group.id);
-                              return next;
-                            });
-                          }}
-                          data-tooltip={isExpanded ? "Hide members" : "Show members"}
-                          data-tooltip-pos="left"
-                        >
-                          <ChevronRightIcon size={9} strokeWidth={2.5} />
-                        </button>
-                      )}
-                    </div>
-                    {isExpanded && members.length > 0 && (
-                      <div className="sync-group-members">
-                        {members.map((m) => (
-                          <div key={m.user_id} className="sync-group-member-row">
-                            <OnlineDotIcon online={m.online} size={5} />
-                            <span className="sync-group-member-name">{m.display_name}</span>
-                            <span className="sync-group-member-scope">{m.scope}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {sessions.length > 0 && (
-            <div className="sync-group-section">
-              <div className="sync-section-row">
-                <span className="sync-section-label-text">Live Share</span>
-                <span className="sync-section-badge">{sessions.length}</span>
-              </div>
-              {sessions.map((session) => {
-                const isActive = selected?.kind === "share" && selected.session.share_group_id === session.share_group_id;
-                const onlineCount = session.members.filter((m) => m.online).length;
-                return (
-                  <button
-                    key={session.share_group_id}
-                    className={`sync-group-card sync-group-card--live${isActive ? " active" : ""}`}
-                    onClick={() => setSelected({ kind: "share", session })}
-                  >
-                    <span className="sync-group-live-avatar">
-                      <span className="sync-group-live-dot" />
-                    </span>
-                    <span className="sync-group-card-body">
-                      <span className="sync-group-card-name">{session.name}</span>
-                      <span className="sync-group-card-meta">{onlineCount}/{session.members.length} online</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -1985,7 +1999,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           {!showCreate && !showJoin && (
             <div className="sync-panel-btns">
               <button
-                className="sync-action-btn"
+                className="sync-action-btn sync-action-btn--primary"
                 onClick={() => {
                   setShowCreate(true);
                   setShowJoin(false);
@@ -1993,7 +2007,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 data-tooltip="Create a new sync group"
                 data-tooltip-pos="top"
               >
-                <PlusIcon size={11} />
+                <Plus size={11} />
                 Create
               </button>
               <button
@@ -2005,7 +2019,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 data-tooltip="Join via invite code"
                 data-tooltip-pos="top"
               >
-                <KeyIcon size={11} />
+                <Key size={11} />
                 Join
               </button>
             </div>

@@ -36,6 +36,217 @@ const NOTES_SPLIT_DEFAULT = 40;
 const NOTES_SPLIT_MIN = 40;
 const NOTES_SPLIT_MAX = 68;
 
+// ═══════════════════════════════════════════════════════════════════════
+// TESTING ONLY — dummy notes for feature preview. REMOVE this whole block
+// (and the `notes` merge inside the component that references DUMMY_NOTES)
+// when done. These seed notes exercise every note feature: pin, group tags,
+// headings, text styles, bullet + ordered lists, checklists, tables, code
+// blocks, images, links, blockquotes, and long/expandable content.
+// ═══════════════════════════════════════════════════════════════════════
+const DUMMY_NOW = Date.now();
+const DUMMY_MIN = 60_000;
+
+// note.content must be a stringified Tiptap ProseMirror doc (plain HTML/markdown
+// renders blank). Tiny builders keep the docs below readable.
+const _t = (text: string, marks?: any[]): any =>
+  marks && marks.length ? { type: "text", text, marks } : { type: "text", text };
+const _p = (...content: any[]): any => ({ type: "paragraph", content });
+const _h = (level: number, text: string): any => ({ type: "heading", attrs: { level }, content: [_t(text)] });
+const _li = (...content: any[]): any => ({ type: "listItem", content });
+const _ul = (...items: any[]): any => ({ type: "bulletList", content: items });
+const _ol = (...items: any[]): any => ({ type: "orderedList", content: items });
+const _task = (checked: boolean, text: string): any => ({ type: "taskItem", attrs: { checked }, content: [_p(_t(text))] });
+const _tasks = (...items: any[]): any => ({ type: "taskList", content: items });
+const _quote = (...content: any[]): any => ({ type: "blockquote", content });
+const _callout = (tone: string, ...content: any[]): any => ({ type: "callout", attrs: { tone }, content });
+const _pre = (language: string, code: string): any => ({ type: "codeBlock", attrs: { language }, content: [_t(code)] });
+const _hr = (): any => ({ type: "horizontalRule" });
+const _img = (src: string, alt: string): any => ({ type: "image", attrs: { src, alt } });
+const _th = (text: string): any => ({ type: "tableHeader", content: [_p(_t(text))] });
+const _td = (text: string): any => ({ type: "tableCell", content: [_p(_t(text))] });
+const _tr = (...cells: any[]): any => ({ type: "tableRow", content: cells });
+const _table = (...rows: any[]): any => ({ type: "table", content: rows });
+const _doc = (...content: any[]): string => JSON.stringify({ type: "doc", content });
+
+const _b = { type: "bold" };
+const _i = { type: "italic" };
+const _u = { type: "underline" };
+const _strike = { type: "strike" };
+const _codeMark = { type: "code" };
+const _link = (href: string): any => ({ type: "link", attrs: { href } });
+const _hl = (color: string): any => ({ type: "highlight", attrs: { color } });
+const _color = (color: string): any => ({ type: "textStyle", attrs: { color } });
+
+const DUMMY_SWATCH =
+  "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22240%22 height=%22100%22%3E%3Crect width=%22240%22 height=%22100%22 rx=%2210%22 fill=%22%23ff5535%22/%3E%3Crect x=%2214%22 y=%2214%22 width=%2272%22 height=%2272%22 rx=%228%22 fill=%22%23181818%22/%3E%3C/svg%3E";
+
+const DUMMY_NOTES: Note[] = [
+  {
+    id: "dummy-welcome",
+    title: "Welcome & text styles",
+    content: _doc(
+      _h(2, "Welcome 👋"),
+      _p(
+        _t("This shows "),
+        _t("bold", [_b]),
+        _t(", "),
+        _t("italic", [_i]),
+        _t(", "),
+        _t("underline", [_u]),
+        _t(", "),
+        _t("strikethrough", [_strike]),
+        _t(", "),
+        _t("inline code", [_codeMark]),
+        _t(", "),
+        _t("highlight", [_hl("#ffd43b")]),
+        _t(", "),
+        _t("colored text", [_color("#ff5535")]),
+        _t(", and "),
+        _t("a link", [_link("https://example.com")]),
+        _t("."),
+      ),
+      _ul(
+        _li(_p(_t("First bullet"))),
+        _li(_p(_t("Second bullet"))),
+        _li(_p(_t("Nested:")), _ul(_li(_p(_t("Child one"))), _li(_p(_t("Child two"))))),
+      ),
+      _hr(),
+      _p(_t("Everything here is dummy data for testing.")),
+    ),
+    created_at: DUMMY_NOW - 4 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 4 * DUMMY_MIN,
+    pinned: true,
+    groups: ["Work"],
+  },
+  {
+    id: "dummy-table",
+    title: "Roadmap (table)",
+    content: _doc(
+      _h(3, "Q3 roadmap"),
+      _table(
+        _tr(_th("Feature"), _th("Owner"), _th("Status")),
+        _tr(_td("Sync engine"), _td("Sal"), _td("Done")),
+        _tr(_td("Live share"), _td("Team"), _td("In progress")),
+        _tr(_td("Grid layout"), _td("Sal"), _td("Shipping")),
+      ),
+      _p(_t("Last-write-wins on updated_at; tombstones always win.")),
+    ),
+    created_at: DUMMY_NOW - 20 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 8 * DUMMY_MIN,
+    pinned: true,
+    groups: ["Work", "Planning"],
+  },
+  {
+    id: "dummy-code",
+    title: "Code snippet",
+    content: _doc(
+      _p(_t("Derive the wrapping key, then unwrap the UMK:")),
+      _pre(
+        "ts",
+        "const kek = argon2id(password, kdf_salt);\nconst umk = aesGcmUnwrap(pw_wrapped_umk, kek);\n// umk stays in memory only (Zeroizing)",
+      ),
+      _p(_t("Use "), _t("umk", [_codeMark]), _t(" for AES-256-GCM content encryption.")),
+    ),
+    created_at: DUMMY_NOW - 60 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 55 * DUMMY_MIN,
+    pinned: false,
+    groups: ["Dev"],
+  },
+  {
+    id: "dummy-image",
+    title: "Design reference (image, quote, callout)",
+    content: _doc(
+      _p(_t("Accent swatch:")),
+      _img(DUMMY_SWATCH, "Accent swatch"),
+      _quote(_p(_t("Good design is as little design as possible."))),
+      _callout("info", _p(_t("Keep the flat dark theme with the orange accent."))),
+    ),
+    created_at: DUMMY_NOW - 90 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 90 * DUMMY_MIN,
+    pinned: false,
+    groups: ["Ideas"],
+  },
+  {
+    id: "dummy-long",
+    title: "Meeting notes (long / expandable)",
+    content: _doc(
+      _h(3, "Sync sprint kickoff"),
+      _p(_t("We reviewed the end-to-end encryption contract and agreed the server never sees plaintext.")),
+      _ol(
+        _li(_p(_t("Confirm the bootstrap salt flow"))),
+        _li(_p(_t("Register device public keys"))),
+        _li(_p(_t("Push encrypted entries (last-write-wins)"))),
+        _li(_p(_t("Fan out live updates over the websocket"))),
+      ),
+      _p(
+        _t(
+          "Open questions: group-key rotation when a member leaves, tombstone vs re-add ordering, blob quotas, and short-lived presigned URLs. This paragraph is intentionally long so the card overflows and shows the expand affordance and bounded scroll in the new layouts. The identity keypair is derived deterministically from the UMK, so it is the same on every device and never stored server-side.",
+        ),
+      ),
+    ),
+    created_at: DUMMY_NOW - 2 * 24 * 60 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 120 * DUMMY_MIN,
+    pinned: false,
+    groups: ["Work"],
+  },
+  {
+    id: "dummy-checklist",
+    title: "Release checklist (tasks)",
+    content: _doc(
+      _h(3, "Before shipping"),
+      _tasks(
+        _task(true, "Build passes"),
+        _task(true, "Layouts verified"),
+        _task(false, "Smoke-test on device"),
+        _task(false, "Update changelog"),
+      ),
+    ),
+    created_at: DUMMY_NOW - 6 * 60 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 30 * DUMMY_MIN,
+    pinned: false,
+    groups: ["Personal"],
+  },
+  {
+    id: "dummy-mixed",
+    title: "Mixed blocks & callouts",
+    content: _doc(
+      _callout("warning", _p(_t("Heads up: this note mixes many block types."))),
+      _h(2, "Heading two"),
+      _p(_t("A paragraph, then a quote:")),
+      _quote(_p(_t("Simplicity is the ultimate sophistication."))),
+      _h(4, "Heading four"),
+      _pre("bash", "bun run tauri dev"),
+      _hr(),
+      _p(_t("End of the mixed note.")),
+    ),
+    created_at: DUMMY_NOW - 45 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 12 * DUMMY_MIN,
+    pinned: false,
+    groups: ["Ideas", "Dev"],
+  },
+  {
+    id: "dummy-short",
+    title: "Quick idea",
+    content: _doc(_p(_t("Add a keyboard shortcut to jump straight to search."))),
+    created_at: DUMMY_NOW - 3 * 60 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 3 * 60 * DUMMY_MIN,
+    pinned: false,
+    groups: [],
+  },
+  {
+    id: "dummy-tags",
+    title: "Many tags (chip overflow)",
+    content: _doc(_p(_t("Several group tags to show chip layout and overflow."))),
+    created_at: DUMMY_NOW - 10 * 60 * DUMMY_MIN,
+    updated_at: DUMMY_NOW - 10 * 60 * DUMMY_MIN,
+    pinned: false,
+    groups: ["Work", "Ideas", "Personal", "Urgent", "Planning"],
+  },
+];
+// ═══════════════════════════════════════════════════════════════════════
+// END TESTING dummy notes
+// ═══════════════════════════════════════════════════════════════════════
+
 // ── NotesScreen ─────────────────────────────────────────────────────
 
 interface NotesScreenProps {
@@ -59,7 +270,7 @@ interface NotesScreenProps {
 }
 
 const NotesScreen: React.FC<NotesScreenProps> = ({
-  notes,
+  notes: incomingNotes,
   entries,
   availableGroups,
   onAddGroup,
@@ -77,6 +288,13 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   onBulkAddGroup,
   onBulkRemoveGroup,
 }) => {
+  // TESTING ONLY — merge dummy notes ahead of real ones. Remove with the
+  // DUMMY_NOTES block above when done.
+  const notes = useMemo(
+    () => [...DUMMY_NOTES, ...incomingNotes],
+    [incomingNotes],
+  );
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -315,7 +533,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
         }
         rightSlot={
           <>
-            <LayoutSegment layout={layout} onLayoutChange={selectLayout} />
+            <LayoutSegment layout={layout} onLayoutChange={selectLayout} showSingle />
 
             <div className="cs-toolbar-sep" />
 
@@ -440,7 +658,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             </div>
           ) : (
             <div
-              className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}
+              className={`ns-grid${layout === "list" ? " ns-grid--grid" : layout === "single" ? " ns-grid--single" : ""}`}
             >
               {sortedNotes.map((n, idx) => (
                 <React.Fragment key={n.id}>

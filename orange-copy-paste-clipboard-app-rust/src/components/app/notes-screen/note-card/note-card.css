@@ -235,8 +235,7 @@
   font-size: 11px;
 }
 
-.ns-card-preview--expanded,
-.ns-grid--list .ns-card-preview--expanded {
+.ns-card-preview--expanded {
   max-height: none;
   -webkit-mask-image: none;
   mask-image: none;
@@ -325,6 +324,16 @@
   letter-spacing: 0.2px;
   flex-shrink: 0;
   user-select: none;
+}
+
+/* Pinned pill — matches the clipboard card's .card-type-chip--pinned */
+.ns-chip--pinned {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.ns-chip--pinned .ns-chip-label {
+  max-width: none;
 }
 
 .ns-chip-dot {

@@ -256,6 +256,14 @@
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+/* Highlights get a soft squircle pill; box-decoration-break keeps the rounded
+   corners + padding intact when a highlight wraps across lines. */
+.ee-rich.ProseMirror mark {
+  padding: 0.05em 0.3em;
+  border-radius: 0.45em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 .ee-rich.ProseMirror pre {
   margin: 0.6em 0;
   padding: 10px 12px;
@@ -263,6 +271,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow-x: auto;
+  scrollbar-width: thin;
   font-size: 12.5px;
   line-height: 1.55;
   font-family: var(--ee-editor-mono);
@@ -544,6 +553,13 @@
 
 /* Task list items already render an <input type=checkbox>, suppress the
    bullet dot for those rows so the checkbox alone marks the line. */
+/* Task lists render as <li><label><input><span>…</span></label></li>, so the
+   checkbox is not a direct child of the <li>; target the data-type markup
+   (plus the legacy shapes) to lay the checkbox and text out on one row. */
+.ee-preview ul[data-type="taskList"] {
+  padding-left: 0.2em;
+}
+.ee-preview ul[data-type="taskList"] > li,
 .ee-preview ul li.task-list-item,
 .ee-preview ul li:has(> input[type="checkbox"]) {
   list-style: none;
@@ -551,13 +567,26 @@
   align-items: center;
   gap: 0.5em;
 }
+.ee-preview ul[data-type="taskList"] > li::before,
 .ee-preview ul li.task-list-item::before,
 .ee-preview ul li:has(> input[type="checkbox"])::before {
   display: none;
 }
+.ee-preview ul[data-type="taskList"] > li > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ee-preview ul[data-type="taskList"] > li > label > span p,
 .ee-preview ul li.task-list-item > p,
 .ee-preview ul li:has(> input[type="checkbox"]) > p {
   margin: 0;
+}
+.ee-preview ul[data-type="taskList"] > li[data-checked="true"] > label > span {
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 .ee-preview input[type="checkbox"] {
   margin: 0;
@@ -582,6 +611,12 @@
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+.ee-preview mark {
+  padding: 0.05em 0.3em;
+  border-radius: 0.45em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 .ee-preview pre {
   margin: 0.6em 0;
   padding: 10px 12px;
@@ -589,6 +624,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow-x: auto;
+  scrollbar-width: thin;
   font-size: 12.5px;
   line-height: 1.55;
 }
@@ -1210,7 +1246,32 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   overflow-x: auto;
+  scrollbar-width: thin;
   margin: 8px 0;
+}
+
+/* Thin horizontal scrollbar for code blocks (editor, preview, and card). */
+.ee-rich.ProseMirror pre::-webkit-scrollbar,
+.ee-preview pre::-webkit-scrollbar,
+.ee-codeblock::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.ee-rich.ProseMirror pre::-webkit-scrollbar-track,
+.ee-preview pre::-webkit-scrollbar-track,
+.ee-codeblock::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ee-rich.ProseMirror pre::-webkit-scrollbar-thumb,
+.ee-preview pre::-webkit-scrollbar-thumb,
+.ee-codeblock::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+.ee-rich.ProseMirror pre::-webkit-scrollbar-thumb:hover,
+.ee-preview pre::-webkit-scrollbar-thumb:hover,
+.ee-codeblock::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 .ee-codeblock code {
   background: transparent;
