@@ -57,6 +57,14 @@ pub fn simulate_paste() {
 
 // Cursor / monitor helpers
 
+/// Whether the global cursor position can be read on this platform.
+///
+/// Always `true` on Windows — `GetCursorPos` is universally available — so
+/// popups anchor to the cursor.
+pub fn cursor_available() -> bool {
+    true
+}
+
 /// Return the cursor position in physical screen coordinates.
 pub fn cursor_pos() -> (i32, i32) {
     let mut pt = POINT { x: 0, y: 0 };

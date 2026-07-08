@@ -128,6 +128,15 @@ pub fn simulate_paste() {
 
 // ── Cursor / monitor helpers ─────────────────────────────────────────────────
 
+/// Whether the global cursor position can be read on this session.
+///
+/// True on X11 (queryable via `xdotool`), false on Wayland — the compositor
+/// deliberately hides the global pointer from clients, so callers should place
+/// windows by centering rather than anchoring to the cursor.
+pub fn cursor_available() -> bool {
+    !is_wayland()
+}
+
 /// Return the cursor position in physical screen coordinates.
 ///
 /// X11 exposes the global pointer via `xdotool`.  Wayland does not expose the
