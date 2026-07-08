@@ -4,7 +4,7 @@ Smart Clipboard is a desktop clipboard manager built with:
 
 - **Frontend:** React + TypeScript + Vite
 - **Backend:** Rust + Tauri 2
-- **Target platform:** Windows-first (global hotkeys and clipboard integrations are implemented for Windows)
+- **Target platforms:** Windows and Linux (X11 recommended; see [Linux support](#linux-support) for Wayland caveats and feature parity)
 
 It captures copied text/images/files into history, shows quick popups near the cursor, and supports fast paste actions from recent clipboard entries.
 
@@ -84,7 +84,8 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `image` + `base64` for image encode/decode and data URL conversion
   - `rmp-serde` for binary persistence (MessagePack)
   - `parking_lot` for efficient shared mutex state
-  - `windows-sys` for Windows input/cursor/monitor and clipboard format helpers
+  - `windows-sys` (Windows only) for input/cursor/monitor and clipboard format helpers; Linux uses `xdotool`/`wtype`/`xdpyinfo` via `runtime/platform/linux.rs`
+  - `keyring` for OS credential storage (Windows Credential Manager / Linux Secret Service)
 
 ---
 
@@ -92,12 +93,71 @@ It captures copied text/images/files into history, shows quick popups near the c
 
 - **Node/Bun toolchain** (project uses `bun` as package manager)
 - **Rust toolchain** (stable)
-- **Tauri prerequisites** for your OS (WebView2 on Windows, etc.)
+- **Tauri prerequisites** for your OS (WebView2 on Windows, the GTK/WebKitGTK stack on Linux — see below)
 
 Recommended VS Code extensions:
 
 - Tauri
 - rust-analyzer
+
+---
+
+## Linux support
+
+The app builds and runs on Linux. All Windows-only integrations (Win32 clipboard
+formats, cursor/monitor queries, keystroke injection) are compiled out and
+replaced with Linux equivalents, so the same source tree targets both platforms.
+
+### Build prerequisites (Debian/Ubuntu)
+
+Install the standard Tauri v2 Linux toolchain before `bun run tauri build`:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+(Fedora/Arch have equivalent packages — see the Tauri v2 prerequisites docs.)
+
+### Runtime dependencies
+
+Keystroke injection and cursor/monitor placement shell out to small,
+widely-available utilities. The `.deb` declares these; install them manually for
+AppImage/`tauri dev`:
+
+| Tool | Purpose | When needed |
+|------|---------|-------------|
+| `xdotool` | Ctrl+C/Ctrl+V injection, cursor position | X11 sessions |
+| `wtype` | Ctrl+C/Ctrl+V injection | Wayland sessions |
+| `x11-utils` (`xdpyinfo`) | Monitor work-area geometry | X11 (optional; falls back to 1920×1080) |
+| `xdg-utils` (`xdg-open`) | "Open data folder" | all |
+| A Secret Service provider (GNOME Keyring / KWallet) | Stores sync device keys & refresh tokens | only when cloud sync is used |
+| A system-tray host (e.g. GNOME AppIndicator extension) | Tray icon & menu | for the tray |
+
+### Packaging
+
+`bun run tauri build` produces `.deb`, `.rpm`, and AppImage bundles on Linux
+(and the NSIS installer on Windows) — `bundle.targets` lists all four and Tauri
+builds only the ones valid for the host.
+
+### Known limitations on Linux
+
+These degrade gracefully (no crash) but are not yet at Windows parity:
+
+- **Wayland:** self-positioned cursor popups, global shortcuts, always-on-top,
+  and window transparency are compositor-dependent and may not work. **X11 is
+  recommended.**
+- **File-list clipboard:** copying **File** entries (and file-backed images) back
+  to the clipboard is Windows-only; on Linux the write returns an error
+  (`text/uri-list` support is not implemented yet).
+- **HTML clipboard:** rich-HTML entries are not written to the Linux clipboard
+  yet (plain-text/image entries work via `arboard`).
+- **Clipboard capture:** file-drops and HTML sources are not captured into
+  history on Linux (text and images are).
+- **Image labels:** auto-generated image labels show a raw timestamp instead of a
+  localized date/time.
 
 ---
 
@@ -342,8 +402,8 @@ notrover-smart-clipboard-app-rust/
 
 ## Notes
 
-- The app is Windows-first; clipboard file support (`CF_HDROP`), cursor position, and monitor work area all use `windows-sys` directly.
-- Popup windows use `transparent: true` + `decorations: false` + `shadow: false` with a CSS-padded body to achieve clean rounded corners without OS border artifacts.
+- The app targets Windows and Linux. On Windows, clipboard file support (`CF_HDROP`), cursor position, and monitor work area use `windows-sys` directly; the equivalent Linux paths live in `runtime/platform/linux.rs` and shell out to `xdotool`/`wtype`/`xdpyinfo` (see [Linux support](#linux-support)).
+- Popup windows use `transparent: true` + `decorations: false` + `shadow: false` with a CSS-padded body to achieve clean rounded corners without OS border artifacts (transparency requires a compositor on Linux).
 - Theme (`dark`/`light`) is stored in `localStorage` under `sc-theme` and read by both popup windows on focus; falls back to the OS `prefers-color-scheme` media query when no manual override is set.
 - Release profile in `src-tauri/Cargo.toml` is optimized for smaller binaries (`opt-level = "z"`, `lto`, `strip`).
 - The custom `VideoPlayer` component deliberately suppresses the native browser context menu on `<video>` to avoid exposing Download, Picture-in-Picture, and Playback speed controls that don't belong in a clipboard manager.
