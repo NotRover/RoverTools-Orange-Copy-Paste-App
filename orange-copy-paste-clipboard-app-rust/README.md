@@ -124,17 +124,29 @@ sudo apt install -y \
 ### Runtime dependencies
 
 Keystroke injection and cursor/monitor placement shell out to small,
-widely-available utilities. The `.deb` declares these; install them manually for
-AppImage/`tauri dev`:
+widely-available utilities. Injection uses a **capability ladder** — the app
+detects the session and tries the best-available tool, falling back only when
+one is missing or fails, so a single binary works across X11 and Wayland:
 
 | Tool | Purpose | When needed |
 |------|---------|-------------|
-| `xdotool` | Ctrl+C/Ctrl+V injection, cursor position | X11 sessions |
-| `wtype` | Ctrl+C/Ctrl+V injection | Wayland sessions |
+| `xdotool` | Ctrl+C/Ctrl+V injection, cursor position | X11 (and XWayland) sessions |
+| `wtype` | Ctrl+C/Ctrl+V injection | Wayland on wlroots compositors (Sway, Hyprland, River) |
+| `ydotool` (+ `ydotoold`) | Ctrl+C/Ctrl+V injection fallback | Wayland on GNOME/KDE, where `wtype` is blocked — needs the daemon running and uinput access |
 | `x11-utils` (`xdpyinfo`) | Monitor work-area geometry | X11 (optional; falls back to 1920×1080) |
 | `xdg-utils` (`xdg-open`) | "Open data folder" | all |
 | A Secret Service provider (GNOME Keyring / KWallet) | Stores sync device keys & refresh tokens | only when cloud sync is used |
 | A system-tray host (e.g. GNOME AppIndicator extension) | Tray icon & menu | for the tray |
+
+The `.deb` **depends** on `xdotool | wtype` (at least one injector) and
+**recommends** `x11-utils` and `ydotool`. On GNOME/KDE Wayland, install and
+enable `ydotool` for working paste injection:
+
+```bash
+sudo apt install -y ydotool          # provides ydotool + ydotoold
+sudo systemctl enable --now ydotool  # or run `ydotoold` in your session
+# ensure your user can access /dev/uinput (a udev rule or the input group)
+```
 
 ### Packaging
 
@@ -146,8 +158,12 @@ builds only the ones valid for the host.
 
 These degrade gracefully (no crash) but are not yet at Windows parity:
 
-- **Wayland:** self-positioned cursor popups, global shortcuts, always-on-top,
-  and window transparency are compositor-dependent and may not work. **X11 is
+- **Wayland:** keystroke injection works via the ladder above (`wtype` on
+  wlroots, `ydotool` on GNOME/KDE). What remains compositor-dependent — because
+  Wayland forbids clients from reading the global cursor or positioning their
+  own windows, and the global-shortcut plugin still relies on X11 grabs — is:
+  **cursor-anchored popup placement, global hotkeys, always-on-top, and window
+  transparency.** For the full cursor-popup + global-hotkey experience, **X11 is
   recommended.**
 - **File-list clipboard:** copying **File** entries (and file-backed images) back
   to the clipboard is Windows-only; on Linux the write returns an error
