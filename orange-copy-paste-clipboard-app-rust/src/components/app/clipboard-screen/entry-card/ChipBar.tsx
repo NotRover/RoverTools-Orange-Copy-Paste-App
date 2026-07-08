@@ -391,7 +391,10 @@ const ChipBar: React.FC<ChipBarProps> = ({
             Copied
           </span>
         ) : (
-          <span className="card-time">{relTime}</span>
+          <span className="card-time card-time--pinned">
+            {entry.pinned && PinIcon}
+            {relTime}
+          </span>
         )}
       </div>
       {showHiddenChips && totalHiddenCount > 0 && (
