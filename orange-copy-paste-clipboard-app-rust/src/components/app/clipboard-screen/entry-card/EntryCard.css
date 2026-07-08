@@ -205,6 +205,21 @@
 .entry-card--expanded .card-text {
   max-height: min(480px, 60vh);
   overflow: auto;
+  scrollbar-width: thin;
+}
+
+.entry-card--expanded .card-text::-webkit-scrollbar {
+  width: 6px;
+}
+.entry-card--expanded .card-text::-webkit-scrollbar-track {
+  background: transparent;
+}
+.entry-card--expanded .card-text::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+.entry-card--expanded .card-text::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 
 .card-text--file {
@@ -258,6 +273,21 @@
 .card-html-preview--expanded {
   max-height: min(480px, 60vh);
   overflow: auto;
+  scrollbar-width: thin;
+}
+
+.card-html-preview--expanded::-webkit-scrollbar {
+  width: 6px;
+}
+.card-html-preview--expanded::-webkit-scrollbar-track {
+  background: transparent;
+}
+.card-html-preview--expanded::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+.card-html-preview--expanded::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 
 .card-html-preview--faded {
