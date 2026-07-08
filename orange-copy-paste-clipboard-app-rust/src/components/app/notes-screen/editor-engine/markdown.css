@@ -271,6 +271,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow-x: auto;
+  scrollbar-width: thin;
   font-size: 12.5px;
   line-height: 1.55;
   font-family: var(--ee-editor-mono);
@@ -623,6 +624,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow-x: auto;
+  scrollbar-width: thin;
   font-size: 12.5px;
   line-height: 1.55;
 }
@@ -1244,7 +1246,32 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   overflow-x: auto;
+  scrollbar-width: thin;
   margin: 8px 0;
+}
+
+/* Thin horizontal scrollbar for code blocks (editor, preview, and card). */
+.ee-rich.ProseMirror pre::-webkit-scrollbar,
+.ee-preview pre::-webkit-scrollbar,
+.ee-codeblock::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.ee-rich.ProseMirror pre::-webkit-scrollbar-track,
+.ee-preview pre::-webkit-scrollbar-track,
+.ee-codeblock::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ee-rich.ProseMirror pre::-webkit-scrollbar-thumb,
+.ee-preview pre::-webkit-scrollbar-thumb,
+.ee-codeblock::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+.ee-rich.ProseMirror pre::-webkit-scrollbar-thumb:hover,
+.ee-preview pre::-webkit-scrollbar-thumb:hover,
+.ee-codeblock::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 .ee-codeblock code {
   background: transparent;

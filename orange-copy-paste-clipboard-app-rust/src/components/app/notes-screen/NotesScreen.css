@@ -97,7 +97,7 @@
 }
 
 .ns-viewport::-webkit-scrollbar {
-  width: 10px;
+  width: 7px;
 }
 
 .ns-viewport::-webkit-scrollbar-track {
@@ -107,13 +107,13 @@
 .ns-viewport::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 999px;
-  border: 3px solid var(--bg);
+  border: 2px solid var(--bg);
   background-clip: padding-box;
 }
 
 .ns-viewport::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
-  border: 3px solid var(--bg);
+  border: 2px solid var(--bg);
   background-clip: padding-box;
 }
 
