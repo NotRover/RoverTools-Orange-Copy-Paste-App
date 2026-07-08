@@ -63,7 +63,7 @@
     "linux": {
       "deb": {
         "depends": ["xdotool | wtype"],
-        "recommends": ["x11-utils"]
+        "recommends": ["x11-utils", "ydotool"]
       },
       "rpm": {
         "depends": ["xdotool"]
