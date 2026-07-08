@@ -315,7 +315,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
         }
         rightSlot={
           <>
-            <LayoutSegment layout={layout} onLayoutChange={selectLayout} />
+            <LayoutSegment layout={layout} onLayoutChange={selectLayout} showSingle />
 
             <div className="cs-toolbar-sep" />
 
@@ -440,7 +440,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             </div>
           ) : (
             <div
-              className={`ns-grid${layout === "list" ? " ns-grid--list" : ""}`}
+              className={`ns-grid${layout === "list" ? " ns-grid--grid" : layout === "single" ? " ns-grid--single" : ""}`}
             >
               {sortedNotes.map((n, idx) => (
                 <React.Fragment key={n.id}>

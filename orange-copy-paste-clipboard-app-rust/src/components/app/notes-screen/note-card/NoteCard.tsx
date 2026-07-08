@@ -79,6 +79,12 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
         )}
         <div className="ns-card-footer">
           <div className="ns-card-chips">
+            {note.pinned && (
+              <span className="ns-chip ns-chip--pinned">
+                <PinIcon size={9} />
+                <span className="ns-chip-label">Pinned</span>
+              </span>
+            )}
             {note.groups.map((g) => {
               const c = groupColor(g);
               return (
@@ -93,9 +99,7 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
               );
             })}
           </div>
-          <span
-            className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
-          >
+          <span className="ns-card-time ns-card-time--pinned">
             {note.pinned && <PinIcon size={8} />}
             {relTime}
           </span>
