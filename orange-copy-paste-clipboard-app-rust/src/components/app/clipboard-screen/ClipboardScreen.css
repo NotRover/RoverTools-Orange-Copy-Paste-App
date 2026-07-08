@@ -19,6 +19,8 @@
   transition: opacity 0.16s ease;
   overflow-x: hidden;
   overflow: hidden auto;
+  /* Leave a little breathing room between the scrollbar and the window edge. */
+  margin-right: 6px;
 }
 
 .layout-viewport--fading {
@@ -28,7 +30,7 @@
 /* Timeline */
 
 .layout-viewport::-webkit-scrollbar {
-  width: 7px;
+  width: 12px;
 }
 
 .layout-viewport::-webkit-scrollbar-track {
@@ -288,7 +290,7 @@
 .entry-grid {
   flex: 1;
   overflow: hidden auto;
-  padding: 14px;
+  padding: 14px 22px 14px 14px;
   columns: 2;
   column-gap: 10px;
 }
@@ -300,7 +302,7 @@
 }
 
 .entry-grid::-webkit-scrollbar {
-  width: 7px;
+  width: 12px;
 }
 
 .entry-grid::-webkit-scrollbar-track {
@@ -325,13 +327,13 @@
 .entry-single {
   flex: 1;
   overflow: hidden auto;
-  padding: 14px;
+  padding: 14px 22px 14px 14px;
   display: flex;
   flex-direction: column;
 }
 
 .entry-single::-webkit-scrollbar {
-  width: 7px;
+  width: 12px;
 }
 
 .entry-single::-webkit-scrollbar-track {
@@ -388,13 +390,13 @@
 .entry-list {
   flex: 1;
   overflow: hidden auto;
-  padding: 14px;
+  padding: 14px 22px 14px 14px;
   columns: 2;
   column-gap: 10px;
 }
 
 .entry-list::-webkit-scrollbar {
-  width: 7px;
+  width: 12px;
 }
 
 .entry-list::-webkit-scrollbar-track {

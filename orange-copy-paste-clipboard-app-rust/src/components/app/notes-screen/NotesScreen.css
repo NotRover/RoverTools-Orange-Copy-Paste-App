@@ -90,6 +90,8 @@
   overflow: hidden auto;
   opacity: 1;
   transition: opacity 0.16s ease;
+  /* Leave a little breathing room between the scrollbar and the window edge. */
+  margin-right: 6px;
 }
 
 .ns-viewport--fading {
@@ -97,7 +99,7 @@
 }
 
 .ns-viewport::-webkit-scrollbar {
-  width: 7px;
+  width: 12px;
 }
 
 .ns-viewport::-webkit-scrollbar-track {
@@ -118,7 +120,7 @@
 }
 
 .ns-grid {
-  padding: 14px;
+  padding: 14px 22px 14px 14px;
   columns: 2;
   column-gap: 10px;
 }
