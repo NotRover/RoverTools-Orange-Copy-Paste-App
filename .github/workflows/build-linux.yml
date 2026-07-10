@@ -26,9 +26,9 @@ on:
 
 jobs:
   build:
-    # Publishing a release requires write access to repo contents.
     permissions:
-      contents: write
+      contents: write # publish releases + delete old release tags
+      actions: write # delete this workflow's old runs (frees artifact storage)
     # Build on the OLDEST supported runner on purpose: the binary links against
     # that image's glibc/webkit, and a bundle built on a newer OS will NOT run
     # on older ones. 22.04 keeps the .deb runnable on current Ubuntu/Debian/Mint.
@@ -116,3 +116,31 @@ jobs:
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/deb/*.deb
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/appimage/*.AppImage
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/rpm/*.rpm
+
+      - name: Prune old builds (keep last 5)
+        # Keep storage bounded: delete this workflow's older runs (which frees
+        # their artifacts) and older auto-generated `*-build.*` releases, keeping
+        # only the 5 most recent of each. Manually-named releases are left alone.
+        # Best-effort — cleanup problems never fail the build.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEEP: 5
+        run: |
+          # Auto-build releases: newest KEEP kept, the rest deleted with their tags.
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq "[.[] | select(.tagName | contains(\"-build.\"))] | sort_by(.createdAt) | reverse | .[${KEEP}:] | .[].tagName" \
+            | while read -r t; do
+                [ -z "$t" ] && continue
+                echo "Deleting old release+tag: $t"
+                gh release delete "$t" --yes --cleanup-tag
+              done
+          # This workflow's runs: newest KEEP kept, older runs (and their artifacts) deleted.
+          gh run list --workflow build-linux.yml --limit 100 --json databaseId,createdAt \
+            --jq "sort_by(.createdAt) | reverse | .[${KEEP}:] | .[].databaseId" \
+            | while read -r r; do
+                [ -z "$r" ] && continue
+                echo "Deleting old workflow run: $r"
+                gh run delete "$r"
+              done
