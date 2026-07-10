@@ -174,7 +174,7 @@ runs on a wide range of current distros.
 ### Installing the `.deb`
 
 ```bash
-sudo apt install ./notrover-smart-clipboard-app-rust_<version>_amd64.deb
+sudo apt install ./Orange.Copy.Paste_*.deb
 ```
 
 `apt` pulls the declared injector (`xdotool | wtype`) automatically. The
