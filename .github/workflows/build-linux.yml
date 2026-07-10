@@ -14,9 +14,21 @@ on:
           - deb
           - appimage
           - deb,rpm,appimage
+      tag:
+        description: "Release tag (leave blank to auto-generate vVERSION-build.RUN)"
+        type: string
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark the release as a prerelease"
+        type: boolean
+        default: true
 
 jobs:
   build:
+    # Publishing a release requires write access to repo contents.
+    permissions:
+      contents: write
     # Build on the OLDEST supported runner on purpose: the binary links against
     # that image's glibc/webkit, and a bundle built on a newer OS will NOT run
     # on older ones. 22.04 keeps the .deb runnable on current Ubuntu/Debian/Mint.
@@ -73,3 +85,34 @@ jobs:
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Resolve release tag
+        id: rel
+        # Use the typed tag if given; otherwise auto-generate a unique tag from
+        # the app version + run number. INPUT_TAG is passed via env (not inlined)
+        # to avoid shell-injection through the free-text input.
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(grep -m1 '^version = ' src-tauri/Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="v${version}-build.${{ github.run_number }}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $tag"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.tag }}
+          prerelease: ${{ inputs.prerelease }}
+          # Attach whatever bundle formats this run produced. Not failing on an
+          # unmatched glob keeps it robust to the `bundles` selection above.
+          fail_on_unmatched_files: false
+          files: |
+            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/deb/*.deb
+            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/appimage/*.AppImage
+            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/rpm/*.rpm
