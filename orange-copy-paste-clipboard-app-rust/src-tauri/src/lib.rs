@@ -300,9 +300,55 @@ fn setup_runtime(
     Ok(())
 }
 
+/// Parse a `--trigger <action>` argument out of a process argv, returning the
+/// action string (`"copy"` / `"paste"`). Accepts both the space-separated
+/// (`--trigger copy`) and `=`-joined (`--trigger=copy`) forms.
+///
+/// This backs the Wayland popup fallback: users bind a compositor keybind to
+/// `rovertools --trigger copy|paste`, and that relaunch is routed to the
+/// running instance by the single-instance plugin.
+fn parse_trigger_action(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let Some(rest) = arg.strip_prefix("--trigger") else {
+            continue;
+        };
+        if let Some(val) = rest.strip_prefix('=') {
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        } else if rest.is_empty() {
+            // Space-separated form: the value is the next argument.
+            if let Some(next) = it.next() {
+                return Some(next.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Dispatch a forwarded CLI invocation to the matching popup handler.
+/// A no-op for unrecognized actions.
+fn dispatch_trigger(app: &tauri::AppHandle, args: &[String]) {
+    match parse_trigger_action(args).as_deref() {
+        Some("copy") => crate::runtime::hotkeys::trigger_copy_popup(app),
+        Some("paste") => crate::runtime::hotkeys::trigger_paste_popup(app),
+        _ => {}
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    kill_previous_instance();
+    let launch_args: Vec<String> = std::env::args().collect();
+    let is_trigger = parse_trigger_action(&launch_args).is_some();
+
+    // A `--trigger` launch must reach the ALREADY-RUNNING instance (via the
+    // single-instance plugin) and fire the popup there, so it must NOT kill the
+    // primary. Normal launches keep the "new instance replaces old" behavior
+    // that releases the old process's global hotkeys on restart.
+    if !is_trigger {
+        kill_previous_instance();
+    }
 
     let history = create_shared_history();
     let suppress: SuppressFlag = Arc::new(AtomicBool::new(false));
@@ -326,6 +372,17 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        // MUST be the first plugin registered. Runs the closure in the primary
+        // instance whenever a second instance launches: a `--trigger` relaunch
+        // fires the popup here; any other relaunch just surfaces the main window.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if parse_trigger_action(&argv).is_some() {
+                dispatch_trigger(app, &argv);
+            } else if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .manage(app_state)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
