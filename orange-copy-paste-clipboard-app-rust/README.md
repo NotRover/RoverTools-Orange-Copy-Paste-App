@@ -162,9 +162,33 @@ These degrade gracefully (no crash) but are not yet at Windows parity:
   wlroots, `ydotool` on GNOME/KDE). What remains compositor-dependent — because
   Wayland forbids clients from reading the global cursor or positioning their
   own windows, and the global-shortcut plugin still relies on X11 grabs — is:
-  **cursor-anchored popup placement, global hotkeys, always-on-top, and window
-  transparency.** For the full cursor-popup + global-hotkey experience, **X11 is
-  recommended.**
+  **cursor-anchored popup placement** (we center popups on the active monitor
+  instead), **always-on-top, and window transparency.** The built-in
+  `Ctrl+Shift+C/V` global hotkeys do **not** fire on native Wayland; use the CLI
+  trigger below instead. For the zero-config cursor-popup + global-hotkey
+  experience, **X11 is still the smoothest.**
+
+  **Global hotkeys on Wayland — CLI trigger.** Because Wayland won't deliver a
+  global shortcut to an ordinary app, bind your *compositor's* keybind to
+  relaunch the binary with a `--trigger` flag. The running instance receives it
+  (via single-instance) and shows the same popup the hotkey would:
+
+  ```sh
+  rovertools --trigger copy    # show the copy popup
+  rovertools --trigger paste   # show the paste popup
+  ```
+
+  Use the actual installed binary name/path (e.g.
+  `notrover-smart-clipboard-app-rust`, or the `Exec=` line from the installed
+  `.desktop` file). Example bindings:
+
+  - **Sway/Hyprland (wlroots):** `bindsym $mod+Shift+v exec rovertools --trigger paste`
+  - **GNOME:** Settings → Keyboard → Custom Shortcuts → command `rovertools --trigger paste`
+  - **KDE:** System Settings → Shortcuts → Custom → run the command above
+
+  This path works on **every** compositor (X11 included), so it's a reliable
+  fallback anywhere the built-in hotkey doesn't register. The app must already
+  be running (launch it normally or via autostart) for the trigger to hit it.
 - **File-list clipboard:** copying **File** entries (and file-backed images) back
   to the clipboard is Windows-only; on Linux the write returns an error
   (`text/uri-list` support is not implemented yet).

@@ -117,6 +117,26 @@ fn handle_copy_shortcut(
     });
 }
 
+/// Fire the copy-popup flow from a source other than the OS global shortcut —
+/// used by the `--trigger copy` CLI invocation (the Wayland fallback where the
+/// compositor doesn't deliver global hotkeys to the app). Pulls the shared
+/// history + suppress flag from app state so it runs the *identical* path to
+/// the registered `Ctrl+Shift+C` handler, including the watcher-suppress dance.
+pub(crate) fn trigger_copy_popup(app: &tauri::AppHandle) {
+    let state = app.state::<crate::state::app_state::AppState>();
+    let history = Arc::clone(&state.history);
+    let suppress = Arc::clone(&state.suppress_next_capture);
+    handle_copy_shortcut(app.clone(), history, suppress);
+}
+
+/// Fire the paste-popup flow from the `--trigger paste` CLI invocation — the
+/// Wayland counterpart to the `Ctrl+Shift+V` handler.
+pub(crate) fn trigger_paste_popup(app: &tauri::AppHandle) {
+    let state = app.state::<crate::state::app_state::AppState>();
+    let history = Arc::clone(&state.history);
+    handle_paste_shortcut(app.clone(), history);
+}
+
 fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHistory>>) {
     if toggle_popup_if_visible(&app, "paste-popup") {
         return;

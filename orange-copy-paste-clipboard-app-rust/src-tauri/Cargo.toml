@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+# Single-instance: routes a second launch's CLI args to the running instance.
+# Backs the `--trigger copy|paste` popup trigger, which is the reliable way to
+# fire the shortcuts on Wayland compositors that don't deliver global hotkeys.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
