@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         # Backend is a submodule and is not needed for the client build — skip it.
 
       - name: Install Linux system dependencies
@@ -63,7 +63,7 @@ jobs:
         run: bun run tauri build --bundles ${{ inputs.bundles }}
 
       - name: Upload bundles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rovertools-linux
           # Paths are relative to the repo root, not the job working-directory.
