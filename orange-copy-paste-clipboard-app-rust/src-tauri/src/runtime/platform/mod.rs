@@ -14,12 +14,14 @@ mod linux;
 
 #[cfg(windows)]
 pub use self::windows::{
-    cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste, work_area_for_point,
+    cursor_available, cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste,
+    work_area_for_point,
 };
 
 #[cfg(target_os = "linux")]
 pub use self::linux::{
-    cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste, work_area_for_point,
+    cursor_available, cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste,
+    work_area_for_point,
 };
 
 //  Cross-platform utilities

@@ -1,0 +1,75 @@
+name: Build Linux (manual)
+
+# Manual-only: this never runs on push or PR. Start it from the Actions tab
+# ("Run workflow") or with `gh workflow run build-linux.yml`.
+on:
+  workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Bundle formats to build"
+        type: choice
+        default: deb,appimage
+        options:
+          - deb,appimage
+          - deb
+          - appimage
+          - deb,rpm,appimage
+
+jobs:
+  build:
+    # Build on the OLDEST supported runner on purpose: the binary links against
+    # that image's glibc/webkit, and a bundle built on a newer OS will NOT run
+    # on older ones. 22.04 keeps the .deb runnable on current Ubuntu/Debian/Mint.
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: orange-copy-paste-clipboard-app-rust
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        # Backend is a submodule and is not needed for the client build — skip it.
+
+      - name: Install Linux system dependencies
+        # Tauri v2 GTK/WebKit toolchain + libxdo (input) + appindicator (tray).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl wget file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: orange-copy-paste-clipboard-app-rust/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Build Tauri bundles
+        # beforeBuildCommand (bun run build) compiles the frontend automatically.
+        run: bun run tauri build --bundles ${{ inputs.bundles }}
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: rovertools-linux
+          # Paths are relative to the repo root, not the job working-directory.
+          path: |
+            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/deb/*.deb
+            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/appimage/*.AppImage
+            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: warn
+          retention-days: 14

@@ -32,10 +32,12 @@ fn toggle_popup_if_visible(app: &tauri::AppHandle, label: &str) -> bool {
 }
 
 fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
-    let (px, py) = platform::popup_position(COPY_POPUP_W as i32, COPY_POPUP_H as i32);
-
     if let Some(win) = app.get_webview_window("copy-popup") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+        crate::runtime::popup_windows::place_popup_for_show(
+            &win,
+            COPY_POPUP_W as i32,
+            COPY_POPUP_H as i32,
+        );
         let payload = CopyPopupPayload {
             id: entry.id.clone(),
             kind: entry.kind.label().to_string(),
@@ -115,6 +117,26 @@ fn handle_copy_shortcut(
     });
 }
 
+/// Fire the copy-popup flow from a source other than the OS global shortcut —
+/// used by the `--trigger copy` CLI invocation (the Wayland fallback where the
+/// compositor doesn't deliver global hotkeys to the app). Pulls the shared
+/// history + suppress flag from app state so it runs the *identical* path to
+/// the registered `Ctrl+Shift+C` handler, including the watcher-suppress dance.
+pub(crate) fn trigger_copy_popup(app: &tauri::AppHandle) {
+    let state = app.state::<crate::state::app_state::AppState>();
+    let history = Arc::clone(&state.history);
+    let suppress = Arc::clone(&state.suppress_next_capture);
+    handle_copy_shortcut(app.clone(), history, suppress);
+}
+
+/// Fire the paste-popup flow from the `--trigger paste` CLI invocation — the
+/// Wayland counterpart to the `Ctrl+Shift+V` handler.
+pub(crate) fn trigger_paste_popup(app: &tauri::AppHandle) {
+    let state = app.state::<crate::state::app_state::AppState>();
+    let history = Arc::clone(&state.history);
+    handle_paste_shortcut(app.clone(), history);
+}
+
 fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHistory>>) {
     if toggle_popup_if_visible(&app, "paste-popup") {
         return;
@@ -127,10 +149,12 @@ fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHist
     };
     drop(hist);
 
-    let (px, py) = platform::popup_position(PASTE_POPUP_W as i32, PASTE_POPUP_H as i32);
-
     if let Some(win) = app.get_webview_window("paste-popup") {
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+        crate::runtime::popup_windows::place_popup_for_show(
+            &win,
+            PASTE_POPUP_W as i32,
+            PASTE_POPUP_H as i32,
+        );
         let _ = win.emit("paste-popup:entries", &payload);
         let _ = win.show();
         let _ = win.set_focus();

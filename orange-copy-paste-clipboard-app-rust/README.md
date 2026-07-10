@@ -4,7 +4,7 @@ Smart Clipboard is a desktop clipboard manager built with:
 
 - **Frontend:** React + TypeScript + Vite
 - **Backend:** Rust + Tauri 2
-- **Target platform:** Windows-first (global hotkeys and clipboard integrations are implemented for Windows)
+- **Target platforms:** Windows and Linux (X11 recommended; see [Linux support](#linux-support) for Wayland caveats and feature parity)
 
 It captures copied text/images/files into history, shows quick popups near the cursor, and supports fast paste actions from recent clipboard entries.
 
@@ -84,7 +84,8 @@ It captures copied text/images/files into history, shows quick popups near the c
   - `image` + `base64` for image encode/decode and data URL conversion
   - `rmp-serde` for binary persistence (MessagePack)
   - `parking_lot` for efficient shared mutex state
-  - `windows-sys` for Windows input/cursor/monitor and clipboard format helpers
+  - `windows-sys` (Windows only) for input/cursor/monitor and clipboard format helpers; Linux uses `xdotool`/`wtype`/`xdpyinfo` via `runtime/platform/linux.rs`
+  - `keyring` for OS credential storage (Windows Credential Manager / Linux Secret Service)
 
 ---
 
@@ -92,12 +93,139 @@ It captures copied text/images/files into history, shows quick popups near the c
 
 - **Node/Bun toolchain** (project uses `bun` as package manager)
 - **Rust toolchain** (stable)
-- **Tauri prerequisites** for your OS (WebView2 on Windows, etc.)
+- **Tauri prerequisites** for your OS (WebView2 on Windows, the GTK/WebKitGTK stack on Linux — see below)
 
 Recommended VS Code extensions:
 
 - Tauri
 - rust-analyzer
+
+---
+
+## Linux support
+
+The app builds and runs on Linux. All Windows-only integrations (Win32 clipboard
+formats, cursor/monitor queries, keystroke injection) are compiled out and
+replaced with Linux equivalents, so the same source tree targets both platforms.
+
+### Build prerequisites (Debian/Ubuntu)
+
+Install the standard Tauri v2 Linux toolchain before `bun run tauri build`:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+(Fedora/Arch have equivalent packages — see the Tauri v2 prerequisites docs.)
+
+### Runtime dependencies
+
+Keystroke injection and cursor/monitor placement shell out to small,
+widely-available utilities. Injection uses a **capability ladder** — the app
+detects the session and tries the best-available tool, falling back only when
+one is missing or fails, so a single binary works across X11 and Wayland:
+
+| Tool | Purpose | When needed |
+|------|---------|-------------|
+| `xdotool` | Ctrl+C/Ctrl+V injection, cursor position | X11 (and XWayland) sessions |
+| `wtype` | Ctrl+C/Ctrl+V injection | Wayland on wlroots compositors (Sway, Hyprland, River) |
+| `ydotool` (+ `ydotoold`) | Ctrl+C/Ctrl+V injection fallback | Wayland on GNOME/KDE, where `wtype` is blocked — needs the daemon running and uinput access |
+| `x11-utils` (`xdpyinfo`) | Monitor work-area geometry | X11 (optional; falls back to 1920×1080) |
+| `xdg-utils` (`xdg-open`) | "Open data folder" | all |
+| A Secret Service provider (GNOME Keyring / KWallet) | Stores sync device keys & refresh tokens | only when cloud sync is used |
+| A system-tray host (e.g. GNOME AppIndicator extension) | Tray icon & menu | for the tray |
+
+The `.deb` **depends** on `xdotool | wtype` (at least one injector) and
+**recommends** `x11-utils` and `ydotool`. On GNOME/KDE Wayland, install and
+enable `ydotool` for working paste injection:
+
+```bash
+sudo apt install -y ydotool          # provides ydotool + ydotoold
+sudo systemctl enable --now ydotool  # or run `ydotoold` in your session
+# ensure your user can access /dev/uinput (a udev rule or the input group)
+```
+
+### Packaging
+
+`bun run tauri build` produces `.deb`, `.rpm`, and AppImage bundles on Linux
+(and the NSIS installer on Windows) — `bundle.targets` lists all four and Tauri
+builds only the ones valid for the host.
+
+> Tauri bundles cannot be cross-compiled from Windows — the Linux artifacts must
+> be built on Linux (a machine, VM, WSL, or CI).
+
+### Building Linux bundles via GitHub Actions (no local Linux needed)
+
+The parent repo ships a **manual** workflow, `.github/workflows/build-linux.yml`
+(`workflow_dispatch` — it never runs on push/PR):
+
+1. GitHub → **Actions** → **Build Linux (manual)** → **Run workflow** (choose the
+   bundle formats; default `deb,appimage`). *The "Run workflow" button only
+   appears once the workflow file is on the default branch (`main`).*
+2. When the run finishes, download the **`rovertools-linux`** artifact — a zip
+   containing the `.deb` (and `.AppImage`).
+
+It builds on `ubuntu-22.04` so the binary links against an older glibc/WebKit and
+runs on a wide range of current distros.
+
+### Installing the `.deb`
+
+```bash
+sudo apt install ./notrover-smart-clipboard-app-rust_<version>_amd64.deb
+```
+
+`apt` pulls the declared injector (`xdotool | wtype`) automatically. The
+`.AppImage` is a single portable file (`chmod +x` then run) but does **not**
+bundle those tools — install `xdotool` (X11) or `wtype`/`ydotool` (Wayland)
+yourself for copy/paste injection.
+
+### Known limitations on Linux
+
+These degrade gracefully (no crash) but are not yet at Windows parity:
+
+- **Wayland:** keystroke injection works via the ladder above (`wtype` on
+  wlroots, `ydotool` on GNOME/KDE). What remains compositor-dependent — because
+  Wayland forbids clients from reading the global cursor or positioning their
+  own windows, and the global-shortcut plugin still relies on X11 grabs — is:
+  **cursor-anchored popup placement** (we center popups on the active monitor
+  instead), **always-on-top, and window transparency.** The built-in
+  `Ctrl+Shift+C/V` global hotkeys do **not** fire on native Wayland; use the CLI
+  trigger below instead. For the zero-config cursor-popup + global-hotkey
+  experience, **X11 is still the smoothest.**
+
+  **Global hotkeys on Wayland — CLI trigger.** Because Wayland won't deliver a
+  global shortcut to an ordinary app, bind your *compositor's* keybind to
+  relaunch the binary with a `--trigger` flag. The running instance receives it
+  (via single-instance) and shows the same popup the hotkey would:
+
+  ```sh
+  rovertools --trigger copy    # show the copy popup
+  rovertools --trigger paste   # show the paste popup
+  ```
+
+  Use the actual installed binary name/path (e.g.
+  `notrover-smart-clipboard-app-rust`, or the `Exec=` line from the installed
+  `.desktop` file). Example bindings:
+
+  - **Sway/Hyprland (wlroots):** `bindsym $mod+Shift+v exec rovertools --trigger paste`
+  - **GNOME:** Settings → Keyboard → Custom Shortcuts → command `rovertools --trigger paste`
+  - **KDE:** System Settings → Shortcuts → Custom → run the command above
+
+  This path works on **every** compositor (X11 included), so it's a reliable
+  fallback anywhere the built-in hotkey doesn't register. The app must already
+  be running (launch it normally or via autostart) for the trigger to hit it.
+- **File-list clipboard:** copying **File** entries (and file-backed images) back
+  to the clipboard is Windows-only; on Linux the write returns an error
+  (`text/uri-list` support is not implemented yet).
+- **HTML clipboard:** rich-HTML entries are not written to the Linux clipboard
+  yet (plain-text/image entries work via `arboard`).
+- **Clipboard capture:** file-drops and HTML sources are not captured into
+  history on Linux (text and images are).
+- **Image labels:** auto-generated image labels show a raw timestamp instead of a
+  localized date/time.
 
 ---
 
@@ -342,8 +470,8 @@ notrover-smart-clipboard-app-rust/
 
 ## Notes
 
-- The app is Windows-first; clipboard file support (`CF_HDROP`), cursor position, and monitor work area all use `windows-sys` directly.
-- Popup windows use `transparent: true` + `decorations: false` + `shadow: false` with a CSS-padded body to achieve clean rounded corners without OS border artifacts.
+- The app targets Windows and Linux. On Windows, clipboard file support (`CF_HDROP`), cursor position, and monitor work area use `windows-sys` directly; the equivalent Linux paths live in `runtime/platform/linux.rs` and shell out to `xdotool`/`wtype`/`xdpyinfo` (see [Linux support](#linux-support)).
+- Popup windows use `transparent: true` + `decorations: false` + `shadow: false` with a CSS-padded body to achieve clean rounded corners without OS border artifacts (transparency requires a compositor on Linux).
 - Theme (`dark`/`light`) is stored in `localStorage` under `sc-theme` and read by both popup windows on focus; falls back to the OS `prefers-color-scheme` media query when no manual override is set.
 - Release profile in `src-tauri/Cargo.toml` is optimized for smaller binaries (`opt-level = "z"`, `lto`, `strip`).
 - The custom `VideoPlayer` component deliberately suppresses the native browser context menu on `<video>` to avoid exposing Download, Picture-in-Picture, and Playback speed controls that don't belong in a clipboard manager.

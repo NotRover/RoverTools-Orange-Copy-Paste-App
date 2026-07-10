@@ -10,33 +10,49 @@ struct PopupWindowSpec {
     width: f64,
     height: f64,
     focused: bool,
-    ignore_cursor_events: bool,
 }
 
 fn build_popup_window(
     app: &mut tauri::App,
     spec: &PopupWindowSpec,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let win =
-        tauri::WebviewWindowBuilder::new(app, spec.label, tauri::WebviewUrl::App(spec.url.into()))
-            .title("")
-            .inner_size(spec.width, spec.height)
-            .position(OFFSCREEN_POS, OFFSCREEN_POS)
-            .decorations(false)
-            .transparent(true)
-            .shadow(false)
-            .resizable(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .focused(spec.focused)
-            .visible(false)
-            .build()?;
-
-    if spec.ignore_cursor_events {
-        let _ = win.set_ignore_cursor_events(true);
-    }
+    // NOTE: do NOT call `set_ignore_cursor_events` here. The window is built
+    // `visible(false)` and is therefore unrealized; on GTK/Linux the backing
+    // GDK window is `None` until first shown, so calling that method now panics
+    // inside tao. Click-through (only the notification needs it) is applied in
+    // `notifications.rs` *after* `show()`, once the window is realized.
+    tauri::WebviewWindowBuilder::new(app, spec.label, tauri::WebviewUrl::App(spec.url.into()))
+        .title("")
+        .inner_size(spec.width, spec.height)
+        .position(OFFSCREEN_POS, OFFSCREEN_POS)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(spec.focused)
+        .visible(false)
+        .build()?;
 
     Ok(())
+}
+
+/// Place a popup for display.
+///
+/// Where the platform can report the global cursor (Windows, Linux/X11) the
+/// popup anchors just below-right of the cursor. Where it cannot (Linux/Wayland
+/// forbids clients from reading the cursor *and* from self-positioning) we fall
+/// back to centering on the active monitor — `center()` is the one placement
+/// request Wayland compositors still honor, so the popup lands somewhere
+/// predictable and on-screen instead of at an ignored coordinate.
+pub(crate) fn place_popup_for_show(win: &tauri::WebviewWindow, w: i32, h: i32) {
+    if crate::runtime::platform::cursor_available() {
+        let (px, py) = crate::runtime::platform::popup_position(w, h);
+        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+    } else {
+        let _ = win.center();
+    }
 }
 
 pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
@@ -71,7 +87,6 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             width: COPY_POPUP_W,
             height: COPY_POPUP_H,
             focused: true,
-            ignore_cursor_events: false,
         },
         PopupWindowSpec {
             label: "paste-popup",
@@ -79,7 +94,6 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             width: PASTE_POPUP_W,
             height: PASTE_POPUP_H,
             focused: false,
-            ignore_cursor_events: false,
         },
         PopupWindowSpec {
             label: "notification",
@@ -87,7 +101,6 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             width: NOTIF_W,
             height: NOTIF_H,
             focused: false,
-            ignore_cursor_events: true,
         },
     ];
 

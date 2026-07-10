@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+# Single-instance: routes a second launch's CLI args to the running instance.
+# Backs the `--trigger copy|paste` popup trigger, which is the reliable way to
+# fire the shortcuts on Wayland compositors that don't deliver global hotkeys.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -39,22 +43,6 @@ rmp-serde = "1"
 # Ergonomic lock primitives (no poisoning, direct lock() → MutexGuard)
 parking_lot = "0.12"
 uuid = { version = "1.23.4", features = ["v4"] }
-
-#  Windows-only  key simulation (keybd_event / GetCursorPos / monitor info)
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Shell",
-    "Win32_Graphics_Gdi",
-    "Win32_System_DataExchange",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
-    "Win32_System_SystemInformation",
-    "Win32_System_Time",
-    "Win32_UI_HiDpi",
-] }
 
 # ── Cloud sync dependencies ──────────────────────────────────────────────────
 # These are loaded only when the sync module is active (runtime-gated by
@@ -83,6 +71,24 @@ keyring = "2"
 zeroize = { version = "1", features = ["derive"] }
 # Open the system browser for the OAuth authorization hop
 open = "5"
+
+#  Windows-only  key simulation (keybd_event / GetCursorPos / monitor info)
+#  NOTE: keep this target table LAST — any `dep = ...` lines after a target
+#  table header belong to that table, so cross-platform deps must precede it.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Gdi",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+    "Win32_System_Time",
+    "Win32_UI_HiDpi",
+] }
 
 [profile.release]
 opt-level = "z"   # optimize for binary size

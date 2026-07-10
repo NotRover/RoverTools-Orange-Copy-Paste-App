@@ -100,6 +100,10 @@ pub(crate) fn start_clipboard_watcher(
     let app = app.clone();
 
     std::thread::spawn(move || {
+        // Only the Windows path tracks a change token (the OS clipboard sequence
+        // number); other platforms poll unconditionally, so the token is unused
+        // there and its declaration would warn.
+        #[cfg(windows)]
         let mut last_token = clipboard_change_token();
 
         loop {
