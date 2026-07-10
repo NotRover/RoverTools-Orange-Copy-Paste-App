@@ -154,6 +154,34 @@ sudo systemctl enable --now ydotool  # or run `ydotoold` in your session
 (and the NSIS installer on Windows) — `bundle.targets` lists all four and Tauri
 builds only the ones valid for the host.
 
+> Tauri bundles cannot be cross-compiled from Windows — the Linux artifacts must
+> be built on Linux (a machine, VM, WSL, or CI).
+
+### Building Linux bundles via GitHub Actions (no local Linux needed)
+
+The parent repo ships a **manual** workflow, `.github/workflows/build-linux.yml`
+(`workflow_dispatch` — it never runs on push/PR):
+
+1. GitHub → **Actions** → **Build Linux (manual)** → **Run workflow** (choose the
+   bundle formats; default `deb,appimage`). *The "Run workflow" button only
+   appears once the workflow file is on the default branch (`main`).*
+2. When the run finishes, download the **`rovertools-linux`** artifact — a zip
+   containing the `.deb` (and `.AppImage`).
+
+It builds on `ubuntu-22.04` so the binary links against an older glibc/WebKit and
+runs on a wide range of current distros.
+
+### Installing the `.deb`
+
+```bash
+sudo apt install ./notrover-smart-clipboard-app-rust_<version>_amd64.deb
+```
+
+`apt` pulls the declared injector (`xdotool | wtype`) automatically. The
+`.AppImage` is a single portable file (`chmod +x` then run) but does **not**
+bundle those tools — install `xdotool` (X11) or `wtype`/`ydotool` (Wayland)
+yourself for copy/paste injection.
+
 ### Known limitations on Linux
 
 These degrade gracefully (no crash) but are not yet at Windows parity:
