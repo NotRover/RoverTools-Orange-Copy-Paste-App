@@ -17,6 +17,10 @@ fn show_notification(app: &tauri::AppHandle, entry: &ClipboardEntry, action: &st
         // Position first, then show, then set always-on-top to force Z-order.
         let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
         let _ = win.show();
+        // Make the notification click-through. This MUST run after `show()`:
+        // the window is created hidden/unrealized, and on GTK/Linux calling
+        // `set_ignore_cursor_events` before the GDK window exists panics in tao.
+        let _ = win.set_ignore_cursor_events(true);
         // Toggle always_on_top off then on to force the window manager to
         // re-stack this window above everything else.
         let _ = win.set_always_on_top(false);

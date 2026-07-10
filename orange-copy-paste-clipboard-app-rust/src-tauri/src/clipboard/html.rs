@@ -197,8 +197,11 @@ pub fn write_html_to_clipboard(_html_fragment: &str, _plain_text: &str) -> Resul
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+// These back the CF_HTML read/write paths, which only exist on Windows, so
+// they are gated to avoid dead-code warnings on other platforms.
 
 /// Parse a numeric value from a CF_HTML header line like "StartFragment:000000123".
+#[cfg(windows)]
 fn parse_header_value(raw: &str, key: &str) -> Option<usize> {
     for line in raw.lines() {
         if let Some(rest) = line.strip_prefix(key) {
@@ -219,6 +222,7 @@ fn parse_header_value(raw: &str, key: &str) -> Option<usize> {
 /// This intentionally rejects:
 ///   • Pure `<img>` tags with no text (let the image capture path handle it).
 ///   • Plain text wrapped in `<span style="...">` (the text capture is better).
+#[cfg(windows)]
 fn is_rich_content(html: &str) -> bool {
     let lower = html.to_lowercase();
 
@@ -240,6 +244,7 @@ fn is_rich_content(html: &str) -> bool {
 
 /// Crude tag stripper — removes everything between `<` and `>` to yield
 /// the raw text content of an HTML fragment.
+#[cfg(windows)]
 fn strip_tags(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut inside = false;
@@ -256,6 +261,7 @@ fn strip_tags(html: &str) -> String {
 }
 
 /// Build the full CF_HTML blob with the required header and byte offsets.
+#[cfg(windows)]
 fn build_cf_html(fragment: &str) -> Vec<u8> {
     // The header template — offsets are padded to 10 digits
     let prefix = "Version:0.9\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n";
