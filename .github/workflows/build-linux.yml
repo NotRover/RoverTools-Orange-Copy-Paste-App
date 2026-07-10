@@ -104,7 +104,7 @@ jobs:
           echo "Release tag: $tag"
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
           name: ${{ steps.rel.outputs.tag }}
