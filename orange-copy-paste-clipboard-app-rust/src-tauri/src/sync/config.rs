@@ -7,22 +7,37 @@
 //!   - `supabase_url`         Supabase project URL (GoTrue auth lives here)
 //!   - `supabase_anon_key`    Supabase anon/public API key
 //!
-//! `supabase_url` / `supabase_anon_key` normally ship with the build (via the
-//! `SUPABASE_URL` / `SUPABASE_ANON_KEY` env vars at compile time) but can be
-//! overridden per-install through `settings.json` for self-hosted deployments.
+//! Endpoints come from the `DEFAULT_*` constants below, optionally overridden
+//! per-install by `settings.json`.
+//!
+//! When both are empty the app is *unconfigured*: [`SyncConfig::is_configured`]
+//! returns false and the sign-in screen says so, rather than silently pointing
+//! the app at a host nobody owns.
 
 use tauri::Manager;
-
-pub const DEFAULT_SERVER_URL: &str = "https://api.orangeclipboard.app";
 
 const KEY_ENABLED: &str = "sync_enabled";
 const KEY_SERVER_URL: &str = "sync_server_url";
 const KEY_SUPABASE_URL: &str = "supabase_url";
 const KEY_SUPABASE_ANON_KEY: &str = "supabase_anon_key";
 
-/// Compile-time Supabase defaults, baked from env at build time when present.
-const BUILD_SUPABASE_URL: Option<&str> = option_env!("SUPABASE_URL");
-const BUILD_SUPABASE_ANON_KEY: Option<&str> = option_env!("SUPABASE_ANON_KEY");
+// ── Deployment endpoints ──────────────────────────────────────────────
+//
+// Fill these in to hardcode the deployment this app ships against, so a plain
+// `git clone && bun run tauri build` yields a working binary with no setup.
+//
+// These are PUBLIC values by design: the project URL and publishable key are the
+// same pair any Supabase web app serves in its JS bundle, and on their own they
+// grant nothing beyond the ability to *attempt* a sign-in. Real protection comes
+// from the JWT check, the backend's per-user scoping, and end-to-end encryption.
+//
+// NEVER put a `service_role` / `sb_secret_…` key here — that is full admin
+// access to the project, and anyone can read strings out of a shipped binary.
+//
+// Leave a value empty to build an app that reports itself as unconfigured.
+const DEFAULT_SERVER_URL: &str = "";
+const DEFAULT_SUPABASE_URL: &str = "";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "";
 
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -37,8 +52,8 @@ impl Default for SyncConfig {
         Self {
             enabled: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
-            supabase_url: BUILD_SUPABASE_URL.unwrap_or_default().to_string(),
-            supabase_anon_key: BUILD_SUPABASE_ANON_KEY.unwrap_or_default().to_string(),
+            supabase_url: DEFAULT_SUPABASE_URL.to_string(),
+            supabase_anon_key: DEFAULT_SUPABASE_ANON_KEY.to_string(),
         }
     }
 }
@@ -72,5 +87,13 @@ impl SyncConfig {
             supabase_url: str_or(KEY_SUPABASE_URL, &defaults.supabase_url),
             supabase_anon_key: str_or(KEY_SUPABASE_ANON_KEY, &defaults.supabase_anon_key),
         }
+    }
+
+    /// True once every endpoint needed to reach a deployment is present.
+    /// Sign-in cannot succeed without all three, so the UI gates on this.
+    pub fn is_configured(&self) -> bool {
+        !self.server_url.is_empty()
+            && !self.supabase_url.is_empty()
+            && !self.supabase_anon_key.is_empty()
     }
 }

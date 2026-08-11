@@ -84,6 +84,13 @@ export interface SyncDevice {
   last_seen_at: number;
 }
 
+/// Whether this build has sync endpoints compiled in. False means the
+/// `DEFAULT_*` constants in `sync/config.rs` were left blank, so sign-in
+/// cannot succeed.
+export interface SyncConnection {
+  configured: boolean;
+}
+
 // ── Group tag colors ────────────────────────────────────────────────
 
 export const GROUP_COLORS: { bg: string; fg: string }[] = [

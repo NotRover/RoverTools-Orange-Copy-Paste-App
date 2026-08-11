@@ -445,7 +445,7 @@ pub fn run() {
             crate::sync::commands::sync_get_status,
             crate::sync::commands::sync_now,
             crate::sync::commands::sync_set_enabled,
-            crate::sync::commands::sync_set_server_url,
+            crate::sync::commands::sync_get_connection,
             crate::sync::commands::sync_receive_local_settings,
             crate::sync::commands::sync_push_settings,
             crate::sync::commands::sync_pull_settings,
