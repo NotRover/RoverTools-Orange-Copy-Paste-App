@@ -7,6 +7,7 @@ import type {
   SyncStatusInfo,
   SharingSession,
   SyncDevice,
+  SyncConnection,
 } from "../../../types";
 import {
   Check,
@@ -54,6 +55,11 @@ const AccountScreen: React.FC = () => {
   const [oauthIsNew, setOauthIsNew] = useState(false);
   const [oauthPassword, setOauthPassword] = useState("");
   const [oauthConfirm, setOauthConfirm] = useState("");
+
+  // Connection — endpoints baked in at build time (see src-tauri/build.rs).
+  // Only used to detect a build compiled without them, so sign-in can say so
+  // instead of failing silently.
+  const [conn, setConn] = useState<SyncConnection | null>(null);
 
   // Forgot / reset password
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -163,6 +169,10 @@ const AccountScreen: React.FC = () => {
       if (s.last_synced_at) setLastSynced(s.last_synced_at);
     }).catch(() => {});
   };
+
+  useEffect(() => {
+    invoke<SyncConnection>("sync_get_connection").then(setConn).catch(() => {});
+  }, []);
 
   const resetOauth = () => {
     setOauthStage(null);
@@ -713,7 +723,13 @@ const AccountScreen: React.FC = () => {
                       type="button"
                       className="auth-submit"
                       onClick={handleLogin}
-                      disabled={loginLoading || oauthLoading || !loginEmail || !loginPassword}
+                      disabled={
+                        loginLoading ||
+                        oauthLoading ||
+                        !loginEmail ||
+                        !loginPassword ||
+                        conn?.configured === false
+                      }
                     >
                       {loginLoading
                         ? authMode === "signup"
@@ -730,7 +746,7 @@ const AccountScreen: React.FC = () => {
                       type="button"
                       className="auth-google"
                       onClick={handleGoogleSignIn}
-                      disabled={loginLoading || oauthLoading}
+                      disabled={loginLoading || oauthLoading || conn?.configured === false}
                     >
                       <GoogleIcon size={16} />
                       {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
@@ -739,11 +755,22 @@ const AccountScreen: React.FC = () => {
                 </>
               )}
 
+              {/* Only ever visible in a build compiled without endpoints — a
+                  developer-facing dead end, not something users should hit. */}
+              {conn?.configured === false && (
+                <span className="auth-error">
+                  This build has no sync endpoints compiled in. Set the{" "}
+                  <code>DEFAULT_*</code> constants in <code>sync/config.rs</code>{" "}
+                  and rebuild.
+                </span>
+              )}
+
               <div className="auth-secure">
                 <Key size={12} weight="fill" />
                 End-to-end encrypted — only you can read your data
               </div>
             </div>
+
           </>
         ) : (
           /* ── Signed in ── */
