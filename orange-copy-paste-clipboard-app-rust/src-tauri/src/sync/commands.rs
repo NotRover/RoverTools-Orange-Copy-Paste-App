@@ -268,22 +268,24 @@ pub fn sync_set_enabled(
     Ok(())
 }
 
+// ── Connection configuration ──────────────────────────────────────────
+
+/// Whether this build knows which deployment to talk to.
+///
+/// Endpoints are compiled in (see the `DEFAULT_*` constants in `sync/config.rs`)
+/// so a shipped app needs no setup. This exists purely so the sign-in screen can
+/// say "not configured" instead of failing silently on a build without them.
+/// The endpoint values themselves are deliberately not exposed to the UI.
+#[derive(serde::Serialize)]
+pub struct SyncConnection {
+    pub configured: bool,
+}
+
 #[tauri::command]
-pub fn sync_set_server_url(
-    url: String,
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    write_setting(
-        &app,
-        "sync_server_url",
-        serde_json::Value::String(url.clone()),
-    );
-    // Rebuild the SyncClient if one exists so it picks up the new URL
-    if state.sync_client.lock().is_some() {
-        eprintln!("[sync] server URL changed to {url} — restart app to reconnect");
+pub fn sync_get_connection(app: tauri::AppHandle) -> SyncConnection {
+    SyncConnection {
+        configured: SyncConfig::load(&app).is_configured(),
     }
-    Ok(())
 }
 
 // ── Settings sync ─────────────────────────────────────────────────────

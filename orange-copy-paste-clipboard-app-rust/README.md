@@ -270,6 +270,86 @@ cargo check
 
 ---
 
+## Cloud Sync Setup
+
+Cloud sync is **off until you point the app at a deployment.** The app ships with
+no endpoints baked in, so a fresh build cannot sign in until you supply three
+device-local values:
+
+| Value | Where it comes from |
+|---|---|
+| **Backend URL** | Your deployed sync API, e.g. `https://your-service.onrender.com` |
+| **Supabase project URL** | Supabase → Settings → API Keys → Project URL |
+| **Supabase publishable key** | Supabase → Settings → API Keys |
+
+> **Which key?** The **publishable** key (`sb_publishable_…`). Projects created
+> before the 2025 key change call it the **anon** key — either works. Never put
+> the **secret** key (`sb_secret_…`) in the client; it grants full project access.
+> The app rejects it outright.
+
+See the backend's `docs/DEPLOY.md` for standing the server side up.
+
+### Setting the endpoints
+
+Endpoints are **compiled in**, so the shipped app just works — users never see
+or enter any of this. Set the three constants near the top of
+`src-tauri/src/sync/config.rs`:
+
+```rust
+const DEFAULT_SERVER_URL: &str = "https://your-service.onrender.com";
+const DEFAULT_SUPABASE_URL: &str = "https://your-project-ref.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_xxxxxxxxxxxxxxxx";
+```
+
+Then build as usual — `bun run tauri dev` or `bun run tauri build`. Committing
+these is fine: they're public-safe (see the warning above), so every clone and
+CI build produces a working app with no extra setup.
+
+If they're left blank, the sign-in screen says the build is unconfigured rather
+than failing silently.
+
+### Overriding a shipped build
+
+For self-hosting or debugging, `settings.json` in the app data directory
+overrides the compiled-in values — `sync_server_url`, `supabase_url`,
+`supabase_anon_key`:
+
+- Windows: `%APPDATA%\com.spect.orange-copy-paste\settings.json`
+- Linux: `~/.config/com.spect.orange-copy-paste/settings.json`
+
+This is an escape hatch, not the normal path — there is intentionally no UI for
+it.
+
+### Enabling Google sign-in
+
+Google OAuth needs all three of these, or sign-in fails **after** the consent
+screen with no useful error:
+
+1. **Supabase → Authentication → Providers → Google** — enabled, with the Client
+   ID and Secret from the Google Cloud Console.
+2. **Google Cloud Console → your OAuth client → Authorized redirect URIs** — add
+   `https://<project-ref>.supabase.co/auth/v1/callback`.
+3. **Supabase → Authentication → URL Configuration → Redirect URLs** — add **all
+   three** loopback URLs:
+   ```
+   http://127.0.0.1:53170
+   http://127.0.0.1:53171
+   http://127.0.0.1:53172
+   ```
+
+Step 3 is the one that's easy to miss. Desktop apps have no web origin, so the
+app binds a short-lived loopback server on the first free port from that list and
+uses it as the OAuth `redirect_to`. If those URLs aren't allow-listed, Google
+consent succeeds and then Supabase refuses to redirect back — the app simply
+waits until its 5-minute timeout. The port list is fixed in
+`src-tauri/src/sync/oauth.rs`.
+
+After Google sign-in you'll be asked to set an **account password**. That is
+expected: it's your end-to-end encryption secret, not a second login step. The
+server never sees it, and you'll enter it on each new device.
+
+---
+
 ## Module Design (Backend)
 
 The backend is organized by **feature/domain**, not by technical layer alone.
