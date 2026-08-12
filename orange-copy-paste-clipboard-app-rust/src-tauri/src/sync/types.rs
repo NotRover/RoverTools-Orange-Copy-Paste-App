@@ -31,13 +31,30 @@ pub struct SyncUser {
 // ── Groups (pool) ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncGroupMember {
+    pub user_id: String,
+    pub display_name: String,
+    pub role: String,
+    /// False until the owner has wrapped the Group Key for this member —
+    /// the UI shows "waiting for key" instead of silent decrypt failures.
+    pub has_group_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncGroup {
     pub id: String,
     pub name: String,
+    pub owner_id: String,
+    /// True when the current user owns this group (may invite/remove/delete).
+    pub is_owner: bool,
+    pub share_history: bool,
     pub member_count: u32,
+    pub members: Vec<SyncGroupMember>,
     /// Present after create / for owners; used to share the group.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invite_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_expires_at: Option<u64>,
 }
 
 // ── Blob quota ──────────────────────────────────────────────────────
@@ -85,6 +102,16 @@ pub enum ShareScope {
 }
 
 impl ShareScope {
+    /// Parse the wire string ("clipboard" | "notes" | "both").
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "clipboard" => Some(Self::Clipboard),
+            "notes" => Some(Self::Notes),
+            "both" => Some(Self::Both),
+            _ => None,
+        }
+    }
+
     pub fn includes_clipboard(self) -> bool {
         matches!(self, Self::Clipboard | Self::Both)
     }
