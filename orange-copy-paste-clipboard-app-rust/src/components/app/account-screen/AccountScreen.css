@@ -735,6 +735,109 @@
   border-color: transparent;
 }
 
+/* ── Shared spaces ─────────────────────────────────────────────────── */
+
+/* "New space" button in the card head; sits at the right edge when no
+   count pill is present (the count pill already claims margin-left: auto). */
+.acct-card-head > .acct-head-btn { margin-left: auto; }
+.acct-card-head > .acct-card-count + .acct-head-btn { margin-left: 8px; }
+
+.acct-space {
+  border-top: 1px solid var(--border);
+}
+
+.acct-list > .acct-space:first-child { border-top: none; }
+
+/* Expandable row header — full-width, unstyled button. */
+.acct-space-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.acct-space-caret {
+  flex: 0 0 auto;
+  color: var(--text-muted, #909090);
+  transition: transform 0.16s ease;
+}
+
+.acct-space-caret--open { transform: rotate(90deg); }
+
+.acct-space-count { margin-left: auto; white-space: nowrap; }
+
+.acct-space-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 12px 19px;
+}
+
+.acct-space-body .acct-members { margin-top: 0; }
+.acct-space-actions { margin-top: 10px; }
+
+/* Small status badges on space rows and members. */
+.acct-badge {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted, #909090);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.acct-badge--owner {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.acct-badge--live {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.acct-badge--warn {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.acct-badge--muted { opacity: 0.75; }
+
+.acct-member-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 9.5px;
+  font-weight: 650;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Inline "New space" create panel. */
+.acct-create-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: color-mix(in srgb, var(--text) 2%, transparent);
+}
+
+.acct-create-panel > .acct-field-row:first-of-type { margin-top: 10px; }
+.acct-create-modes { margin-bottom: 2px; }
+
 /* ── Live Share extras ─────────────────────────────────────────────── */
 
 .acct-invite-banner {

@@ -8,10 +8,15 @@ import type {
   SharingSession,
   SyncDevice,
   SyncConnection,
+  SyncInvite,
+  SyncInviteList,
 } from "../../../types";
 import {
+  CaretRight,
   Check,
   CloudCheck,
+  Copy,
+  Plus,
   Users,
   ShareNetwork,
   Key,
@@ -27,9 +32,28 @@ const SCOPE_OPTIONS: { value: string; label: string }[] = [
   { value: "both", label: "Clipboard & Notes" },
 ];
 
+/** Display an invite code as XXXX-XXXX when it is a plain 8-char code. */
+function formatInviteCode(code: string): string {
+  const c = code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : code;
+}
+
+function avatarInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+/** One row in the unified Shared spaces list: a pool group or a live session. */
+type SharedSpace =
+  | { kind: "pool"; id: string; group: SyncGroup }
+  | { kind: "session"; id: string; session: SharingSession };
+
 // ── Account & Cloud Sync screen ───────────────────────────────────────
 // Owns everything identity/sync related: sign in/up (email + Google),
-// account + devices, cloud-sync enablement, groups, and Live Share.
+// account + devices, cloud-sync enablement, and shared spaces (pool
+// groups + Live Share sessions).
 
 const AccountScreen: React.FC = () => {
   // ── Cloud Sync ─────────────────────────────────────────────────
@@ -68,35 +92,51 @@ const AccountScreen: React.FC = () => {
   const [resetSent, setResetSent] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
 
-  // Group management
+  // ── Shared spaces (pool groups + Live Share sessions) ──────────
+  const [sharingSessions, setSharingSessions] = useState<SharingSession[]>([]);
+  const [invites, setInvites] = useState<SyncInviteList>({ sent: [], received: [] });
+  const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
+  const [spacesError, setSpacesError] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // "Invite by email" inputs, keyed by group id (several rows can be open).
+  const [inviteEmails, setInviteEmails] = useState<Record<string, string>>({});
+
+  // Create flow — inline "New space" panel with two presets.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<"lasting" | "quick">("lasting");
   const [newGroupName, setNewGroupName] = useState("");
   // Owner's history policy for a group being created (server default is true).
   const [newGroupShareHistory, setNewGroupShareHistory] = useState(true);
-  const [joinCode, setJoinCode] = useState("");
-  const [groupLoading, setGroupLoading] = useState(false);
-  const [copiedGroupId, setCopiedGroupId] = useState<string | null>(null);
-  const copiedGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [quickEmail, setQuickEmail] = useState("");
+  const [quickScope, setQuickScope] = useState("clipboard");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createdInvite, setCreatedInvite] = useState<string | null>(null);
+
+  // Armed "Delete space" confirmation (group id), auto-reset after a beat.
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const deleteConfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Devices
+  const [deviceError, setDeviceError] = useState<string | null>(null);
 
   // Sync actions
   const [syncNowLoading, setSyncNowLoading] = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
 
-  // ── Live Share ─────────────────────────────────────────────────
-  const [sharingSessions, setSharingSessions] = useState<SharingSession[]>([]);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteScope, setInviteScope] = useState("clipboard");
-  const [inviteResult, setInviteResult] = useState<{
-    invite_code: string;
-    share_group_id: string;
-    expires_at: number;
-  } | null>(null);
-  const [acceptCode, setAcceptCode] = useState("");
-  const [acceptScope, setAcceptScope] = useState("clipboard");
-  const [sharingLoading, setSharingLoading] = useState(false);
-  const [incomingInvite, setIncomingInvite] = useState<{
-    invite_code: string;
-    from_email?: string;
-  } | null>(null);
+  const refreshSpaces = useCallback(() => {
+    invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
+    invoke<SharingSession[]>("sharing_refresh_sessions")
+      .then(setSharingSessions)
+      .catch(() => {});
+  }, []);
+
+  const refreshInvites = useCallback(() => {
+    invoke<SyncInviteList>("sync_list_invites").then(setInvites).catch(() => {});
+  }, []);
 
   // ── Load state on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -107,8 +147,8 @@ const AccountScreen: React.FC = () => {
     invoke<SyncUser | null>("sync_get_user").then((u) => {
       setSyncUser(u);
       if (u) {
-        invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
-        invoke<SharingSession[]>("sharing_get_sessions").then(setSharingSessions).catch(() => {});
+        refreshSpaces();
+        refreshInvites();
         invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
         invoke<SyncStatusInfo>("sync_get_status").then((s) => {
           setSyncStatus(s);
@@ -116,7 +156,7 @@ const AccountScreen: React.FC = () => {
         }).catch(() => {});
       }
     });
-  }, []);
+  }, [refreshSpaces, refreshInvites]);
 
   // ── Device presence: mark devices online/offline as events arrive ──
   useEffect(() => {
@@ -137,15 +177,42 @@ const AccountScreen: React.FC = () => {
     return () => unlisten?.();
   }, []);
 
-  // ── Listen for incoming sharing invites ─────────────────────────
+  // ── Invite + membership events ──────────────────────────────────
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<{ invite_code: string; from_email?: string }>(
-      "sharing:invite-received",
-      (event) => setIncomingInvite(event.payload),
-    ).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
-  }, []);
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    const track = (p: Promise<() => void>) => {
+      p.then((fn) => {
+        if (cancelled) fn();
+        else unlisteners.push(fn);
+      });
+    };
+    track(listen("sync:group-membership", () => refreshSpaces()));
+    track(
+      listen<SyncInvite>("sync:invite-received", (event) => {
+        setInvites((prev) => ({
+          ...prev,
+          received: [
+            event.payload,
+            ...prev.received.filter((i) => i.id !== event.payload.id),
+          ],
+        }));
+      }),
+    );
+    track(
+      listen<{ invite_id: string; status: string; group_id: string }>(
+        "sync:invite-updated",
+        () => {
+          refreshInvites();
+          refreshSpaces();
+        },
+      ),
+    );
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [refreshSpaces, refreshInvites]);
 
   // ── Cloud Sync handlers ─────────────────────────────────────────
   const handleSyncToggle = async () => {
@@ -163,8 +230,8 @@ const AccountScreen: React.FC = () => {
   // Post-authentication: hydrate account state (shared by password + OAuth).
   const loadPostLogin = (user: SyncUser) => {
     setSyncUser(user);
-    invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
-    invoke<SharingSession[]>("sharing_get_sessions").then(setSharingSessions).catch(() => {});
+    refreshSpaces();
+    refreshInvites();
     invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
     invoke<SyncStatusInfo>("sync_get_status").then((s) => {
       setSyncStatus(s);
@@ -315,6 +382,10 @@ const AccountScreen: React.FC = () => {
       setSyncStatus(null);
       setSyncGroups([]);
       setSharingSessions([]);
+      setInvites({ sent: [], received: [] });
+      setExpandedSpaces(new Set());
+      setSpacesError(null);
+      setDeviceError(null);
       setDevices([]);
       setOnlineDevices(new Set());
     } catch (e) {
@@ -336,9 +407,33 @@ const AccountScreen: React.FC = () => {
     }
   };
 
-  const handleCreateGroup = async () => {
+  // ── Shared spaces handlers ──────────────────────────────────────
+  const errMsg = (e: unknown, fallback: string) =>
+    typeof e === "string" ? e : fallback;
+
+  const toggleSpace = (id: string) => {
+    setExpandedSpaces((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleCopy = useCallback((key: string, text: string) => {
+    if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedKey(key);
+    copiedTimerRef.current = setTimeout(() => {
+      setCopiedKey(null);
+      copiedTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  const handleCreateLasting = async () => {
     if (!newGroupName.trim()) return;
-    setGroupLoading(true);
+    setCreateLoading(true);
+    setCreateError(null);
     try {
       const g = await invoke<SyncGroup>("sync_create_group", {
         name: newGroupName.trim(),
@@ -346,84 +441,143 @@ const AccountScreen: React.FC = () => {
       });
       setSyncGroups((prev) => [...prev, g]);
       setNewGroupName("");
+      setCreatedInvite(g.invite_code ?? null);
+      refreshSpaces();
     } catch (e) {
-      console.error("sync_create_group failed", e);
+      setCreateError(errMsg(e, "Could not create the space."));
     } finally {
-      setGroupLoading(false);
+      setCreateLoading(false);
     }
   };
 
-  const handleJoinGroup = async () => {
-    if (!joinCode.trim()) return;
-    setGroupLoading(true);
+  const handleCreateQuick = async () => {
+    if (!quickEmail.trim()) return;
+    setCreateLoading(true);
+    setCreateError(null);
     try {
+      const result = await invoke<{ invite_code: string; share_group_id: string; expires_at: number }>(
+        "sharing_invite",
+        { email: quickEmail.trim(), scope: quickScope },
+      );
+      setQuickEmail("");
+      setCreatedInvite(result.invite_code);
+      refreshSpaces();
+      refreshInvites();
+    } catch (e) {
+      setCreateError(errMsg(e, "Could not send the invite."));
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    if (!joinCode.trim()) return;
+    setJoinLoading(true);
+    setSpacesError(null);
+    try {
+      // The Rust side extracts the code from a pasted link and normalizes it.
       await invoke("sync_join_group", { inviteCode: joinCode.trim() });
       setJoinCode("");
-      const groups = await invoke<SyncGroup[]>("sync_get_groups");
-      setSyncGroups(groups);
+      refreshSpaces();
     } catch (e) {
-      console.error("sync_join_group failed", e);
+      setSpacesError(errMsg(e, "Could not join with that code."));
     } finally {
-      setGroupLoading(false);
+      setJoinLoading(false);
     }
   };
 
   const handleLeaveGroup = async (groupId: string) => {
+    setSpacesError(null);
     try {
       await invoke("sync_leave_group", { groupId });
       setSyncGroups((prev) => prev.filter((g) => g.id !== groupId));
     } catch (e) {
-      console.error("sync_leave_group failed", e);
+      setSpacesError(errMsg(e, "Could not leave the space."));
     }
   };
 
-  const handleCopyInvite = useCallback((groupId: string) => {
-    if (copiedGroupTimerRef.current !== null) clearTimeout(copiedGroupTimerRef.current);
-    const url = `https://orangeclipboard.app/join/${groupId}`;
-    navigator.clipboard.writeText(url).catch(() => {});
-    setCopiedGroupId(groupId);
-    copiedGroupTimerRef.current = setTimeout(() => {
-      setCopiedGroupId(null);
-      copiedGroupTimerRef.current = null;
-    }, 1500);
-  }, []);
-
-  // ── Live Share handlers ─────────────────────────────────────────
-  const handleShareInvite = async () => {
-    if (!inviteEmail.trim()) return;
-    setSharingLoading(true);
+  const handleRemoveMember = async (groupId: string, memberUserId: string) => {
+    setSpacesError(null);
     try {
-      const result = await invoke<{ invite_code: string; share_group_id: string; expires_at: number }>(
-        "sharing_invite",
-        { email: inviteEmail.trim(), scope: inviteScope },
-      );
-      setInviteResult(result);
-      setInviteEmail("");
-      const sessions = await invoke<SharingSession[]>("sharing_get_sessions");
-      setSharingSessions(sessions);
+      await invoke("sync_remove_member", { groupId, memberUserId });
+      refreshSpaces();
     } catch (e) {
-      console.error("sharing_invite failed", e);
-    } finally {
-      setSharingLoading(false);
+      setSpacesError(errMsg(e, "Could not remove the member."));
     }
   };
 
-  const handleAcceptInvite = async (code: string, scope: string) => {
-    setSharingLoading(true);
+  // One-step confirm for space deletion: first click arms, second deletes.
+  const handleDeleteGroup = async (groupId: string) => {
+    if (deleteConfirmId !== groupId) {
+      if (deleteConfirmTimerRef.current !== null)
+        clearTimeout(deleteConfirmTimerRef.current);
+      setDeleteConfirmId(groupId);
+      deleteConfirmTimerRef.current = setTimeout(() => {
+        setDeleteConfirmId(null);
+        deleteConfirmTimerRef.current = null;
+      }, 3000);
+      return;
+    }
+    if (deleteConfirmTimerRef.current !== null) {
+      clearTimeout(deleteConfirmTimerRef.current);
+      deleteConfirmTimerRef.current = null;
+    }
+    setDeleteConfirmId(null);
+    setSpacesError(null);
     try {
-      await invoke("sharing_accept", { inviteCode: code, scope });
-      setAcceptCode("");
-      setIncomingInvite(null);
-      const sessions = await invoke<SharingSession[]>("sharing_get_sessions");
-      setSharingSessions(sessions);
+      await invoke("sync_delete_group", { groupId });
+      refreshSpaces();
     } catch (e) {
-      console.error("sharing_accept failed", e);
-    } finally {
-      setSharingLoading(false);
+      setSpacesError(errMsg(e, "Could not delete the space."));
+    }
+  };
+
+  const handleSendInvite = async (groupId: string) => {
+    const email = (inviteEmails[groupId] ?? "").trim();
+    if (!email) return;
+    setSpacesError(null);
+    try {
+      await invoke<SyncInvite>("sync_send_invite", { groupId, email });
+      setInviteEmails((prev) => ({ ...prev, [groupId]: "" }));
+      refreshInvites();
+    } catch (e) {
+      setSpacesError(errMsg(e, "Could not send the invite."));
+    }
+  };
+
+  const handleAcceptInvite = async (inviteId: string) => {
+    setSpacesError(null);
+    try {
+      await invoke("sync_accept_invite", { inviteId });
+      refreshInvites();
+      refreshSpaces();
+    } catch (e) {
+      setSpacesError(errMsg(e, "Could not accept the invite."));
+    }
+  };
+
+  const handleDeclineInvite = async (inviteId: string) => {
+    setSpacesError(null);
+    try {
+      await invoke("sync_decline_invite", { inviteId });
+      refreshInvites();
+    } catch (e) {
+      setSpacesError(errMsg(e, "Could not decline the invite."));
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    setSpacesError(null);
+    try {
+      await invoke("sync_revoke_invite", { inviteId });
+      refreshInvites();
+    } catch (e) {
+      setSpacesError(errMsg(e, "Could not revoke the invite."));
     }
   };
 
   const handleUpdateScope = async (shareGroupId: string, scope: string) => {
+    setSpacesError(null);
     try {
       await invoke("sharing_update_scope", { shareGroupId, scope });
       setSharingSessions((prev) =>
@@ -434,25 +588,40 @@ const AccountScreen: React.FC = () => {
         ),
       );
     } catch (e) {
-      console.error("sharing_update_scope failed", e);
+      setSpacesError(errMsg(e, "Could not change the scope."));
     }
   };
 
   const handleLeaveSession = async (shareGroupId: string) => {
+    setSpacesError(null);
     try {
       await invoke("sharing_leave_session", { shareGroupId });
       setSharingSessions((prev) => prev.filter((s) => s.share_group_id !== shareGroupId));
     } catch (e) {
-      console.error("sharing_leave_session failed", e);
+      setSpacesError(errMsg(e, "Could not leave the session."));
     }
   };
 
   const handleEndSession = async (shareGroupId: string) => {
+    setSpacesError(null);
     try {
       await invoke("sharing_end_session", { shareGroupId });
       setSharingSessions((prev) => prev.filter((s) => s.share_group_id !== shareGroupId));
     } catch (e) {
-      console.error("sharing_end_session failed", e);
+      setSpacesError(errMsg(e, "Could not end the session."));
+    }
+  };
+
+  const handleRevokeDevice = async (deviceId: string) => {
+    setDeviceError(null);
+    try {
+      // The Rust command refuses to revoke the current device with a clear
+      // message, so Remove is shown on every row and the error surfaces here.
+      await invoke("sync_revoke_device", { deviceId });
+      const ds = await invoke<SyncDevice[]>("sync_list_devices");
+      setDevices(ds);
+    } catch (e) {
+      setDeviceError(errMsg(e, "Could not remove the device."));
     }
   };
 
@@ -492,6 +661,46 @@ const AccountScreen: React.FC = () => {
       </div>
     </div>
   );
+
+  // Copy-code / copy-link button pair used for invite codes.
+  const copyButtons = (key: string, code: string) => (
+    <>
+      <button
+        type="button"
+        className="acct-btn acct-btn--sm"
+        onClick={() => handleCopy(`${key}:code`, code)}
+      >
+        {copiedKey === `${key}:code` ? (
+          <><Check size={11} /> Copied</>
+        ) : (
+          <><Copy size={11} /> Copy code</>
+        )}
+      </button>
+      <button
+        type="button"
+        className="acct-btn acct-btn--sm"
+        onClick={() => handleCopy(`${key}:link`, `orange://join?code=${code}`)}
+      >
+        {copiedKey === `${key}:link` ? (
+          <><Check size={11} /> Copied</>
+        ) : (
+          <><ShareNetwork size={11} /> Copy link</>
+        )}
+      </button>
+    </>
+  );
+
+  // Unified Shared spaces list: pool groups first, then live sessions.
+  const spaces: SharedSpace[] = [
+    ...syncGroups.map((g) => ({ kind: "pool" as const, id: g.id, group: g })),
+    ...sharingSessions.map((s) => ({
+      kind: "session" as const,
+      id: s.share_group_id,
+      session: s,
+    })),
+  ];
+  const receivedPending = invites.received.filter((i) => i.status === "pending");
+  const sentInvites = invites.sent;
 
   // Short states (enable hero / signed-out auth) get centered vertically and
   // rely on the card's own heading, so the page header is hidden there.
@@ -816,6 +1025,7 @@ const AccountScreen: React.FC = () => {
                 <h3 className="acct-card-title">Devices</h3>
                 {devices.length > 0 && <span className="acct-card-count">{devices.length}</span>}
               </div>
+              {deviceError && <span className="auth-error">{deviceError}</span>}
               {devices.length > 0 ? (
                 <div className="acct-list">
                   {devices.map((d) => {
@@ -827,6 +1037,15 @@ const AccountScreen: React.FC = () => {
                           <span className="acct-row-name">{d.device_name || "Unknown device"}</span>
                           <span className="acct-row-meta">{d.platform}{online ? " · online" : " · offline"}</span>
                         </div>
+                        <div className="acct-row-actions">
+                          <button
+                            type="button"
+                            className="acct-btn acct-btn--sm acct-btn--danger"
+                            onClick={() => handleRevokeDevice(d.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -836,221 +1055,384 @@ const AccountScreen: React.FC = () => {
               )}
             </div>
 
-            {/* Shared Groups */}
+            {/* Shared spaces */}
             <div className="acct-card">
               <div className="acct-card-head">
                 <span className="acct-card-icon"><Users size={15} /></span>
-                <h3 className="acct-card-title">Shared Groups</h3>
-                {syncGroups.length > 0 && <span className="acct-card-count">{syncGroups.length}</span>}
+                <h3 className="acct-card-title">Shared spaces</h3>
+                {spaces.length > 0 && <span className="acct-card-count">{spaces.length}</span>}
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--sm acct-head-btn"
+                  onClick={() => {
+                    setCreateOpen((v) => !v);
+                    setCreateError(null);
+                    setCreatedInvite(null);
+                  }}
+                >
+                  <Plus size={11} /> New space
+                </button>
               </div>
-              {syncGroups.length > 0 && (
-                <div className="acct-list">
-                  {syncGroups.map((g) => (
-                    <div key={g.id} className="acct-row">
-                      <div className="acct-row-main">
-                        <span className="acct-row-name">{g.name}</span>
-                        <span className="acct-row-meta">{g.member_count} member{g.member_count !== 1 ? "s" : ""}</span>
+
+              {spacesError && <span className="auth-error">{spacesError}</span>}
+
+              {createOpen && (
+                <div className="acct-create-panel">
+                  <div className="acct-scope-pills acct-create-modes">
+                    <button
+                      type="button"
+                      className={`acct-scope-pill${createMode === "lasting" ? " active" : ""}`}
+                      onClick={() => setCreateMode("lasting")}
+                    >
+                      Lasting space
+                    </button>
+                    <button
+                      type="button"
+                      className={`acct-scope-pill${createMode === "quick" ? " active" : ""}`}
+                      onClick={() => setCreateMode("quick")}
+                    >
+                      Quick share
+                    </button>
+                  </div>
+                  {createMode === "lasting" ? (
+                    <>
+                      <div className="acct-field-row">
+                        <input
+                          className="auth-input"
+                          placeholder="Space name"
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleCreateLasting(); }}
+                          disabled={createLoading}
+                        />
+                        <button
+                          type="button"
+                          className="acct-btn acct-btn--primary"
+                          onClick={handleCreateLasting}
+                          disabled={createLoading || !newGroupName.trim()}
+                        >
+                          {createLoading ? "Creating…" : "Create"}
+                        </button>
                       </div>
-                      <div className="acct-row-actions">
+                      {/* Decided at creation and fixed per member at join, so changing it
+                          later never retroactively widens what an existing member sees. */}
+                      <label className="acct-check-row">
+                        <input
+                          type="checkbox"
+                          checked={newGroupShareHistory}
+                          onChange={(e) => setNewGroupShareHistory(e.target.checked)}
+                          disabled={createLoading}
+                        />
+                        <span>
+                          New members can read earlier entries
+                          <span className="acct-card-desc">
+                            {newGroupShareHistory
+                              ? "Anyone who joins can see everything shared before they joined."
+                              : "New members only see entries shared after they join."}
+                          </span>
+                        </span>
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <div className="acct-field-row">
+                        <input
+                          className="auth-input"
+                          type="email"
+                          placeholder="Email address"
+                          value={quickEmail}
+                          onChange={(e) => setQuickEmail(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleCreateQuick(); }}
+                          disabled={createLoading}
+                        />
+                        <button
+                          type="button"
+                          className="acct-btn acct-btn--primary"
+                          onClick={handleCreateQuick}
+                          disabled={createLoading || !quickEmail.trim()}
+                        >
+                          {createLoading ? "Sending…" : "Invite"}
+                        </button>
+                      </div>
+                      {scopePills(quickScope, setQuickScope)}
+                    </>
+                  )}
+                  {createError && <span className="auth-error">{createError}</span>}
+                  {createdInvite && (
+                    <div className="acct-invite-result">
+                      <span className="acct-row-meta">Invite code</span>
+                      <code className="acct-invite-code-inline">
+                        {formatInviteCode(createdInvite)}
+                      </code>
+                      {copyButtons("created", createdInvite)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {spaces.length > 0 ? (
+                <div className="acct-list">
+                  {spaces.map((space) => {
+                    const open = expandedSpaces.has(space.id);
+                    const isPool = space.kind === "pool";
+                    const name = isPool
+                      ? space.group.name
+                      : (space.session.name || "Quick share");
+                    const memberCount = isPool
+                      ? space.group.member_count
+                      : space.session.members.length;
+                    const isOwner = isPool && space.group.is_owner;
+                    return (
+                      <div key={space.id} className="acct-space">
+                        <button
+                          type="button"
+                          className="acct-space-head"
+                          onClick={() => toggleSpace(space.id)}
+                        >
+                          <CaretRight
+                            size={11}
+                            weight="bold"
+                            className={`acct-space-caret${open ? " acct-space-caret--open" : ""}`}
+                          />
+                          <span className="acct-row-name">{name}</span>
+                          {isOwner && (
+                            <span className="acct-badge acct-badge--owner">you own this</span>
+                          )}
+                          {isPool ? (
+                            <span className={`acct-badge${space.group.share_history ? "" : " acct-badge--muted"}`}>
+                              history {space.group.share_history ? "on" : "off"}
+                            </span>
+                          ) : (
+                            <span className="acct-badge acct-badge--live">
+                              live · {space.session.my_scope}
+                            </span>
+                          )}
+                          <span className="acct-row-meta acct-space-count">
+                            {memberCount} member{memberCount === 1 ? "" : "s"}
+                          </span>
+                        </button>
+                        {open && (
+                          <div className="acct-space-body">
+                            <div className="acct-members">
+                              {isPool
+                                ? space.group.members.map((m) => (
+                                    <div key={m.user_id} className="acct-member">
+                                      <span className="acct-member-avatar">
+                                        {avatarInitials(m.display_name || m.user_id)}
+                                      </span>
+                                      <span className="acct-row-name">
+                                        {m.display_name || m.user_id.slice(0, 8)}
+                                      </span>
+                                      <span className="acct-row-meta">{m.role}</span>
+                                      {!m.has_group_key && (
+                                        <span className="acct-badge acct-badge--warn">
+                                          waiting for key
+                                        </span>
+                                      )}
+                                      {isOwner && m.user_id !== syncUser?.user_id && (
+                                        <button
+                                          type="button"
+                                          className="acct-btn acct-btn--sm acct-btn--danger"
+                                          onClick={() => handleRemoveMember(space.id, m.user_id)}
+                                        >
+                                          Remove
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))
+                                : space.session.members.map((m) => (
+                                    <div key={m.user_id} className="acct-member">
+                                      <span className="acct-member-avatar">
+                                        {avatarInitials(m.display_name || m.email || m.user_id)}
+                                      </span>
+                                      <span className={`acct-dot${m.online ? " online" : ""}`} />
+                                      <span className="acct-row-name">
+                                        {m.display_name || m.email || m.user_id.slice(0, 8)}
+                                      </span>
+                                      <span className="acct-row-meta">{m.scope}</span>
+                                    </div>
+                                  ))}
+                            </div>
+
+                            {isPool && isOwner && space.group.invite_code && (
+                              <>
+                                <div className="acct-invite-result">
+                                  <code className="acct-invite-code-inline">
+                                    {formatInviteCode(space.group.invite_code)}
+                                  </code>
+                                  {copyButtons(space.id, space.group.invite_code)}
+                                </div>
+                                <div className="acct-field-row">
+                                  <input
+                                    className="auth-input"
+                                    type="email"
+                                    placeholder="Invite by email"
+                                    value={inviteEmails[space.id] ?? ""}
+                                    onChange={(e) =>
+                                      setInviteEmails((prev) => ({
+                                        ...prev,
+                                        [space.id]: e.target.value,
+                                      }))
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleSendInvite(space.id);
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="acct-btn"
+                                    onClick={() => handleSendInvite(space.id)}
+                                    disabled={!(inviteEmails[space.id] ?? "").trim()}
+                                  >
+                                    Invite
+                                  </button>
+                                </div>
+                              </>
+                            )}
+
+                            {!isPool &&
+                              scopePills(space.session.my_scope, (v) =>
+                                handleUpdateScope(space.id, v),
+                              )}
+
+                            {isPool && isOwner ? (
+                              <div className="acct-row-actions acct-space-actions">
+                                <button
+                                  type="button"
+                                  className="acct-btn acct-btn--sm acct-btn--danger"
+                                  onClick={() => handleDeleteGroup(space.id)}
+                                  onBlur={() => {
+                                    if (deleteConfirmId === space.id) setDeleteConfirmId(null);
+                                  }}
+                                >
+                                  {deleteConfirmId === space.id
+                                    ? "Confirm delete?"
+                                    : "Delete space"}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="acct-row-actions acct-space-actions">
+                                {isPool ? (
+                                  <button
+                                    type="button"
+                                    className="acct-btn acct-btn--sm acct-btn--danger"
+                                    onClick={() => handleLeaveGroup(space.id)}
+                                  >
+                                    Leave
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="acct-btn acct-btn--sm"
+                                      onClick={() => handleLeaveSession(space.id)}
+                                    >
+                                      Leave
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="acct-btn acct-btn--sm acct-btn--danger"
+                                      onClick={() => handleEndSession(space.id)}
+                                    >
+                                      End
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="acct-empty">
+                  No shared spaces yet — create one to share with your other
+                  devices or with someone else.
+                </p>
+              )}
+
+              <div className="acct-subhead">Join a space</div>
+              <div className="acct-field-row">
+                <input
+                  className="auth-input"
+                  placeholder="Paste an invite code or link"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
+                  disabled={joinLoading}
+                />
+                <button
+                  type="button"
+                  className="acct-btn"
+                  onClick={handleJoin}
+                  disabled={joinLoading || !joinCode.trim()}
+                >
+                  {joinLoading ? "Joining…" : "Join"}
+                </button>
+              </div>
+
+              {(receivedPending.length > 0 || sentInvites.length > 0) && (
+                <>
+                  <div className="acct-subhead">Pending invites</div>
+                  {receivedPending.map((inv) => (
+                    <div key={inv.id} className="acct-invite-banner">
+                      <div className="acct-invite-head">
+                        <ShareNetwork size={13} />
+                        {inv.inviter_name || "Someone"} wants to share{" "}
+                        {inv.group_type === "live_share"
+                          ? "their clipboard live"
+                          : `"${inv.group_name}"`}{" "}
+                        with you
+                      </div>
+                      <div className="acct-row-actions acct-invite-actions">
+                        <button
+                          type="button"
+                          className="acct-btn acct-btn--primary acct-btn--sm"
+                          onClick={() => handleAcceptInvite(inv.id)}
+                        >
+                          Accept
+                        </button>
                         <button
                           type="button"
                           className="acct-btn acct-btn--sm"
-                          onClick={() => handleCopyInvite(g.id)}
+                          onClick={() => handleDeclineInvite(inv.id)}
                         >
-                          {copiedGroupId === g.id ? (
-                            <><Check size={11} /> Copied</>
-                          ) : (
-                            <><ShareNetwork size={11} /> Invite</>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="acct-btn acct-btn--sm acct-btn--danger"
-                          onClick={() => handleLeaveGroup(g.id)}
-                        >
-                          Leave
+                          Decline
                         </button>
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-              <div className="acct-field-row">
-                <input
-                  className="auth-input"
-                  placeholder="New group name"
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroup(); }}
-                  disabled={groupLoading}
-                />
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--primary"
-                  onClick={handleCreateGroup}
-                  disabled={groupLoading || !newGroupName.trim()}
-                >
-                  Create
-                </button>
-              </div>
-              {/* Decided at creation and fixed per member at join, so changing it
-                  later never retroactively widens what an existing member sees. */}
-              <label className="acct-check-row">
-                <input
-                  type="checkbox"
-                  checked={newGroupShareHistory}
-                  onChange={(e) => setNewGroupShareHistory(e.target.checked)}
-                  disabled={groupLoading}
-                />
-                <span>
-                  Let new members read earlier entries
-                  <span className="acct-card-desc">
-                    {newGroupShareHistory
-                      ? "Anyone who joins can see everything shared before they joined."
-                      : "New members only see entries shared after they join."}
-                  </span>
-                </span>
-              </label>
-              <div className="acct-field-row">
-                <input
-                  className="auth-input"
-                  placeholder="Invite code to join"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleJoinGroup(); }}
-                  disabled={groupLoading}
-                />
-                <button
-                  type="button"
-                  className="acct-btn"
-                  onClick={handleJoinGroup}
-                  disabled={groupLoading || !joinCode.trim()}
-                >
-                  Join
-                </button>
-              </div>
-            </div>
-
-            {/* Live Share */}
-            <div className="acct-card">
-              <div className="acct-card-head">
-                <span className="acct-card-icon"><ShareNetwork size={15} /></span>
-                <h3 className="acct-card-title">Live Share</h3>
-              </div>
-              <p className="acct-card-desc">
-                Share your clipboard or notes in real time with another person (up to 5 members).
-              </p>
-
-              {incomingInvite && (
-                <div className="acct-invite-banner">
-                  <div className="acct-invite-head"><ShareNetwork size={13} /> Incoming invite</div>
-                  <p className="acct-invite-code">{incomingInvite.invite_code}</p>
-                  {incomingInvite.from_email && (
-                    <p className="acct-row-meta">From {incomingInvite.from_email}</p>
-                  )}
-                  {scopePills(acceptScope, setAcceptScope)}
-                  <div className="acct-row-actions acct-invite-actions">
-                    <button
-                      type="button"
-                      className="acct-btn acct-btn--primary acct-btn--sm"
-                      disabled={sharingLoading}
-                      onClick={() => handleAcceptInvite(incomingInvite.invite_code, acceptScope)}
-                    >
-                      {sharingLoading ? "Accepting…" : "Accept"}
-                    </button>
-                    <button type="button" className="acct-btn acct-btn--sm" onClick={() => setIncomingInvite(null)}>
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {sharingSessions.length > 0 && (
-                <div className="acct-list">
-                  {sharingSessions.map((session) => (
-                    <div key={session.share_group_id} className="acct-session">
-                      <div className="acct-row">
-                        <div className="acct-row-main">
-                          <span className="acct-row-name">{session.name || "Live Share session"}</span>
-                          <span className="acct-row-meta">
-                            {session.members.length} member{session.members.length !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                        <div className="acct-row-actions">
-                          <button type="button" className="acct-btn acct-btn--sm" onClick={() => handleLeaveSession(session.share_group_id)}>Leave</button>
-                          <button type="button" className="acct-btn acct-btn--sm acct-btn--danger" onClick={() => handleEndSession(session.share_group_id)}>End</button>
-                        </div>
-                      </div>
-                      {scopePills(session.my_scope, (v) => handleUpdateScope(session.share_group_id, v))}
-                      {session.members.length > 0 && (
-                        <div className="acct-members">
-                          {session.members.map((m) => (
-                            <div key={m.user_id} className="acct-member">
-                              <span className={`acct-dot${m.online ? " online" : ""}`} />
-                              <span className="acct-row-name">{m.display_name}</span>
-                              <span className="acct-row-meta">{m.scope}</span>
+                  {sentInvites.length > 0 && (
+                    <div className="acct-list">
+                      {sentInvites.map((inv) => (
+                        <div key={inv.id} className="acct-row">
+                          <div className="acct-row-main">
+                            <span className="acct-row-name">{inv.invitee_email}</span>
+                            <span className="acct-row-meta">
+                              {inv.group_name} · {inv.status}
+                            </span>
+                          </div>
+                          {inv.status === "pending" && (
+                            <div className="acct-row-actions">
+                              <button
+                                type="button"
+                                className="acct-btn acct-btn--sm acct-btn--danger"
+                                onClick={() => handleRevokeInvite(inv.id)}
+                              >
+                                Revoke
+                              </button>
                             </div>
-                          ))}
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
-
-              <div className="acct-subhead">Invite someone</div>
-              <div className="acct-field-row">
-                <input
-                  className="auth-input"
-                  type="email"
-                  placeholder="Email address"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  disabled={sharingLoading}
-                />
-              </div>
-              {scopePills(inviteScope, setInviteScope)}
-              <button
-                type="button"
-                className="acct-btn acct-btn--primary acct-btn--wide"
-                onClick={handleShareInvite}
-                disabled={sharingLoading || !inviteEmail.trim()}
-              >
-                {sharingLoading ? "Sending…" : "Send invite"}
-              </button>
-              {inviteResult && (
-                <div className="acct-invite-result">
-                  <span className="acct-row-meta">Invite code</span>
-                  <code className="acct-invite-code-inline">{inviteResult.invite_code}</code>
-                  <button
-                    type="button"
-                    className="acct-btn acct-btn--sm"
-                    onClick={() => navigator.clipboard.writeText(inviteResult.invite_code).catch(() => {})}
-                  >
-                    <ShareNetwork size={11} /> Copy
-                  </button>
-                </div>
-              )}
-
-              <div className="acct-subhead">Join by code</div>
-              <div className="acct-field-row">
-                <input
-                  className="auth-input"
-                  placeholder="Paste invite code"
-                  value={acceptCode}
-                  onChange={(e) => setAcceptCode(e.target.value)}
-                  disabled={sharingLoading}
-                />
-                <button
-                  type="button"
-                  className="acct-btn"
-                  onClick={() => handleAcceptInvite(acceptCode, acceptScope)}
-                  disabled={sharingLoading || !acceptCode.trim()}
-                >
-                  {sharingLoading ? "Joining…" : "Join"}
-                </button>
-              </div>
             </div>
+
           </>
         )}
       </div>

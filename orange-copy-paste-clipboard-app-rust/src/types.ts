@@ -47,11 +47,42 @@ export interface SyncUser {
   display_name: string;
 }
 
+export interface SyncGroupMember {
+  user_id: string;
+  display_name: string;
+  role: string;
+  /** False until the owner has wrapped the Group Key for this member. */
+  has_group_key: boolean;
+}
+
 export interface SyncGroup {
   id: string;
   name: string;
+  owner_id: string;
+  is_owner: boolean;
+  share_history: boolean;
   member_count: number;
+  members: SyncGroupMember[];
   invite_code?: string;
+  invite_expires_at?: number;
+}
+
+export interface SyncInvite {
+  id: string;
+  group_id: string;
+  group_name: string;
+  group_type: "pool" | "live_share";
+  inviter_id: string;
+  inviter_name: string;
+  invitee_email: string;
+  status: "pending" | "accepted" | "declined" | "revoked";
+  created_at: number;
+  expires_at: number;
+}
+
+export interface SyncInviteList {
+  sent: SyncInvite[];
+  received: SyncInvite[];
 }
 
 export interface SharingMember {

@@ -199,6 +199,12 @@ pub fn generate_device_keypair() -> (Zeroizing<[u8; 32]>, [u8; 32]) {
     (Zeroizing::new(private.to_bytes()), public.to_bytes())
 }
 
+/// Public half of an X25519 private key — used when reusing a stored device
+/// key instead of registering a fresh device on every login.
+pub fn device_public_key(privkey: &[u8; 32]) -> [u8; 32] {
+    X25519Public::from(&StaticSecret::from(*privkey)).to_bytes()
+}
+
 /// Derive the per-user **identity** X25519 keypair deterministically from the
 /// UMK.  Because the UMK is identical on every one of a user's devices (shared
 /// via §7.3 wrapping), so is this keypair — no cross-device distribution and no

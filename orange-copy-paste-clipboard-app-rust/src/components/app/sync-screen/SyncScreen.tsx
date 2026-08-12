@@ -12,7 +12,6 @@ import type {
   Note,
   SyncGroup,
   SharingSession,
-  SharingMember,
 } from "../../../types";
 import {
   timeAgo,
@@ -149,439 +148,6 @@ function matchesSearch(item: FeedItem, q: string): boolean {
   );
 }
 
-// ── DEMO DATA — delete this entire block before production ───────────
-// Populates the sync panel and feed with realistic-looking mock content
-// so the UI can be iterated on without a live backend connection.
-
-const _DEMO_NOW = Date.now();
-const DEMO_GROUP_ID = "__demo_team__";
-const DEMO_PERSONAL_ID = "__demo_personal__";
-const DEMO_SHARE_ID = "__demo_live__";
-
-const DEMO_SYNC_GROUPS: SyncGroup[] = [
-  {
-    id: DEMO_GROUP_ID,
-    name: "Team Orange",
-    member_count: 4,
-    invite_code: "TM-ORANGE-2024",
-  },
-  {
-    id: DEMO_PERSONAL_ID,
-    name: "Personal Devices",
-    member_count: 2,
-  },
-];
-
-// DEMO: member lists per group — remove with the rest of the demo block before production
-const DEMO_GROUP_MEMBERS: Record<string, SharingMember[]> = {
-  [DEMO_GROUP_ID]: [
-    { user_id: "m1", display_name: "Alex K.", email: "", scope: "both", online: true },
-    { user_id: "m2", display_name: "Jordan L.", email: "", scope: "clipboard", online: true },
-    { user_id: "m3", display_name: "Sam R.", email: "", scope: "notes", online: false },
-    { user_id: "m4", display_name: "You", email: "", scope: "both", online: true },
-  ],
-  [DEMO_PERSONAL_ID]: [
-    { user_id: "m5", display_name: "MacBook Pro", email: "", scope: "both", online: true },
-    { user_id: "m6", display_name: "You (Desktop)", email: "", scope: "both", online: true },
-  ],
-};
-
-const DEMO_SESSIONS: SharingSession[] = [
-  {
-    share_group_id: DEMO_SHARE_ID,
-    name: "Design Review",
-    my_scope: "both",
-    members: [
-      { user_id: "u1", display_name: "Alex K.", email: "", scope: "both", online: true },
-      { user_id: "u2", display_name: "Jordan", email: "", scope: "clipboard", online: true },
-      { user_id: "u3", display_name: "Sam", email: "", scope: "notes", online: false },
-    ],
-  },
-];
-
-const _DAY = 1000 * 60 * 60 * 24;
-
-const DEMO_ENTRIES: ClipboardEntry[] = [
-  // ── Today ──
-  {
-    id: "__demo_e1__",
-    type: "text",
-    content:
-      "Meeting agenda: Q3 planning\n1. OKR review\n2. Roadmap discussion\n3. Resource allocation\n4. AOB",
-    timestamp: _DEMO_NOW - 1000 * 60 * 4,
-    pinned: true,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e2__",
-    type: "html",
-    content:
-      "<p><strong>Sprint 24 Review</strong></p><ul><li>Completed sync screen redesign ✓</li><li>Fixed clipboard latency on Windows</li><li>Deployed v2.4.1 to staging</li></ul><p>Next sprint starts <em>Monday</em>.</p>",
-    timestamp: _DEMO_NOW - 1000 * 60 * 38,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e3__",
-    type: "text",
-    content: "figma.com/file/abc123/Orange-Design-System-v3",
-    timestamp: _DEMO_NOW - 1000 * 60 * 75,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e4__",
-    type: "text",
-    content: "STRIPE_SECRET=sk_test_9f2a3b7c1d4e8f6a2b5c9d3e",
-    timestamp: _DEMO_NOW - 1000 * 60 * 60 * 2,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e5__",
-    type: "text",
-    content: "Tailwind v4 migration checklist: audit config → replace JIT flags → update postcss → test dark mode",
-    timestamp: _DEMO_NOW - 1000 * 60 * 60 * 5,
-    pinned: false,
-    groups: [DEMO_PERSONAL_ID],
-  },
-  // ── Yesterday ──
-  {
-    id: "__demo_e6__",
-    type: "text",
-    content: "npm install @radix-ui/react-dialog @radix-ui/react-tooltip",
-    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 30,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e7__",
-    type: "html",
-    content:
-      "<p><code>GET /api/v2/sync/groups</code> → returns <strong>200</strong> with group list. Auth via <code>Bearer</code> token in header.</p><p>Rate limit: <em>60 req/min</em> per user.</p>",
-    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 95,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e8__",
-    type: "text",
-    content: "postgres://user:pass@db.internal:5432/orange_prod",
-    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 60 * 3,
-    pinned: true,
-    groups: [DEMO_PERSONAL_ID],
-  },
-  {
-    id: "__demo_e9__",
-    type: "text",
-    content: "Review PR #418 — WebSocket reconnect with exponential backoff\nhttps://github.com/org/orange/pull/418",
-    timestamp: _DEMO_NOW - _DAY - 1000 * 60 * 60 * 5,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  // ── 3 days ago ──
-  {
-    id: "__demo_e10__",
-    type: "text",
-    content: "Design tokens update:\n--color-accent: #ff3e1c;\n--radius: 10px;\n--shadow-sm: 0 1px 3px rgba(0,0,0,.08);",
-    timestamp: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 20,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e11__",
-    type: "html",
-    content:
-      "<p><strong>Retro action items:</strong></p><ol><li>Add skeleton loaders to feed cards</li><li>Throttle clipboard watcher to 250 ms</li><li>Write migration guide for v3 API</li></ol>",
-    timestamp: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 80,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e12__",
-    type: "text",
-    content: "curl -X POST https://api.orange.app/v2/invite \\\n  -H 'Authorization: Bearer $TOKEN' \\\n  -d '{\"group_id\": \"grp_abc123\"}'",
-    timestamp: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 60 * 2,
-    pinned: false,
-    groups: [DEMO_PERSONAL_ID],
-  },
-  // ── 6 days ago ──
-  {
-    id: "__demo_e13__",
-    type: "text",
-    content: "Kick-off notes: scope confirmed for Q3. Focus on sync reliability, not new features.",
-    timestamp: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 45,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_e14__",
-    type: "html",
-    content:
-      "<p><strong>Team OKRs — Q3 2025</strong></p><ul><li>O1: Ship sync v2 by end of August</li><li>O2: Reduce p95 paste latency to &lt;80 ms</li><li>O3: Reach 10 k MAU milestone</li></ul>",
-    timestamp: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 60 * 2,
-    pinned: true,
-    groups: [DEMO_GROUP_ID],
-  },
-];
-
-const DEMO_NOTES: Note[] = [
-  // ── Today ──
-  {
-    id: "__demo_n1__",
-    title: "Sync Screen Design Brief",
-    content: JSON.stringify({
-      type: "doc",
-      content: [
-        {
-          type: "heading",
-          attrs: { level: 2 },
-          content: [{ type: "text", text: "Overview" }],
-        },
-        {
-          type: "paragraph",
-          content: [
-            {
-              type: "text",
-              text: "The sync screen lets users share clipboard entries and notes across devices and team members in real time via persistent groups or ephemeral live-share sessions.",
-            },
-          ],
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [{ type: "text", text: "Key Features" }],
-        },
-        {
-          type: "bulletList",
-          content: [
-            {
-              type: "listItem",
-              content: [
-                {
-                  type: "paragraph",
-                  content: [
-                    { type: "text", marks: [{ type: "bold" }], text: "Sync Groups" },
-                    { type: "text", text: " — persistent shared collections with invite codes" },
-                  ],
-                },
-              ],
-            },
-            {
-              type: "listItem",
-              content: [
-                {
-                  type: "paragraph",
-                  content: [
-                    { type: "text", marks: [{ type: "bold" }], text: "Live Share" },
-                    { type: "text", text: " — real-time session with per-member scope control" },
-                  ],
-                },
-              ],
-            },
-            {
-              type: "listItem",
-              content: [
-                {
-                  type: "paragraph",
-                  content: [{ type: "text", text: "Offline queue with automatic retry on reconnect" }],
-                },
-              ],
-            },
-          ],
-        },
-        {
-          type: "blockquote",
-          content: [
-            {
-              type: "paragraph",
-              content: [
-                {
-                  type: "text",
-                  marks: [{ type: "italic" }],
-                  text: "Design goal: zero friction. Copy once, available everywhere.",
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    }),
-    created_at: _DEMO_NOW - _DAY,
-    updated_at: _DEMO_NOW - 1000 * 60 * 28,
-    pinned: true,
-    groups: [DEMO_GROUP_ID],
-  },
-  {
-    id: "__demo_n2__",
-    title: "Standup — May 7",
-    content: JSON.stringify({
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [
-            { type: "text", marks: [{ type: "bold" }], text: "Yesterday: " },
-            {
-              type: "text",
-              text: "Finished group panel redesign, wired real NoteCard and EntryCard into the sync feed.",
-            },
-          ],
-        },
-        {
-          type: "paragraph",
-          content: [
-            { type: "text", marks: [{ type: "bold" }], text: "Today: " },
-            {
-              type: "text",
-              text: "Wire up WebSocket events, add optimistic updates, polish empty states.",
-            },
-          ],
-        },
-        {
-          type: "paragraph",
-          content: [
-            { type: "text", marks: [{ type: "bold" }], text: "Blockers: " },
-            { type: "text", text: "None." },
-          ],
-        },
-      ],
-    }),
-    created_at: _DEMO_NOW - 1000 * 60 * 60 * 3,
-    updated_at: _DEMO_NOW - 1000 * 60 * 12,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  // ── Yesterday ──
-  {
-    id: "__demo_n3__",
-    title: "API Contract — Sync v2",
-    content: JSON.stringify({
-      type: "doc",
-      content: [
-        {
-          type: "heading",
-          attrs: { level: 2 },
-          content: [{ type: "text", text: "Endpoints" }],
-        },
-        {
-          type: "bulletList",
-          content: [
-            {
-              type: "listItem",
-              content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "code" }], text: "POST /v2/groups" }, { type: "text", text: " — create group" }] }],
-            },
-            {
-              type: "listItem",
-              content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "code" }], text: "GET /v2/groups/:id/feed" }, { type: "text", text: " — paginated feed" }] }],
-            },
-            {
-              type: "listItem",
-              content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "code" }], text: "WS /v2/groups/:id/stream" }, { type: "text", text: " — real-time push" }] }],
-            },
-          ],
-        },
-        {
-          type: "paragraph",
-          content: [
-            { type: "text", text: "All payloads use " },
-            { type: "text", marks: [{ type: "bold" }], text: "MessagePack" },
-            { type: "text", text: " for binary efficiency. Auth via short-lived JWT issued by the identity service." },
-          ],
-        },
-      ],
-    }),
-    created_at: _DEMO_NOW - _DAY - 1000 * 60 * 60 * 2,
-    updated_at: _DEMO_NOW - _DAY - 1000 * 60 * 50,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  // ── 3 days ago ──
-  {
-    id: "__demo_n4__",
-    title: "Retro — Sprint 23",
-    content: JSON.stringify({
-      type: "doc",
-      content: [
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [{ type: "text", text: "What went well" }],
-        },
-        {
-          type: "bulletList",
-          content: [
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Timeline rail shipped ahead of schedule" }] }] },
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Zero regressions in clipboard watcher" }] }] },
-          ],
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [{ type: "text", text: "What to improve" }],
-        },
-        {
-          type: "bulletList",
-          content: [
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Need better offline UX — error states are too quiet" }] }] },
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "WebSocket reconnect needs exponential backoff" }] }] },
-          ],
-        },
-      ],
-    }),
-    created_at: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 60,
-    updated_at: _DEMO_NOW - _DAY * 3 - 1000 * 60 * 40,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-  // ── 6 days ago ──
-  {
-    id: "__demo_n5__",
-    title: "Q3 Kick-off — Goals & Scope",
-    content: JSON.stringify({
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [
-            { type: "text", text: "Agreed scope for Q3: ship " },
-            { type: "text", marks: [{ type: "bold" }], text: "Sync v2" },
-            { type: "text", text: " with group management, real-time push, and offline queue. No new clipboard capture features this quarter." },
-          ],
-        },
-        {
-          type: "blockquote",
-          content: [
-            {
-              type: "paragraph",
-              content: [
-                { type: "text", marks: [{ type: "italic" }], text: "\"If sync isn't rock-solid by September, nothing else matters.\" — Alex" },
-              ],
-            },
-          ],
-        },
-        {
-          type: "heading",
-          attrs: { level: 3 },
-          content: [{ type: "text", text: "Milestones" }],
-        },
-        {
-          type: "bulletList",
-          content: [
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "July 31" }, { type: "text", text: " — API v2 complete" }] }] },
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "Aug 15" }, { type: "text", text: " — Desktop client integration" }] }] },
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", marks: [{ type: "bold" }], text: "Aug 31" }, { type: "text", text: " — Beta to 100 users" }] }] },
-          ],
-        },
-      ],
-    }),
-    created_at: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 60 * 3,
-    updated_at: _DEMO_NOW - _DAY * 6 - 1000 * 60 * 60,
-    pinned: false,
-    groups: [DEMO_GROUP_ID],
-  },
-];
-// ── END DEMO DATA ─────────────────────────────────────────────────────
 
 // ── Sync context menu ─────────────────────────────────────────────────
 
@@ -1245,13 +811,9 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   syncConnected,
   onCopyEntry,
 }) => {
-  // DEMO: pre-filled with mock data — replace initial values with [] / null before production
-  const [syncGroups, setSyncGroups] = useState<SyncGroup[]>(DEMO_SYNC_GROUPS);
-  const [sessions, setSessions] = useState<SharingSession[]>(DEMO_SESSIONS);
-  const [selected, setSelected] = useState<SelectedGroup | null>({
-    kind: "sync",
-    group: DEMO_SYNC_GROUPS[0],
-  });
+  const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
+  const [sessions, setSessions] = useState<SharingSession[]>([]);
+  const [selected, setSelected] = useState<SelectedGroup | null>(null);
   const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>(
@@ -1345,13 +907,12 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
 
 
   useEffect(() => {
-    // DEMO: catch falls back to demo data instead of [] — remove fallback before production
     invoke<SyncGroup[]>("sync_get_groups")
       .then(setSyncGroups)
-      .catch(() => setSyncGroups(DEMO_SYNC_GROUPS));
-    invoke<SharingSession[]>("sharing_get_sessions")
+      .catch(() => {});
+    invoke<SharingSession[]>("sharing_refresh_sessions")
       .then(setSessions)
-      .catch(() => setSessions(DEMO_SESSIONS));
+      .catch(() => {});
   }, [syncConnected]);
 
   useEffect(() => {
@@ -1359,7 +920,6 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   }, [selected]);
 
   // Base feed items (group + type filter)
-  // DEMO: merges DEMO_ENTRIES / DEMO_NOTES alongside real props — remove before production
   const allFeedItems = useMemo((): FeedItem[] => {
     if (!selected) return [];
     const matchesGroup = (groups: string[]) => {
@@ -1368,14 +928,12 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
       return groups.includes(selected.session.share_group_id);
     };
     const items: FeedItem[] = [];
-    const allEntries = [...entries, ...DEMO_ENTRIES]; // DEMO
-    const allNotes = [...notes, ...DEMO_NOTES]; // DEMO
     if (feedFilter !== "notes")
-      for (const entry of allEntries)
+      for (const entry of entries)
         if (matchesGroup(entry.groups))
           items.push({ kind: "clipboard", entry });
     if (feedFilter !== "clipboard")
-      for (const note of allNotes)
+      for (const note of notes)
         if (matchesGroup(note.groups)) items.push({ kind: "note", note });
     return items;
   }, [selected, feedFilter, entries, notes]);
@@ -1829,9 +1387,9 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
               {syncGroups.length === 0 && sessions.length === 0 ? (
                 <>
                   <Users size={40} />
-                  <span className="sync-no-selection-title">No groups yet</span>
+                  <span className="sync-no-selection-title">No shared spaces yet</span>
                   <span className="sync-no-selection-sub">
-                    Create a sync group or join one with an invite code.
+                    Create one from the Account screen, or join with an invite code.
                   </span>
                 </>
               ) : (
@@ -1871,14 +1429,14 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                   ? "Not signed in"
                   : syncConnected === false
                     ? "Offline"
-                    : "No sync groups yet"}
+                    : "No shared spaces yet"}
               </span>
               <span className="sync-panel-empty-sub">
                 {syncConnected === null
                   ? "Sign in to sync across your devices."
                   : syncConnected === false
                     ? "Reconnecting…"
-                    : "Create a group or join one with an invite code to start syncing."}
+                    : "Create one from the Account screen, or join with an invite code."}
               </span>
             </div>
           ) : (
@@ -1895,8 +1453,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                     const isExpanded = expandedGroups.has(group.id);
                     const color = groupAvatarColor(group.id);
                     const initials = group.name.slice(0, 2).toUpperCase();
-                    // DEMO: replace with real member list from API before production
-                    const members: SharingMember[] = DEMO_GROUP_MEMBERS[group.id] ?? [];
+                    const members = group.members;
                     return (
                       <div key={group.id} className="sync-group-card-wrap">
                         <button
@@ -1932,9 +1489,10 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                           <div className="sync-group-members">
                             {members.map((m) => (
                               <div key={m.user_id} className="sync-group-member-row">
-                                <Circle size={5} weight="fill" color={m.online ? "#22c55e" : "#6b7280"} />
-                                <span className="sync-group-member-name">{m.display_name}</span>
-                                <span className="sync-group-member-scope">{m.scope}</span>
+                                <span className="sync-group-member-name">
+                                  {m.display_name || m.user_id.slice(0, 8)}
+                                </span>
+                                <span className="sync-group-member-scope">{m.role}</span>
                               </div>
                             ))}
                           </div>
