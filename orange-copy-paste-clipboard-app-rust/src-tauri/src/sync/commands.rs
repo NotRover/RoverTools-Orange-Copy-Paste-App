@@ -222,6 +222,46 @@ pub async fn sync_reset_password(
     sync.reset_password(email).await
 }
 
+/// Silently restore the previous session (refresh token + device-wrapped UMK).
+/// Called once on app startup; returns null when there's nothing to restore so
+/// the UI can show the login screen without an error.
+#[tauri::command]
+pub async fn sync_restore_session(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<Option<SyncUser>, String> {
+    let config = SyncConfig::load(&app);
+    if !config.enabled || !config.is_configured() {
+        return Ok(None);
+    }
+    let sync = {
+        let guard = state.sync_client.lock();
+        match guard.clone() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                let client = SyncClient::new(app.clone(), config)?;
+                let arc = Arc::new(client);
+                *state.sync_client.lock() = Some(Arc::clone(&arc));
+                arc
+            }
+        }
+    };
+    match sync.try_restore_session().await {
+        Ok(user) => {
+            Arc::clone(&sync).trigger_initial_sync();
+            let _ = app.emit("sync:session-restored", &user);
+            Ok(Some(user))
+        }
+        Err(e) => {
+            // Expected on first run / after logout / after revocation — the UI
+            // just shows the login screen.
+            eprintln!("[sync] session restore skipped: {e}");
+            Ok(None)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn sync_logout(
     state: State<'_, AppState>,

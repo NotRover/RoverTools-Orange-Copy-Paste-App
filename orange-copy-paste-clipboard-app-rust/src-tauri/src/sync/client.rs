@@ -889,6 +889,39 @@ impl SyncHttpClient {
             .await
     }
 
+    /// The UMK wrapped for this device (silent restore path); `None` when no
+    /// wrap is stored or the device was revoked.
+    pub async fn get_device_wrapped_umk(&self) -> Result<Option<String>, String> {
+        match self
+            .run("device umk", true, || {
+                self.authed(Method::GET, "/api/v1/auth/umk/device")
+            })
+            .await?
+        {
+            None => Ok(None),
+            Some(resp) => resp
+                .json::<serde_json::Value>()
+                .await
+                .map_err(|e| format!("device umk parse: {e}"))
+                .map(|v| v.get("wrapped_umk").and_then(|w| w.as_str()).map(String::from)),
+        }
+    }
+
+    /// Store the UMK wrapped for a device (enables its silent restore).
+    pub async fn store_device_wrapped_umk(
+        &self,
+        device_id: &str,
+        wrapped_umk: String,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({ "wrapped_umk": wrapped_umk });
+        self.get_ok("store device umk", false, || {
+            Ok(self
+                .authed(Method::POST, &format!("/api/v1/auth/devices/{device_id}/key-wrap"))?
+                .json(&body))
+        })
+        .await
+    }
+
     /// Revoke one of the user's devices (soft delete server-side).
     pub async fn revoke_device(&self, device_id: &str) -> Result<(), String> {
         self.get_ok("revoke device", true, || {
