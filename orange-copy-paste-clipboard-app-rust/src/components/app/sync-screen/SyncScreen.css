@@ -844,6 +844,34 @@
   flex-shrink: 0;
 }
 
+/* Member picture — a person, so a circle, against the squircle group avatars.
+   Falls back to initials in the same accent tint the Account screen uses. */
+
+.sync-member-pic {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 8px;
+  font-weight: 650;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* In a chip the picture sits inside the pill, so it loses its own left inset. */
+.sync-member-pic--chip {
+  width: 14px;
+  height: 14px;
+  font-size: 7px;
+}
+
+.sync-member-chip:has(.sync-member-pic--chip) {
+  padding-left: 3px;
+}
+
 /* Letter avatar */
 
 .sync-group-avatar {
