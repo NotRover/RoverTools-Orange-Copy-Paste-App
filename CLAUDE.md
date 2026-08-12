@@ -5,9 +5,11 @@ RoverTools is a **cross-device Smart Clipboard product**: a Tauri desktop app pl
 <communication>
 Be concise and direct. Match length to the task.
 
-- Plain language; no filler or preamble ("Great question!", "I'll now…").
+- Plain language; no filler or preamble ("Great question!", "I'll now…", "It's worth noting…").
+- No recap of what was just said; no restating the request back before answering.
 - When summarizing changes, say what changed and why — skip the line-by-line walkthrough unless asked.
 - Surface assumptions and risks explicitly; don't bury them.
+- Don't pad. If the answer is one line, let it be one line.
 </communication>
 
 <scope>
@@ -17,6 +19,16 @@ Every changed line should trace to the request.
 - No abstractions for single-use code, no config that wasn't asked for.
 - Cleanup of code you're already touching is fine; don't wander into unrelated files. Flag out-of-scope issues instead of silently fixing or ignoring them.
 </scope>
+
+<working-notes>
+Context is lossy — compaction and long sessions wash out earlier detail. On any multi-step or multi-file task (especially anything crossing the client/backend contract), lean on durable tools — todo lists for tracking, a working-notes file for the reasoning — instead of trusting the context window to hold it.
+
+**File:** `.scratch/<YYYY-MM-DD>-<topic-slug>.md` at the workspace root — e.g. `2026-08-12-group-key-rewrap.md`. Gitignored; never commit it. One file per task/topic, reused across sessions.
+
+**Contents, terse:** goal + issue/PR link · plan checklist · decisions with one-line rationale · current state & next step · key files as `path:line` · which repo(s) each change lands in · verification run so far (checks passed/failed) · blockers/open questions.
+
+**Discipline:** create it early, before you're lost. Update after each meaningful step — record decisions and results as they happen (including approaches ruled out and why); prune stale notes. After a compaction, or when context feels thin, re-read it before acting. Delete it once shipped.
+</working-notes>
 
 ## Instruction Scope
 
@@ -62,7 +74,9 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `components/app/clipboard-screen/entry-card/EntryCard.tsx` — per-entry rendering/interactions.
 - `components/app/notes-screen/NotesScreen.tsx` — notes CRUD/editor, grouping, bulk actions.
 - `components/app/sync-screen/SyncScreen.tsx` — sync feed UI (groups/sessions; still partly demo-scaffolded).
-- `components/app/settings-screen/SettingsScreen.tsx` — sync auth (login/signup), devices/presence, groups, sharing.
+- `components/app/account-screen/AccountScreen.tsx` — sync auth (login/signup/Google), devices/presence, groups, sharing.
+- `components/app/settings-screen/SettingsScreen.tsx` — app preferences (slots, storage folder, history behavior); owns the shared `scr-*`/`set-section-*` styles other screens reuse.
+- `components/app/shortcuts-screen/ShortcutsScreen.tsx` — hotkey reference.
 - `components/paste-popup/PastePopup.tsx`, `components/copy-popup/CopyPopup.tsx` — quick-paste + capture popups.
 - `types.ts` — shared TS types (entries, notes, sync/group/session/device shapes).
 
@@ -127,6 +141,20 @@ These bind the client and backend. Changing one side usually means changing the 
 - Sync must never echo a merge back as a new push, and must skip self-device entries.
 - Be careful with autostart while running `tauri dev` (dev-path startup entries can break launches without Vite).
 
+## Code Conventions
+
+**Client — the Rust/React boundary**
+- Rust owns state, persistence, and **all** crypto; React is UI. Never reimplement encryption, key handling, or merge logic in TypeScript.
+- Frontend → Rust: `invoke<T>("command_name", { camelCaseArgs })` from `@tauri-apps/api/core`. Commands are snake_case and domain-prefixed (`sync_get_groups`, `sharing_get_sessions`, `get_setting`); register new ones in `lib.rs`.
+- Tauri commands return `Result<T, String>` — surface errors as strings, don't panic in command paths.
+- Rust → Frontend: events are namespaced `domain:event` in kebab-case (`clipboard:new-entry`, `sync:history-merged`, `sync:status-changed`). Match that shape for new events and update both sides together.
+- Shared TS shapes live in `src/types.ts`; keep them in sync with the serde structs they mirror.
+- Screens keep their own CSS next to the component; shared page-header/section styles come from `settings-screen/SettingsScreen.css`.
+
+**Backend**
+- Routers stay thin: HTTP concerns in the route, logic in the domain service. Versions and route prefixes come from `src/version.py` — never hardcode `/api/v1`.
+- Device-scoped routes go through the shared JWT + `X-Device-Id` dependencies in `dependencies.py`; don't re-parse tokens per route.
+
 ## Commands
 
 **Client** (from `orange-copy-paste-clipboard-app-rust/`):
@@ -154,6 +182,9 @@ Pick the smallest valid check set for what you touched.
 - Backend work goes on its **own dedicated branches** in the backend repo. Compare/PR against each repo's `main`.
 - **`uv.lock` churn:** `uv run` can regenerate `uv.lock`. If a task didn't intend a dependency change, restore it (`git checkout -- uv.lock`) so the commit stays scoped.
 - Never apply migrations, push, or commit-push without explicit approval.
+- **Commit only when the user asks in that turn** — never proactively, and never bundle a push with it.
+- Commit messages: lowercase `type(scope): subject`, then 3–5 single-line bullets on what changed and why. No wall of text, and **no AI attribution footer** (`Co-Authored-By`, "Generated with…") anywhere — commits, PRs, or comments.
+- PRs are always opened as drafts (`gh pr create --draft`); never merge or mark ready without being asked. When editing a PR body, fetch the existing body first and splice — don't clobber screenshots or bot summaries.
 
 ## Docs & Source Priority
 
@@ -175,3 +206,18 @@ Use live code first; docs are context and may be stale — confirm behavior in c
 - No regression in clipboard/notes/sync flows; cross-system contract stays consistent across client and backend.
 - Diff is minimal and matches existing patterns.
 - Assumptions, risks, and any deferred/untested paths are called out explicitly.
+
+## Compact Instructions
+
+When compacting, preserve — in enough detail to act on without the original messages:
+- **Task & goal** — the active request, what "done" means, and the issue/PR link.
+- **Decisions + rationale** — every settled choice and its one-line why, so nothing gets relitigated.
+- **Current state & next step** — what's done, what's in progress, and the exact next action.
+- **Critical facts** — key `path:line`, contract details (payloads, event names, key handling), root causes, and gotchas discovered.
+- **Repo/branch context** — which repo each pending change belongs to (parent vs backend submodule), branch names, and whether anything is committed.
+- **Verification state** — which checks were run and their results; which flows are untested and why.
+- **User instructions** — explicit directions and constraints given this session.
+- **Open blockers / questions** — anything unresolved or awaiting the user.
+- **The working-notes file path** (`.scratch/…`), so it can be re-read after the summary.
+
+Safe to compress or drop: verbose file/tool output (keep the `path:line`, not the dump), resolved dead-ends (keep a one-line "ruled out X because Y"), and preamble or chit-chat.
