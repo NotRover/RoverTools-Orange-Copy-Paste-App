@@ -74,6 +74,10 @@ pub struct SyncDevice {
     pub platform: String,
     pub app_version: String,
     pub last_seen_at: u64,
+    /// Presence snapshot from the server; the UI keeps it fresh via WS events.
+    pub online: bool,
+    /// True when this row is the device the app is running on.
+    pub is_current: bool,
 }
 
 // ── Sync status info ────────────────────────────────────────────────

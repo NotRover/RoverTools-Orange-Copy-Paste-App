@@ -427,16 +427,19 @@ pub async fn sync_get_quota(state: State<'_, AppState>) -> Result<SyncQuota, Str
 
 #[tauri::command]
 pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDevice>, String> {
-    let (_sync, http) = sync_http(&state)?;
+    let (sync, http) = sync_http(&state)?;
+    let my_device = sync.device_id();
     let devices = http.list_devices().await?;
     Ok(devices
         .into_iter()
         .map(|d| SyncDevice {
+            is_current: my_device.as_deref() == Some(d.id.as_str()),
             id: d.id,
             device_name: d.device_name,
             platform: d.platform,
             app_version: d.app_version,
             last_seen_at: d.last_seen_at,
+            online: d.online,
         })
         .collect())
 }

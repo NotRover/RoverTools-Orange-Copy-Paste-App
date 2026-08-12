@@ -4,6 +4,13 @@
    AccountScreen.tsx). This file holds the auth-card + acct-* styling, kept in
    the same flat surface language as Settings. */
 
+/* Status colors used by presence dots and badges — single source so pills,
+   dots, and meta text can't drift apart. */
+.settings-screen {
+  --acct-ok: #22c55e;
+  --acct-warn: #f59e0b;
+}
+
 /* ── Auth card ─────────────────────────────────────────────────────── */
 
 .auth-card {
@@ -417,10 +424,13 @@
 
 .acct-card-count {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.5;
   color: var(--text-muted, #909090);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   padding: 1px 8px;
   border-radius: 999px;
 }
@@ -647,7 +657,7 @@
   flex: 0 0 auto;
 }
 
-.acct-dot.online { background: #22c55e; }
+.acct-dot.online { background: var(--acct-ok); }
 
 .acct-empty {
   font-size: 12px;
@@ -783,17 +793,23 @@
 .acct-space-body .acct-members { margin-top: 0; }
 .acct-space-actions { margin-top: 10px; }
 
-/* Small status badges on space rows and members. */
+/* Small status pills — one shared metric so every badge on the screen lines
+   up (space rows, members, devices, counts). Variants change color only. */
 .acct-badge {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
+  line-height: 1.5;
   color: var(--text-muted, #909090);
   background: color-mix(in srgb, var(--text) 7%, transparent);
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: 999px;
   white-space: nowrap;
 }
+
+.acct-row-name > .acct-badge { margin-left: 8px; }
 
 .acct-badge--owner {
   color: var(--accent);
@@ -801,13 +817,13 @@
 }
 
 .acct-badge--live {
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.12);
+  color: var(--acct-ok);
+  background: color-mix(in srgb, var(--acct-ok) 12%, transparent);
 }
 
 .acct-badge--warn {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.12);
+  color: var(--acct-warn);
+  background: color-mix(in srgb, var(--acct-warn) 12%, transparent);
 }
 
 .acct-badge--muted { opacity: 0.75; }
