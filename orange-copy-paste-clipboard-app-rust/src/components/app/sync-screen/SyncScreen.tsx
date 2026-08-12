@@ -24,6 +24,7 @@ import {
   deriveDisplayKind,
   groupColor,
 } from "../../../types";
+import { UserAvatar } from "../../UserAvatar";
 import { EntryTypePill } from "../../entry-types/EntryTypePill";
 import {
   TYPE_ICONS,
@@ -1249,8 +1250,14 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 <div className="sync-members-bar">
                   {selected.session.members.map((m) => (
                     <div key={m.user_id} className="sync-member-chip">
+                      <UserAvatar
+                        className="sync-member-pic sync-member-pic--chip"
+                        url={m.avatar_url}
+                        label={m.display_name || m.email || ""}
+                        glyphSize={9}
+                      />
                       <Circle size={6} weight="fill" color={m.online ? "#22c55e" : "#6b7280"} />
-                      <span>{m.display_name}</span>
+                      <span>{m.display_name || m.email || "Member"}</span>
                       <span className="sync-member-scope">{m.scope}</span>
                     </div>
                   ))}
@@ -1489,8 +1496,16 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                           <div className="sync-group-members">
                             {members.map((m) => (
                               <div key={m.user_id} className="sync-group-member-row">
+                                <UserAvatar
+                                  className="sync-member-pic"
+                                  url={m.avatar_url}
+                                  label={m.display_name || ""}
+                                  glyphSize={10}
+                                />
                                 <span className="sync-group-member-name">
-                                  {m.display_name || m.user_id.slice(0, 8)}
+                                  {/* A user-id prefix is not a name — a profile
+                                      with no display name reads as "Member". */}
+                                  {m.display_name || "Member"}
                                 </span>
                                 <span className="sync-group-member-scope">{m.role}</span>
                               </div>

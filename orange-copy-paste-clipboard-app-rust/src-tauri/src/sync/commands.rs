@@ -74,6 +74,7 @@ fn to_sync_group(g: GroupOut, me: &str) -> SyncGroup {
             .map(|m| crate::sync::types::SyncGroupMember {
                 user_id: m.user_id,
                 display_name: m.display_name,
+                avatar_url: m.avatar_url,
                 role: m.role,
                 has_group_key: m.has_group_key,
             })
@@ -220,6 +221,46 @@ pub async fn sync_reset_password(
         }
     };
     sync.reset_password(email).await
+}
+
+/// Silently restore the previous session (refresh token + device-wrapped UMK).
+/// Called once on app startup; returns null when there's nothing to restore so
+/// the UI can show the login screen without an error.
+#[tauri::command]
+pub async fn sync_restore_session(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<Option<SyncUser>, String> {
+    let config = SyncConfig::load(&app);
+    if !config.enabled || !config.is_configured() {
+        return Ok(None);
+    }
+    let sync = {
+        let guard = state.sync_client.lock();
+        match guard.clone() {
+            Some(s) => s,
+            None => {
+                drop(guard);
+                let client = SyncClient::new(app.clone(), config)?;
+                let arc = Arc::new(client);
+                *state.sync_client.lock() = Some(Arc::clone(&arc));
+                arc
+            }
+        }
+    };
+    match sync.try_restore_session().await {
+        Ok(user) => {
+            Arc::clone(&sync).trigger_initial_sync();
+            let _ = app.emit("sync:session-restored", &user);
+            Ok(Some(user))
+        }
+        Err(e) => {
+            // Expected on first run / after logout / after revocation — the UI
+            // just shows the login screen.
+            eprintln!("[sync] session restore skipped: {e}");
+            Ok(None)
+        }
+    }
 }
 
 #[tauri::command]
@@ -427,16 +468,19 @@ pub async fn sync_get_quota(state: State<'_, AppState>) -> Result<SyncQuota, Str
 
 #[tauri::command]
 pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDevice>, String> {
-    let (_sync, http) = sync_http(&state)?;
+    let (sync, http) = sync_http(&state)?;
+    let my_device = sync.device_id();
     let devices = http.list_devices().await?;
     Ok(devices
         .into_iter()
         .map(|d| SyncDevice {
+            is_current: my_device.as_deref() == Some(d.id.as_str()),
             id: d.id,
             device_name: d.device_name,
             platform: d.platform,
             app_version: d.app_version,
             last_seen_at: d.last_seen_at,
+            online: d.online,
         })
         .collect())
 }
