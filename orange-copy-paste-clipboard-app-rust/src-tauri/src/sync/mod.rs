@@ -515,6 +515,23 @@ impl SyncClient {
         crypto::store_device_private_key(&user_id, &device_priv)?;
         crypto::store_refresh_token(&user_id, &session.refresh_token)?;
 
+        // 7b. Store the UMK wrapped for this device so future launches can
+        //     restore the session without the password (see
+        //     [`Self::try_restore_session`]). X25519 with our own public half
+        //     is a valid self-shared secret, same pattern as group keys.
+        //     Best-effort: failure only means the next launch asks to log in.
+        {
+            let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
+            match crypto::wrap_key(&shared, &umk) {
+                Ok(wrapped) => {
+                    if let Err(e) = http.store_device_wrapped_umk(&device_id, wrapped).await {
+                        eprintln!("[sync] store device umk failed (no silent restore): {e}");
+                    }
+                }
+                Err(e) => eprintln!("[sync] wrap device umk failed: {e}"),
+            }
+        }
+
         // 8. Update persisted sync state.
         {
             let mut state = self.sync_state.lock();
@@ -527,6 +544,7 @@ impl SyncClient {
             user_id,
             email: user_email,
             display_name: boot.display_name,
+            avatar_url: boot.avatar_url,
         };
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
@@ -534,6 +552,67 @@ impl SyncClient {
         self.status.lock().connected = true;
 
         // 10. Start the realtime listener.
+        self.start_ws_listener();
+
+        Ok(user)
+    }
+
+    /// Restore the previous session without user interaction.
+    ///
+    /// Requires all of: stored `user_id`/`device_id` in sync_state.json, the
+    /// refresh token and device private key in the OS keychain, and a
+    /// device-wrapped UMK on the server (uploaded at login, cleared on device
+    /// revocation — so a revoked device cannot restore even with an intact
+    /// keychain). Any missing piece returns Err and the UI shows the login
+    /// screen; nothing is mutated on failure.
+    pub async fn try_restore_session(&self) -> Result<SyncUser, String> {
+        if self.user.lock().is_some() {
+            return self.current_user().ok_or_else(|| "no session".into());
+        }
+
+        let (stored_user, stored_device) = {
+            let s = self.sync_state.lock();
+            (s.data.user_id.clone(), s.data.device_id.clone())
+        };
+        if stored_user.is_empty() || stored_device.is_empty() {
+            return Err("no previous session".into());
+        }
+        let refresh = crypto::load_refresh_token(&stored_user)
+            .map_err(|_| "no stored credentials".to_string())?;
+        let device_priv = crypto::load_device_private_key(&stored_user)
+            .map_err(|_| "no stored device key".to_string())?;
+
+        // Fresh tokens from Supabase; the refresh token rotates, so persist it.
+        let session = self.supabase.refresh(&refresh).await?;
+        crypto::store_refresh_token(&stored_user, &session.refresh_token)?;
+
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        http.set_access_token(session.access_token);
+        http.set_refresh_token(session.refresh_token);
+        http.set_user_id(stored_user.clone());
+        http.set_device_id(stored_device.clone());
+
+        let boot = http.bootstrap(None).await?;
+
+        // Recover the UMK from the device wrap — no password involved.
+        let wrapped = http
+            .get_device_wrapped_umk()
+            .await?
+            .ok_or("no device key wrap (revoked or never stored) — log in again")?;
+        let device_pub = crypto::device_public_key(&device_priv);
+        let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
+        let umk = crypto::unwrap_key(&shared, &wrapped)?;
+
+        let user = SyncUser {
+            user_id: stored_user,
+            email: session.user.email.clone(),
+            display_name: boot.display_name,
+            avatar_url: boot.avatar_url,
+        };
+        *self.umk.lock() = Some(umk);
+        *self.http.lock() = Some(Arc::clone(&http));
+        *self.user.lock() = Some(user.clone());
+        self.status.lock().connected = true;
         self.start_ws_listener();
 
         Ok(user)
@@ -1433,6 +1512,7 @@ impl SyncClient {
                     .map(|m| crate::sync::types::SessionMember {
                         user_id: m.user_id,
                         display_name: m.display_name,
+                        avatar_url: m.avatar_url,
                         email: String::new(),
                         scope: ShareScope::parse(&m.scope).unwrap_or(ShareScope::Clipboard),
                         online: false,

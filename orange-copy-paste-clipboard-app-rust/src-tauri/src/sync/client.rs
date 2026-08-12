@@ -39,6 +39,10 @@ pub struct BootstrapResponse {
     /// base64-encoded salt used for Argon2id key derivation (the wrapping key).
     pub kdf_salt: String,
     pub display_name: String,
+    /// Identity-provider avatar URL (Google, mirrored at bootstrap); `None` for
+    /// accounts without one.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     /// base64 envelope holding the random UMK wrapped under the password-derived
     /// KEK.  `None` on a brand-new account (no UMK established yet); its presence
     /// is how the client distinguishes first-setup from a returning login, and
@@ -74,6 +78,9 @@ pub struct DeviceOut {
     pub platform: String,
     pub app_version: String,
     pub last_seen_at: u64,
+    /// Presence snapshot at list time; live updates arrive over WS.
+    #[serde(default)]
+    pub online: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -217,6 +224,9 @@ pub struct GroupMemberOut {
     pub user_id: String,
     #[serde(default)]
     pub display_name: String,
+    /// Identity-provider avatar URL; `None` for accounts without one.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub role: String,
     pub joined_at: u64,
     #[serde(default)]
@@ -300,6 +310,9 @@ pub struct SharingInviteResponse {
 pub struct SessionMemberOut {
     pub user_id: String,
     pub display_name: String,
+    /// Identity-provider avatar URL; `None` for accounts without one.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub scope: String,
     #[serde(default)]
     pub identity_pubkey: Option<String>,
@@ -884,6 +897,39 @@ impl SyncHttpClient {
     pub async fn list_devices(&self) -> Result<Vec<DeviceOut>, String> {
         self.get_json("list devices", || self.authed(Method::GET, "/api/v1/auth/devices"))
             .await
+    }
+
+    /// The UMK wrapped for this device (silent restore path); `None` when no
+    /// wrap is stored or the device was revoked.
+    pub async fn get_device_wrapped_umk(&self) -> Result<Option<String>, String> {
+        match self
+            .run("device umk", true, || {
+                self.authed(Method::GET, "/api/v1/auth/umk/device")
+            })
+            .await?
+        {
+            None => Ok(None),
+            Some(resp) => resp
+                .json::<serde_json::Value>()
+                .await
+                .map_err(|e| format!("device umk parse: {e}"))
+                .map(|v| v.get("wrapped_umk").and_then(|w| w.as_str()).map(String::from)),
+        }
+    }
+
+    /// Store the UMK wrapped for a device (enables its silent restore).
+    pub async fn store_device_wrapped_umk(
+        &self,
+        device_id: &str,
+        wrapped_umk: String,
+    ) -> Result<(), String> {
+        let body = serde_json::json!({ "wrapped_umk": wrapped_umk });
+        self.get_ok("store device umk", false, || {
+            Ok(self
+                .authed(Method::POST, &format!("/api/v1/auth/devices/{device_id}/key-wrap"))?
+                .json(&body))
+        })
+        .await
     }
 
     /// Revoke one of the user's devices (soft delete server-side).
