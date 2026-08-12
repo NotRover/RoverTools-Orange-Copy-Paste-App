@@ -64,12 +64,26 @@ fn write_setting(app: &tauri::AppHandle, key: &str, value: serde_json::Value) {
     });
 }
 
-fn to_sync_group(g: GroupOut) -> SyncGroup {
+fn to_sync_group(g: GroupOut, me: &str) -> SyncGroup {
     SyncGroup {
         member_count: g.members.len() as u32,
+        is_owner: g.owner_id == me,
+        members: g
+            .members
+            .into_iter()
+            .map(|m| crate::sync::types::SyncGroupMember {
+                user_id: m.user_id,
+                display_name: m.display_name,
+                role: m.role,
+                has_group_key: m.has_group_key,
+            })
+            .collect(),
         id: g.id,
         name: g.name,
+        owner_id: g.owner_id,
+        share_history: g.share_history,
         invite_code: g.invite_code,
+        invite_expires_at: g.invite_expires_at,
     }
 }
 
@@ -306,9 +320,10 @@ pub fn sync_receive_local_settings(
 
 #[tauri::command]
 pub async fn sync_get_groups(state: State<'_, AppState>) -> Result<Vec<SyncGroup>, String> {
-    let (_sync, http) = sync_http(&state)?;
+    let (sync, http) = sync_http(&state)?;
+    let me = sync.current_user().map(|u| u.user_id).unwrap_or_default();
     let groups = http.list_groups().await?;
-    Ok(groups.into_iter().map(to_sync_group).collect())
+    Ok(groups.into_iter().map(|g| to_sync_group(g, &me)).collect())
 }
 
 #[tauri::command]
@@ -334,11 +349,17 @@ pub async fn sync_create_group(
     sync.reconcile_group_keys().await;
     // Creator is the sole member at this point; surface the invite code so the
     // UI can share it.
+    let me = sync.current_user().map(|u| u.user_id).unwrap_or_default();
     Ok(SyncGroup {
         id: created.group_id,
         name,
+        owner_id: me.clone(),
+        is_owner: true,
+        share_history: share_history.unwrap_or(true),
         member_count: 1,
+        members: Vec::new(),
         invite_code: Some(created.invite_code),
+        invite_expires_at: None,
     })
 }
 
@@ -350,12 +371,31 @@ pub async fn sync_join_group(
     let (sync, http) = sync_http(&state)?;
     let g = http
         .join_group(JoinGroupRequest {
-            invite_code,
+            // Tolerate pasted links and sloppy casing: the server normalizes
+            // short codes, but strip an obvious `?code=`/path prefix here.
+            invite_code: extract_invite_code(&invite_code),
             wrapped_group_key: None,
         })
         .await?;
     sync.register_group_mapping(&g.name, &g.group_id);
+    // Catch up on the group's shared history in the background.
+    let sync2 = Arc::clone(&sync);
+    tauri::async_runtime::spawn(async move {
+        sync2.reconcile_group_keys().await;
+        let _ = sync2.flush_and_pull().await;
+    });
     Ok(())
+}
+
+/// Pull the code out of a pasted invite link (`…?code=KX7Q-2M4X` or a bare
+/// code, dashed or not). Server-side normalization handles case/dashes.
+fn extract_invite_code(input: &str) -> String {
+    let trimmed = input.trim();
+    if let Some(pos) = trimmed.find("code=") {
+        let rest = &trimmed[pos + 5..];
+        return rest.split(&['&', '#'][..]).next().unwrap_or(rest).to_string();
+    }
+    trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
 
 #[tauri::command]
@@ -399,6 +439,76 @@ pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDev
             last_seen_at: d.last_seen_at,
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn sync_revoke_device(
+    device_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (sync, http) = sync_http(&state)?;
+    // Refuse to revoke the device we're running on — sign out is the way.
+    if sync.device_id().as_deref() == Some(device_id.as_str()) {
+        return Err("can't remove this device while signed in on it — sign out instead".into());
+    }
+    http.revoke_device(&device_id).await
+}
+
+// ── Addressed invites ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn sync_list_invites(
+    state: State<'_, AppState>,
+) -> Result<crate::sync::client::InviteListResponse, String> {
+    let (_sync, http) = sync_http(&state)?;
+    http.list_invites().await
+}
+
+#[tauri::command]
+pub async fn sync_send_invite(
+    group_id: String,
+    email: String,
+    state: State<'_, AppState>,
+) -> Result<crate::sync::client::InviteOut, String> {
+    let (_sync, http) = sync_http(&state)?;
+    http.send_group_invite(&group_id, &email).await
+}
+
+#[tauri::command]
+pub async fn sync_accept_invite(
+    invite_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (sync, http) = sync_http(&state)?;
+    let g = http.accept_invite(&invite_id).await?;
+    sync.register_group_mapping(&g.name, &g.group_id);
+    // Catch up in the background: recover/receive keys, then pull the group's
+    // history (subject to its share_history policy).
+    let sync2 = Arc::clone(&sync);
+    tauri::async_runtime::spawn(async move {
+        sync2.reconcile_group_keys().await;
+        sync2.refresh_sharing_sessions().await;
+        let _ = sync2.flush_and_pull().await;
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_decline_invite(
+    invite_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (_sync, http) = sync_http(&state)?;
+    http.decline_invite(&invite_id).await
+}
+
+#[tauri::command]
+pub async fn sync_revoke_invite(
+    invite_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (_sync, http) = sync_http(&state)?;
+    http.revoke_invite(&invite_id).await
 }
 
 // ── Live Share ────────────────────────────────────────────────────────
@@ -456,7 +566,7 @@ pub async fn sharing_accept(
     // wraps it against our identity key — so no key material is exchanged here.
     let join_resp = http
         .join_group(JoinGroupRequest {
-            invite_code,
+            invite_code: extract_invite_code(&invite_code),
             wrapped_group_key: None,
         })
         .await?;
@@ -483,6 +593,17 @@ pub fn sharing_get_sessions(state: State<'_, AppState>) -> Vec<SharingSession> {
         .as_ref()
         .map(|s| s.sharing_sessions())
         .unwrap_or_default()
+}
+
+/// Fetch sessions from the server (recovering keys as needed) and return the
+/// refreshed list. Use this on screen mount; `sharing_get_sessions` only reads
+/// the in-memory cache, which is empty right after an app restart.
+#[tauri::command]
+pub async fn sharing_refresh_sessions(
+    state: State<'_, AppState>,
+) -> Result<Vec<SharingSession>, String> {
+    let sync = sync_client(&state)?;
+    Ok(sync.refresh_sharing_sessions().await)
 }
 
 #[tauri::command]
@@ -640,10 +761,5 @@ pub async fn sync_pull_settings(
 // ── Helpers ───────────────────────────────────────────────────────────
 
 fn parse_scope(scope: &str) -> Result<ShareScope, String> {
-    match scope {
-        "clipboard" => Ok(ShareScope::Clipboard),
-        "notes" => Ok(ShareScope::Notes),
-        "both" => Ok(ShareScope::Both),
-        other => Err(format!("unknown scope: {other}")),
-    }
+    ShareScope::parse(scope).ok_or_else(|| format!("unknown scope: {scope}"))
 }

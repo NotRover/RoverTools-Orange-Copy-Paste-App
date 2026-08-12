@@ -215,6 +215,8 @@ pub struct CreateGroupResponse {
 #[derive(Debug, Deserialize)]
 pub struct GroupMemberOut {
     pub user_id: String,
+    #[serde(default)]
+    pub display_name: String,
     pub role: String,
     pub joined_at: u64,
     #[serde(default)]
@@ -233,6 +235,8 @@ pub struct GroupOut {
     pub group_type: String,
     #[serde(default)]
     pub invite_code: Option<String>,
+    #[serde(default)]
+    pub invite_expires_at: Option<u64>,
     #[serde(default)]
     pub members: Vec<GroupMemberOut>,
     /// Our *own* Group Key, wrapped against our identity key. Group keys are
@@ -299,14 +303,48 @@ pub struct SessionMemberOut {
     pub scope: String,
     #[serde(default)]
     pub identity_pubkey: Option<String>,
+    #[serde(default)]
+    pub has_group_key: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SessionOut {
     pub share_group_id: String,
+    pub owner_id: String,
     pub members: Vec<SessionMemberOut>,
     pub my_scope: String,
     pub active_since: u64,
+    /// Our own session Group Key wrapped against our identity key — the
+    /// restart-recovery path (session keys are memory-only on clients).
+    #[serde(default)]
+    pub my_wrapped_group_key: Option<String>,
+}
+
+// ── Addressed invites ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InviteOut {
+    pub id: String,
+    pub group_id: String,
+    pub group_name: String,
+    pub group_type: String,
+    pub inviter_id: String,
+    pub inviter_name: String,
+    pub invitee_email: String,
+    pub status: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InviteListResponse {
+    pub sent: Vec<InviteOut>,
+    pub received: Vec<InviteOut>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SendInviteRequest {
+    pub email: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -846,5 +884,58 @@ impl SyncHttpClient {
     pub async fn list_devices(&self) -> Result<Vec<DeviceOut>, String> {
         self.get_json("list devices", || self.authed(Method::GET, "/api/v1/auth/devices"))
             .await
+    }
+
+    /// Revoke one of the user's devices (soft delete server-side).
+    pub async fn revoke_device(&self, device_id: &str) -> Result<(), String> {
+        self.get_ok("revoke device", true, || {
+            self.authed(Method::DELETE, &format!("/api/v1/auth/devices/{device_id}"))
+        })
+        .await
+    }
+
+    // ── Addressed invites ─────────────────────────────────────────
+
+    /// Pending invites addressed to us + the status of invites we sent.
+    pub async fn list_invites(&self) -> Result<InviteListResponse, String> {
+        self.get_json("list invites", || self.authed(Method::GET, "/api/v1/invites"))
+            .await
+    }
+
+    /// Send an addressed invite for a group we own (also emails the code).
+    pub async fn send_group_invite(&self, group_id: &str, email: &str) -> Result<InviteOut, String> {
+        let body = SendInviteRequest { email: email.to_string() };
+        self.get_json("send invite", || {
+            Ok(self
+                .authed(Method::POST, &format!("/api/v1/groups/{group_id}/invites"))?
+                .json(&body))
+        })
+        .await
+    }
+
+    /// Accept an invite addressed to us; joins its group server-side.
+    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinGroupResponse, String> {
+        self.get_json("accept invite", || {
+            Ok(self
+                .authed(Method::POST, &format!("/api/v1/invites/{invite_id}/accept"))?
+                .json(&serde_json::json!({})))
+        })
+        .await
+    }
+
+    pub async fn decline_invite(&self, invite_id: &str) -> Result<(), String> {
+        self.get_ok("decline invite", true, || {
+            Ok(self
+                .authed(Method::POST, &format!("/api/v1/invites/{invite_id}/decline"))?
+                .json(&serde_json::json!({})))
+        })
+        .await
+    }
+
+    pub async fn revoke_invite(&self, invite_id: &str) -> Result<(), String> {
+        self.get_ok("revoke invite", true, || {
+            self.authed(Method::DELETE, &format!("/api/v1/invites/{invite_id}"))
+        })
+        .await
     }
 }

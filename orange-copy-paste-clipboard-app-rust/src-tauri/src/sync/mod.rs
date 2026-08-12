@@ -461,17 +461,42 @@ impl SyncClient {
         let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
         let identity_pub_b64 = B64.encode(identity_pub);
 
-        // 5. Register this device (fresh X25519 keypair for group key exchange).
-        let (device_priv, device_pub) = crypto::generate_device_keypair();
-        let dev = http
-            .register_device(RegisterDeviceRequest {
-                device_name,
-                platform: std::env::consts::OS.to_string(),
-                app_version: env!("CARGO_PKG_VERSION").to_string(),
-                device_pubkey: Some(B64.encode(device_pub)),
-            })
-            .await?;
-        http.set_device_id(dev.device_id.clone());
+        // 5. Register this device — or reuse the identity from a previous login
+        //    on this install, so re-logins stop minting a new device row every
+        //    time. Reuse requires all three to line up: same user, a stored
+        //    device id the server still lists (not revoked), and the device
+        //    private key still in the keychain.
+        let stored = {
+            let s = self.sync_state.lock();
+            (s.data.user_id.clone(), s.data.device_id.clone())
+        };
+        let mut reused: Option<(Zeroizing<[u8; 32]>, [u8; 32], String)> = None;
+        if stored.0 == user_id && !stored.1.is_empty() {
+            if let Ok(privk) = crypto::load_device_private_key(&user_id) {
+                if let Ok(devices) = http.list_devices().await {
+                    if devices.iter().any(|d| d.id == stored.1) {
+                        let pubk = crypto::device_public_key(&privk);
+                        reused = Some((privk, pubk, stored.1.clone()));
+                    }
+                }
+            }
+        }
+        let (device_priv, device_pub, device_id) = match reused {
+            Some(t) => t,
+            None => {
+                let (privk, pubk) = crypto::generate_device_keypair();
+                let dev = http
+                    .register_device(RegisterDeviceRequest {
+                        device_name,
+                        platform: std::env::consts::OS.to_string(),
+                        app_version: env!("CARGO_PKG_VERSION").to_string(),
+                        device_pubkey: Some(B64.encode(pubk)),
+                    })
+                    .await?;
+                (privk, pubk, dev.device_id)
+            }
+        };
+        http.set_device_id(device_id.clone());
 
         // 6. Register public keys for E2E group-key exchange.  The identity key
         //    is derived from the UMK (identical on every device).  Best-effort:
@@ -493,7 +518,7 @@ impl SyncClient {
         // 8. Update persisted sync state.
         {
             let mut state = self.sync_state.lock();
-            state.set_device_id(&dev.device_id);
+            state.set_device_id(&device_id);
             state.set_user_id(&user_id);
         }
 
@@ -1033,6 +1058,12 @@ impl SyncClient {
         self.user.lock().clone()
     }
 
+    /// This install's server-assigned device id, if it has one.
+    pub fn device_id(&self) -> Option<String> {
+        let id = self.sync_state.lock().data.device_id.clone();
+        if id.is_empty() { None } else { Some(id) }
+    }
+
     pub fn status_info(&self) -> SyncStatusInfo {
         self.status.lock().clone()
     }
@@ -1081,10 +1112,11 @@ impl SyncClient {
     pub fn trigger_initial_sync(self: Arc<Self>) {
         let handle = self.handle.clone();
         handle.spawn(async move {
-            // Recover pool-group keys *before* pulling: group keys are memory-only,
-            // so without this the first pull after a restart would fail to decrypt
-            // every shared entry and fall back to the UMK.
+            // Recover pool-group and session keys *before* pulling: both are
+            // memory-only, so without this the first pull after a restart would
+            // fail to decrypt every shared entry and fall back to the UMK.
             self.reconcile_group_keys().await;
+            self.refresh_sharing_sessions().await;
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
             }
@@ -1293,6 +1325,126 @@ impl SyncClient {
                 eprintln!("[sync] distribute group keys for {}: {e}", g.id);
             }
         }
+    }
+
+    /// Fetch Live Share sessions from the server, recover or mint session keys,
+    /// and refresh the in-memory session list.
+    ///
+    /// Sessions previously lived only in client memory, so an app restart lost
+    /// them (and their keys) even though they persisted server-side. This is the
+    /// session analogue of [`Self::reconcile_group_keys`]: members recover their
+    /// key from `my_wrapped_group_key`; the owner mints one when none is held and
+    /// (re)wraps it for every member who has published an identity key —
+    /// including themselves, which is what makes the next restart recoverable.
+    pub(crate) async fn refresh_sharing_sessions(self: &Arc<Self>) -> Vec<SharingSession> {
+        let Some(http) = self.http.lock().clone() else {
+            return self.sharing_sessions();
+        };
+        let Some((id_priv, _)) = self.identity_keypair() else {
+            return self.sharing_sessions();
+        };
+        let me = match self.current_user() {
+            Some(u) => u.user_id,
+            None => return self.sharing_sessions(),
+        };
+
+        let sessions = match http.list_sharing_sessions().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[sync] refresh sessions: {e}");
+                return self.sharing_sessions();
+            }
+        };
+
+        let server_ids: Vec<String> = sessions.iter().map(|s| s.share_group_id.clone()).collect();
+        // Drop sessions that no longer exist server-side (dissolved elsewhere).
+        self.sharing_sessions
+            .lock()
+            .retain(|s| server_ids.contains(&s.share_group_id));
+
+        let mut out = Vec::new();
+        for s in sessions {
+            let owner_pub = s
+                .members
+                .iter()
+                .find(|m| m.user_id == s.owner_id)
+                .and_then(|m| m.identity_pubkey.as_deref())
+                .and_then(decode_pubkey);
+
+            // ── Recover our own key ──────────────────────────────────
+            if self.session_group_key(&s.share_group_id).is_none() {
+                if let (Some(wrapped), Some(owner_pub)) = (&s.my_wrapped_group_key, owner_pub) {
+                    let shared = crypto::x25519_shared_secret(&id_priv, &owner_pub);
+                    match crypto::unwrap_key(&shared, wrapped) {
+                        Ok(key) => self.set_session_group_key(&s.share_group_id, *key),
+                        Err(e) => eprintln!("[sync] unwrap session key {}: {e}", s.share_group_id),
+                    }
+                }
+            }
+
+            // ── Owner: mint on first use, wrap for whoever needs it ──
+            if s.owner_id == me {
+                let (group_key, minted) = match self.session_group_key(&s.share_group_id) {
+                    Some(k) => (k, false),
+                    None => {
+                        let fresh = *crypto::random_key();
+                        self.set_session_group_key(&s.share_group_id, fresh);
+                        (fresh, true)
+                    }
+                };
+                let mut wrapped_keys = Vec::new();
+                for m in &s.members {
+                    if m.has_group_key && !minted {
+                        continue;
+                    }
+                    let Some(member_pub) = m.identity_pubkey.as_deref().and_then(decode_pubkey)
+                    else {
+                        continue;
+                    };
+                    let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
+                    match crypto::wrap_key(&shared, &group_key) {
+                        Ok(w) => wrapped_keys.push(WrappedKeyEntry {
+                            user_id: m.user_id.clone(),
+                            wrapped_group_key: w,
+                        }),
+                        Err(e) => eprintln!("[sync] wrap session key for {}: {e}", m.user_id),
+                    }
+                }
+                if !wrapped_keys.is_empty() {
+                    if let Err(e) = http
+                        .distribute_group_keys(
+                            &s.share_group_id,
+                            DistributeKeysRequest { wrapped_keys },
+                        )
+                        .await
+                    {
+                        eprintln!("[sync] distribute session keys for {}: {e}", s.share_group_id);
+                    }
+                }
+            }
+
+            let session = SharingSession {
+                share_group_id: s.share_group_id.clone(),
+                name: "Live Share".into(),
+                my_scope: ShareScope::parse(&s.my_scope).unwrap_or(ShareScope::Clipboard),
+                members: s
+                    .members
+                    .into_iter()
+                    .map(|m| crate::sync::types::SessionMember {
+                        user_id: m.user_id,
+                        display_name: m.display_name,
+                        email: String::new(),
+                        scope: ShareScope::parse(&m.scope).unwrap_or(ShareScope::Clipboard),
+                        online: false,
+                    })
+                    .collect(),
+                group_key: self.session_group_key(&s.share_group_id),
+            };
+            self.id_map.lock().set_sharing_session(&s.share_group_id);
+            self.set_sharing_session(session.clone());
+            out.push(session);
+        }
+        out
     }
 
     /// Owner side (`sharing:accepted`): a member joined our Live Share.  Wrap

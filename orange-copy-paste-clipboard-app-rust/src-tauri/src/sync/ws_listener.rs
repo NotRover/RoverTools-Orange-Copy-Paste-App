@@ -194,14 +194,28 @@ impl WsListener {
             }
             "group:membership_changed" => {
                 let _ = self.app.emit("sync:group-membership", &msg.payload);
-                // Someone joined or left a pool group: the owner (re)wraps the
-                // Group Key for the current member list; members no-op.
+                // Our own membership may have changed (we joined, or were
+                // removed): ask the server to re-resolve this socket's channel
+                // set so group fan-out starts/stops without a reconnect.
+                let _ = write
+                    .send(Message::Text(r#"{"event":"resubscribe"}"#.into()))
+                    .await;
+                // Someone joined or left: the owner (re)wraps Group Keys for
+                // the current member list (pools and sessions); members no-op.
                 if let Some(sync) = self.sync_client() {
                     let handle = tokio::runtime::Handle::current();
                     handle.spawn(async move {
                         sync.reconcile_group_keys().await;
+                        sync.refresh_sharing_sessions().await;
                     });
                 }
+            }
+            // Addressed invites: surface to the UI (badge + pending list).
+            "invite:received" => {
+                let _ = self.app.emit("sync:invite-received", &msg.payload);
+            }
+            "invite:updated" => {
+                let _ = self.app.emit("sync:invite-updated", &msg.payload);
             }
             "sharing:invite" => {
                 let _ = self.app.emit("sharing:invite-received", &msg.payload);
