@@ -220,6 +220,12 @@ const App: React.FC = () => {
     initAttachmentResolver();
   }, []);
 
+  // Silent session restore: refresh token + device-wrapped UMK, no password.
+  // Fire-and-forget — a null result just means the login screen shows as usual.
+  useEffect(() => {
+    invoke("sync_restore_session").catch(() => {});
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;

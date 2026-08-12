@@ -160,6 +160,18 @@ const AccountScreen: React.FC = () => {
     });
   }, [refreshSpaces, refreshInvites]);
 
+  // ── Silent session restore (fired by App on startup) ────────────
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<SyncUser>("sync:session-restored", (event) => {
+      setSyncUser(event.payload);
+      refreshSpaces();
+      refreshInvites();
+      invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, [refreshSpaces, refreshInvites]);
+
   // ── Device presence: mark devices online/offline as events arrive ──
   useEffect(() => {
     let unlisten: (() => void) | undefined;
