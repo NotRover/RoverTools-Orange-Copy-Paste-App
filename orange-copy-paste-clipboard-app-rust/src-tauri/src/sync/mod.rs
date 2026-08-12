@@ -544,6 +544,7 @@ impl SyncClient {
             user_id,
             email: user_email,
             display_name: boot.display_name,
+            avatar_url: boot.avatar_url,
         };
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
@@ -606,6 +607,7 @@ impl SyncClient {
             user_id: stored_user,
             email: session.user.email.clone(),
             display_name: boot.display_name,
+            avatar_url: boot.avatar_url,
         };
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
@@ -1510,6 +1512,7 @@ impl SyncClient {
                     .map(|m| crate::sync::types::SessionMember {
                         user_id: m.user_id,
                         display_name: m.display_name,
+                        avatar_url: m.avatar_url,
                         email: String::new(),
                         scope: ShareScope::parse(&m.scope).unwrap_or(ShareScope::Clipboard),
                         online: false,

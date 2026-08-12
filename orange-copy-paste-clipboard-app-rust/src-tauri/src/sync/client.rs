@@ -39,6 +39,10 @@ pub struct BootstrapResponse {
     /// base64-encoded salt used for Argon2id key derivation (the wrapping key).
     pub kdf_salt: String,
     pub display_name: String,
+    /// Identity-provider avatar URL (Google, mirrored at bootstrap); `None` for
+    /// accounts without one.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     /// base64 envelope holding the random UMK wrapped under the password-derived
     /// KEK.  `None` on a brand-new account (no UMK established yet); its presence
     /// is how the client distinguishes first-setup from a returning login, and
@@ -220,6 +224,9 @@ pub struct GroupMemberOut {
     pub user_id: String,
     #[serde(default)]
     pub display_name: String,
+    /// Identity-provider avatar URL; `None` for accounts without one.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub role: String,
     pub joined_at: u64,
     #[serde(default)]
@@ -303,6 +310,9 @@ pub struct SharingInviteResponse {
 pub struct SessionMemberOut {
     pub user_id: String,
     pub display_name: String,
+    /// Identity-provider avatar URL; `None` for accounts without one.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub scope: String,
     #[serde(default)]
     pub identity_pubkey: Option<String>,

@@ -45,11 +45,15 @@ export interface SyncUser {
   user_id: string;
   email: string;
   display_name: string;
+  /** Provider avatar URL (Google), or null — the UI falls back to initials. */
+  avatar_url: string | null;
 }
 
 export interface SyncGroupMember {
   user_id: string;
   display_name: string;
+  /** Provider avatar URL (Google), or null — the UI falls back to initials. */
+  avatar_url: string | null;
   role: string;
   /** False until the owner has wrapped the Group Key for this member. */
   has_group_key: boolean;
@@ -80,6 +84,11 @@ export interface SyncInvite {
   expires_at: number;
 }
 
+export interface SyncQuota {
+  used_bytes: number;
+  quota_bytes: number;
+}
+
 export interface SyncInviteList {
   sent: SyncInvite[];
   received: SyncInvite[];
@@ -88,6 +97,8 @@ export interface SyncInviteList {
 export interface SharingMember {
   user_id: string;
   display_name: string;
+  /** Provider avatar URL (Google), or null — the UI falls back to initials. */
+  avatar_url: string | null;
   email: string;
   scope: "clipboard" | "notes" | "both";
   online: boolean;

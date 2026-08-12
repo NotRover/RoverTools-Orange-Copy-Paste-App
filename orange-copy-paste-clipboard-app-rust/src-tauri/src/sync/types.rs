@@ -26,6 +26,8 @@ pub struct SyncUser {
     pub user_id: String,
     pub email: String,
     pub display_name: String,
+    /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
+    pub avatar_url: Option<String>,
 }
 
 // ── Groups (pool) ───────────────────────────────────────────────────
@@ -34,6 +36,8 @@ pub struct SyncUser {
 pub struct SyncGroupMember {
     pub user_id: String,
     pub display_name: String,
+    /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
+    pub avatar_url: Option<String>,
     pub role: String,
     /// False until the owner has wrapped the Group Key for this member —
     /// the UI shows "waiting for key" instead of silent decrypt failures.
@@ -137,6 +141,8 @@ impl ShareScope {
 pub struct SessionMember {
     pub user_id: String,
     pub display_name: String,
+    /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
+    pub avatar_url: Option<String>,
     pub email: String,
     pub scope: ShareScope,
     pub online: bool,
