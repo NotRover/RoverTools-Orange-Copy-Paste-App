@@ -219,6 +219,9 @@ pub struct GroupMemberOut {
     pub joined_at: u64,
     #[serde(default)]
     pub identity_pubkey: Option<String>,
+    /// Whether this member already holds a wrapped Group Key.
+    #[serde(default)]
+    pub has_group_key: bool,
 }
 
 /// Full group record (`GET /groups` / `GET /groups/{id}`).
