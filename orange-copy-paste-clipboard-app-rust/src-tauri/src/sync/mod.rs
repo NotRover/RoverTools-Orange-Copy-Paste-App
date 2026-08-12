@@ -192,8 +192,27 @@ pub struct SyncClient {
 
     /// Handle to the dedicated background Tokio runtime.
     handle: tokio::runtime::Handle,
-    /// Owned runtime — kept alive for the lifetime of SyncClient.
-    _runtime: tokio::runtime::Runtime,
+    /// Owned runtime — kept alive for the lifetime of SyncClient. `Option` only
+    /// so [`Drop`] can move it out and shut it down without blocking.
+    runtime: Option<tokio::runtime::Runtime>,
+}
+
+impl Drop for SyncClient {
+    fn drop(&mut self) {
+        // The last `Arc<SyncClient>` is frequently released *inside* a task
+        // running on this very runtime — a spawned sync job that outlives
+        // logout or a disabled-sync toggle. Dropping a Runtime from async
+        // context panics ("Cannot drop a runtime in a context where blocking is
+        // not allowed"), and because the release profile sets `panic = "abort"`
+        // that panic takes the whole app down instead of just the worker.
+        //
+        // `shutdown_background` never blocks, so it is safe from any context:
+        // in-flight tasks are abandoned rather than awaited, which is what we
+        // want for a client that is already logged out.
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl SyncClient {
@@ -278,7 +297,7 @@ impl SyncClient {
             settings_push_at,
             settings_notify,
             handle,
-            _runtime: runtime,
+            runtime: Some(runtime),
         })
     }
 
@@ -577,10 +596,13 @@ impl SyncClient {
         if stored_user.is_empty() || stored_device.is_empty() {
             return Err("no previous session".into());
         }
+        // Keep the underlying keychain error: "not found" and "found but
+        // unreadable" are different problems, and collapsing both into one
+        // message makes a failed restore impossible to diagnose from a log.
         let refresh = crypto::load_refresh_token(&stored_user)
-            .map_err(|_| "no stored credentials".to_string())?;
+            .map_err(|e| format!("no stored credentials for user {stored_user}: {e}"))?;
         let device_priv = crypto::load_device_private_key(&stored_user)
-            .map_err(|_| "no stored device key".to_string())?;
+            .map_err(|e| format!("no stored device key for user {stored_user}: {e}"))?;
 
         // Fresh tokens from Supabase; the refresh token rotates, so persist it.
         let session = self.supabase.refresh(&refresh).await?;
