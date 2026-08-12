@@ -189,11 +189,19 @@ impl WsListener {
             // the identity key), then let the UI know.
             "group:rekey" => {
                 if let Some(sync) = self.sync_client() {
-                    sync.handle_group_rekey(&msg.payload);
+                    sync.handle_group_rekey_arc(&msg.payload);
                 }
             }
             "group:membership_changed" => {
                 let _ = self.app.emit("sync:group-membership", &msg.payload);
+                // Someone joined or left a pool group: the owner (re)wraps the
+                // Group Key for the current member list; members no-op.
+                if let Some(sync) = self.sync_client() {
+                    let handle = tokio::runtime::Handle::current();
+                    handle.spawn(async move {
+                        sync.reconcile_group_keys().await;
+                    });
+                }
             }
             "sharing:invite" => {
                 let _ = self.app.emit("sharing:invite-received", &msg.payload);

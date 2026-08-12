@@ -314,3 +314,70 @@ pub fn delete_keychain_entries(user_id: &str) {
         let _ = dk.delete_password();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Owner → member: the Group Key survives a wrap/unwrap round trip through an
+    /// X25519 shared secret derived from opposite halves of the two keypairs.
+    #[test]
+    fn group_key_wrap_roundtrip_between_two_parties() {
+        let owner_umk = random_key();
+        let member_umk = random_key();
+        let (owner_priv, owner_pub) = derive_identity_keypair(&owner_umk);
+        let (member_priv, member_pub) = derive_identity_keypair(&member_umk);
+
+        let group_key = random_key();
+
+        let sending = x25519_shared_secret(&owner_priv, &member_pub);
+        let wrapped = wrap_key(&sending, &group_key).expect("wrap");
+
+        let receiving = x25519_shared_secret(&member_priv, &owner_pub);
+        let unwrapped = unwrap_key(&receiving, &wrapped).expect("unwrap");
+
+        assert_eq!(*unwrapped, *group_key);
+    }
+
+    /// Owner → owner: the same path must work when a member wraps for *itself*,
+    /// which is how the group owner recovers its own key after a restart.
+    #[test]
+    fn group_key_self_wrap_roundtrip() {
+        let umk = random_key();
+        let (id_priv, id_pub) = derive_identity_keypair(&umk);
+        let group_key = random_key();
+
+        let shared = x25519_shared_secret(&id_priv, &id_pub);
+        let wrapped = wrap_key(&shared, &group_key).expect("wrap");
+        let unwrapped = unwrap_key(&shared, &wrapped).expect("unwrap");
+
+        assert_eq!(*unwrapped, *group_key);
+    }
+
+    /// A member who was never wrapped for cannot unwrap someone else's blob.
+    #[test]
+    fn group_key_unwrap_fails_for_wrong_recipient() {
+        let (owner_priv, _owner_pub) = derive_identity_keypair(&random_key());
+        let (_m1_priv, m1_pub) = derive_identity_keypair(&random_key());
+        let (outsider_priv, owner_pub) = (
+            derive_identity_keypair(&random_key()).0,
+            derive_identity_keypair(&random_key()).1,
+        );
+
+        let wrapped = wrap_key(&x25519_shared_secret(&owner_priv, &m1_pub), &random_key())
+            .expect("wrap");
+        let wrong = x25519_shared_secret(&outsider_priv, &owner_pub);
+        assert!(unwrap_key(&wrong, &wrapped).is_err(), "AES-GCM must reject");
+    }
+
+    /// Identity keypairs are derived from the UMK, so every device of the same
+    /// user reproduces them — the property group-key wrapping depends on.
+    #[test]
+    fn identity_keypair_is_deterministic_from_umk() {
+        let umk = random_key();
+        let (a_priv, a_pub) = derive_identity_keypair(&umk);
+        let (b_priv, b_pub) = derive_identity_keypair(&umk);
+        assert_eq!(*a_priv, *b_priv);
+        assert_eq!(a_pub, b_pub);
+    }
+}

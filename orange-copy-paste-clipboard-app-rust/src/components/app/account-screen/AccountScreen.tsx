@@ -70,6 +70,8 @@ const AccountScreen: React.FC = () => {
 
   // Group management
   const [newGroupName, setNewGroupName] = useState("");
+  // Owner's history policy for a group being created (server default is true).
+  const [newGroupShareHistory, setNewGroupShareHistory] = useState(true);
   const [joinCode, setJoinCode] = useState("");
   const [groupLoading, setGroupLoading] = useState(false);
   const [copiedGroupId, setCopiedGroupId] = useState<string | null>(null);
@@ -338,7 +340,10 @@ const AccountScreen: React.FC = () => {
     if (!newGroupName.trim()) return;
     setGroupLoading(true);
     try {
-      const g = await invoke<SyncGroup>("sync_create_group", { name: newGroupName.trim() });
+      const g = await invoke<SyncGroup>("sync_create_group", {
+        name: newGroupName.trim(),
+        shareHistory: newGroupShareHistory,
+      });
       setSyncGroups((prev) => [...prev, g]);
       setNewGroupName("");
     } catch (e) {
@@ -888,6 +893,24 @@ const AccountScreen: React.FC = () => {
                   Create
                 </button>
               </div>
+              {/* Decided at creation and fixed per member at join, so changing it
+                  later never retroactively widens what an existing member sees. */}
+              <label className="acct-check-row">
+                <input
+                  type="checkbox"
+                  checked={newGroupShareHistory}
+                  onChange={(e) => setNewGroupShareHistory(e.target.checked)}
+                  disabled={groupLoading}
+                />
+                <span>
+                  Let new members read earlier entries
+                  <span className="acct-card-desc">
+                    {newGroupShareHistory
+                      ? "Anyone who joins can see everything shared before they joined."
+                      : "New members only see entries shared after they join."}
+                  </span>
+                </span>
+              </label>
               <div className="acct-field-row">
                 <input
                   className="auth-input"

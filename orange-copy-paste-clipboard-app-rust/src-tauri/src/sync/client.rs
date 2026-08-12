@@ -200,6 +200,9 @@ pub struct SettingsPullResponse {
 pub struct CreateGroupRequest {
     pub name: String,
     pub group_type: String, // "pool"
+    /// Owner's choice: may members who join later read entries pushed before
+    /// they joined? Resolved server-side into each member's history floor.
+    pub share_history: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,6 +232,16 @@ pub struct GroupOut {
     pub invite_code: Option<String>,
     #[serde(default)]
     pub members: Vec<GroupMemberOut>,
+    /// Our *own* Group Key, wrapped against our identity key. Group keys are
+    /// held in memory only, so this is how a client recovers one after restart.
+    #[serde(default)]
+    pub my_wrapped_group_key: Option<String>,
+    #[serde(default = "default_true")]
+    pub share_history: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]

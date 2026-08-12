@@ -314,6 +314,7 @@ pub async fn sync_get_groups(state: State<'_, AppState>) -> Result<Vec<SyncGroup
 #[tauri::command]
 pub async fn sync_create_group(
     name: String,
+    share_history: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<SyncGroup, String> {
     let (sync, http) = sync_http(&state)?;
@@ -321,9 +322,16 @@ pub async fn sync_create_group(
         .create_group(CreateGroupRequest {
             name: name.clone(),
             group_type: "pool".into(),
+            // Default to sharing history — matches the server default and the
+            // previous behaviour for callers that don't pass a choice.
+            share_history: share_history.unwrap_or(true),
         })
         .await?;
     sync.register_group_mapping(&name, &created.group_id);
+    // Mint and upload the Group Key now, so the first entry tagged into this
+    // group can be encrypted for the group rather than silently falling back to
+    // the personal UMK (which no other member could ever read).
+    sync.reconcile_group_keys().await;
     // Creator is the sole member at this point; surface the invite code so the
     // UI can share it.
     Ok(SyncGroup {
