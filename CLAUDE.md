@@ -30,6 +30,11 @@ Context is lossy — compaction and long sessions wash out earlier detail. On an
 **Discipline:** create it early, before you're lost. Update after each meaningful step — record decisions and results as they happen (including approaches ruled out and why); prune stale notes. After a compaction, or when context feels thin, re-read it before acting. Delete it once shipped.
 </working-notes>
 
+## Subagents
+
+- **Always spawn subagents on Opus** — pass the model explicitly (`model: "opus"`). Never Sonnet or Haiku, regardless of how small the task looks.
+- Subagents inherit none of this session's context — restate the goal, the relevant `path:line`, and which repo the work lands in.
+
 ## Instruction Scope
 
 - `CLAUDE.md` is the authoritative instruction file for Claude Code in this workspace (root and both components).
