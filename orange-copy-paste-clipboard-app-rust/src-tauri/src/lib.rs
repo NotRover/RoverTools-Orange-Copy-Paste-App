@@ -459,6 +459,8 @@ pub fn run() {
             crate::sync::commands::sharing_accept,
             crate::sync::commands::sharing_get_sessions,
             crate::sync::commands::sharing_refresh_sessions,
+            crate::sync::commands::sync_remove_member,
+            crate::sync::commands::sync_delete_group,
             crate::sync::commands::sync_revoke_device,
             crate::sync::commands::sync_list_invites,
             crate::sync::commands::sync_send_invite,

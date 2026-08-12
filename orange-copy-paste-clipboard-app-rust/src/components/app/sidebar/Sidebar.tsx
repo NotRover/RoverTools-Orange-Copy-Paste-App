@@ -21,6 +21,8 @@ interface SidebarProps {
   screen: AppScreen;
   theme: AppTheme;
   syncState: SyncIndicator;
+  /** Received shared-space invites awaiting a response. */
+  pendingInvites?: number;
   onNavigate: (screen: AppScreen) => void;
   onToggleTheme: () => void;
 }
@@ -29,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   screen,
   theme,
   syncState,
+  pendingInvites = 0,
   onNavigate,
   onToggleTheme,
 }) => {
@@ -127,6 +130,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip-pos="right"
       >
         <UserCircle size={22} weight={screen === "account" ? "fill" : "regular"} />
+        {pendingInvites > 0 && (
+          <span className="nav-badge">
+            {pendingInvites > 9 ? "9+" : pendingInvites}
+          </span>
+        )}
       </button>
 
       <button

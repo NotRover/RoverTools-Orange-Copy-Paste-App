@@ -441,6 +441,27 @@ pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDev
         .collect())
 }
 
+/// Remove a member from a group we own (self-removal uses sync_leave_group).
+#[tauri::command]
+pub async fn sync_remove_member(
+    group_id: String,
+    member_user_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (_sync, http) = sync_http(&state)?;
+    http.remove_group_member(&group_id, &member_user_id).await
+}
+
+/// Delete a group we own (dissolves it for every member).
+#[tauri::command]
+pub async fn sync_delete_group(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (_sync, http) = sync_http(&state)?;
+    http.delete_group(&group_id).await
+}
+
 #[tauri::command]
 pub async fn sync_revoke_device(
     device_id: String,

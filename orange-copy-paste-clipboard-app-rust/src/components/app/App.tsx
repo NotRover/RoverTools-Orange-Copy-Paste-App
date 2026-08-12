@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ClipboardEntry, Note, AppScreen, AppTheme, SyncIndicator } from "../../types";
+import type { ClipboardEntry, Note, AppScreen, AppTheme, SyncIndicator, SyncInviteList } from "../../types";
 import {
   classifyFileEntry,
   removeGroupColor,
@@ -147,6 +147,8 @@ const App: React.FC = () => {
   // Bumped whenever a merge lands, to briefly show a "syncing" pulse.
   const [syncTick, setSyncTick] = useState(0);
   const [syncActivity, setSyncActivity] = useState(false);
+  // Received shared-space invites still awaiting a response.
+  const [pendingInviteCount, setPendingInviteCount] = useState(0);
 
   // Undo state for group deletion
   const [deletedGroup, setDeletedGroup] = useState<{
@@ -453,35 +455,43 @@ const App: React.FC = () => {
     return () => clearTimeout(t);
   }, [syncTick]);
 
-  // Receive remote entries pushed from the sync WS listener.
+  // Pending shared-space invites — drives the badge on the Account nav item.
   useEffect(() => {
     let cancelled = false;
-    let unlistenEntry: (() => void) | undefined;
-    let unlistenDelete: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
 
-    listen<ClipboardEntry>("sync:remote-entry", (event) => {
-      if (cancelled) return;
-      setEntries((prev) => {
-        if (prev.some((e) => e.id === event.payload.id)) return prev;
-        return [event.payload, ...prev];
+    const track = (p: Promise<() => void>) => {
+      p.then((fn) => {
+        if (cancelled) fn();
+        else unlisteners.push(fn);
       });
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlistenEntry = fn;
-    });
+    };
 
-    listen<string>("sync:remote-delete", (event) => {
-      if (cancelled) return;
-      setEntries((prev) => prev.filter((e) => e.id !== event.payload));
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlistenDelete = fn;
-    });
+    const refresh = () => {
+      invoke<SyncInviteList>("sync_list_invites")
+        .then((list) => {
+          if (cancelled) return;
+          setPendingInviteCount(
+            list.received.filter((i) => i.status === "pending").length,
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setPendingInviteCount(0);
+        });
+    };
+
+    refresh();
+    track(listen("sync:invite-received", refresh));
+    track(listen("sync:invite-updated", refresh));
+    track(
+      listen<{ connected: boolean }>("sync:status-changed", (event) => {
+        if (event.payload.connected) refresh();
+      }),
+    );
 
     return () => {
       cancelled = true;
-      unlistenEntry?.();
-      unlistenDelete?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, []);
 
@@ -1132,6 +1142,7 @@ const App: React.FC = () => {
         screen={screen}
         theme={theme}
         syncState={syncState}
+        pendingInvites={pendingInviteCount}
         onNavigate={(s) => {
           setScreen(s);
           if (s === "clipboard" || s === "notes" || s === "sync") {
