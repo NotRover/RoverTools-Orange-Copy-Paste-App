@@ -74,6 +74,9 @@ pub struct DeviceOut {
     pub platform: String,
     pub app_version: String,
     pub last_seen_at: u64,
+    /// Presence snapshot at list time; live updates arrive over WS.
+    #[serde(default)]
+    pub online: bool,
 }
 
 #[derive(Debug, Serialize)]

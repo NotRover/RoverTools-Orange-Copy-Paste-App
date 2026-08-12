@@ -62,7 +62,9 @@ const AccountScreen: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo | null>(null);
   const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
   const [devices, setDevices] = useState<SyncDevice[]>([]);
-  const [onlineDevices, setOnlineDevices] = useState<Set<string>>(new Set());
+  // Live presence overrides on top of the server snapshot (device.online):
+  // undefined = no event seen yet, use the snapshot.
+  const [presenceOverrides, setPresenceOverrides] = useState<Record<string, boolean>>({});
 
   // Login form
   const [loginEmail, setLoginEmail] = useState("");
@@ -166,12 +168,7 @@ const AccountScreen: React.FC = () => {
       (event) => {
         const { device_id, online } = event.payload;
         if (!device_id) return;
-        setOnlineDevices((prev) => {
-          const next = new Set(prev);
-          if (online) next.add(device_id);
-          else next.delete(device_id);
-          return next;
-        });
+        setPresenceOverrides((prev) => ({ ...prev, [device_id]: online === true }));
       },
     ).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
@@ -387,7 +384,7 @@ const AccountScreen: React.FC = () => {
       setSpacesError(null);
       setDeviceError(null);
       setDevices([]);
-      setOnlineDevices(new Set());
+      setPresenceOverrides({});
     } catch (e) {
       console.error("sync_logout failed", e);
     }
@@ -1029,23 +1026,28 @@ const AccountScreen: React.FC = () => {
               {devices.length > 0 ? (
                 <div className="acct-list">
                   {devices.map((d) => {
-                    const online = onlineDevices.has(d.id);
+                    const online = d.is_current || (presenceOverrides[d.id] ?? d.online);
                     return (
                       <div key={d.id} className="acct-row">
                         <span className={`acct-dot${online ? " online" : ""}`} />
                         <div className="acct-row-main">
-                          <span className="acct-row-name">{d.device_name || "Unknown device"}</span>
+                          <span className="acct-row-name">
+                            {d.device_name || "Unknown device"}
+                            {d.is_current && <span className="acct-badge acct-badge--owner">this device</span>}
+                          </span>
                           <span className="acct-row-meta">{d.platform}{online ? " · online" : " · offline"}</span>
                         </div>
-                        <div className="acct-row-actions">
-                          <button
-                            type="button"
-                            className="acct-btn acct-btn--sm acct-btn--danger"
-                            onClick={() => handleRevokeDevice(d.id)}
-                          >
-                            Remove
-                          </button>
-                        </div>
+                        {!d.is_current && (
+                          <div className="acct-row-actions">
+                            <button
+                              type="button"
+                              className="acct-btn acct-btn--sm acct-btn--danger"
+                              onClick={() => handleRevokeDevice(d.id)}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1221,7 +1223,9 @@ const AccountScreen: React.FC = () => {
                                         {avatarInitials(m.display_name || m.user_id)}
                                       </span>
                                       <span className="acct-row-name">
-                                        {m.display_name || m.user_id.slice(0, 8)}
+                                        {m.user_id === syncUser?.user_id
+                                          ? "You"
+                                          : m.display_name || m.user_id.slice(0, 8)}
                                       </span>
                                       <span className="acct-row-meta">{m.role}</span>
                                       {!m.has_group_key && (
@@ -1247,7 +1251,9 @@ const AccountScreen: React.FC = () => {
                                       </span>
                                       <span className={`acct-dot${m.online ? " online" : ""}`} />
                                       <span className="acct-row-name">
-                                        {m.display_name || m.email || m.user_id.slice(0, 8)}
+                                        {m.user_id === syncUser?.user_id
+                                          ? "You"
+                                          : m.display_name || m.email || m.user_id.slice(0, 8)}
                                       </span>
                                       <span className="acct-row-meta">{m.scope}</span>
                                     </div>

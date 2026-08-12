@@ -112,6 +112,10 @@ export interface SyncDevice {
   device_name: string;
   platform: string;
   app_version: string;
+  /** Presence snapshot from the server; WS events keep it fresh. */
+  online: boolean;
+  /** True when this row is the device the app is running on. */
+  is_current: boolean;
   last_seen_at: number;
 }
 
