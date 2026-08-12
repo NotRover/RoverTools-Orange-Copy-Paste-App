@@ -1350,6 +1350,44 @@ const App: React.FC = () => {
 
 export default App;
 
+/** Last line of defence for a render error. Without it React unmounts the tree
+    and the window goes blank with no way back — indistinguishable from a hard
+    crash. Shows what broke and offers a reload; local data is untouched either
+    way, since it lives on the Rust side. */
+class AppBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[app] render error", error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="app-crash">
+        <h1>Something broke on screen</h1>
+        <p>
+          Your clipboard history and notes are safe — they're stored outside the
+          window. Reloading usually clears this.
+        </p>
+        <pre>{this.state.error.message}</pre>
+        <button onClick={() => window.location.reload()}>Reload</button>
+      </div>
+    );
+  }
+}
+
 // Mount
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <AppBoundary>
+    <App />
+  </AppBoundary>,
+);
