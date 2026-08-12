@@ -10,18 +10,24 @@ import type {
   SyncConnection,
   SyncInvite,
   SyncInviteList,
+  SyncQuota,
 } from "../../../types";
 import {
   CaretRight,
   Check,
   CloudCheck,
   Copy,
+  Desktop,
+  DeviceMobile,
+  Envelope,
+  HardDrives,
+  Laptop,
   Plus,
-  Users,
   ShareNetwork,
   Key,
 } from "@phosphor-icons/react";
 import { GoogleIcon } from "../../icons";
+import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
 import "./AccountScreen.css";
@@ -32,17 +38,74 @@ const SCOPE_OPTIONS: { value: string; label: string }[] = [
   { value: "both", label: "Clipboard & Notes" },
 ];
 
+// Space avatars must match the Sharing screen's group list exactly — same
+// palette, same seed, same initials — so a space is recognisable across screens.
+// Mirrors AVATAR_PALETTE / groupAvatarColor in sync-screen/SyncScreen.tsx.
+const AVATAR_PALETTE = [
+  "#ff3e1c", "#f59e0b", "#22c55e", "#3b82f6",
+  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316",
+];
+
+function groupAvatarColor(seed: string): string {
+  let h = 0;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
+
 /** Display an invite code as XXXX-XXXX when it is a plain 8-char code. */
 function formatInviteCode(code: string): string {
   const c = code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
   return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : code;
 }
 
-function avatarInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "?";
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
+/** Lowercase scope wording for the meta line ("clipboard and notes"). */
+function scopeLabel(scope: string): string {
+  if (scope === "both") return "clipboard and notes";
+  return scope;
+}
+
+/** Member avatar. A user id is not a name — with no display name or email there
+    are no initials to show, so it falls back to a glyph instead of UUID digits. */
+function MemberAvatar({
+  displayName,
+  email,
+  avatarUrl,
+  self,
+}: {
+  displayName: string | null | undefined;
+  email: string | null | undefined;
+  avatarUrl: string | null | undefined;
+  self: SyncUser | null;
+}) {
+  const label = self
+    ? self.display_name || self.email || ""
+    : displayName || email || "";
+  return (
+    <UserAvatar
+      className="acct-member-avatar"
+      // Own row: bootstrap's copy is the freshest one this client has.
+      url={self ? self.avatar_url : avatarUrl}
+      label={label}
+      glyphSize={11}
+    />
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** Pick a device glyph from the reported platform string. */
+function deviceIcon(platform: string) {
+  const p = platform.toLowerCase();
+  if (p.includes("android") || p.includes("ios")) return DeviceMobile;
+  if (p.includes("mac") || p.includes("darwin")) return Laptop;
+  return Desktop;
 }
 
 /** One row in the unified Shared spaces list: a pool group or a live session. */
@@ -100,6 +163,7 @@ const AccountScreen: React.FC = () => {
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(new Set());
   const [spacesError, setSpacesError] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
+  const [joinOpen, setJoinOpen] = useState(false);
   const [joinLoading, setJoinLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -125,9 +189,16 @@ const AccountScreen: React.FC = () => {
   // Devices
   const [deviceError, setDeviceError] = useState<string | null>(null);
 
+  // Blob storage usage — null until a successful fetch (the row stays hidden).
+  const [quota, setQuota] = useState<SyncQuota | null>(null);
+
   // Sync actions
   const [syncNowLoading, setSyncNowLoading] = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
+
+  const refreshQuota = useCallback(() => {
+    invoke<SyncQuota>("sync_get_quota").then(setQuota).catch(() => {});
+  }, []);
 
   const refreshSpaces = useCallback(() => {
     invoke<SyncGroup[]>("sync_get_groups").then(setSyncGroups).catch(() => {});
@@ -151,6 +222,7 @@ const AccountScreen: React.FC = () => {
       if (u) {
         refreshSpaces();
         refreshInvites();
+        refreshQuota();
         invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
         invoke<SyncStatusInfo>("sync_get_status").then((s) => {
           setSyncStatus(s);
@@ -158,7 +230,7 @@ const AccountScreen: React.FC = () => {
         }).catch(() => {});
       }
     });
-  }, [refreshSpaces, refreshInvites]);
+  }, [refreshSpaces, refreshInvites, refreshQuota]);
 
   // ── Silent session restore (fired by App on startup) ────────────
   useEffect(() => {
@@ -167,10 +239,11 @@ const AccountScreen: React.FC = () => {
       setSyncUser(event.payload);
       refreshSpaces();
       refreshInvites();
+      refreshQuota();
       invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
     }).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
-  }, [refreshSpaces, refreshInvites]);
+  }, [refreshSpaces, refreshInvites, refreshQuota]);
 
   // ── Device presence: mark devices online/offline as events arrive ──
   useEffect(() => {
@@ -241,6 +314,7 @@ const AccountScreen: React.FC = () => {
     setSyncUser(user);
     refreshSpaces();
     refreshInvites();
+    refreshQuota();
     invoke<SyncDevice[]>("sync_list_devices").then(setDevices).catch(() => {});
     invoke<SyncStatusInfo>("sync_get_status").then((s) => {
       setSyncStatus(s);
@@ -397,6 +471,9 @@ const AccountScreen: React.FC = () => {
       setDeviceError(null);
       setDevices([]);
       setPresenceOverrides({});
+      setQuota(null);
+      setJoinOpen(false);
+      setCreateOpen(false);
     } catch (e) {
       console.error("sync_logout failed", e);
     }
@@ -409,6 +486,7 @@ const AccountScreen: React.FC = () => {
       const s = await invoke<SyncStatusInfo>("sync_get_status");
       setSyncStatus(s);
       setLastSynced(Date.now());
+      refreshQuota();
     } catch (e) {
       console.error("sync_now failed", e);
     } finally {
@@ -420,13 +498,9 @@ const AccountScreen: React.FC = () => {
   const errMsg = (e: unknown, fallback: string) =>
     typeof e === "string" ? e : fallback;
 
+  // Accordion: only one space stays open, so the list never grows past a screen.
   const toggleSpace = (id: string) => {
-    setExpandedSpaces((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setExpandedSpaces((prev) => (prev.has(id) ? new Set() : new Set([id])));
   };
 
   const handleCopy = useCallback((key: string, text: string) => {
@@ -642,16 +716,39 @@ const AccountScreen: React.FC = () => {
     const mins = Math.floor(diff / 60_000);
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
-    return `${hrs}h ago`;
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
   };
 
   const status = !syncStatus
     ? { kind: "checking", label: "Checking…" }
     : syncStatus.connected
-      ? { kind: "connected", label: "Connected" }
+      ? { kind: "connected", label: "Synced" }
       : syncStatus.pending_count > 0
         ? { kind: "pending", label: `${syncStatus.pending_count} pending` }
         : { kind: "offline", label: "Offline" };
+
+  // Presence resolves from the server snapshot unless a WS event overrode it;
+  // the current device is always shown online.
+  const isDeviceOnline = (d: SyncDevice) =>
+    d.is_current || (presenceOverrides[d.id] ?? d.online);
+  const onlineDevices = devices.filter(isDeviceOnline).length;
+
+  // Queue detail that the old status pill folded into its label — kept as a
+  // second line so nothing is lost when the pill says "Synced".
+  const queueNote = [
+    // Skip when the status label already reads "N pending".
+    syncStatus && syncStatus.pending_count > 0 && status.kind !== "pending"
+      ? `${syncStatus.pending_count} change${syncStatus.pending_count === 1 ? "" : "s"} waiting to upload`
+      : null,
+    syncStatus && syncStatus.skipped_count > 0
+      ? `${syncStatus.skipped_count} skipped`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  // Amber is for the one case that needs a look: entries sync refused to send.
+  const queueNoteWarn = !!syncStatus && syncStatus.skipped_count > 0;
 
   const scopePills = (value: string, onPick: (v: string) => void) => (
     <div className="acct-scope">
@@ -998,21 +1095,36 @@ const AccountScreen: React.FC = () => {
         ) : (
           /* ── Signed in ── */
           <>
-            {/* Profile */}
-            <div className="acct-card acct-profile">
-              <div className="acct-avatar">
-                {(syncUser.display_name || syncUser.email || "?").charAt(0).toUpperCase()}
+            {/* Identity band */}
+            <div className="acct-card acct-idband">
+              <UserAvatar
+                className="acct-avatar"
+                url={syncUser.avatar_url}
+                label={syncUser.display_name || syncUser.email || "?"}
+                glyphSize={18}
+              />
+              <div className="acct-id-text">
+                <span className="acct-id-email">
+                  {syncUser.email || syncUser.display_name || "Your account"}
+                </span>
+                <span className={`acct-id-status acct-id-status--${status.kind}`}>
+                  <span className="acct-id-dot" />
+                  {status.label}
+                  {status.kind === "connected" && lastSynced
+                    ? ` · ${formatLastSynced(lastSynced)}`
+                    : ""}
+                  {/* Presence is only trustworthy while this device is connected. */}
+                  {status.kind === "connected" && devices.length > 0
+                    ? ` · ${onlineDevices} device${onlineDevices === 1 ? "" : "s"} online`
+                    : ""}
+                </span>
+                {queueNote && (
+                  <span className={`acct-id-note${queueNoteWarn ? " acct-id-note--warn" : ""}`}>
+                    {queueNote}
+                  </span>
+                )}
               </div>
-              <div className="acct-profile-text">
-                <span className="acct-profile-name">{syncUser.display_name || "Your account"}</span>
-                <span className="acct-profile-email">{syncUser.email}</span>
-              </div>
-              <span className={`acct-status acct-status--${status.kind}`}>
-                <span className="acct-status-dot" />
-                {status.label}
-                {status.kind === "connected" && lastSynced ? ` · ${formatLastSynced(lastSynced)}` : ""}
-              </span>
-              <div className="acct-profile-actions">
+              <div className="acct-id-actions">
                 <button
                   type="button"
                   className="acct-btn"
@@ -1021,77 +1133,84 @@ const AccountScreen: React.FC = () => {
                 >
                   {syncNowLoading ? "Syncing…" : "Sync now"}
                 </button>
-                <button type="button" className="acct-btn acct-btn--danger" onClick={handleLogout}>
+                <button type="button" className="acct-btn acct-btn--quiet" onClick={handleLogout}>
                   Sign out
                 </button>
               </div>
             </div>
 
-            {/* Devices */}
-            <div className="acct-card">
-              <div className="acct-card-head">
-                <span className="acct-card-icon"><CloudCheck size={15} /></span>
-                <h3 className="acct-card-title">Devices</h3>
-                {devices.length > 0 && <span className="acct-card-count">{devices.length}</span>}
+            {/* Attention strip — invites waiting on you */}
+            {receivedPending.length > 0 && (
+              <div className="acct-attn-strip">
+                {receivedPending.map((inv) => (
+                  <div key={inv.id} className="acct-attn">
+                    <Envelope size={15} className="acct-attn-icon" />
+                    <span className="acct-attn-text">
+                      <strong>{inv.inviter_name || "Someone"}</strong> invited you to{" "}
+                      {inv.group_type === "live_share"
+                        ? "share their clipboard live"
+                        : inv.group_name}
+                    </span>
+                    <div className="acct-row-actions acct-attn-actions">
+                      <button
+                        type="button"
+                        className="acct-btn acct-btn--primary acct-btn--sm"
+                        onClick={() => handleAcceptInvite(inv.id)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        className="acct-btn acct-btn--sm"
+                        onClick={() => handleDeclineInvite(inv.id)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              {deviceError && <span className="auth-error">{deviceError}</span>}
-              {devices.length > 0 ? (
-                <div className="acct-list">
-                  {devices.map((d) => {
-                    const online = d.is_current || (presenceOverrides[d.id] ?? d.online);
-                    return (
-                      <div key={d.id} className="acct-row">
-                        <span className={`acct-dot${online ? " online" : ""}`} />
-                        <div className="acct-row-main">
-                          <span className="acct-row-name">
-                            {d.device_name || "Unknown device"}
-                            {d.is_current && <span className="acct-badge acct-badge--owner">this device</span>}
-                          </span>
-                          <span className="acct-row-meta">{d.platform}{online ? " · online" : " · offline"}</span>
-                        </div>
-                        {!d.is_current && (
-                          <div className="acct-row-actions">
-                            <button
-                              type="button"
-                              className="acct-btn acct-btn--sm acct-btn--danger"
-                              onClick={() => handleRevokeDevice(d.id)}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="acct-empty">No devices registered yet.</p>
-              )}
-            </div>
+            )}
 
-            {/* Shared spaces */}
-            <div className="acct-card">
-              <div className="acct-card-head">
-                <span className="acct-card-icon"><Users size={15} /></span>
-                <h3 className="acct-card-title">Shared spaces</h3>
-                {spaces.length > 0 && <span className="acct-card-count">{spaces.length}</span>}
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--sm acct-head-btn"
-                  onClick={() => {
-                    setCreateOpen((v) => !v);
-                    setCreateError(null);
-                    setCreatedInvite(null);
-                  }}
-                >
-                  <Plus size={11} /> New space
-                </button>
+            {/* Sharing */}
+            <section className="acct-zone">
+              <div className="acct-zone-head">
+                <span className="acct-zone-icon"><ShareNetwork size={13} /></span>
+                <span className="acct-zone-label">Sharing</span>
+                <div className="acct-zone-actions">
+                  <button
+                    type="button"
+                    className={`acct-btn acct-btn--sm${createOpen ? " acct-btn--on" : ""}`}
+                    aria-expanded={createOpen}
+                    onClick={() => {
+                      setCreateOpen((v) => !v);
+                      setJoinOpen(false);
+                      setCreateError(null);
+                      setCreatedInvite(null);
+                    }}
+                  >
+                    <Plus size={11} /> New space
+                  </button>
+                  <button
+                    type="button"
+                    className={`acct-btn acct-btn--sm${joinOpen ? " acct-btn--on" : ""}`}
+                    aria-expanded={joinOpen}
+                    onClick={() => {
+                      setJoinOpen((v) => !v);
+                      setCreateOpen(false);
+                      setSpacesError(null);
+                    }}
+                  >
+                    Join
+                  </button>
+                </div>
               </div>
 
               {spacesError && <span className="auth-error">{spacesError}</span>}
 
+              <div className="acct-spaces">
               {createOpen && (
-                <div className="acct-create-panel">
+                <div className="acct-card acct-create-panel">
                   <div className="acct-scope-pills acct-create-modes">
                     <button
                       type="button"
@@ -1184,272 +1303,358 @@ const AccountScreen: React.FC = () => {
                 </div>
               )}
 
-              {spaces.length > 0 ? (
-                <div className="acct-list">
-                  {spaces.map((space) => {
-                    const open = expandedSpaces.has(space.id);
-                    const isPool = space.kind === "pool";
-                    const name = isPool
-                      ? space.group.name
-                      : (space.session.name || "Quick share");
-                    const memberCount = isPool
-                      ? space.group.member_count
-                      : space.session.members.length;
-                    const isOwner = isPool && space.group.is_owner;
-                    return (
-                      <div key={space.id} className="acct-space">
-                        <button
-                          type="button"
-                          className="acct-space-head"
-                          onClick={() => toggleSpace(space.id)}
+              {joinOpen && (
+                <div className="acct-card acct-create-panel acct-join-panel">
+                  <div className="acct-field-row">
+                    <input
+                      className="auth-input"
+                      placeholder="Paste an invite code or link"
+                      value={joinCode}
+                      autoFocus
+                      onChange={(e) => setJoinCode(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
+                      disabled={joinLoading}
+                    />
+                    <button
+                      type="button"
+                      className="acct-btn acct-btn--primary"
+                      onClick={handleJoin}
+                      disabled={joinLoading || !joinCode.trim()}
+                    >
+                      {joinLoading ? "Joining…" : "Join"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {spaces.map((space) => {
+                const open = expandedSpaces.has(space.id);
+                const isPool = space.kind === "pool";
+                const name = isPool
+                  ? space.group.name
+                  : (space.session.name || "Quick share");
+                const memberCount = isPool
+                  ? space.group.member_count
+                  : space.session.members.length;
+                const isOwner = isPool && space.group.is_owner;
+                return (
+                  <div
+                    key={space.id}
+                    className={`acct-card acct-space${open ? " acct-space--open" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="acct-space-head"
+                      aria-expanded={open}
+                      onClick={() => toggleSpace(space.id)}
+                    >
+                      {isPool ? (
+                        <span
+                          className="acct-space-avatar"
+                          style={{ background: groupAvatarColor(space.group.id) }}
                         >
-                          <CaretRight
-                            size={11}
-                            weight="bold"
-                            className={`acct-space-caret${open ? " acct-space-caret--open" : ""}`}
-                          />
-                          <span className="acct-row-name">{name}</span>
-                          {isOwner && (
-                            <span className="acct-badge acct-badge--owner">you own this</span>
-                          )}
-                          {isPool ? (
-                            <span className={`acct-badge${space.group.share_history ? "" : " acct-badge--muted"}`}>
-                              history {space.group.share_history ? "on" : "off"}
-                            </span>
-                          ) : (
-                            <span className="acct-badge acct-badge--live">
-                              live · {space.session.my_scope}
-                            </span>
-                          )}
-                          <span className="acct-row-meta acct-space-count">
-                            {memberCount} member{memberCount === 1 ? "" : "s"}
-                          </span>
-                        </button>
-                        {open && (
-                          <div className="acct-space-body">
-                            <div className="acct-members">
-                              {isPool
-                                ? space.group.members.map((m) => (
-                                    <div key={m.user_id} className="acct-member">
-                                      <span className="acct-member-avatar">
-                                        {avatarInitials(m.display_name || m.user_id)}
-                                      </span>
-                                      <span className="acct-row-name">
-                                        {m.user_id === syncUser?.user_id
-                                          ? "You"
-                                          : m.display_name || m.user_id.slice(0, 8)}
-                                      </span>
-                                      <span className="acct-row-meta">{m.role}</span>
-                                      {!m.has_group_key && (
-                                        <span className="acct-badge acct-badge--warn">
-                                          waiting for key
-                                        </span>
-                                      )}
-                                      {isOwner && m.user_id !== syncUser?.user_id && (
-                                        <button
-                                          type="button"
-                                          className="acct-btn acct-btn--sm acct-btn--danger"
-                                          onClick={() => handleRemoveMember(space.id, m.user_id)}
-                                        >
-                                          Remove
-                                        </button>
-                                      )}
-                                    </div>
-                                  ))
-                                : space.session.members.map((m) => (
-                                    <div key={m.user_id} className="acct-member">
-                                      <span className="acct-member-avatar">
-                                        {avatarInitials(m.display_name || m.email || m.user_id)}
-                                      </span>
-                                      <span className={`acct-dot${m.online ? " online" : ""}`} />
-                                      <span className="acct-row-name">
-                                        {m.user_id === syncUser?.user_id
-                                          ? "You"
-                                          : m.display_name || m.email || m.user_id.slice(0, 8)}
-                                      </span>
-                                      <span className="acct-row-meta">{m.scope}</span>
-                                    </div>
-                                  ))}
-                            </div>
-
-                            {isPool && isOwner && space.group.invite_code && (
-                              <>
-                                <div className="acct-invite-result">
-                                  <code className="acct-invite-code-inline">
-                                    {formatInviteCode(space.group.invite_code)}
-                                  </code>
-                                  {copyButtons(space.id, space.group.invite_code)}
-                                </div>
-                                <div className="acct-field-row">
-                                  <input
-                                    className="auth-input"
-                                    type="email"
-                                    placeholder="Invite by email"
-                                    value={inviteEmails[space.id] ?? ""}
-                                    onChange={(e) =>
-                                      setInviteEmails((prev) => ({
-                                        ...prev,
-                                        [space.id]: e.target.value,
-                                      }))
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") handleSendInvite(space.id);
-                                    }}
+                          {space.group.name.slice(0, 2).toUpperCase()}
+                        </span>
+                      ) : (
+                        <span className="acct-space-avatar acct-space-avatar--live">
+                          <span className="acct-space-live-dot" />
+                        </span>
+                      )}
+                      <span className="acct-row-main">
+                        <span className="acct-row-name">{name}</span>
+                        {/* Settings that read as description, not state, live in the
+                            meta line — only the one status stays a pill. */}
+                        <span className="acct-row-meta">
+                          {memberCount} member{memberCount === 1 ? "" : "s"}
+                          {isPool
+                            ? ` · history ${space.group.share_history ? "on" : "off"}`
+                            : ` · ${scopeLabel(space.session.my_scope)}`}
+                        </span>
+                      </span>
+                      <span className="acct-space-pills">
+                        {isOwner && (
+                          <span className="acct-badge acct-badge--owner">owner</span>
+                        )}
+                        {!isPool && (
+                          <span className="acct-badge acct-badge--live">live</span>
+                        )}
+                      </span>
+                      <CaretRight
+                        size={11}
+                        weight="bold"
+                        className={`acct-space-caret${open ? " acct-space-caret--open" : ""}`}
+                      />
+                    </button>
+                    {open && (
+                      <div className="acct-space-body">
+                        <div className="acct-members">
+                          {isPool
+                            ? space.group.members.map((m) => (
+                                <div key={m.user_id} className="acct-member">
+                                  <MemberAvatar
+                                    displayName={m.display_name}
+                                    email={null}
+                                    avatarUrl={m.avatar_url}
+                                    self={m.user_id === syncUser?.user_id ? syncUser : null}
                                   />
-                                  <button
-                                    type="button"
-                                    className="acct-btn"
-                                    onClick={() => handleSendInvite(space.id)}
-                                    disabled={!(inviteEmails[space.id] ?? "").trim()}
-                                  >
-                                    Invite
-                                  </button>
-                                </div>
-                              </>
-                            )}
-
-                            {!isPool &&
-                              scopePills(space.session.my_scope, (v) =>
-                                handleUpdateScope(space.id, v),
-                              )}
-
-                            {isPool && isOwner ? (
-                              <div className="acct-row-actions acct-space-actions">
-                                <button
-                                  type="button"
-                                  className="acct-btn acct-btn--sm acct-btn--danger"
-                                  onClick={() => handleDeleteGroup(space.id)}
-                                  onBlur={() => {
-                                    if (deleteConfirmId === space.id) setDeleteConfirmId(null);
-                                  }}
-                                >
-                                  {deleteConfirmId === space.id
-                                    ? "Confirm delete?"
-                                    : "Delete space"}
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="acct-row-actions acct-space-actions">
-                                {isPool ? (
-                                  <button
-                                    type="button"
-                                    className="acct-btn acct-btn--sm acct-btn--danger"
-                                    onClick={() => handleLeaveGroup(space.id)}
-                                  >
-                                    Leave
-                                  </button>
-                                ) : (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="acct-btn acct-btn--sm"
-                                      onClick={() => handleLeaveSession(space.id)}
-                                    >
-                                      Leave
-                                    </button>
+                                  <span className="acct-row-name">
+                                    {m.user_id === syncUser?.user_id
+                                      ? "You"
+                                      : m.display_name || "Member"}
+                                  </span>
+                                  {/* "member" is the default — only the owner is worth marking. */}
+                                  {m.role === "owner" && (
+                                    <span className="acct-badge acct-badge--owner">owner</span>
+                                  )}
+                                  {!m.has_group_key && (
+                                    <span className="acct-badge acct-badge--warn">
+                                      waiting for key
+                                    </span>
+                                  )}
+                                  {isOwner && m.user_id !== syncUser?.user_id && (
                                     <button
                                       type="button"
                                       className="acct-btn acct-btn--sm acct-btn--danger"
-                                      onClick={() => handleEndSession(space.id)}
+                                      onClick={() => handleRemoveMember(space.id, m.user_id)}
                                     >
-                                      End
+                                      Remove
                                     </button>
-                                  </>
-                                )}
-                              </div>
+                                  )}
+                                </div>
+                              ))
+                            : space.session.members.map((m) => (
+                                <div key={m.user_id} className="acct-member">
+                                  <MemberAvatar
+                                    displayName={m.display_name}
+                                    email={m.email}
+                                    avatarUrl={m.avatar_url}
+                                    self={m.user_id === syncUser?.user_id ? syncUser : null}
+                                  />
+                                  <span className="acct-row-name">
+                                    {m.user_id === syncUser?.user_id
+                                      ? "You"
+                                      : m.display_name || m.email || "Member"}
+                                  </span>
+                                  <span className="acct-row-meta">{scopeLabel(m.scope)}</span>
+                                  <span className={`acct-dot${m.online ? " online" : ""}`} />
+                                </div>
+                              ))}
+                        </div>
+
+                      </div>
+                    )}
+
+                    {/* Footer strip: everything that acts on the space, on its
+                        own tinted band so the member list stays a list. */}
+                    {open && (
+                      <div className="acct-space-foot">
+                        {isPool && isOwner && space.group.invite_code && (
+                          <>
+                            <div className="acct-space-foot-row">
+                              <code className="acct-invite-code-inline">
+                                {formatInviteCode(space.group.invite_code)}
+                              </code>
+                              {copyButtons(space.id, space.group.invite_code)}
+                              <button
+                                type="button"
+                                className="acct-btn acct-btn--sm acct-btn--danger acct-space-foot-end"
+                                onClick={() => handleDeleteGroup(space.id)}
+                                onBlur={() => {
+                                  if (deleteConfirmId === space.id) setDeleteConfirmId(null);
+                                }}
+                              >
+                                {deleteConfirmId === space.id
+                                  ? "Confirm delete?"
+                                  : "Delete space"}
+                              </button>
+                            </div>
+                            <div className="acct-space-foot-row">
+                              <input
+                                className="auth-input"
+                                type="email"
+                                placeholder="Invite by email"
+                                value={inviteEmails[space.id] ?? ""}
+                                onChange={(e) =>
+                                  setInviteEmails((prev) => ({
+                                    ...prev,
+                                    [space.id]: e.target.value,
+                                  }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleSendInvite(space.id);
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="acct-btn acct-btn--sm"
+                                onClick={() => handleSendInvite(space.id)}
+                                disabled={!(inviteEmails[space.id] ?? "").trim()}
+                              >
+                                Invite
+                              </button>
+                            </div>
+                          </>
+                        )}
+
+                        {isPool && !isOwner && (
+                          <div className="acct-space-foot-row">
+                            <button
+                              type="button"
+                              className="acct-btn acct-btn--sm acct-btn--danger acct-space-foot-end"
+                              onClick={() => handleLeaveGroup(space.id)}
+                            >
+                              Leave space
+                            </button>
+                          </div>
+                        )}
+
+                        {!isPool && (
+                          <div className="acct-space-foot-row">
+                            {scopePills(space.session.my_scope, (v) =>
+                              handleUpdateScope(space.id, v),
                             )}
+                            <button
+                              type="button"
+                              className="acct-btn acct-btn--sm acct-space-foot-end"
+                              onClick={() => handleLeaveSession(space.id)}
+                            >
+                              Leave
+                            </button>
+                            <button
+                              type="button"
+                              className="acct-btn acct-btn--sm acct-btn--danger"
+                              onClick={() => handleEndSession(space.id)}
+                            >
+                              End share
+                            </button>
                           </div>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="acct-empty">
-                  No shared spaces yet — create one to share with your other
-                  devices or with someone else.
-                </p>
-              )}
+                    )}
+                  </div>
+                );
+              })}
 
-              <div className="acct-subhead">Join a space</div>
-              <div className="acct-field-row">
-                <input
-                  className="auth-input"
-                  placeholder="Paste an invite code or link"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
-                  disabled={joinLoading}
-                />
-                <button
-                  type="button"
-                  className="acct-btn"
-                  onClick={handleJoin}
-                  disabled={joinLoading || !joinCode.trim()}
-                >
-                  {joinLoading ? "Joining…" : "Join"}
-                </button>
-              </div>
-
-              {(receivedPending.length > 0 || sentInvites.length > 0) && (
-                <>
-                  <div className="acct-subhead">Pending invites</div>
-                  {receivedPending.map((inv) => (
-                    <div key={inv.id} className="acct-invite-banner">
-                      <div className="acct-invite-head">
-                        <ShareNetwork size={13} />
-                        {inv.inviter_name || "Someone"} wants to share{" "}
-                        {inv.group_type === "live_share"
-                          ? "their clipboard live"
-                          : `"${inv.group_name}"`}{" "}
-                        with you
-                      </div>
-                      <div className="acct-row-actions acct-invite-actions">
+              {/* Outbound invites — dashed, because a space you've offered isn't a
+                  space you have yet. */}
+              {sentInvites.length > 0 && (
+                <div className="acct-card acct-sent">
+                  {sentInvites.map((inv) => (
+                    <div key={inv.id} className="acct-sent-row">
+                      <Envelope size={15} className="acct-sent-icon" />
+                      <span className="acct-sent-text">
+                        {inv.invitee_email} invited to {inv.group_name}
+                      </span>
+                      <span className="acct-sent-status">{inv.status}</span>
+                      {inv.status === "pending" && (
                         <button
                           type="button"
-                          className="acct-btn acct-btn--primary acct-btn--sm"
-                          onClick={() => handleAcceptInvite(inv.id)}
+                          className="acct-linkbtn"
+                          onClick={() => handleRevokeInvite(inv.id)}
                         >
-                          Accept
+                          Revoke
                         </button>
-                        <button
-                          type="button"
-                          className="acct-btn acct-btn--sm"
-                          onClick={() => handleDeclineInvite(inv.id)}
-                        >
-                          Decline
-                        </button>
-                      </div>
+                      )}
                     </div>
                   ))}
-                  {sentInvites.length > 0 && (
-                    <div className="acct-list">
-                      {sentInvites.map((inv) => (
-                        <div key={inv.id} className="acct-row">
+                </div>
+              )}
+
+              {spaces.length === 0 && sentInvites.length === 0 && (
+                <div className="acct-card">
+                  <p className="acct-empty">
+                    Nothing shared yet. Create a space to sync with your other
+                    devices, or join one with an invite code.
+                  </p>
+                </div>
+              )}
+              </div>
+            </section>
+
+            {/* This account */}
+            <section className="acct-zone">
+              <div className="acct-zone-head">
+                <span className="acct-zone-icon"><Desktop size={13} /></span>
+                <span className="acct-zone-label">Devices &amp; storage</span>
+              </div>
+
+              {deviceError && <span className="auth-error">{deviceError}</span>}
+
+              <div className="acct-card acct-card--rows">
+                <div className="acct-list">
+                  {devices.length > 0 ? (
+                    devices.map((d) => {
+                      const online = isDeviceOnline(d);
+                      const DeviceGlyph = deviceIcon(d.platform);
+                      const seen = formatLastSynced(d.last_seen_at);
+                      return (
+                        <div key={d.id} className="acct-row">
+                          <span className="acct-row-icon"><DeviceGlyph size={15} /></span>
                           <div className="acct-row-main">
-                            <span className="acct-row-name">{inv.invitee_email}</span>
+                            <span className="acct-row-name">
+                              {d.device_name || "Unknown device"}
+                              {d.is_current && (
+                                <span className="acct-badge acct-badge--owner">this device</span>
+                              )}
+                            </span>
                             <span className="acct-row-meta">
-                              {inv.group_name} · {inv.status}
+                              {d.platform}
+                              {online
+                                ? " · online"
+                                : seen
+                                  ? ` · last seen ${seen}`
+                                  : " · offline"}
                             </span>
                           </div>
-                          {inv.status === "pending" && (
+                          <span className={`acct-dot${online ? " online" : ""}`} />
+                          {!d.is_current && (
                             <div className="acct-row-actions">
                               <button
                                 type="button"
                                 className="acct-btn acct-btn--sm acct-btn--danger"
-                                onClick={() => handleRevokeInvite(inv.id)}
+                                onClick={() => handleRevokeDevice(d.id)}
                               >
-                                Revoke
+                                Remove
                               </button>
                             </div>
                           )}
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })
+                  ) : (
+                    <p className="acct-empty">No devices registered yet.</p>
                   )}
-                </>
-              )}
-            </div>
+                  {quota && (() => {
+                    const pct =
+                      quota.quota_bytes > 0
+                        ? Math.min(100, (quota.used_bytes / quota.quota_bytes) * 100)
+                        : 0;
+                    return (
+                      <div className="acct-quota">
+                        <div className="acct-quota-head">
+                          <HardDrives size={13} />
+                          <span>Storage</span>
+                          <span className="acct-quota-value">
+                            {formatBytes(quota.used_bytes)} of {formatBytes(quota.quota_bytes)}
+                          </span>
+                        </div>
+                        <div className="acct-quota-track">
+                          <div
+                            className={`acct-quota-fill${pct >= 85 ? " acct-quota-fill--warn" : ""}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </section>
+
+            <p className="auth-secure acct-secure-foot">
+              <Key size={12} weight="fill" />
+              End-to-end encrypted — only you can read your data
+            </p>
 
           </>
         )}
