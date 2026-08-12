@@ -24,6 +24,7 @@ pub mod sync_state;
 pub mod types;
 pub mod ws_listener;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -177,6 +178,9 @@ pub struct SyncClient {
     status: Arc<Mutex<SyncStatusInfo>>,
     /// Active Live Share sessions (includes cached group keys).
     sharing_sessions: Arc<Mutex<Vec<SharingSession>>>,
+    /// Pool-group Group Keys by server group id. In memory only, like the UMK
+    /// and session keys — recovered from `my_wrapped_group_key` on next sync.
+    group_keys: Arc<Mutex<HashMap<String, [u8; 32]>>>,
 
     /// WebSocket listener — replaced on reconnect.
     ws_listener: Mutex<Option<Arc<WsListener>>>,
@@ -269,6 +273,7 @@ impl SyncClient {
             sync_state,
             status,
             sharing_sessions: Arc::new(Mutex::new(Vec::new())),
+            group_keys: Arc::new(Mutex::new(HashMap::new())),
             ws_listener: Mutex::new(None),
             settings_push_at,
             settings_notify,
@@ -637,7 +642,8 @@ impl SyncClient {
         let ctx = self.push_ctx();
         // Shared entries encrypt under the session Group Key (§15.2); personal
         // ones under the UMK.
-        let (enc_key, group_ids) = self.share_target(umk, |s| s.my_scope.includes_clipboard());
+        let (enc_key, group_ids) =
+            self.share_target(umk, &entry.groups, |s| s.my_scope.includes_clipboard());
 
         self.handle.spawn(async move {
             // Skip file entries larger than 5 MB (Phase 7 enforcement)
@@ -706,7 +712,8 @@ impl SyncClient {
 
     fn spawn_push_note(&self, note: Note, umk: Zeroizing<[u8; 32]>, is_update: bool) {
         let ctx = self.push_ctx();
-        let (enc_key, group_ids) = self.share_target(umk, |s| s.my_scope.includes_notes());
+        let (enc_key, group_ids) =
+            self.share_target(umk, &note.groups, |s| s.my_scope.includes_notes());
 
         self.handle.spawn(async move {
             let metadata_json = serde_json::json!({
@@ -1074,6 +1081,10 @@ impl SyncClient {
     pub fn trigger_initial_sync(self: Arc<Self>) {
         let handle = self.handle.clone();
         handle.spawn(async move {
+            // Recover pool-group keys *before* pulling: group keys are memory-only,
+            // so without this the first pull after a restart would fail to decrypt
+            // every shared entry and fall back to the UMK.
+            self.reconcile_group_keys().await;
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
             }
@@ -1116,15 +1127,47 @@ impl SyncClient {
         }
     }
 
+    /// The cached Group Key for a pool group, if we hold one.
+    fn pool_group_key(&self, group_id: &str) -> Option<[u8; 32]> {
+        self.group_keys.lock().get(group_id).copied()
+    }
+
+    fn set_pool_group_key(&self, group_id: &str, key: [u8; 32]) {
+        self.group_keys.lock().insert(group_id.to_string(), key);
+    }
+
+    /// Resolve an entry's local group *names* to the server pool-group ids we
+    /// hold a Group Key for. Names without a mapping, or groups we have no key
+    /// for, are skipped — encrypting under a key no member holds would produce
+    /// entries nobody (including us, on another device) could read.
+    fn keyed_pool_groups(&self, group_names: &[String]) -> Vec<(String, [u8; 32])> {
+        let id_map = self.id_map.lock();
+        group_names
+            .iter()
+            .filter_map(|name| id_map.get_group_server_id(name).map(str::to_string))
+            .filter_map(|gid| self.pool_group_key(&gid).map(|k| (gid, k)))
+            .collect()
+    }
+
     /// Pick the content-encryption key + fan-out target for an outgoing entry.
-    /// If the user is in a Live Share session (matching `want`) whose Group Key
-    /// we hold, encrypt under that key and tag the entry with that group;
-    /// otherwise it's a personal entry encrypted under the UMK (no group_ids).
+    ///
+    /// Precedence: an entry explicitly tagged into a pool group we hold a key for
+    /// is shared with that group — that's a deliberate user action, so it wins
+    /// over an ambient Live Share session. Otherwise fall back to a matching
+    /// Live Share session, and failing that it's personal (UMK, no group_ids).
     fn share_target(
         &self,
         umk: Zeroizing<[u8; 32]>,
+        group_names: &[String],
         want: impl Fn(&SharingSession) -> bool,
     ) -> (Zeroizing<[u8; 32]>, Vec<String>) {
+        let pools = self.keyed_pool_groups(group_names);
+        if let Some((gid, key)) = pools.first() {
+            // One key per entry: AES-GCM encrypts under a single key, so an entry
+            // in several groups is shared into the first we hold a key for.
+            return (Zeroizing::new(*key), vec![gid.clone()]);
+        }
+
         let guard = self.sharing_sessions.lock();
         match guard.iter().find(|s| want(s) && s.group_key.is_some()) {
             Some(s) => (
@@ -1135,8 +1178,8 @@ impl SyncClient {
         }
     }
 
-    /// The key to decrypt a pulled entry: a session Group Key when the entry is
-    /// tagged with a session we hold a key for, else the personal UMK.
+    /// The key to decrypt a pulled entry: a Live Share session key or a pool
+    /// Group Key when the entry is tagged with one we hold, else the personal UMK.
     fn decryption_key_for(
         &self,
         umk: &Zeroizing<[u8; 32]>,
@@ -1144,8 +1187,105 @@ impl SyncClient {
     ) -> Zeroizing<[u8; 32]> {
         group_ids
             .iter()
-            .find_map(|gid| self.session_group_key(gid).map(Zeroizing::new))
+            .find_map(|gid| {
+                self.session_group_key(gid)
+                    .or_else(|| self.pool_group_key(gid))
+                    .map(Zeroizing::new)
+            })
             .unwrap_or_else(|| umk.clone())
+    }
+
+    /// Reconcile pool-group Group Keys with the server.
+    ///
+    /// For each pool group we belong to: recover our key by unwrapping
+    /// `my_wrapped_group_key` against the owner's identity key; and if we *are*
+    /// the owner, mint a key when the group has none yet and (re)wrap it for every
+    /// member who has published an identity key. Members without one are skipped
+    /// and picked up the next time this runs.
+    ///
+    /// Idempotent, and safe to call on login, on `group:rekey`, and whenever
+    /// membership changes.
+    pub(crate) async fn reconcile_group_keys(self: &Arc<Self>) {
+        let Some(http) = self.http.lock().clone() else {
+            return;
+        };
+        let Some((id_priv, id_pub)) = self.identity_keypair() else {
+            return;
+        };
+        let me = match self.current_user() {
+            Some(u) => u.user_id,
+            None => return,
+        };
+
+        let groups = match http.list_groups().await {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("[sync] reconcile group keys: {e}");
+                return;
+            }
+        };
+
+        for g in groups {
+            let owner_pub = g
+                .members
+                .iter()
+                .find(|m| m.user_id == g.owner_id)
+                .and_then(|m| m.identity_pubkey.as_deref())
+                .and_then(decode_pubkey);
+
+            // ── Recover our own key ──────────────────────────────────────
+            if self.pool_group_key(&g.id).is_none() {
+                if let (Some(wrapped), Some(owner_pub)) = (&g.my_wrapped_group_key, owner_pub) {
+                    let shared = crypto::x25519_shared_secret(&id_priv, &owner_pub);
+                    match crypto::unwrap_key(&shared, wrapped) {
+                        Ok(key) => self.set_pool_group_key(&g.id, *key),
+                        Err(e) => eprintln!("[sync] unwrap group key {}: {e}", g.id),
+                    }
+                }
+            }
+
+            if g.owner_id != me {
+                continue;
+            }
+
+            // ── Owner: mint on first use, then wrap for everyone ─────────
+            let group_key = match self.pool_group_key(&g.id) {
+                Some(k) => k,
+                None => {
+                    let fresh = *crypto::random_key();
+                    self.set_pool_group_key(&g.id, fresh);
+                    fresh
+                }
+            };
+
+            let mut wrapped_keys = Vec::new();
+            for m in &g.members {
+                let Some(member_pub) = m.identity_pubkey.as_deref().and_then(decode_pubkey) else {
+                    continue; // hasn't registered keys yet — retried next run
+                };
+                // Wrapping for ourselves works too: X25519(priv, own_pub) is a
+                // valid shared secret, so the owner can recover after a restart.
+                let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
+                match crypto::wrap_key(&shared, &group_key) {
+                    Ok(w) => wrapped_keys.push(WrappedKeyEntry {
+                        user_id: m.user_id.clone(),
+                        wrapped_group_key: w,
+                    }),
+                    Err(e) => eprintln!("[sync] wrap group key for {}: {e}", m.user_id),
+                }
+            }
+            let _ = id_pub; // own public half comes from the member list
+
+            if wrapped_keys.is_empty() {
+                continue;
+            }
+            if let Err(e) = http
+                .distribute_group_keys(&g.id, DistributeKeysRequest { wrapped_keys })
+                .await
+            {
+                eprintln!("[sync] distribute group keys for {}: {e}", g.id);
+            }
+        }
     }
 
     /// Owner side (`sharing:accepted`): a member joined our Live Share.  Wrap
@@ -1216,6 +1356,21 @@ impl SyncClient {
     /// Member side (`group:rekey`): the owner sent us a Group Key wrapped
     /// against our identity key.  Unwrap with `X25519(my_priv, sender_pubkey)`
     /// and cache it so matching entries encrypt/decrypt under it.
+    /// A rekey arrived but the payload carries no `sender_pubkey` — the pool-group
+    /// path. Re-reading `GET /groups` fetches the same wrapped key from the server
+    /// (it is persisted, not just broadcast) plus the owner's public key needed to
+    /// unwrap it, so a plain reconcile covers it.
+    pub(crate) fn handle_group_rekey_arc(self: &Arc<Self>, payload: &serde_json::Value) {
+        if payload.get("sender_pubkey").and_then(|v| v.as_str()).is_some() {
+            self.handle_group_rekey(payload);
+            return;
+        }
+        let this = Arc::clone(self);
+        self.handle.spawn(async move {
+            this.reconcile_group_keys().await;
+        });
+    }
+
     pub(crate) fn handle_group_rekey(&self, payload: &serde_json::Value) {
         let group_id = payload
             .get("group_id")
