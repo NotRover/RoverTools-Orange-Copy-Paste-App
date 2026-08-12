@@ -1248,18 +1248,25 @@ impl SyncClient {
                 continue;
             }
 
-            // ── Owner: mint on first use, then wrap for everyone ─────────
-            let group_key = match self.pool_group_key(&g.id) {
-                Some(k) => k,
+            // ── Owner: mint on first use, then wrap for whoever needs it ──
+            // `minted` matters: a fresh key invalidates every previously
+            // distributed one, so it must go to all members. An existing key only
+            // goes to members who don't have one yet — re-sending to everybody
+            // would echo back as `group:rekey` and loop forever.
+            let (group_key, minted) = match self.pool_group_key(&g.id) {
+                Some(k) => (k, false),
                 None => {
                     let fresh = *crypto::random_key();
                     self.set_pool_group_key(&g.id, fresh);
-                    fresh
+                    (fresh, true)
                 }
             };
 
             let mut wrapped_keys = Vec::new();
             for m in &g.members {
+                if m.has_group_key && !minted {
+                    continue; // already holds the current key
+                }
                 let Some(member_pub) = m.identity_pubkey.as_deref().and_then(decode_pubkey) else {
                     continue; // hasn't registered keys yet — retried next run
                 };
@@ -1363,6 +1370,18 @@ impl SyncClient {
     pub(crate) fn handle_group_rekey_arc(self: &Arc<Self>, payload: &serde_json::Value) {
         if payload.get("sender_pubkey").and_then(|v| v.as_str()).is_some() {
             self.handle_group_rekey(payload);
+            return;
+        }
+        // Distributing keys makes the server echo `group:rekey` back to every
+        // recipient — including ourselves. Reconciling on an event for a group we
+        // already hold a key for would re-distribute and loop indefinitely, so
+        // only a group we have no key for is worth acting on.
+        let group_id = payload
+            .get("group_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if group_id.is_empty() || self.pool_group_key(&group_id).is_some() {
             return;
         }
         let this = Arc::clone(self);
