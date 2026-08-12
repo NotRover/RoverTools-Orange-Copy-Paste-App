@@ -35,9 +35,9 @@ const KEY_SUPABASE_ANON_KEY: &str = "supabase_anon_key";
 // access to the project, and anyone can read strings out of a shipped binary.
 //
 // Leave a value empty to build an app that reports itself as unconfigured.
-const DEFAULT_SERVER_URL: &str = "";
-const DEFAULT_SUPABASE_URL: &str = "";
-const DEFAULT_SUPABASE_ANON_KEY: &str = "";
+const DEFAULT_SERVER_URL: &str = "https://rovertools-smart-clipboard-app-backend.onrender.com";
+const DEFAULT_SUPABASE_URL: &str = "https://dmtdusebizngdjtuhzzm.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_ZNs6Q9HfOdUBe8bEBEdPEg_z__qKE8e";
 
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -61,14 +61,18 @@ impl Default for SyncConfig {
 impl SyncConfig {
     pub fn load(app: &tauri::AppHandle) -> Self {
         let defaults = Self::default();
-        let Some(path) = app.path().app_data_dir().ok().map(|d| d.join("settings.json")) else {
+        let Some(path) = app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|d| d.join("settings.json"))
+        else {
             return defaults;
         };
         let Ok(data) = std::fs::read_to_string(&path) else {
             return defaults;
         };
-        let Ok(map) =
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data)
+        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data)
         else {
             return defaults;
         };
@@ -82,7 +86,10 @@ impl SyncConfig {
         };
 
         Self {
-            enabled: map.get(KEY_ENABLED).and_then(|v| v.as_bool()).unwrap_or(false),
+            enabled: map
+                .get(KEY_ENABLED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             server_url: str_or(KEY_SERVER_URL, &defaults.server_url),
             supabase_url: str_or(KEY_SUPABASE_URL, &defaults.supabase_url),
             supabase_anon_key: str_or(KEY_SUPABASE_ANON_KEY, &defaults.supabase_anon_key),
