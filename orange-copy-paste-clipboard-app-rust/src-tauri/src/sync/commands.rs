@@ -74,6 +74,7 @@ fn to_sync_group(g: GroupOut, me: &str) -> SyncGroup {
             .map(|m| crate::sync::types::SyncGroupMember {
                 user_id: m.user_id,
                 display_name: m.display_name,
+                avatar_url: m.avatar_url,
                 role: m.role,
                 has_group_key: m.has_group_key,
             })

@@ -348,13 +348,14 @@
 }
 
 /* Centered content column inside the .settings-screen scroll shell. */
+/* Same column metrics as .settings-inner so Account and Settings line up. */
 .acct-inner {
   width: 100%;
-  max-width: 600px;
+  max-width: 620px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 22px;
 }
 
 .account-screen--center .acct-inner {
@@ -363,21 +364,19 @@
 
 /* ── Cards ─────────────────────────────────────────────────────────── */
 
+/* Same surface, radius and border as .set-group in Settings. */
 .acct-card {
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--card-bg, var(--surface));
-  padding: 16px 18px;
+  padding: 14px;
   box-shadow: var(--card-shadow, var(--shadow-sm));
   animation: acctCardIn 0.28s ease both;
 }
 
-.acct-inner > .acct-card:nth-child(2),
-.acct-inner > .auth-card:nth-child(2) { animation-delay: 0.03s; }
-.acct-inner > .acct-card:nth-child(3) { animation-delay: 0.06s; }
-.acct-inner > .acct-card:nth-child(4) { animation-delay: 0.09s; }
-.acct-inner > .acct-card:nth-child(5) { animation-delay: 0.12s; }
-.acct-inner > .acct-card:nth-child(6) { animation-delay: 0.15s; }
+/* Deliberately unstaggered: nth-child delays shift when a conditional block
+   (attention strip, create panel) mounts, which re-runs the animation on
+   everything below it. One quiet fade for the whole column instead. */
 
 @keyframes acctCardIn {
   from {
@@ -397,43 +396,58 @@
   }
 }
 
-.acct-card-head {
+/* ── Zones ─────────────────────────────────────────────────────────── */
+
+/* A zone is the Settings section pattern: accent icon chip + title above one
+   grouped-rows box. Metrics mirror .set-section / .set-section-head so the two
+   screens read as the same system. */
+.acct-zone {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 9px;
-  margin-bottom: 12px;
 }
 
-.acct-card-icon {
+.acct-zone-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.acct-zone-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--accent-dim);
+  flex-shrink: 0;
 }
 
-.acct-card-title {
-  margin: 0;
-  font-size: 13.5px;
+.acct-zone-label {
+  font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  letter-spacing: -0.1px;
+  color: var(--text-secondary);
 }
 
-.acct-card-count {
+.acct-zone-actions {
+  display: flex;
+  gap: 6px;
   margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--text-muted, #909090);
-  background: color-mix(in srgb, var(--text) 7%, transparent);
-  padding: 1px 8px;
-  border-radius: 999px;
 }
+
+/* Grouped-rows card: children are divided rows, so padding lives on the rows. */
+.acct-card--rows {
+  padding: 0;
+  overflow: hidden;
+}
+
+.acct-card--rows .acct-row { padding: 10px 14px; }
+.acct-card--rows .acct-empty { padding: 12px 14px; margin: 0; }
+
 
 .acct-card-desc {
   margin: -4px 0 12px;
@@ -485,81 +499,83 @@
   margin-top: 8px;
 }
 
-/* ── Profile card ──────────────────────────────────────────────────── */
+/* ── Identity band ─────────────────────────────────────────────────── */
 
-.acct-profile {
+/* One horizontal row: avatar · email + status line · sync/sign-out. Replaces
+   the old profile card and the standalone status pill. */
+.acct-idband {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+.acct-id-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.acct-id-email {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct-id-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted, #909090);
+}
+
+.acct-id-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted, #909090);
+}
+
+.acct-id-status--connected .acct-id-dot { background: var(--acct-ok); }
+.acct-id-status--offline .acct-id-dot,
+.acct-id-status--pending .acct-id-dot { background: var(--acct-warn); }
+
+/* Queue detail is normal operation, so it stays muted; amber is reserved for
+   entries sync refused to send. */
+.acct-id-note {
+  font-size: 11.5px;
+  color: var(--text-muted, #909090);
+}
+
+.acct-id-note--warn { color: var(--acct-warn); }
+
+.acct-id-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .acct-avatar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   flex: 0 0 auto;
-}
-
-.acct-profile-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.acct-profile-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.acct-profile-email {
-  font-size: 12px;
-  color: var(--text-muted, #909090);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.acct-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.acct-status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.acct-status--connected { color: #22c55e; background: rgba(34, 197, 94, 0.12); }
-.acct-status--connected .acct-status-dot { background: #22c55e; }
-.acct-status--offline,
-.acct-status--pending { color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
-.acct-status--offline .acct-status-dot,
-.acct-status--pending .acct-status-dot { background: #f59e0b; }
-.acct-status--checking { color: var(--text-muted, #909090); background: color-mix(in srgb, var(--text) 8%, transparent); }
-.acct-status--checking .acct-status-dot { background: var(--text-muted, #909090); }
-
-.acct-profile-actions {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  margin-top: 4px;
 }
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
@@ -585,6 +601,21 @@
   border-color: color-mix(in srgb, var(--text) 24%, transparent);
 }
 
+.acct-btn:focus-visible,
+.acct-space-head:focus-visible,
+.acct-scope-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Pressed-in state for the buttons that open the create / join panels, so the
+   open panel is traceable to the control that opened it. */
+.acct-btn--on {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--text) 24%, transparent);
+}
+
 .acct-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -603,6 +634,19 @@
 
 .acct-btn--danger { color: #ef4444; }
 .acct-btn--danger:hover:not(:disabled) { border-color: #ef4444; }
+
+/* Recessive variant — for actions that must stay reachable but not compete
+   (Sign out next to Sync now). */
+.acct-btn--quiet {
+  color: var(--text-muted, #909090);
+  background: transparent;
+  border-color: transparent;
+}
+
+.acct-btn--quiet:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+}
 
 .acct-btn--sm { padding: 5px 10px; font-size: 11.5px; }
 .acct-btn--wide { width: 100%; margin-top: 10px; }
@@ -647,6 +691,13 @@
   display: flex;
   gap: 6px;
   flex: 0 0 auto;
+}
+
+.acct-row-icon {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-muted, #909090);
 }
 
 .acct-dot {
@@ -696,75 +747,105 @@
   margin-top: 2px;
 }
 
-.acct-subhead {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted, #909090);
-  margin: 16px 0 2px;
-}
-
 /* ── Scope pills ───────────────────────────────────────────────────── */
 
 .acct-scope {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .acct-scope-label {
   font-size: 11.5px;
-  font-weight: 600;
   color: var(--text-muted, #909090);
 }
 
+/* Segmented control: one bordered track, the active segment lifted. Picking a
+   scope is a setting, not a call to action, so it doesn't take the CTA fill. */
 .acct-scope-pills {
   display: flex;
-  gap: 6px;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
 }
 
 .acct-scope-pill {
   font-family: inherit;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-muted, #909090);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 11px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
   cursor: pointer;
-  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  transition: color 0.12s ease, background 0.12s ease;
 }
 
+.acct-scope-pill:hover:not(.active) { color: var(--text); }
+
 .acct-scope-pill.active {
-  color: #fff;
-  background: var(--cta);
-  border-color: transparent;
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 /* ── Shared spaces ─────────────────────────────────────────────────── */
 
-/* "New space" button in the card head; sits at the right edge when no
-   count pill is present (the count pill already claims margin-left: auto). */
-.acct-card-head > .acct-head-btn { margin-left: auto; }
-.acct-card-head > .acct-card-count + .acct-head-btn { margin-left: 8px; }
-
-.acct-space {
-  border-top: 1px solid var(--border);
+/* Each space is its own card in a stack, so a space and everything inside it
+   read as one object and the zone reads as a set of them. */
+.acct-spaces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.acct-list > .acct-space:first-child { border-top: none; }
+.acct-space {
+  padding: 0;
+  overflow: hidden;
+}
 
-/* Expandable row header — full-width, unstyled button. */
+/* Space avatar — the same treatment as .sync-group-avatar in the Sharing
+   screen's group list (colored initials tile for a lasting space, green dot for
+   a live share), scaled to this screen's row height. */
+.acct-space-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.acct-space-avatar--live {
+  background: color-mix(in srgb, var(--acct-ok) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--acct-ok) 25%, transparent);
+  box-shadow: none;
+}
+
+.acct-space-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--acct-ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--acct-ok) 60%, transparent);
+}
+
+/* Expandable card header — the whole head is the toggle. */
 .acct-space-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 10px 0;
+  padding: 11px 14px;
   font-family: inherit;
   text-align: left;
   color: inherit;
@@ -781,17 +862,63 @@
 
 .acct-space-caret--open { transform: rotate(90deg); }
 
-.acct-space-count { margin-left: auto; white-space: nowrap; }
+.acct-space-head:hover {
+  background: var(--surface-hover);
+}
 
+.acct-space-head .acct-row-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status pills sit at the right edge of the collapsed row. */
+.acct-space-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Inside its own card the body needs no indent — a hairline under the head is
+   the whole separation, and it stays on the card surface so only the footer
+   strip is tinted. */
 .acct-space-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 0 12px 19px;
+  padding: 2px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* Footer strip — everything that acts on the space. */
+.acct-space-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+}
+
+.acct-space-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.acct-space-foot-row .auth-input { flex: 1; min-width: 160px; }
+.acct-space-foot-end { margin-left: auto; }
+
+/* Controls sit on the card surface so they stay visible against the strip. */
+.acct-space-foot .auth-input,
+.acct-space-foot .acct-btn:not(.acct-btn--primary) {
+  background: var(--surface);
 }
 
 .acct-space-body .acct-members { margin-top: 0; }
-.acct-space-actions { margin-top: 10px; }
 
 /* Small status pills — one shared metric so every badge on the screen lines
    up (space rows, members, devices, counts). Variants change color only. */
@@ -805,7 +932,7 @@
   color: var(--text-muted, #909090);
   background: color-mix(in srgb, var(--text) 7%, transparent);
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: 6px;
   white-space: nowrap;
 }
 
@@ -826,8 +953,6 @@
   background: color-mix(in srgb, var(--acct-warn) 12%, transparent);
 }
 
-.acct-badge--muted { opacity: 0.75; }
-
 .acct-member-avatar {
   display: flex;
   align-items: center;
@@ -842,37 +967,91 @@
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-/* Inline "New space" create panel. */
+/* Inline "New space" / "Join" panels, opened from the zone header — a card at
+   the top of the space stack. */
 .acct-create-panel {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: color-mix(in srgb, var(--text) 2%, transparent);
+  padding: 12px 14px;
 }
 
 .acct-create-panel > .acct-field-row:first-of-type { margin-top: 10px; }
 .acct-create-modes { margin-bottom: 2px; }
 
-/* ── Live Share extras ─────────────────────────────────────────────── */
+.acct-join-panel > .acct-field-row { margin-top: 0; }
 
-.acct-invite-banner {
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
-  border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 10px;
+/* ── Attention strip ───────────────────────────────────────────────── */
+
+/* Invites addressed to you — the only accent-bordered element on the screen. */
+.acct-attn-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.acct-attn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 11px 14px;
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
-.acct-invite-head {
+.acct-attn-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.acct-attn-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.acct-attn-actions { margin-left: auto; }
+
+/* ── Storage quota ─────────────────────────────────────────────────── */
+
+.acct-quota {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.acct-list > .acct-quota:first-child { border-top: none; }
+
+.acct-quota-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted, #909090);
 }
+
+.acct-quota-value { margin-left: auto; }
+
+.acct-quota-track {
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  overflow: hidden;
+}
+
+.acct-quota-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.24s ease;
+}
+
+.acct-quota-fill--warn { background: var(--acct-warn); }
+
+/* ── Live Share extras ─────────────────────────────────────────────── */
 
 .acct-invite-code {
   font-family: var(--font-mono, monospace);
@@ -882,8 +1061,6 @@
   word-break: break-all;
 }
 
-.acct-invite-actions { margin-top: 10px; }
-
 .acct-session {
   padding: 10px 0;
   border-top: 1px solid var(--border);
@@ -892,7 +1069,6 @@
 .acct-members {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   margin-top: 8px;
 }
 
@@ -901,9 +1077,23 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
+  min-height: 34px;
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 
-.acct-member .acct-row-meta { margin-left: auto; }
+.acct-members > .acct-member:last-child { border-bottom: none; }
+
+/* Member names sit one step below the space name they hang under. */
+.acct-member .acct-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .acct-invite-result {
   display: flex;
@@ -916,9 +1106,66 @@
 .acct-invite-code-inline {
   font-family: var(--font-mono, monospace);
   font-size: 12px;
+  letter-spacing: 0.04em;
   color: var(--text);
   background: color-mix(in srgb, var(--text) 6%, transparent);
   padding: 3px 8px;
   border-radius: 6px;
+}
+
+/* Trust closer for the signed-in column — the same line the auth card ends on. */
+.acct-secure-foot {
+  margin: -6px 0 0;
+}
+
+/* ── Sent invites ──────────────────────────────────────────────────── */
+
+/* Same hairline as every other card — it reads as pending from the muted text,
+   not from a different border style. */
+.acct-sent {
+  padding: 0;
+}
+
+.acct-sent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-muted, #909090);
+  border-top: 1px solid var(--border);
+}
+
+.acct-sent > .acct-sent-row:first-child { border-top: none; }
+
+.acct-sent-icon { flex: 0 0 auto; }
+
+.acct-sent-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct-sent-status { flex: 0 0 auto; }
+
+.acct-linkbtn {
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.acct-linkbtn:hover { color: var(--text); }
+
+.acct-linkbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
