@@ -31,6 +31,7 @@ import {
   RestoreIcon,
   WindowCloseIcon,
   CloudSyncIcon,
+  WarningIcon,
 } from "../icons";
 import "./App.css";
 
@@ -230,6 +231,21 @@ const App: React.FC = () => {
   // An internal error left the process running but no longer trusted, so saving
   // is paused until a restart.
   const health = useHealthWarning();
+
+  // What a previous degraded session had to set aside and this one took back on.
+  // Decided before this window existed, so it is polled rather than listened for.
+  const [recovered, setRecovered] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<string | null>("health_recovery_notice")
+      .then((notice) => {
+        if (!cancelled && notice) setRecovered(notice);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1284,6 +1300,15 @@ const App: React.FC = () => {
             icon={<PinIcon size={13} />}
             duration={3000}
             onDismiss={() => setPinLimitReached(false)}
+          />
+        )}
+
+        {recovered !== null && (
+          <ToastNotification
+            message={`Restored the ${recovered} you captured before the last restart`}
+            icon={<WarningIcon />}
+            duration={8000}
+            onDismiss={() => setRecovered(null)}
           />
         )}
 

@@ -92,6 +92,73 @@ fn record(app_data: Option<&Path>, headline: &str, detail: &str) {
     }
 }
 
+// ── Recovery ────────────────────────────────────────────────────────
+
+/// Stores that had a quarantined payload adopted at startup, for a one-time
+/// notice. A set, because history and saved-entries both report as one thing.
+static RECOVERED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Adopt a payload a degraded session had to set aside, so what the user
+/// captured after the fault is not stranded in a file nothing reads.
+///
+/// The held-back snapshot is `rmp_serde` output like any other, so it always
+/// parses — the reason it was withheld is that a panic *may* have left one entry
+/// logically half-updated, not that the file is unreadable. Against losing
+/// everything captured in that window, adopting it is the better trade. The
+/// displaced copy is kept as `.pre-recovery` so the choice stays reversible.
+///
+/// A swap rather than a second load path: the store then reads the file it
+/// always did, so nothing downstream needs to know this happened.
+pub fn recover_quarantined(path: &Path, label: &str) -> bool {
+    let quarantine = sibling(path, ".quarantine");
+    if !quarantine.exists() {
+        return false;
+    }
+
+    // A quarantine older than the live file belongs to a session that already
+    // recovered, and the live file supersedes it. Left in place rather than
+    // deleted: it is only litter, and deleting is the one step nothing undoes.
+    let stale = match (modified(&quarantine), modified(path)) {
+        (Some(q), Some(target)) => q <= target,
+        _ => false,
+    };
+    if stale {
+        return false;
+    }
+
+    // Copy, not rename: if the swap below fails, the live file must still be
+    // there. A rename here would leave the app with neither file.
+    let _ = std::fs::copy(path, sibling(path, ".pre-recovery"));
+
+    if std::fs::rename(&quarantine, path).is_err() {
+        return false;
+    }
+    RECOVERED.lock().insert(label.to_string());
+    record(
+        path.parent(),
+        "recovered",
+        &format!(
+            "  adopted {} after a degraded session\n  displaced copy kept alongside it as \
+             .pre-recovery\n",
+            quarantine.display()
+        ),
+    );
+    true
+}
+
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// What was adopted at startup, phrased for the user, or `None` if nothing was.
+pub fn recovery_notice() -> Option<String> {
+    let items = RECOVERED.lock();
+    if items.is_empty() {
+        return None;
+    }
+    Some(items.iter().cloned().collect::<Vec<_>>().join(" and "))
+}
+
 // ── Liveness ────────────────────────────────────────────────────────
 //
 // The latch above only fires on a panic, and a deadlock never produces one.
@@ -388,6 +455,14 @@ pub fn health_stall_reason() -> Option<String> {
     stall_reason()
 }
 
+/// What a degraded previous session left behind and this one adopted, so the app
+/// can say so once. Decided long before any window exists, hence a poll rather
+/// than an event.
+#[tauri::command]
+pub fn health_recovery_notice() -> Option<String> {
+    recovery_notice()
+}
+
 /// Restart the app. The only real recovery from a degraded process: it rebuilds
 /// every in-memory structure from what is on disk, which was protected from the
 /// bad state precisely so this would be safe.
@@ -590,6 +665,63 @@ mod tests {
         assert_eq!(stall_reason(), None);
         assert_eq!(apply_stall(false, 500), StallChange::Unchanged);
         assert_eq!(apply_stall(false, 500), StallChange::Unchanged);
+    }
+
+    /// The cases `tests/degraded_mode.rs` does not reach, since it only exercises
+    /// the happy path of a quarantine written moments ago.
+    ///
+    /// Touches process-global `RECOVERED`, so it uses labels no other test
+    /// asserts on. Nothing here may assert that the notice is *empty*.
+    #[test]
+    fn recovery_adopts_only_a_quarantine_newer_than_the_file_it_replaces() {
+        let dir = scratch_dir("recover");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("history.bin");
+
+        // Nothing set aside: the overwhelmingly common case, and it must not
+        // disturb the live file.
+        std::fs::write(&target, b"live").unwrap();
+        assert!(!recover_quarantined(&target, "unit-none"));
+        assert_eq!(std::fs::read(&target).unwrap(), b"live");
+
+        // A quarantine older than the live file is from a session that already
+        // recovered. Adopting it would roll the user back onto a stale snapshot,
+        // losing everything written since — the opposite of the point.
+        std::fs::write(sibling(&target, ".quarantine"), b"stale").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&target, b"newer live").unwrap();
+        assert!(!recover_quarantined(&target, "unit-stale"));
+        assert_eq!(std::fs::read(&target).unwrap(), b"newer live");
+        assert!(
+            sibling(&target, ".quarantine").exists(),
+            "a stale quarantine was deleted — the one step nothing undoes"
+        );
+
+        // Newer quarantine: adopted, and the displaced copy kept.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(sibling(&target, ".quarantine"), b"fresh").unwrap();
+        assert!(recover_quarantined(&target, "unit-fresh"));
+        assert_eq!(std::fs::read(&target).unwrap(), b"fresh");
+        assert_eq!(
+            std::fs::read(sibling(&target, ".pre-recovery")).unwrap(),
+            b"newer live"
+        );
+
+        // No live file at all — a fault before the first flush ever landed. There
+        // is nothing to compare against and nothing to displace, and the captures
+        // still have to survive.
+        let virgin = dir.join("notes.bin");
+        std::fs::write(sibling(&virgin, ".quarantine"), b"only copy").unwrap();
+        assert!(recover_quarantined(&virgin, "unit-virgin"));
+        assert_eq!(std::fs::read(&virgin).unwrap(), b"only copy");
+
+        assert_eq!(
+            recovery_notice().as_deref(),
+            Some("unit-fresh and unit-virgin"),
+            "the notice should name each store once, in stable order"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The watchdog's whole value in the frozen-UI case is the file it leaves
