@@ -9,7 +9,10 @@ import {
   SlidersHorizontal,
   ClipboardText,
   ClockCounterClockwise,
+  ArrowClockwise,
+  DownloadSimple,
 } from "@phosphor-icons/react";
+import { useUpdater } from "../../../hooks/useUpdater";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -100,6 +103,14 @@ const SettingsScreen: React.FC = () => {
   const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
+  // ── Updates ────────────────────────────────────────────────────
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
+  const [appVersion, setAppVersion] = useState("");
+  // Its own instance, independent of App's: this one drives the manual check and
+  // its result, while App's drives the banner. Both read the same Rust-side state,
+  // so they agree on what is pending.
+  const updater = useUpdater();
+
   // ── Load settings on mount ──────────────────────────────────────
   useEffect(() => {
     const loadBool = (key: string, setter: (v: boolean) => void, fallback: boolean) =>
@@ -115,7 +126,9 @@ const SettingsScreen: React.FC = () => {
     loadBool("notif_paste", setNotifPaste, true);
     loadBool("autosave", setAutosave, false);
     loadBool("show_splash", setShowSplash, true);
+    loadBool("auto_check_updates", setAutoCheckUpdates, true);
     invoke<boolean>("get_autostart").then(setRunOnStartup);
+    invoke<string>("updater_current_version").then(setAppVersion).catch(() => {});
   }, []);
 
   // ── General settings handlers ───────────────────────────────────
@@ -162,6 +175,38 @@ const SettingsScreen: React.FC = () => {
       setRunOnStartup(previous);
     }
   };
+
+  // ── Update handlers ─────────────────────────────────────────────
+  // "Nothing found" and "not checked yet" are the same stage on the Rust side,
+  // and only one of them should say "you're up to date".
+  const [checkedOnce, setCheckedOnce] = useState(false);
+  const handleCheckUpdates = async () => {
+    setCheckedOnce(true);
+    await updater.check();
+  };
+
+  const updateStatus = (() => {
+    switch (updater.stage) {
+      case "checking":
+        return "Checking…";
+      case "available":
+        return `Version ${updater.info?.version} is available.`;
+      case "downloading":
+        return updater.percent === null
+          ? "Downloading…"
+          : `Downloading — ${updater.percent}%`;
+      case "ready":
+        return `Version ${updater.info?.version} is downloaded and ready to install.`;
+      case "installing":
+        return "Installing…";
+      case "error":
+        return updater.error;
+      default:
+        return checkedOnce ? "You're up to date." : null;
+    }
+  })();
+
+  const updateBusy = updater.stage === "checking" || updater.stage === "downloading" || updater.stage === "installing";
 
   // ── Render ──────────────────────────────────────────────────────
   return (
@@ -318,6 +363,72 @@ const SettingsScreen: React.FC = () => {
                 Open
               </button>
             </div>
+          </div>
+        </section>
+
+        {/* ── Updates ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><DownloadSimple size={15} /></span>
+            <h3 className="set-section-title">Updates</h3>
+          </div>
+          <div className="set-group">
+            <div className="set-row set-row--stack">
+              <div className="set-row-header">
+                <div className="set-row-info">
+                  <span className="set-row-label">
+                    App version{appVersion && ` ${appVersion}`}
+                  </span>
+                  <span className="set-row-desc">
+                    {updateStatus ?? "Check whether a newer version has been released."}
+                  </span>
+                </div>
+                {/* Once downloaded, the only remaining step is the restart — so the
+                    button becomes that, rather than offering a second download. */}
+                {updater.stage === "ready" ? (
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    onClick={updater.install}
+                    disabled={updateBusy}
+                  >
+                    <ArrowClockwise size={14} />
+                    Restart &amp; install
+                  </button>
+                ) : updater.stage === "available" ? (
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    onClick={updater.download}
+                    disabled={updateBusy}
+                  >
+                    <DownloadSimple size={14} />
+                    Download
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    onClick={handleCheckUpdates}
+                    disabled={updateBusy}
+                  >
+                    <ArrowClockwise size={14} />
+                    {updater.stage === "checking" ? "Checking…" : "Check now"}
+                  </button>
+                )}
+              </div>
+              {updater.info?.notes && updater.stage !== "idle" && (
+                <pre className="set-update-notes">{updater.info.notes}</pre>
+              )}
+            </div>
+            <ToggleRow
+              label="Check for updates automatically"
+              desc="Look for a newer version shortly after the app starts. Updates are never installed without asking."
+              active={autoCheckUpdates}
+              onToggle={() =>
+                toggleBoolSetting(autoCheckUpdates, setAutoCheckUpdates, "auto_check_updates")
+              }
+            />
           </div>
         </section>
       </div>

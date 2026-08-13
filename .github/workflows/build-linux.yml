@@ -2,6 +2,12 @@ name: Build Linux (manual)
 
 # Manual-only: this never runs on push or PR. Start it from the Actions tab
 # ("Run workflow") or with `gh workflow run build-linux.yml`.
+#
+# Throwaway test builds, NOT releases. Real releases go through release.yml, which
+# publishes to the separate public releases repo the app's updater reads — so the
+# prune step at the bottom can never delete a release users are being served.
+# Keep it that way: if this workflow's output ever becomes the update feed, that
+# prune turns into a way to break every installed copy.
 on:
   workflow_dispatch:
     inputs:

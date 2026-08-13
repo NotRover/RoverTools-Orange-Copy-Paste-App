@@ -1,0 +1,179 @@
+/* Update strip: sits under the titlebar, above the screen content.
+   Deliberately the same shape as `.app-degraded` in App.css — both are
+   "the app needs to tell you something" bars, and looking alike keeps the
+   window from growing a second visual language. */
+
+.app-update {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-dim);
+}
+
+.app-update-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.app-update-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.app-update-from {
+  opacity: 0.75;
+}
+
+.app-update-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+.app-update-error {
+  color: var(--danger);
+  opacity: 1;
+}
+
+/* ── Release notes ─────────────────────────────────────────────────── */
+
+.app-update-notes-toggle {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* Notes come from commit subjects, so they arrive as plain lines. `pre` keeps
+   those line breaks without pulling in a markdown renderer, and wrapping stops a
+   long subject from stretching the window. */
+.app-update-notes {
+  margin: 6px 0 0;
+  max-height: 132px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--bg-subtle);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── Progress ──────────────────────────────────────────────────────── */
+
+.app-update-bar {
+  margin-top: 7px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.app-update-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+/* No content-length: sweep rather than sit at a made-up percentage. */
+.app-update-bar-fill.indeterminate {
+  width: 35%;
+  animation: app-update-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes app-update-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(285%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-update-bar-fill.indeterminate {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* ── Actions ───────────────────────────────────────────────────────── */
+
+.app-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.app-update-primary,
+.app-update-secondary,
+.app-update-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.app-update-primary {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+
+.app-update-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.app-update-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.app-update-secondary {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.app-update-secondary:hover {
+  color: var(--text);
+  border-color: var(--border-light, var(--border));
+}
+
+.app-update-close {
+  padding: 5px;
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.app-update-close:hover {
+  color: var(--text);
+}

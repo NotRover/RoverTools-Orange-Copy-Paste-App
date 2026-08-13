@@ -69,6 +69,26 @@ pub fn get_autostart(app: tauri::AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// Re-point the OS startup entry at this build's executable.
+///
+/// An update reinstalls the app rather than patching it, so the path recorded
+/// when the user first switched "Run on startup" on can end up naming an
+/// executable the installer replaced. `enable()` overwrites the existing entry in
+/// place, so this is an idempotent refresh — and unlike disable-then-enable it
+/// leaves no window where a failure loses the setting.
+///
+/// A no-op when startup is off, and in debug builds for the same reason
+/// [`set_autostart`] refuses there.
+pub fn reconcile_autostart(app: &tauri::AppHandle) {
+    if cfg!(debug_assertions) && !ALLOW_AUTOSTART_IN_DEBUG_BUILD {
+        return;
+    }
+    let mgr = app.autolaunch();
+    if mgr.is_enabled().unwrap_or(false) {
+        let _ = mgr.enable();
+    }
+}
+
 #[tauri::command]
 pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> bool {
     if enabled && cfg!(debug_assertions) && !ALLOW_AUTOSTART_IN_DEBUG_BUILD {

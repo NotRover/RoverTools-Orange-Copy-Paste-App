@@ -20,6 +20,7 @@ It watches the OS clipboard, keeps a searchable history of text/images/files, sh
 - [Project structure](#project-structure)
 - [Cloud sync setup](#cloud-sync-setup)
 - [Linux support](#linux-support)
+- [Releases & updates](#releases--updates)
 - [Storage & config reference](#storage--config-reference)
 - [Further reading](#further-reading)
 
@@ -218,7 +219,7 @@ sudo systemctl enable --now ydotool
 
 `bun run tauri build` produces `.deb`, `.rpm`, and AppImage on Linux, and the NSIS installer on Windows — Tauri builds only the targets valid for the host. Linux bundles **cannot** be cross-compiled from Windows; use a Linux machine, VM, WSL, or CI.
 
-The parent repo ships a manual workflow, `.github/workflows/build-linux.yml` (`workflow_dispatch` only): Actions → **Build Linux (manual)** → Run workflow, then download the `rovertools-linux` artifact. It builds on `ubuntu-22.04` for broad glibc/WebKit compatibility.
+For **test** Linux builds the parent repo ships a manual workflow, `.github/workflows/build-linux.yml` (`workflow_dispatch` only): Actions → **Build Linux (manual)** → Run workflow, then download the `rovertools-linux` artifact. It builds on `ubuntu-22.04` for broad glibc/WebKit compatibility. Its output is throwaway — to ship to users, see [Releases & updates](#releases--updates).
 
 Install the `.deb` with `sudo apt install ./Orange.Copy.Paste_*.deb` — apt pulls an injector automatically. The AppImage is portable but bundles no injector; install `xdotool` or `wtype`/`ydotool` yourself.
 
@@ -242,6 +243,85 @@ rovertools --trigger paste
 ```
 
 Use the real installed binary name/path (check the `Exec=` line in the installed `.desktop` file). Examples — Sway/Hyprland: `bindsym $mod+Shift+v exec rovertools --trigger paste`; GNOME: Settings → Keyboard → Custom Shortcuts; KDE: System Settings → Shortcuts → Custom. Works on every compositor including X11, but the app must already be running.
+
+---
+
+## Releases & updates
+
+Nobody hand-distributes an installer after the first one. Cutting a release is a
+single manual workflow; installed copies notice it on their next launch and offer
+it. Version numbers, the changelog, and the update feed are all derived from commit
+history — none of them are edited by hand.
+
+Full operational detail, including one-time setup, lives in
+[`../docs/RELEASING.md`](../docs/RELEASING.md).
+
+### The shape of it
+
+```text
+commits (feat:/fix:/…)
+   │
+   ├─ git-cliff ──► next version ──► src-tauri/Cargo.toml
+   │                └──────────────► CHANGELOG.md + release notes
+   │
+   └─ matrix build ─► signed NSIS (Windows) + AppImage/deb (Linux)
+                          │
+                          └─► public releases repo: bundles + latest.json
+                                      │
+                                      └─► app checks it ~8s after launch
+```
+
+The source repo is private; the **releases** repo is public because the updater
+fetches over plain HTTPS with no credentials. Reaching a private repo's assets
+would mean shipping a token inside the app.
+
+### Cutting a release
+
+Rehearse first — this does everything except commit, tag, and publish:
+
+```bash
+gh workflow run release.yml -f bump=auto -f dry_run=true
+```
+
+Then, once the rehearsal looks right:
+
+```bash
+gh workflow run release.yml -f bump=auto -f dry_run=false
+```
+
+`bump=auto` reads the commits since the last release tag; `patch` and `minor`
+override it. Re-run with `dry_run=true` after any edit to the workflow itself.
+
+### What users get
+
+Within a few seconds of their next launch, a strip appears under the titlebar:
+*"Version 0.3.0 is available"*, with the generated notes behind **What's new**.
+Nothing downloads or installs until they press something — **Download**, then
+**Restart & install** as a separate confirmation, so a background download
+finishing never takes the window out from under someone mid-paste. **Skip this
+version** silences that one release; the ✕ defers to the next launch. Settings →
+**Updates** shows the running version, a manual check, and a toggle for the
+automatic one.
+
+### What to watch out for
+
+| Trap | Why it matters |
+| --- | --- |
+| **The signing key is load-bearing** | Every installed copy only trusts bundles signed by it. Lose it and the update channel is dead — users would have to reinstall by hand to get a build carrying a new public key. Back it up outside CI before the first release. |
+| **Commit messages *are* the changelog** | A `feat:` subject ships verbatim into the update prompt. Write them for users, not for yourself. |
+| **Only `feat:`, `fix:` and `perf:` move the version** | `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, `build:` and non-conventional commits are excluded from both the notes and the bump. A batch of nothing but those makes `bump=auto` fail with *"no releasable commits"* — which is the intent, not a bug. To ship it anyway, dispatch with `-f bump=patch`. |
+| **`bun run tauri build` output cannot be served as an update** | Local builds are unsigned. Only `release.yml` produces the `.sig` files the feed needs. Use local bundles for testing, never for publishing. |
+| **Only NSIS and AppImage self-update** | `.deb`/`.rpm` are owned by the package manager. They are still built and attached for manual install, but never appear in `latest.json` — offering an update the client can't apply is worse than offering none. |
+| **The version lives in exactly one place** | `src-tauri/Cargo.toml`. `tauri.conf.json` has no `version` field on purpose (Tauri falls back to Cargo.toml), and `package.json`'s copy is cosmetic. Don't reintroduce it. |
+| **`build-linux.yml` is not a release** | Its `v0.1.0-build.N` tags are throwaway CI builds, excluded from versioning by `tag_pattern` in `cliff.toml`, and it publishes to this repo rather than the releases repo. Never point the updater at it — its prune step would then be a way to break every install. |
+| **Dev builds refuse to update** | A debug build reports the Cargo.toml version, so it would see any release as an upgrade and install over `target/debug`, replacing a build that loads from `devUrl`. Settings says so rather than letting it happen. |
+| **Prereleases are invisible to the updater** | `releases/latest/download/…` resolves to the newest *non*-prerelease. Marking a release as a prerelease makes it a beta you install by hand — useful, but easy to do by accident and then wonder why nobody is offered it. |
+
+Two safety rails worth knowing about, because they mean a bad release fails in CI
+rather than in front of users: the workflow refuses to publish a version that isn't
+plain semver or a bundle whose `.sig` is missing, and after publishing it re-fetches
+`latest.json` through the same URL the app uses and checks every bundle URL it
+advertises is reachable.
 
 ---
 
@@ -276,5 +356,6 @@ Use the real installed binary name/path (check the `Exec=` line in the installed
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architecture: modules, data flows, IPC surface, sync internals.
 - [`docs/BUGFIX_HISTORY.md`](docs/BUGFIX_HISTORY.md) — regression history; read before changing watcher, hotkey, popup, or paste behavior.
+- Workspace root [`docs/RELEASING.md`](../docs/RELEASING.md) — releasing and the update feed: one-time setup, signing keys, verification rails.
 - Workspace root `docs/ARCHITECTURE.md` — cross-system context with the sync backend.
 - Backend repo `docs/ARCHITECTURE.md` — the source of truth for the wire contract.
