@@ -178,7 +178,8 @@ pub async fn sync_oauth_complete(
 /// Discard a stashed OAuth session when the user backs out of the password step.
 #[tauri::command]
 pub fn sync_oauth_cancel(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(sync) = state.sync_client.lock().clone() {
+    let sync = state.sync_client.lock().clone();
+    if let Some(sync) = sync {
         sync.cancel_oauth();
     }
     Ok(())
@@ -227,7 +228,8 @@ pub async fn sync_restore_session(
 pub async fn sync_logout(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if let Some(sync) = state.sync_client.lock().clone() {
+    let sync = state.sync_client.lock().clone();
+    if let Some(sync) = sync {
         sync.logout();
     }
     Ok(())

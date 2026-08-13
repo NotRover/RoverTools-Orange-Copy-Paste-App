@@ -60,7 +60,8 @@ impl WsListener {
 
     /// Abort the WebSocket task (on logout / shutdown).
     pub fn disconnect(&self) {
-        if let Some(task) = self.task.lock().take() {
+        let task = self.task.lock().take();
+        if let Some(task) = task {
             task.abort();
         }
     }

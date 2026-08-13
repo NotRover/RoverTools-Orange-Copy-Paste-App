@@ -14,6 +14,17 @@ edition = "2021"
 name = "notrover_smart_clipboard_app_rust_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[lints.clippy]
+# A `parking_lot` guard in an `if let`/`match` scrutinee lives until the end of
+# the whole block, so anything the block calls runs with the lock still held.
+# These locks are neither reentrant nor poisoning: re-taking one deadlocks
+# silently, with no panic for the health latch to catch. Hoist the value into a
+# `let` first so the guard dies at the end of that statement.
+significant_drop_in_scrutinee = "warn"
+# A guard held across `.await` is the same hazard, plus it blocks the executor
+# thread. Currently zero occurrences in the async sync engine — keep it that way.
+await_holding_lock = "deny"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
