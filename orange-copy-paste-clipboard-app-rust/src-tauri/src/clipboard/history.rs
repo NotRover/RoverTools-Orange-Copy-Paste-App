@@ -17,6 +17,10 @@ use serde::{Deserialize, Serialize};
 /// Maximum number of entries kept in history.
 pub const MAX_HISTORY: usize = 100;
 
+/// Separator embedded in an `Html` entry's content between the HTML fragment
+/// and its plain-text fallback.  Written by `new_html`, split by `html_parts`.
+const HTML_PLAINTEXT_MARKER: &str = "\n---PLAINTEXT---\n";
+
 /// Format a human-readable label for a clipboard image from its timestamp.
 fn format_image_label(timestamp_ms: u64) -> String {
     #[cfg(windows)]
@@ -148,8 +152,7 @@ fn save_entries_binary(
     entries: &[ClipboardEntry],
     path: &std::path::Path,
 ) -> Result<(), std::io::Error> {
-    let msgpack = rmp_serde::to_vec(entries)
-        .map_err(std::io::Error::other)?;
+    let msgpack = rmp_serde::to_vec(entries).map_err(std::io::Error::other)?;
     crate::health::write_state(path, &msgpack)
 }
 
@@ -284,18 +287,22 @@ impl ClipboardEntry {
     }
 
     /// `content` stores the HTML fragment extracted from CF_HTML.
-    /// A plain-text fallback is embedded via `\n---PLAINTEXT---\n`.
+    /// A plain-text fallback is embedded via [`HTML_PLAINTEXT_MARKER`].
     pub fn new_html(html: String, plain_text: String) -> Self {
-        let content = format!("{html}\n---PLAINTEXT---\n{plain_text}");
+        let content = format!("{html}{HTML_PLAINTEXT_MARKER}{plain_text}");
         Self::new(EntryKind::Html, content)
     }
 
     /// For Html entries, split content into (html, plain_text).
     pub fn html_parts(&self) -> (&str, &str) {
-        if let Some(idx) = self.content.find("\n---PLAINTEXT---\n") {
-            (&self.content[..idx], &self.content[idx + 18..])
-        } else {
-            (&self.content, "")
+        match self.content.find(HTML_PLAINTEXT_MARKER) {
+            // `find` returns a char boundary and the marker is ASCII, so both
+            // slices are always valid — never hardcode the marker's length here.
+            Some(idx) => (
+                &self.content[..idx],
+                &self.content[idx + HTML_PLAINTEXT_MARKER.len()..],
+            ),
+            None => (&self.content, ""),
         }
     }
 
@@ -584,5 +591,40 @@ impl ClipboardHistory {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `html_parts` used to skip a hardcoded 18 bytes past a 17-byte marker, so
+    /// re-copying an Html entry panicked out of `write_entry_to_clipboard`:
+    /// out of bounds when the plain-text fallback was empty (apps that offer
+    /// CF_HTML without CF_UNICODETEXT), off a char boundary when it started with
+    /// a multi-byte character, and silently eating the first byte otherwise.
+    #[test]
+    fn html_parts_round_trips_every_plain_text_fallback() {
+        for plain in [
+            "hello",  // ASCII: used to lose the 'h'
+            "",       // empty: used to slice out of bounds
+            "— dash", // leading multi-byte: used to hit a char boundary
+            "日本語",
+            "🎉 emoji",
+            "has\n---PLAINTEXT---\nthe marker inside it",
+        ] {
+            let entry = ClipboardEntry::new_html("<b>hi</b>".into(), plain.to_string());
+            let (html, recovered) = entry.html_parts();
+            assert_eq!(html, "<b>hi</b>", "html half changed for {plain:?}");
+            assert_eq!(recovered, plain, "plain half changed for {plain:?}");
+        }
+    }
+
+    /// Content with no marker at all — entries written before the Html kind
+    /// existed, and every other entry kind — reads back as pure HTML.
+    #[test]
+    fn html_parts_without_a_marker_is_all_html() {
+        let entry = ClipboardEntry::new(EntryKind::Html, "<i>legacy</i>".into());
+        assert_eq!(entry.html_parts(), ("<i>legacy</i>", ""));
     }
 }
