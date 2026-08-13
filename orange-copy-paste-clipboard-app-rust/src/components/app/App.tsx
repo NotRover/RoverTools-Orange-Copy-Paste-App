@@ -20,6 +20,7 @@ import NotesScreen from "./notes-screen/NotesScreen";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
+import { useDegraded } from "../../hooks/useDegraded";
 import {
   TrashIcon,
   UndoIcon,
@@ -226,34 +227,9 @@ const App: React.FC = () => {
     invoke("sync_restore_session").catch(() => {});
   }, []);
 
-  // Degraded mode: an internal error left the process running but no longer
-  // trusted, so saving is paused. Poll once as well as listening, because a
-  // window reload after the event has no listener attached to receive it.
-  const [degraded, setDegraded] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-
-    invoke<string | null>("health_degraded_reason")
-      .then((reason) => {
-        if (!cancelled && reason) setDegraded(reason);
-      })
-      .catch(() => {});
-
-    listen<string | null>("health:degraded", (event) => {
-      if (cancelled) return;
-      setDegraded(event.payload || "An internal error occurred");
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
+  // An internal error left the process running but no longer trusted, so saving
+  // is paused until a restart.
+  const degraded = useDegraded();
 
   useEffect(() => {
     let cancelled = false;
