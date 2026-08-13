@@ -16,6 +16,7 @@ import {
 } from "../../types";
 import { loadImagePreview } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
+import { DegradedPill } from "../DegradedPill";
 import {
   TrashIcon,
   CloseIcon,
@@ -265,6 +266,7 @@ const CopyPopup: React.FC = () => {
               {kind === "file" && files.length > 1 && (
                 <span className="popup-file-count">{files.length} files</span>
               )}
+              <DegradedPill />
             </div>
             <button className="popup-close" onClick={handleClose}>
               <CloseIcon size={10} />

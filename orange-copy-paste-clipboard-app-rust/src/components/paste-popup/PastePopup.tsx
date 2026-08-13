@@ -17,6 +17,7 @@ import {
 } from "../../types";
 import { loadImagePreview, useMissingFiles } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
+import { DegradedPill } from "../DegradedPill";
 import {
   CloseIcon,
   PinIcon,
@@ -274,6 +275,7 @@ const PastePopup: React.FC = () => {
         <div className="paste-header-left">
           <span className="paste-title">Quick Paste</span>
           <span className="paste-count">{entries.length}</span>
+          <DegradedPill />
         </div>
         <div className="paste-tabs">
           <button
