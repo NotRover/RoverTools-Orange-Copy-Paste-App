@@ -173,6 +173,19 @@ fn setup_runtime(
         .map(|p| read_bool_setting(p, "keep_history", false))
         .unwrap_or(false);
 
+    // Adopt anything a degraded session had to set aside before its restart, so
+    // what the user captured after the fault is not stranded on disk. A file-level
+    // swap, so every load below reads the path it always did.
+    for (path, label) in [
+        (history_file.as_ref(), "clipboard history"),
+        (saved_file.as_ref(), "clipboard history"),
+        (notes_file.as_ref(), "notes"),
+    ] {
+        if let Some(p) = path {
+            crate::health::recover_quarantined(p, label);
+        }
+    }
+
     // Load history: full restore if same boot + keep enabled, saved-only otherwise.
     if keep_enabled {
         if let (Some(hf), Some(pf), Some(bf)) = (&history_file, &saved_file, &boot_file) {
@@ -267,7 +280,14 @@ fn setup_runtime(
                     let _ = notes_store.lock().save_to_file(nf);
                 }
             }
+
+            // Reached only by taking and releasing every state lock above, so it
+            // doubles as proof that none of them are wedged. The watchdog warns
+            // the user if these stop arriving.
+            crate::health::beat();
         });
+
+        crate::health::start_stall_watchdog(app.path().app_data_dir().ok(), app.handle().clone());
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
@@ -391,6 +411,8 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
+            crate::health::health_stall_reason,
+            crate::health::health_recovery_notice,
             crate::health::health_restart_app,
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,

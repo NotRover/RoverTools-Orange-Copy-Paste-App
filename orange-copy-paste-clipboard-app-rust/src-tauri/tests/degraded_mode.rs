@@ -4,9 +4,7 @@
 //! latching the process as degraded is one-way and process-global. Split across
 //! two tests in one binary, whichever ran second would see the other's latch.
 
-use notrover_smart_clipboard_app_rust_lib::clipboard::history::{
-    ClipboardEntry, ClipboardHistory,
-};
+use notrover_smart_clipboard_app_rust_lib::clipboard::history::{ClipboardEntry, ClipboardHistory};
 use notrover_smart_clipboard_app_rust_lib::health;
 
 fn quarantine_of(path: &std::path::Path) -> std::path::PathBuf {
@@ -16,7 +14,7 @@ fn quarantine_of(path: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[test]
-fn a_panic_stops_history_being_overwritten() {
+fn a_panic_costs_nothing_across_the_restart() {
     let dir = std::env::temp_dir().join("rovertools-degraded-e2e");
     let _ = std::fs::remove_dir_all(&dir);
     let history_file = dir.join("history.bin");
@@ -84,6 +82,54 @@ fn a_panic_stops_history_being_overwritten() {
         .load_all_from_file(&history_file)
         .expect("pre-panic history still parses");
     assert_eq!(restored.all().len(), 2);
+
+    // ── What the restart the banner asks for actually does ──────────
+    //
+    // Holding the line above is only half the job: without this, everything
+    // captured between the fault and the restart would sit in a file nothing
+    // reads, which to the user is indistinguishable from losing it.
+    assert!(
+        health::recover_quarantined(&history_file, "clipboard history"),
+        "quarantined captures were not adopted"
+    );
+    assert!(
+        !quarantine_of(&history_file).exists(),
+        "quarantine left in place — a second restart would adopt it again"
+    );
+    assert_eq!(
+        health::recovery_notice().as_deref(),
+        Some("clipboard history"),
+        "recovery happened silently"
+    );
+
+    // All four captures are back: the two from before the fault and the two the
+    // degraded session could not write.
+    let mut after_restart = ClipboardHistory::new();
+    after_restart
+        .load_all_from_file(&history_file)
+        .expect("adopted history parses");
+    assert_eq!(after_restart.all().len(), 4);
+    let contents: Vec<&str> = after_restart
+        .all()
+        .iter()
+        .map(|e| e.content.as_str())
+        .collect();
+    assert!(contents.contains(&"captured after the fault"));
+    assert!(contents.contains(&"captured later still"));
+
+    // And the pre-fault copy is still there to fall back on, since adopting a
+    // post-panic snapshot is a judgement call rather than a certainty.
+    let pre = history_file.with_file_name("history.bin.pre-recovery");
+    assert_eq!(std::fs::read(&pre).unwrap(), good_bytes);
+
+    // Idempotent: the next launch has nothing left to adopt and must not touch
+    // the file it just recovered.
+    let now = std::fs::read(&history_file).unwrap();
+    assert!(!health::recover_quarantined(
+        &history_file,
+        "clipboard history"
+    ));
+    assert_eq!(std::fs::read(&history_file).unwrap(), now);
 
     // Sync bookkeeping deliberately keeps persisting while degraded: it is
     // rebuilt from server state, and it carries the queued tombstones that must

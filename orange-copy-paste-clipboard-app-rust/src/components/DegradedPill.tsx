@@ -1,6 +1,6 @@
 import React from "react";
 import { WarningIcon } from "./icons";
-import { useDegraded } from "../hooks/useDegraded";
+import { useHealthWarning } from "../hooks/useHealthWarning";
 import "./DegradedPill.css";
 
 /**
@@ -14,14 +14,19 @@ import "./DegradedPill.css";
  * Renders nothing while the process is healthy.
  */
 export const DegradedPill: React.FC<{ className?: string }> = ({ className }) => {
-  const degraded = useDegraded();
-  if (!degraded) return null;
+  const health = useHealthWarning();
+  if (!health) return null;
+
+  const detail =
+    health.kind === "degraded"
+      ? "History and notes are not being saved — restart the app from the main window."
+      : "History and notes may not be saving. If it does not pick up again on its own, restart from the main window.";
 
   return (
     <span
       className={`degraded-pill${className ? ` ${className}` : ""}`}
       role="status"
-      title={`${degraded}. History and notes are not being saved — restart the app from the main window.`}
+      title={`${health.reason}. ${detail}`}
     >
       <WarningIcon size={10} />
       Not saving
