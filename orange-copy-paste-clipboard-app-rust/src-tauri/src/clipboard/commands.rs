@@ -266,7 +266,8 @@ fn finish_bulk_update(
     let sync = state.sync_client.lock().clone();
     if let Some(s) = sync {
         for id in ids {
-            if let Some(entry) = state.history.lock().find(id).cloned() {
+            let entry = state.history.lock().find(id).cloned();
+            if let Some(entry) = entry {
                 s.on_update_clipboard_entry(entry);
             }
         }
@@ -643,7 +644,8 @@ fn file_stamp(path: &Path) -> Option<(u64, u64)> {
 pub fn get_image_file_preview(path: String) -> Option<String> {
     let stamp = file_stamp(Path::new(&path));
     if let Some((mtime, len)) = stamp {
-        if let Some(hit) = PREVIEW_CACHE.lock().get(&path, mtime, len) {
+        let cached = PREVIEW_CACHE.lock().get(&path, mtime, len);
+        if let Some(hit) = cached {
             return Some(hit);
         }
     }

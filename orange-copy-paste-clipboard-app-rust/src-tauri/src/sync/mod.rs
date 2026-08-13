@@ -257,7 +257,8 @@ impl SyncClient {
                 loop {
                     notify.notified().await;
                     loop {
-                        let deadline = match *push_at.lock() {
+                        let scheduled = *push_at.lock();
+                        let deadline = match scheduled {
                             Some(at) => at + Duration::from_secs_f64(SETTINGS_DEBOUNCE_SECS),
                             None => break,
                         };
@@ -655,7 +656,8 @@ impl SyncClient {
             crypto::delete_keychain_entries(&user_id);
         }
 
-        if let Some(http) = self.http.lock().take() {
+        let http = self.http.lock().take();
+        if let Some(http) = http {
             http.logout();
         }
 
@@ -667,7 +669,8 @@ impl SyncClient {
     // ── WS management ─────────────────────────────────────────────
 
     fn start_ws_listener(&self) {
-        let http = match self.http.lock().clone() {
+        let current = self.http.lock().clone();
+        let http = match current {
             Some(h) => h,
             None => return,
         };
@@ -677,7 +680,8 @@ impl SyncClient {
     }
 
     fn stop_ws_listener(&self) {
-        if let Some(listener) = self.ws_listener.lock().take() {
+        let listener = self.ws_listener.lock().take();
+        if let Some(listener) = listener {
             listener.disconnect();
         }
         let _ = self
@@ -989,7 +993,8 @@ impl SyncClient {
                 // descriptor `{"mime":...}` we stored inline at push time.
                 if kind == EntryKind::Image {
                     if let Some(blob_key) = e.blob_key.clone() {
-                        if let Some(http) = self.http.lock().clone() {
+                        let http = self.http.lock().clone();
+                        if let Some(http) = http {
                             let mime = serde_json::from_str::<serde_json::Value>(&content)
                                 .ok()
                                 .and_then(|v| v.get("mime").and_then(|m| m.as_str()).map(String::from))
