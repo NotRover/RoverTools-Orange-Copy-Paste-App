@@ -27,6 +27,8 @@ pub struct SyncUser {
     pub email: String,
     pub display_name: String,
     /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
+    /// Defaulted so a payload written before this field existed still loads.
+    #[serde(default)]
     pub avatar_url: Option<String>,
 }
 
@@ -37,6 +39,8 @@ pub struct SyncGroupMember {
     pub user_id: String,
     pub display_name: String,
     /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
+    /// Defaulted so a payload written before this field existed still loads.
+    #[serde(default)]
     pub avatar_url: Option<String>,
     pub role: String,
     /// False until the owner has wrapped the Group Key for this member —
@@ -142,6 +146,8 @@ pub struct SessionMember {
     pub user_id: String,
     pub display_name: String,
     /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
+    /// Defaulted so a payload written before this field existed still loads.
+    #[serde(default)]
     pub avatar_url: Option<String>,
     pub email: String,
     pub scope: ShareScope,

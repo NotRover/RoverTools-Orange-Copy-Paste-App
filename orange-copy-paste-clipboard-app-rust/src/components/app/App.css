@@ -329,3 +329,109 @@ textarea {
   background: var(--accent);
   color: #ffffff;
 }
+
+/*  Degraded mode  */
+
+.app-degraded {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-dim);
+}
+
+.app-degraded-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.app-degraded-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.app-degraded-reason {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+
+.app-degraded button {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.app-degraded button:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* ── Render-error fallback ───────────────────────────────────────────── */
+
+/* Shown by AppBoundary when the React tree throws. Deliberately plain: it has
+   to render even if the failure came from theme or layout state. */
+.app-crash {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 48px 24px;
+  color: var(--text);
+}
+
+.app-crash h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.app-crash p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.app-crash pre {
+  align-self: stretch;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.app-crash button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.app-crash button:hover {
+  background: var(--surface-hover);
+}

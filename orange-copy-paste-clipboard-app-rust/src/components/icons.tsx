@@ -287,6 +287,27 @@ export const FilterIcon: React.FC<IconProps> = ({ size = 11, className }) => (
   </svg>
 );
 
+/* ── Warning triangle ── */
+
+export const WarningIcon: React.FC<IconProps> = ({ size = 12, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M10.3 3.9 1.8 18.4A2 2 0 0 0 3.5 21.4h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
 /* ── Clock ── */
 
 export const ClockIcon: React.FC<IconProps> = ({ size = 11, className }) => (

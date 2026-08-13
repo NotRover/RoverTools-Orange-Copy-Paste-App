@@ -192,8 +192,27 @@ pub struct SyncClient {
 
     /// Handle to the dedicated background Tokio runtime.
     handle: tokio::runtime::Handle,
-    /// Owned runtime — kept alive for the lifetime of SyncClient.
-    _runtime: tokio::runtime::Runtime,
+    /// Owned runtime — kept alive for the lifetime of SyncClient. `Option` only
+    /// so [`Drop`] can move it out and shut it down without blocking.
+    runtime: Option<tokio::runtime::Runtime>,
+}
+
+impl Drop for SyncClient {
+    fn drop(&mut self) {
+        // The last `Arc<SyncClient>` is frequently released *inside* a task
+        // running on this very runtime — a spawned sync job that outlives
+        // logout or a disabled-sync toggle. Dropping a Runtime from async
+        // context panics ("Cannot drop a runtime in a context where blocking is
+        // not allowed"), and because the release profile sets `panic = "abort"`
+        // that panic takes the whole app down instead of just the worker.
+        //
+        // `shutdown_background` never blocks, so it is safe from any context:
+        // in-flight tasks are abandoned rather than awaited, which is what we
+        // want for a client that is already logged out.
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl SyncClient {
@@ -238,7 +257,8 @@ impl SyncClient {
                 loop {
                     notify.notified().await;
                     loop {
-                        let deadline = match *push_at.lock() {
+                        let scheduled = *push_at.lock();
+                        let deadline = match scheduled {
                             Some(at) => at + Duration::from_secs_f64(SETTINGS_DEBOUNCE_SECS),
                             None => break,
                         };
@@ -278,7 +298,7 @@ impl SyncClient {
             settings_push_at,
             settings_notify,
             handle,
-            _runtime: runtime,
+            runtime: Some(runtime),
         })
     }
 
@@ -577,10 +597,13 @@ impl SyncClient {
         if stored_user.is_empty() || stored_device.is_empty() {
             return Err("no previous session".into());
         }
+        // Keep the underlying keychain error: "not found" and "found but
+        // unreadable" are different problems, and collapsing both into one
+        // message makes a failed restore impossible to diagnose from a log.
         let refresh = crypto::load_refresh_token(&stored_user)
-            .map_err(|_| "no stored credentials".to_string())?;
+            .map_err(|e| format!("no stored credentials for user {stored_user}: {e}"))?;
         let device_priv = crypto::load_device_private_key(&stored_user)
-            .map_err(|_| "no stored device key".to_string())?;
+            .map_err(|e| format!("no stored device key for user {stored_user}: {e}"))?;
 
         // Fresh tokens from Supabase; the refresh token rotates, so persist it.
         let session = self.supabase.refresh(&refresh).await?;
@@ -633,7 +656,8 @@ impl SyncClient {
             crypto::delete_keychain_entries(&user_id);
         }
 
-        if let Some(http) = self.http.lock().take() {
+        let http = self.http.lock().take();
+        if let Some(http) = http {
             http.logout();
         }
 
@@ -645,7 +669,8 @@ impl SyncClient {
     // ── WS management ─────────────────────────────────────────────
 
     fn start_ws_listener(&self) {
-        let http = match self.http.lock().clone() {
+        let current = self.http.lock().clone();
+        let http = match current {
             Some(h) => h,
             None => return,
         };
@@ -655,7 +680,8 @@ impl SyncClient {
     }
 
     fn stop_ws_listener(&self) {
-        if let Some(listener) = self.ws_listener.lock().take() {
+        let listener = self.ws_listener.lock().take();
+        if let Some(listener) = listener {
             listener.disconnect();
         }
         let _ = self
@@ -677,9 +703,10 @@ impl SyncClient {
     /// `sync_receive_local_settings` command.  They will be merged with
     /// `settings.json` values on the next debounced push.
     pub fn store_local_settings_payload(&self, json: String) {
-        // Persist temporarily to disk so the push task can read it
+        // Persist temporarily to disk so the push task can read it. Scratch data
+        // read back moments later, so it needs the atomic swap but not the flush.
         let path = self.app_data.join("sync_settings_local.json");
-        let _ = std::fs::write(&path, json);
+        let _ = crate::health::replace_atomic(&path, json.as_bytes());
     }
 
     // ── Entry sync hooks ──────────────────────────────────────────
@@ -966,7 +993,8 @@ impl SyncClient {
                 // descriptor `{"mime":...}` we stored inline at push time.
                 if kind == EntryKind::Image {
                     if let Some(blob_key) = e.blob_key.clone() {
-                        if let Some(http) = self.http.lock().clone() {
+                        let http = self.http.lock().clone();
+                        if let Some(http) = http {
                             let mime = serde_json::from_str::<serde_json::Value>(&content)
                                 .ok()
                                 .and_then(|v| v.get("mime").and_then(|m| m.as_str()).map(String::from))
@@ -1144,7 +1172,13 @@ impl SyncClient {
     }
 
     pub fn status_info(&self) -> SyncStatusInfo {
-        self.status.lock().clone()
+        let mut info = self.status.lock().clone();
+        // A worker that panicked leaves `connected` stuck true, so the pill would
+        // claim everything is synced while nothing is running. Report the truth.
+        if crate::health::is_degraded() {
+            info.connected = false;
+        }
+        info
     }
 
     pub fn sharing_sessions(&self) -> Vec<SharingSession> {
@@ -1694,11 +1728,10 @@ impl SyncClient {
                 return;
             };
             let Some(dir) = images_dir else { return };
-            if std::fs::create_dir_all(&dir).is_err() {
-                return;
-            }
             let path = dir.join(format!("{}.{}", meta.client_id, ext_for_mime(&meta.mime)));
-            if std::fs::write(&path, &bytes).is_err() {
+            // Atomic, because the entry upserted below points at this file — a
+            // torn write would leave history referencing a truncated image.
+            if crate::health::replace_atomic(&path, &bytes).is_err() {
                 return;
             }
 

@@ -77,17 +77,12 @@ impl Note {
 
 // ── Persistence helpers ─────────────────────────────────────────────
 
-fn write_binary(path: &std::path::Path, data: &[u8]) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, data)
-}
-
+/// Same durability contract as clipboard history: notes are the user's data, so
+/// an atomic flushed replace, and no overwrite once the process is degraded.
 fn save_notes_binary(notes: &[Note], path: &std::path::Path) -> Result<(), std::io::Error> {
     let msgpack =
         rmp_serde::to_vec(notes).map_err(std::io::Error::other)?;
-    write_binary(path, &msgpack)
+    crate::health::write_state(path, &msgpack)
 }
 
 fn load_notes_binary(path: &std::path::Path) -> Result<Vec<Note>, std::io::Error> {

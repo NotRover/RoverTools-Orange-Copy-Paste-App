@@ -485,7 +485,8 @@ impl SyncHttpClient {
             .inner
             .request(method, self.url(path))
             .header("Authorization", auth);
-        if let Some(device_id) = self.device_id.lock().clone() {
+        let device_id = self.device_id.lock().clone();
+        if let Some(device_id) = device_id {
             rb = rb.header("X-Device-Id", device_id);
         }
         Ok(rb)
@@ -502,7 +503,8 @@ impl SyncHttpClient {
         let session = self.supabase.refresh(&refresh).await?;
         self.set_access_token(session.access_token);
         *self.refresh_token.lock() = Some(session.refresh_token.clone());
-        if let Some(user_id) = self.user_id.lock().clone() {
+        let user_id = self.user_id.lock().clone();
+        if let Some(user_id) = user_id {
             let _ = crate::sync::crypto::store_refresh_token(&user_id, &session.refresh_token);
         }
         Ok(())

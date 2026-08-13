@@ -1,6 +1,7 @@
 //! Smart Clipboard – Tauri/Rust backend.
 
 pub mod clipboard;
+pub mod health;
 pub mod notes;
 pub mod runtime;
 pub mod state;
@@ -172,11 +173,22 @@ fn setup_runtime(
         .map(|p| read_bool_setting(p, "keep_history", false))
         .unwrap_or(false);
 
+    // Adopt anything a degraded session had to set aside before its restart, so
+    // what the user captured after the fault is not stranded on disk. A file-level
+    // swap, so every load below reads the path it always did.
+    for (path, label) in [
+        (history_file.as_ref(), "clipboard history"),
+        (saved_file.as_ref(), "clipboard history"),
+        (notes_file.as_ref(), "notes"),
+    ] {
+        if let Some(p) = path {
+            crate::health::recover_quarantined(p, label);
+        }
+    }
+
     // Load history: full restore if same boot + keep enabled, saved-only otherwise.
     if keep_enabled {
-        if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
-            (&history_file, &saved_file, &boot_file, &app_data)
-        {
+        if let (Some(hf), Some(pf), Some(bf)) = (&history_file, &saved_file, &boot_file) {
             let current_boot = system_boot_epoch_secs();
             let previous_boot: u64 = std::fs::read_to_string(bf)
                 .ok()
@@ -197,8 +209,9 @@ fn setup_runtime(
                 let _ = history.lock().load_saved_from_file(pf);
             }
 
-            let _ = std::fs::create_dir_all(ad);
-            let _ = std::fs::write(bf, current_boot.to_string());
+            // Boot marker decides whether history survives a reboot, so a
+            // half-written value must not be readable as a valid timestamp.
+            let _ = crate::health::write_atomic(bf, current_boot.to_string().as_bytes());
         }
     } else if let Some(pf) = &saved_file {
         let _ = history.lock().load_saved_from_file(pf);
@@ -267,7 +280,14 @@ fn setup_runtime(
                     let _ = notes_store.lock().save_to_file(nf);
                 }
             }
+
+            // Reached only by taking and releasing every state lock above, so it
+            // doubles as proof that none of them are wedged. The watchdog warns
+            // the user if these stop arriving.
+            crate::health::beat();
         });
+
+        crate::health::start_stall_watchdog(app.path().app_data_dir().ok(), app.handle().clone());
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
@@ -390,6 +410,10 @@ pub fn run() {
             None,
         ))
         .invoke_handler(tauri::generate_handler![
+            crate::health::health_degraded_reason,
+            crate::health::health_trouble,
+            crate::health::health_recovery_notice,
+            crate::health::health_restart_app,
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,
             crate::clipboard::commands::clear_history,
@@ -495,6 +519,12 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // Installed before any other setup work, so a panic inside it lands
+            // in the log too.
+            crate::health::install_panic_hook(
+                app.path().app_data_dir().ok(),
+                app.handle().clone(),
+            );
             setup_runtime(app, &history, &suppress)?;
             // Close the splash window from Rust — JS close() is unreliable for
             // conf.json windows on Windows (handle can persist as a click-blocker).

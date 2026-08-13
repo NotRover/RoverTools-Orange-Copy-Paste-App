@@ -20,6 +20,7 @@ import NotesScreen from "./notes-screen/NotesScreen";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
+import { useHealthWarning } from "../../hooks/useHealthWarning";
 import {
   TrashIcon,
   UndoIcon,
@@ -30,6 +31,7 @@ import {
   RestoreIcon,
   WindowCloseIcon,
   CloudSyncIcon,
+  WarningIcon,
 } from "../icons";
 import "./App.css";
 
@@ -224,6 +226,25 @@ const App: React.FC = () => {
   // Fire-and-forget — a null result just means the login screen shows as usual.
   useEffect(() => {
     invoke("sync_restore_session").catch(() => {});
+  }, []);
+
+  // An internal error left the process running but no longer trusted, so saving
+  // is paused until a restart.
+  const health = useHealthWarning();
+
+  // What a previous degraded session had to set aside and this one took back on.
+  // Decided before this window existed, so it is polled rather than listened for.
+  const [recovered, setRecovered] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<string | null>("health_recovery_notice")
+      .then((notice) => {
+        if (!cancelled && notice) setRecovered(notice);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1164,6 +1185,50 @@ const App: React.FC = () => {
           <WindowControls />
         </div>
 
+        {health && (
+          <div className="app-degraded" role="alert">
+            <div className="app-degraded-text">
+              {health.kind === "degraded" && (
+                <>
+                  <strong>Saving is paused.</strong> Something went wrong inside
+                  the app, so your saved history and notes are being left
+                  untouched rather than risk overwriting them. Anything captured
+                  since is kept in memory only — restart to start saving again.
+                </>
+              )}
+              {health.kind === "stalled" && (
+                <>
+                  <strong>Saving has stopped responding.</strong> The part of the
+                  app that writes history and notes to disk has not finished a
+                  pass in a while, so anything captured recently may not be
+                  saved. If it does not pick up again on its own, restart.
+                </>
+              )}
+              {health.kind === "unwritable" && (
+                <>
+                  <strong>Your disk is refusing to save.</strong> The app is
+                  working, but writing history and notes keeps failing — usually
+                  a full drive, or antivirus holding the file open. Free up space
+                  or check the folder, and saving picks up on its own.
+                </>
+              )}
+              <span className="app-degraded-reason">{health.reason}</span>
+            </div>
+            {/* A restart clears a fault or a wedged thread. It does nothing about
+                a full disk, and offering it there sends the user in a circle. */}
+            {health.kind !== "unwritable" && (
+              <button
+                type="button"
+                onClick={() => {
+                  invoke("health_restart_app").catch(() => {});
+                }}
+              >
+                Restart app
+              </button>
+            )}
+          </div>
+        )}
+
         {screen === "settings" ? (
           <SettingsScreen />
         ) : screen === "account" ? (
@@ -1248,6 +1313,15 @@ const App: React.FC = () => {
             icon={<PinIcon size={13} />}
             duration={3000}
             onDismiss={() => setPinLimitReached(false)}
+          />
+        )}
+
+        {recovered !== null && (
+          <ToastNotification
+            message={`Restored the ${recovered} you captured before the last restart`}
+            icon={<WarningIcon />}
+            duration={8000}
+            onDismiss={() => setRecovered(null)}
           />
         )}
 
@@ -1350,6 +1424,44 @@ const App: React.FC = () => {
 
 export default App;
 
+/** Last line of defence for a render error. Without it React unmounts the tree
+    and the window goes blank with no way back — indistinguishable from a hard
+    crash. Shows what broke and offers a reload; local data is untouched either
+    way, since it lives on the Rust side. */
+class AppBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[app] render error", error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="app-crash">
+        <h1>Something broke on screen</h1>
+        <p>
+          Your clipboard history and notes are safe — they're stored outside the
+          window. Reloading usually clears this.
+        </p>
+        <pre>{this.state.error.message}</pre>
+        <button onClick={() => window.location.reload()}>Reload</button>
+      </div>
+    );
+  }
+}
+
 // Mount
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <AppBoundary>
+    <App />
+  </AppBoundary>,
+);

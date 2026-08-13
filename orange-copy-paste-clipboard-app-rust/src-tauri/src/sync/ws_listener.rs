@@ -60,7 +60,8 @@ impl WsListener {
 
     /// Abort the WebSocket task (on logout / shutdown).
     pub fn disconnect(&self) {
-        if let Some(task) = self.task.lock().take() {
+        let task = self.task.lock().take();
+        if let Some(task) = task {
             task.abort();
         }
     }
@@ -95,18 +96,18 @@ impl WsListener {
             // Strip http(s) scheme and replace with ws(s)
             .replacen("https://", "wss://", 1)
             .replacen("http://", "ws://", 1);
-        let url = format!(
-            "{}/ws?token={}&device_id={}",
-            base.trim_end_matches('/'),
-            token,
-            device_id
-        );
+        let endpoint = format!("{}/ws", base.trim_end_matches('/'));
+        // The token has to travel in the query string — that is the wire contract
+        // — but it must never be logged with it.
+        let url = format!("{endpoint}?token={token}&device_id={device_id}");
 
         let (ws_stream, _) = connect_async(&url)
             .await
             .map_err(|e| format!("ws connect: {e}"))?;
 
-        eprintln!("[sync:ws] connected to {url}");
+        // Endpoint and device only: the token is a live bearer credential, and
+        // stdout here is a log file that outlives the session.
+        eprintln!("[sync:ws] connected to {endpoint} as device {device_id}");
         let _ = self.app.emit("sync:status-changed", serde_json::json!({ "connected": true }));
 
         let (mut write, mut read) = ws_stream.split();

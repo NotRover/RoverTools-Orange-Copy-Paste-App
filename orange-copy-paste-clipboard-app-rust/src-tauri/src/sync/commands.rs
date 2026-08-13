@@ -29,6 +29,28 @@ fn sync_client(state: &State<'_, AppState>) -> Result<Arc<SyncClient>, String> {
         .ok_or_else(|| "sync not enabled".into())
 }
 
+/// Get the `SyncClient`, creating one if this is the first auth attempt (a
+/// login can happen before sync was ever enabled in settings).
+///
+/// The lock is held across construction on purpose. Releasing it to build the
+/// client leaves a window where two commands — startup session restore and a
+/// sign-in click, say — each build one and the second replaces the first. That
+/// discarded client is then dropped by whichever of its own worker threads holds
+/// the last reference, which used to abort the process. `SyncClient::new` is
+/// synchronous and only builds a runtime, so nothing can await while we hold it.
+fn get_or_create_client(
+    state: &State<'_, AppState>,
+    app: &tauri::AppHandle,
+) -> Result<Arc<SyncClient>, String> {
+    let mut guard = state.sync_client.lock();
+    if let Some(existing) = guard.clone() {
+        return Ok(existing);
+    }
+    let client = Arc::new(SyncClient::new(app.clone(), SyncConfig::load(app))?);
+    *guard = Some(Arc::clone(&client));
+    Ok(client)
+}
+
 /// Resolve both the SyncClient and its authenticated HTTP client, or fail
 /// with the same errors the individual lookups produced.
 fn sync_http(
@@ -54,7 +76,9 @@ fn update_settings(
         .unwrap_or_default();
     f(&mut map);
     if let Ok(json) = serde_json::to_string_pretty(&map) {
-        let _ = std::fs::write(&path, json);
+        // Read-modify-write of the whole settings file: a truncated write here
+        // silently resets preferences, so replace it atomically.
+        let _ = crate::health::write_atomic(&path, json.as_bytes());
     }
 }
 
@@ -100,20 +124,7 @@ pub async fn sync_login(
 ) -> Result<SyncUser, String> {
     // Ensure a SyncClient exists (create one on first login even if sync was
     // not yet enabled in settings).
-    let sync = {
-        let guard = state.sync_client.lock();
-        match guard.clone() {
-            Some(s) => s,
-            None => {
-                drop(guard);
-                let config = SyncConfig::load(&app);
-                let client = SyncClient::new(app.clone(), config)?;
-                let arc = Arc::new(client);
-                *state.sync_client.lock() = Some(Arc::clone(&arc));
-                arc
-            }
-        }
-    };
+    let sync = get_or_create_client(&state, &app)?;
 
     // Supabase login → bootstrap → device registration, all inside the client.
     let user = sync.perform_login(email, password, device_name).await?;
@@ -130,20 +141,7 @@ pub async fn sync_signup(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<SyncUser, String> {
-    let sync = {
-        let guard = state.sync_client.lock();
-        match guard.clone() {
-            Some(s) => s,
-            None => {
-                drop(guard);
-                let config = SyncConfig::load(&app);
-                let client = SyncClient::new(app.clone(), config)?;
-                let arc = Arc::new(client);
-                *state.sync_client.lock() = Some(Arc::clone(&arc));
-                arc
-            }
-        }
-    };
+    let sync = get_or_create_client(&state, &app)?;
 
     // Supabase signup → (if confirmed) bootstrap → device registration.
     let user = sync.perform_signup(email, password, device_name).await?;
@@ -160,20 +158,7 @@ pub async fn sync_oauth_begin(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<crate::sync::OAuthBegin, String> {
-    let sync = {
-        let guard = state.sync_client.lock();
-        match guard.clone() {
-            Some(s) => s,
-            None => {
-                drop(guard);
-                let config = SyncConfig::load(&app);
-                let client = SyncClient::new(app.clone(), config)?;
-                let arc = Arc::new(client);
-                *state.sync_client.lock() = Some(Arc::clone(&arc));
-                arc
-            }
-        }
-    };
+    let sync = get_or_create_client(&state, &app)?;
     sync.begin_oauth(provider, device_name).await
 }
 
@@ -193,7 +178,8 @@ pub async fn sync_oauth_complete(
 /// Discard a stashed OAuth session when the user backs out of the password step.
 #[tauri::command]
 pub fn sync_oauth_cancel(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(sync) = state.sync_client.lock().clone() {
+    let sync = state.sync_client.lock().clone();
+    if let Some(sync) = sync {
         sync.cancel_oauth();
     }
     Ok(())
@@ -206,20 +192,7 @@ pub async fn sync_reset_password(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let sync = {
-        let guard = state.sync_client.lock();
-        match guard.clone() {
-            Some(s) => s,
-            None => {
-                drop(guard);
-                let config = SyncConfig::load(&app);
-                let client = SyncClient::new(app.clone(), config)?;
-                let arc = Arc::new(client);
-                *state.sync_client.lock() = Some(Arc::clone(&arc));
-                arc
-            }
-        }
-    };
+    let sync = get_or_create_client(&state, &app)?;
     sync.reset_password(email).await
 }
 
@@ -235,19 +208,7 @@ pub async fn sync_restore_session(
     if !config.enabled || !config.is_configured() {
         return Ok(None);
     }
-    let sync = {
-        let guard = state.sync_client.lock();
-        match guard.clone() {
-            Some(s) => s,
-            None => {
-                drop(guard);
-                let client = SyncClient::new(app.clone(), config)?;
-                let arc = Arc::new(client);
-                *state.sync_client.lock() = Some(Arc::clone(&arc));
-                arc
-            }
-        }
-    };
+    let sync = get_or_create_client(&state, &app)?;
     match sync.try_restore_session().await {
         Ok(user) => {
             Arc::clone(&sync).trigger_initial_sync();
@@ -267,7 +228,8 @@ pub async fn sync_restore_session(
 pub async fn sync_logout(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if let Some(sync) = state.sync_client.lock().clone() {
+    let sync = state.sync_client.lock().clone();
+    if let Some(sync) = sync {
         sync.logout();
     }
     Ok(())
@@ -309,15 +271,15 @@ pub fn sync_set_enabled(
     write_setting(&app, "sync_enabled", serde_json::Value::Bool(enabled));
 
     if enabled {
-        let guard = state.sync_client.lock();
-        if guard.is_none() {
-            drop(guard);
-            let config = SyncConfig::load(&app);
-            let client = SyncClient::new(app, config)?;
-            *state.sync_client.lock() = Some(Arc::new(client));
+        get_or_create_client(&state, &app)?;
+    } else {
+        // Log out while still holding our own reference, then release it. The
+        // client's runtime is shut down without blocking by its Drop impl, so it
+        // no longer matters which thread happens to release the last Arc.
+        let previous = state.sync_client.lock().take();
+        if let Some(sync) = previous {
+            sync.logout();
         }
-    } else if let Some(sync) = state.sync_client.lock().take() {
-        sync.logout();
     }
 
     Ok(())
