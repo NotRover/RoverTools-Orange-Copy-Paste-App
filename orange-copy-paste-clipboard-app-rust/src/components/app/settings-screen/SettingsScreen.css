@@ -506,3 +506,24 @@
   color: var(--text-muted);
   line-height: 1.35;
 }
+
+/* ── Update release notes ─────────────────────────────────────────────
+   Generated from commit subjects, so they arrive as plain lines. `pre` keeps
+   those breaks without pulling in a markdown renderer; wrapping stops a long
+   subject from widening the settings column. */
+
+.set-update-notes {
+  margin: 8px 0 0;
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--bg-subtle);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

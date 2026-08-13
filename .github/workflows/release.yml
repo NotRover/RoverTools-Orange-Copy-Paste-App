@@ -1,0 +1,433 @@
+name: Release (manual)
+
+# Manual-only, on purpose: a release is a decision, not a side effect of merging.
+# Start it from the Actions tab or with `gh workflow run release.yml`.
+#
+# What it does, in order:
+#   1. Works out the next version from the conventional commits since the last
+#      release tag, and regenerates CHANGELOG.md from them.
+#   2. Builds signed Windows (NSIS) and Linux (AppImage + deb) bundles.
+#   3. Assembles `latest.json` and publishes everything to the PUBLIC releases
+#      repo, which is what the app's updater reads.
+#
+# `dry_run` defaults to true — it does everything except commit, tag and publish,
+# so a first run (or a run after editing this file) is a rehearsal.
+#
+# Required secrets (see docs/RELEASING.md):
+#   TAURI_SIGNING_PRIVATE_KEY           minisign private key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
+#   RELEASES_REPO_TOKEN                 PAT with contents:write on RELEASES_REPO
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        default: auto
+        options:
+          - auto # from the commits since the last release tag
+          - patch
+          - minor
+      dry_run:
+        description: "Rehearse: build and verify, but publish nothing"
+        type: boolean
+        default: true
+
+env:
+  # Public, releases-only repo. Source stays private; this holds binaries and
+  # `latest.json`, and is what tauri.conf.json's updater endpoint points at.
+  RELEASES_REPO: Spectrewolf8/RoverTools-Releases
+  APP_DIR: orange-copy-paste-clipboard-app-rust
+  # Space-free bundle prefix. GitHub rewrites spaces in uploaded asset names to
+  # dots, which would silently break every URL in latest.json — so the bundles are
+  # renamed to this before upload and the URLs are built from the new names.
+  ASSET_PREFIX: RoverTools
+
+jobs:
+  # ── 1. Decide the version and write the changelog ──────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit the version bump + changelog, push the tag
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: v${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # git-cliff needs the whole history and every tag to find the last
+          # release and the commits since it.
+          fetch-depth: 0
+          submodules: false
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Install cargo-edit
+        # `cargo set-version` keeps Cargo.toml and Cargo.lock consistent, which
+        # hand-editing the version does not.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
+      - name: Resolve next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          current=$(grep -m1 '^version = ' "$APP_DIR/src-tauri/Cargo.toml" | sed -E 's/version = "(.*)"/\1/')
+          echo "Current version: $current"
+
+          case "$BUMP" in
+            auto)
+              # git-cliff prints the tag form (vX.Y.Z); strip the prefix.
+              # `|| true`, because under `set -e` a failure inside the substitution
+              # would abort the step with no explanation — the empty check below
+              # says something useful instead.
+              next=$(git cliff --bumped-version 2>&1 | tail -1 | sed 's/^v//') || true
+              if [ -z "$next" ]; then
+                echo "::error::git-cliff could not work out the next version. Check cliff.toml and that release tags exist."
+                exit 1
+              fi
+              ;;
+            patch|minor)
+              IFS=. read -r maj min pat <<< "$current"
+              if [ "$BUMP" = "minor" ]; then
+                next="${maj}.$((min + 1)).0"
+              else
+                next="${maj}.${min}.$((pat + 1))"
+              fi
+              ;;
+          esac
+
+          # The updater compares semver, so a version it cannot parse would be
+          # published and then never offered to anyone. Fail here instead.
+          if ! printf '%s' "$next" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved version '$next' is not a plain X.Y.Z semver."
+            exit 1
+          fi
+          if [ "$next" = "$current" ]; then
+            echo "::error::No version bump — there are no releasable commits since v$current."
+            exit 1
+          fi
+
+          echo "Next version: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version files
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Cargo.toml is the single source of truth — tauri.conf.json has no
+          # `version` field and falls back to this one.
+          (cd src-tauri && cargo set-version "$VERSION")
+          # Cosmetic, but a package.json that disagrees is a trap for the next reader.
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          git diff --stat
+
+      - name: Generate changelog and release notes
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git cliff --tag "$TAG" --output CHANGELOG.md
+
+          # Just this release's bullets for the in-app "What's new". Its own body
+          # template, not the changelog's: that one opens with a `## 0.2.0 — date`
+          # heading, which is noise directly under a banner already saying
+          # "Version 0.2.0 is available".
+          notes_body='{% for group, group_commits in commits | group_by(attribute="group") %}### {{ group | upper_first }}
+          {% for commit in group_commits %}- {{ commit.message | upper_first }}
+          {% endfor %}
+          {% endfor %}'
+          git cliff --tag "$TAG" --unreleased --strip all --body "$notes_body" --output RELEASE_NOTES.md
+
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Maintenance release — internal changes only." > RELEASE_NOTES.md
+          fi
+          echo "── release notes ──"
+          cat RELEASE_NOTES.md
+
+      - name: Upload release notes
+        # Passed to the publish job as a file: multi-line job outputs get mangled.
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+          if-no-files-found: error
+
+      - name: Commit and tag
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$APP_DIR/package.json" "$APP_DIR/src-tauri/Cargo.toml" \
+                  "$APP_DIR/src-tauri/Cargo.lock" CHANGELOG.md
+          git commit -m "chore(release): $TAG"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "$TAG"
+
+  # ── 2. Build signed bundles ────────────────────────────────────────────────
+  build:
+    needs: prepare
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # NSIS is the Windows target the updater can install; the AppImage is
+          # the Linux one. The .deb rides along as a manual download — a package
+          # manager install cannot be replaced by a self-update.
+          - os: windows-latest
+            bundles: nsis
+            artifact: windows
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Verify signing key is present
+        # First, before anything expensive: without a key Tauri builds unsigned
+        # bundles and skips the .sig files, and the release would publish and then
+        # be rejected by every client.
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set — see docs/RELEASING.md."
+            exit 1
+          fi
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        # Same toolchain as build-linux.yml. 22.04 on purpose: the binary links
+        # against this image's glibc/webkit, and a bundle built on a newer image
+        # will not run on older distros.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.APP_DIR }}/src-tauri -> target
+          key: ${{ matrix.artifact }}
+
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-edit
+
+      - name: Apply release version
+        # Re-applied here rather than checked out from the release commit, so a
+        # dry run builds the real bundles without anything having been pushed.
+        working-directory: ${{ env.APP_DIR }}/src-tauri
+        run: cargo set-version ${{ needs.prepare.outputs.version }}
+
+      - name: Install frontend dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: bun install
+
+      - name: Build bundles
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Collect and rename bundles
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          out=staging
+          mkdir -p "$out"
+          bundle="$APP_DIR/src-tauri/target/release/bundle"
+
+          # Renaming to a space-free prefix, keeping each .sig next to its bundle.
+          # A signature covers bytes, not filenames, so renaming is safe.
+          # `if` rather than `[ … ] && cp`: a bare test that fails is a non-zero
+          # command mid-function, which `set -e` treats as fatal.
+          copy() {
+            src="$1"; dest="$2"
+            [ -f "$src" ] || return 0
+            cp "$src" "$out/$dest"
+            if [ -f "$src.sig" ]; then cp "$src.sig" "$out/$dest.sig"; fi
+            echo "  $dest"
+          }
+
+          echo "Staging:"
+          while IFS= read -r f; do
+            copy "$f" "${ASSET_PREFIX}_${VERSION}_x64-setup.exe"
+          done < <(find "$bundle/nsis" -name '*-setup.exe' 2>/dev/null || true)
+          while IFS= read -r f; do
+            copy "$f" "${ASSET_PREFIX}_${VERSION}_amd64.AppImage"
+          done < <(find "$bundle/appimage" -name '*.AppImage' 2>/dev/null || true)
+          while IFS= read -r f; do
+            copy "$f" "${ASSET_PREFIX}_${VERSION}_amd64.deb"
+          done < <(find "$bundle/deb" -name '*.deb' 2>/dev/null || true)
+
+          # An updatable target with no .sig means the signing step silently did
+          # nothing; publishing that ships a release no client will accept.
+          for f in "$out"/*-setup.exe "$out"/*.AppImage; do
+            [ -e "$f" ] || continue
+            if [ ! -f "$f.sig" ]; then
+              echo "::error::$f has no .sig — check createUpdaterArtifacts and the signing secrets."
+              exit 1
+            fi
+          done
+          ls -la "$out"
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundle-${{ matrix.artifact }}
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── 3. Publish to the public releases repo ─────────────────────────────────
+  publish:
+    needs: [prepare, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Assemble release assets and latest.json
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.sig' \) \
+            -exec cp {} release/ \;
+
+          notes=$(cat artifacts/release-notes/RELEASE_NOTES.md)
+          base="https://github.com/${RELEASES_REPO}/releases/download/${TAG}"
+
+          # The feed the app reads. Only the two self-updatable targets appear —
+          # a .deb entry here would offer an update the client cannot install.
+          platforms=$(jq -n '{}')
+          add_platform() {
+            target="$1"; file="$2"
+            [ -f "release/$file" ] || return 0
+            sig=$(cat "release/$file.sig")
+            platforms=$(jq --arg t "$target" --arg s "$sig" --arg u "$base/$file" \
+              '.[$t] = { signature: $s, url: $u }' <<< "$platforms")
+            echo "  $target -> $file"
+          }
+          echo "Feed platforms:"
+          add_platform windows-x86_64 "RoverTools_${VERSION}_x64-setup.exe"
+          add_platform linux-x86_64   "RoverTools_${VERSION}_amd64.AppImage"
+
+          if [ "$(jq 'length' <<< "$platforms")" -eq 0 ]; then
+            echo "::error::latest.json would have no platforms — nothing to serve."
+            exit 1
+          fi
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "$notes" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson platforms "$platforms" \
+            '{ version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms }' \
+            > release/latest.json
+
+          cat release/latest.json
+
+      - name: Publish release
+        env:
+          # A PAT: the workflow token is scoped to this repo and cannot write to
+          # the releases repo.
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          TAG: v${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Not a prerelease: `releases/latest/download/latest.json` resolves to the
+          # newest NON-prerelease, so marking this one would publish a release the
+          # updater never sees. Prereleases in this repo are a deliberate beta
+          # channel for exactly that reason.
+          gh release create "$TAG" \
+            --repo "$RELEASES_REPO" \
+            --title "$TAG" \
+            --notes-file artifacts/release-notes/RELEASE_NOTES.md \
+            --latest \
+            release/*
+
+      - name: Verify the published feed
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Fetch through the same stable URL the app uses, so a broken redirect or
+          # a mangled asset name fails here rather than in front of users.
+          url="https://github.com/${RELEASES_REPO}/releases/latest/download/latest.json"
+          served=$(curl -fsSL "$url")
+          echo "$served"
+          got=$(jq -r '.version' <<< "$served")
+          [ "$got" = "$VERSION" ] || { echo "::error::feed serves $got, expected $VERSION"; exit 1; }
+
+          # And every bundle URL it advertises is actually reachable. A `for` over
+          # the expanded list, not `| while read`: a pipeline's loop body runs in a
+          # subshell, where `exit 1` ends the subshell and the step still passes.
+          # Asset names are renamed to be space-free above, so word splitting here
+          # is safe. One byte rather than HEAD — the asset CDN is more consistent
+          # about ranged GETs than about HEAD.
+          for u in $(jq -r '.platforms[].url' <<< "$served"); do
+            curl -fsL -r 0-0 -o /dev/null "$u" || { echo "::error::unreachable: $u"; exit 1; }
+            echo "ok: $u"
+          done
+
+      - name: Prune old releases (keep last 5)
+        # Storage hygiene. Sorted newest-first and sliced from index 5, so the
+        # release the updater is currently serving is never a candidate.
+        # Best-effort — cleanup problems never fail a successful release.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          KEEP: 5
+        run: |
+          gh release list --repo "$RELEASES_REPO" --limit 100 --json tagName,createdAt,isLatest \
+            --jq "[.[] | select(.isLatest | not)] | sort_by(.createdAt) | reverse | .[$((KEEP - 1)):] | .[].tagName" \
+            | while read -r t; do
+                [ -z "$t" ] && continue
+                echo "Deleting old release+tag: $t"
+                gh release delete "$t" --repo "$RELEASES_REPO" --yes --cleanup-tag
+              done

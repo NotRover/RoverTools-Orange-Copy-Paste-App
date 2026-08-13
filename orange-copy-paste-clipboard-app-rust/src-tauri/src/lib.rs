@@ -6,6 +6,7 @@ pub mod notes;
 pub mod runtime;
 pub mod state;
 pub mod sync;
+pub mod updater;
 
 pub use state::AppState;
 
@@ -317,6 +318,16 @@ fn setup_runtime(
         }
     }
 
+    // An in-place update reinstalls the app, and on Windows that rewrites the
+    // executable the startup entry points at. Rewrite the entry from where this
+    // build actually lives, so "Run on startup" survives an update instead of
+    // silently pointing at a path the installer replaced.
+    crate::runtime::commands::reconcile_autostart(&app.handle().clone());
+
+    // Last: the update check is the least urgent thing the app does, and it
+    // sleeps before running anyway.
+    crate::updater::spawn_startup_check(&app.handle().clone());
+
     Ok(())
 }
 
@@ -409,6 +420,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
             crate::health::health_trouble,
@@ -443,6 +455,12 @@ pub fn run() {
             crate::runtime::commands::open_data_folder,
             crate::runtime::commands::get_autostart,
             crate::runtime::commands::set_autostart,
+            crate::updater::updater_check,
+            crate::updater::updater_pending,
+            crate::updater::updater_current_version,
+            crate::updater::updater_download,
+            crate::updater::updater_install,
+            crate::updater::updater_skip_version,
             crate::runtime::commands::close_notification,
             crate::notes::commands::get_notes,
             crate::notes::commands::create_note,

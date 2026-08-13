@@ -1,0 +1,84 @@
+# git-cliff — turns conventional commits into the version number and the
+# changelog, so neither is hand-maintained.
+#
+# Two things are generated from this file:
+#   * `git cliff --bumped-version`  → the next version the release workflow uses
+#   * `git cliff --tag vX.Y.Z`      → CHANGELOG.md, and the release notes the
+#                                     in-app update prompt shows
+#
+# Because the notes reach users, only user-visible commit types are rendered
+# (features, fixes, performance).
+#
+# `skip = true` below removes those commits from the bump calculation as well, not
+# just from the output — a batch of nothing but chores, docs, refactors or tests
+# makes `--bumped-version` report "nothing to bump" and return the current version
+# unchanged. The release workflow treats that as an error rather than releasing the
+# same version twice; to ship such a batch anyway, dispatch it with `bump=patch`.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to the Smart Clipboard app. Generated from commit history —
+edit the commits, not this file.
+"""
+
+# `commits` is already filtered to the rendered groups, so a release of pure
+# chores produces an empty body. The release workflow substitutes a fallback line
+# in that case rather than shipping a blank "What's new".
+body = """
+{% if version %}## {{ version | trim_start_matches(pat="v") }}{% if timestamp %} — {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
+{% else %}## Unreleased
+{% endif %}{% for group, group_commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+
+{% for commit in group_commits %}- {{ commit.message | upper_first }}
+{% endfor %}{% endfor %}
+"""
+
+footer = ""
+# Exact whitespace matters here: the blank line before each `##` and `###` is what
+# keeps a heading that follows a bullet list from being folded into it by markdown
+# renderers. Trimming the templates would eat those lines.
+trim = false
+
+[git]
+conventional_commits = true
+# Anything that is not a conventional commit is noise for a user-facing
+# changelog — merge commits, one-off fixups, submodule pointer bumps.
+filter_unconventional = true
+filter_commits = true
+split_commits = false
+protect_breaking_commits = false
+topo_order = false
+sort_commits = "oldest"
+
+# Only real releases. Deliberately excludes the `v0.1.0-build.N` tags the manual
+# Linux workflow publishes — those are throwaway CI builds, and letting them
+# count as releases would reset the changelog window on every test build.
+#
+# `v?` is not cosmetic: `--bumped-version` validates the version it computes
+# against this same pattern, and it prints the bare `0.2.0` form. Requiring the
+# prefix makes every bump fail with a confusing "does not match the tag pattern".
+tag_pattern = "^v?[0-9]+\\.[0-9]+\\.[0-9]+$"
+
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  # Counted for the version bump, not shown to users.
+  { message = "^refactor", skip = true },
+  { message = "^test", skip = true },
+  { message = "^docs", skip = true },
+  { message = "^style", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^chore", skip = true },
+]
+
+[bump]
+# Pre-1.0: a feature is a minor bump, and a breaking change is *also* only a
+# minor bump — 0.x makes no promise a major bump would be announcing. Flip
+# `breaking_always_bump_major` when cutting 1.0.
+features_always_bump_minor = true
+breaking_always_bump_major = false

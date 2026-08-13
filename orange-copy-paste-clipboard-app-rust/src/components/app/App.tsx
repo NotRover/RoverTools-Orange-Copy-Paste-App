@@ -20,7 +20,9 @@ import NotesScreen from "./notes-screen/NotesScreen";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
+import UpdateBanner from "./update-banner/UpdateBanner";
 import { useHealthWarning } from "../../hooks/useHealthWarning";
+import { useUpdater } from "../../hooks/useUpdater";
 import {
   TrashIcon,
   UndoIcon,
@@ -231,6 +233,10 @@ const App: React.FC = () => {
   // An internal error left the process running but no longer trusted, so saving
   // is paused until a restart.
   const health = useHealthWarning();
+
+  // A newer release is out. Notify-only: nothing downloads or installs until the
+  // user presses something in the banner below.
+  const updater = useUpdater();
 
   // What a previous degraded session had to set aside and this one took back on.
   // Decided before this window existed, so it is polled rather than listened for.
@@ -1228,6 +1234,11 @@ const App: React.FC = () => {
             )}
           </div>
         )}
+
+        {/* Yields to the health bar: two stacked alarm strips is a lot of window
+            to spend, and "saving is paused" is the more urgent of the two. The
+            update stays pending either way, and Settings still offers it. */}
+        {!health && <UpdateBanner updater={updater} />}
 
         {screen === "settings" ? (
           <SettingsScreen />
