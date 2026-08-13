@@ -1188,14 +1188,15 @@ const App: React.FC = () => {
         {health && (
           <div className="app-degraded" role="alert">
             <div className="app-degraded-text">
-              {health.kind === "degraded" ? (
+              {health.kind === "degraded" && (
                 <>
                   <strong>Saving is paused.</strong> Something went wrong inside
                   the app, so your saved history and notes are being left
                   untouched rather than risk overwriting them. Anything captured
                   since is kept in memory only — restart to start saving again.
                 </>
-              ) : (
+              )}
+              {health.kind === "stalled" && (
                 <>
                   <strong>Saving has stopped responding.</strong> The part of the
                   app that writes history and notes to disk has not finished a
@@ -1203,16 +1204,28 @@ const App: React.FC = () => {
                   saved. If it does not pick up again on its own, restart.
                 </>
               )}
+              {health.kind === "unwritable" && (
+                <>
+                  <strong>Your disk is refusing to save.</strong> The app is
+                  working, but writing history and notes keeps failing — usually
+                  a full drive, or antivirus holding the file open. Free up space
+                  or check the folder, and saving picks up on its own.
+                </>
+              )}
               <span className="app-degraded-reason">{health.reason}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                invoke("health_restart_app").catch(() => {});
-              }}
-            >
-              Restart app
-            </button>
+            {/* A restart clears a fault or a wedged thread. It does nothing about
+                a full disk, and offering it there sends the user in a circle. */}
+            {health.kind !== "unwritable" && (
+              <button
+                type="button"
+                onClick={() => {
+                  invoke("health_restart_app").catch(() => {});
+                }}
+              >
+                Restart app
+              </button>
+            )}
           </div>
         )}
 

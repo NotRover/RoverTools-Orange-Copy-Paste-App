@@ -50,6 +50,13 @@ fn a_panic_costs_nothing_across_the_restart() {
         "degraded flush overwrote the pre-panic history"
     );
 
+    // And that refusal must not read as the disk turning us away: the user already
+    // has the degraded banner, with advice this one would contradict.
+    assert!(
+        !health::write_failure_pending(),
+        "setting state aside was counted as a write failure"
+    );
+
     // Nothing captured since the fault is lost: it is sitting in the quarantine
     // sibling, and it really is the newer, three-entry payload.
     let quarantined = std::fs::read(quarantine_of(&history_file)).expect("quarantine written");
