@@ -226,6 +226,35 @@ const App: React.FC = () => {
     invoke("sync_restore_session").catch(() => {});
   }, []);
 
+  // Degraded mode: an internal error left the process running but no longer
+  // trusted, so saving is paused. Poll once as well as listening, because a
+  // window reload after the event has no listener attached to receive it.
+  const [degraded, setDegraded] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    invoke<string | null>("health_degraded_reason")
+      .then((reason) => {
+        if (!cancelled && reason) setDegraded(reason);
+      })
+      .catch(() => {});
+
+    listen<string | null>("health:degraded", (event) => {
+      if (cancelled) return;
+      setDegraded(event.payload || "An internal error occurred");
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
@@ -1163,6 +1192,26 @@ const App: React.FC = () => {
           <span className="titlebar-title">Orange Copy Paste</span>
           <WindowControls />
         </div>
+
+        {degraded && (
+          <div className="app-degraded" role="alert">
+            <div className="app-degraded-text">
+              <strong>Saving is paused.</strong> Something went wrong inside the
+              app, so your saved history and notes are being left untouched
+              rather than risk overwriting them. Anything captured since is kept
+              in memory only — restart to start saving again.
+              <span className="app-degraded-reason">{degraded}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                invoke("health_restart_app").catch(() => {});
+              }}
+            >
+              Restart app
+            </button>
+          </div>
+        )}
 
         {screen === "settings" ? (
           <SettingsScreen />

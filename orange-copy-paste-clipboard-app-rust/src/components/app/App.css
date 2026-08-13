@@ -330,6 +330,57 @@ textarea {
   color: #ffffff;
 }
 
+/*  Degraded mode  */
+
+.app-degraded {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-dim);
+}
+
+.app-degraded-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.app-degraded-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.app-degraded-reason {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+
+.app-degraded button {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.app-degraded button:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 /* ── Render-error fallback ───────────────────────────────────────────── */
 
 /* Shown by AppBoundary when the React tree throws. Deliberately plain: it has

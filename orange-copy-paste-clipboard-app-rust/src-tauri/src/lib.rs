@@ -1,6 +1,7 @@
 //! Smart Clipboard – Tauri/Rust backend.
 
 pub mod clipboard;
+pub mod health;
 pub mod notes;
 pub mod runtime;
 pub mod state;
@@ -174,9 +175,7 @@ fn setup_runtime(
 
     // Load history: full restore if same boot + keep enabled, saved-only otherwise.
     if keep_enabled {
-        if let (Some(hf), Some(pf), Some(bf), Some(ad)) =
-            (&history_file, &saved_file, &boot_file, &app_data)
-        {
+        if let (Some(hf), Some(pf), Some(bf)) = (&history_file, &saved_file, &boot_file) {
             let current_boot = system_boot_epoch_secs();
             let previous_boot: u64 = std::fs::read_to_string(bf)
                 .ok()
@@ -197,8 +196,9 @@ fn setup_runtime(
                 let _ = history.lock().load_saved_from_file(pf);
             }
 
-            let _ = std::fs::create_dir_all(ad);
-            let _ = std::fs::write(bf, current_boot.to_string());
+            // Boot marker decides whether history survives a reboot, so a
+            // half-written value must not be readable as a valid timestamp.
+            let _ = crate::health::write_atomic(bf, current_boot.to_string().as_bytes());
         }
     } else if let Some(pf) = &saved_file {
         let _ = history.lock().load_saved_from_file(pf);
@@ -338,42 +338,6 @@ fn dispatch_trigger(app: &tauri::AppHandle, args: &[String]) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Record panics to `{app_data}/crash.log` on top of the default stderr print.
-///
-/// A packaged Windows build has no console, so a panic that kills the process
-/// leaves nothing behind to diagnose. Appending (never truncating) keeps a
-/// repeating crash's history, and each entry carries the location plus the
-/// backtrace when `RUST_BACKTRACE` is set.
-fn install_panic_logger(app_data: Option<std::path::PathBuf>) {
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if let Some(dir) = app_data.as_ref() {
-            let _ = std::fs::create_dir_all(dir);
-            let secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or_default();
-            let location = info
-                .location()
-                .map(|l| format!("{}:{}", l.file(), l.line()))
-                .unwrap_or_else(|| "unknown".into());
-            let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-            let entry = format!(
-                "── panic @ epoch {secs}s\n  thread:   {thread}\n  location: {location}\n  message:  {info}\n\n"
-            );
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("crash.log"))
-            {
-                use std::io::Write;
-                let _ = f.write_all(entry.as_bytes());
-            }
-        }
-        default_hook(info);
-    }));
-}
-
 pub fn run() {
     let launch_args: Vec<String> = std::env::args().collect();
     let is_trigger = parse_trigger_action(&launch_args).is_some();
@@ -426,6 +390,8 @@ pub fn run() {
             None,
         ))
         .invoke_handler(tauri::generate_handler![
+            crate::health::health_degraded_reason,
+            crate::health::health_restart_app,
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,
             crate::clipboard::commands::clear_history,
@@ -533,7 +499,10 @@ pub fn run() {
         .setup(move |app| {
             // Installed before any other setup work, so a panic inside it lands
             // in the log too.
-            install_panic_logger(app.path().app_data_dir().ok());
+            crate::health::install_panic_hook(
+                app.path().app_data_dir().ok(),
+                app.handle().clone(),
+            );
             setup_runtime(app, &history, &suppress)?;
             // Close the splash window from Rust — JS close() is unreliable for
             // conf.json windows on Windows (handle can persist as a click-blocker).

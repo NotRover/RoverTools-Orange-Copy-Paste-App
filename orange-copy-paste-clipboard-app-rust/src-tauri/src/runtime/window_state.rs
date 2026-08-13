@@ -1,6 +1,8 @@
-//! Saved window geometry — saves to `{app_data_dir}/window-state.json`
-//! on every move/resize so a hard kill still preserves the latest state.
+//! Saved window geometry — tracks every move/resize and persists the latest
+//! state to `{app_data_dir}/window-state.json` shortly after, so a hard kill
+//! still preserves it.
 
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use tauri::Manager;
@@ -9,6 +11,16 @@ use tauri::Manager;
 /// restore, since they indicate a minimised / transitional window state.
 const MIN_WIDTH: u32 = 200;
 const MIN_HEIGHT: u32 = 200;
+
+/// Latest geometry seen, waiting to be written.
+///
+/// Dragging or resizing a window emits `Moved`/`Resized` continuously — tens of
+/// events a second — and each save is a durable replace ending in an fsync. Doing
+/// that per event stalls the window-event thread badly enough to make the drag
+/// stutter, so the handler only ever touches memory and a timer does the I/O.
+/// Worst case a kill loses the last fraction of a second of window movement.
+static PENDING: Mutex<Option<WindowGeometry>> = Mutex::new(None);
+const PERSIST_INTERVAL_MS: u64 = 700;
 
 #[derive(Serialize, Deserialize)]
 struct WindowGeometry {
@@ -27,9 +39,10 @@ fn load(app: &tauri::AppHandle) -> Option<WindowGeometry> {
 
 fn save(app: &tauri::AppHandle, geo: &WindowGeometry) {
     if let Ok(dir) = app.path().app_data_dir() {
-        let _ = std::fs::create_dir_all(&dir);
         if let Ok(json) = serde_json::to_vec_pretty(geo) {
-            let _ = std::fs::write(dir.join("window-state.json"), json);
+            // Atomic: a truncated file here means the window reopening at a
+            // garbage size, which is worse than reopening at the default.
+            let _ = crate::health::write_atomic(&dir.join("window-state.json"), &json);
         }
     }
 }
@@ -109,19 +122,41 @@ pub fn restore(app: &tauri::App) {
     }
 }
 
-/// Persist geometry on every move/resize so hard-kills still save state.
+/// Track geometry on every move/resize so hard-kills still save state.
 pub fn setup_tracking(app: &tauri::App) {
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
     let handle = app.handle().clone();
 
+    // Writer for whatever the handler last recorded. One thread, so writes can
+    // never overlap, and a run of events collapses into a single file replace.
+    {
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(PERSIST_INTERVAL_MS));
+                let pending = PENDING.lock().take();
+                if let Some(geo) = pending {
+                    save(&handle, &geo);
+                }
+            }
+        });
+    }
+
     win.on_window_event(move |event| {
-        if !matches!(
-            event,
-            tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
-        ) {
-            return;
+        match event {
+            tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {}
+            // On the way out the timer gets no further turn, so write now — this
+            // is what keeps "moved the window, then quit" from losing the move.
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                let pending = PENDING.lock().take();
+                if let Some(geo) = pending {
+                    save(&handle, &geo);
+                }
+                return;
+            }
+            _ => return,
         }
         let Some(w) = handle.get_webview_window("main") else {
             return;
@@ -135,9 +170,12 @@ pub fn setup_tracking(app: &tauri::App) {
         // because the OS-reported size in those states is meaningless
         // for the restored window rectangle.
         if is_maximized || is_minimized {
-            if let Some(mut geo) = load(&handle) {
+            // Take the pending value if there is one, so this does not read back
+            // a file the writer thread has not caught up to yet.
+            let mut pending = PENDING.lock();
+            if let Some(mut geo) = pending.take().or_else(|| load(&handle)) {
                 geo.maximized = is_maximized;
-                save(&handle, &geo);
+                *pending = Some(geo);
             }
             return;
         }
@@ -148,15 +186,12 @@ pub fn setup_tracking(app: &tauri::App) {
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
             return;
         }
-        save(
-            &handle,
-            &WindowGeometry {
-                x: pos.x,
-                y: pos.y,
-                width: size.width,
-                height: size.height,
-                maximized: false,
-            },
-        );
+        *PENDING.lock() = Some(WindowGeometry {
+            x: pos.x,
+            y: pos.y,
+            width: size.width,
+            height: size.height,
+            maximized: false,
+        });
     });
 }

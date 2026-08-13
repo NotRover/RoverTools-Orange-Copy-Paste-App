@@ -36,7 +36,9 @@ pub fn save_note_image(
     let filename = format!("note_{}_{}.{}", ts, seq, safe_ext);
     let filepath = dir.join(&filename);
 
-    std::fs::write(&filepath, &bytes).map_err(|e| e.to_string())?;
+    // Atomic: the returned name is embedded in the note body, so a half-written
+    // file becomes a permanently broken image in that note.
+    crate::health::replace_atomic(&filepath, &bytes).map_err(|e| e.to_string())?;
     Ok(filename)
 }
 
@@ -58,7 +60,7 @@ pub fn save_note_file(
     let filename = format!("{}_{}_{}", ts, seq, safe_name);
     let filepath = dir.join(&filename);
 
-    std::fs::write(&filepath, &bytes).map_err(|e| e.to_string())?;
+    crate::health::replace_atomic(&filepath, &bytes).map_err(|e| e.to_string())?;
     Ok(filename)
 }
 

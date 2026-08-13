@@ -75,13 +75,6 @@ fn advance_id_past(entries: &[ClipboardEntry]) {
     let _ = NEXT_ID.fetch_max(max_id + 1, Ordering::Relaxed);
 }
 
-fn write_binary_file(path: &std::path::Path, data: &[u8]) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, data)
-}
-
 /// Decode a `data:<mime>;base64,<data>` URL and write the raw image bytes
 /// to the images directory.  The file is named `{id}_{label}.{ext}` so it
 /// is both human-readable and unique.  Returns the absolute file path on
@@ -114,8 +107,10 @@ fn save_image_to_disk(entry: &ClipboardEntry, images_dir: &std::path::Path) -> O
     let filename = format!("{}_{}.{}", entry.id, safe.trim(), ext);
     let filepath = images_dir.join(&filename);
 
-    std::fs::create_dir_all(images_dir).ok()?;
-    std::fs::write(&filepath, &raw).ok()?;
+    // Atomic: the caller stores this path on the entry, so a truncated file here
+    // becomes a permanently broken thumbnail. Unflushed — images can be large and
+    // this runs on the capture path, and a power cut costs one thumbnail.
+    crate::health::replace_atomic(&filepath, &raw).ok()?;
 
     Some(filepath.to_string_lossy().to_string())
 }
@@ -145,13 +140,17 @@ pub(crate) fn content_matches(a: &ClipboardEntry, b: &ClipboardEntry) -> bool {
 }
 
 /// Serialize entries to MessagePack binary and write to `path`.
+///
+/// History and saved entries are the user's own data, rewritten wholesale on
+/// every flush, so they take the strictest path: atomic, flushed, and refused
+/// outright once the process is degraded.
 fn save_entries_binary(
     entries: &[ClipboardEntry],
     path: &std::path::Path,
 ) -> Result<(), std::io::Error> {
     let msgpack = rmp_serde::to_vec(entries)
         .map_err(std::io::Error::other)?;
-    write_binary_file(path, &msgpack)
+    crate::health::write_state(path, &msgpack)
 }
 
 /// Load entries from a MessagePack binary file.
