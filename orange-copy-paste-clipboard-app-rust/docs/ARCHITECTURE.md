@@ -28,10 +28,10 @@ A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real
   - [Popups](#popups)
   - [UI Components](#ui-components)
 - [Data Flows](#data-flows)
-- [TODO — Implementation Checklist](#todo--implementation-checklist)
 - [Persistence & Storage](#persistence--storage)
 - [Tauri Configuration & Permissions](#tauri-configuration--permissions)
 - [Cross-System Invariants](#cross-system-invariants)
+- [Cloud Sync — Implementation Status](#cloud-sync--implementation-status)
 
 ---
 
@@ -127,6 +127,8 @@ src-tauri/
 ├── src/
 │   ├── main.rs                 # Process entry point
 │   ├── lib.rs                  # App builder, setup, Tauri command registration
+│   ├── health.rs               # Panic hook, heartbeat watchdog, atomic writes, quarantine
+│   ├── updater.rs              # Signed self-update: check, download, install
 │   ├── clipboard/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_history, copy, paste, etc.)
@@ -138,14 +140,20 @@ src-tauri/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_notes, create/update/delete, groups)
 │   │   └── store.rs            # Note model + MessagePack persistence
-│   ├── sync/                   # Cloud sync module (optional, Phase 6)
+│   ├── sync/                   # Cloud sync module (optional, runtime-gated)
 │   │   ├── mod.rs              # SyncClient init, background Tokio runtime
-│   │   ├── client.rs           # reqwest HTTP client, token refresh middleware
+│   │   ├── client.rs           # reqwest HTTP client, Bearer + X-Device-Id injection, 401 refresh
+│   │   ├── supabase.rs         # Supabase Auth (GoTrue): login, signup, refresh, recover, PKCE
+│   │   ├── oauth.rs            # Google sign-in: loopback redirect server (ports 53170-53172)
 │   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
 │   │   ├── pending_queue.rs    # sync_pending.json read/write for offline accumulation
-│   │   ├── crypto.rs           # UMK derivation (Argon2id), AES-256-GCM, X25519 key exchange
+│   │   ├── id_map.rs           # client_id → server_id map (id_map.json)
+│   │   ├── sync_state.rs       # Connection/status state shared with the UI
+│   │   ├── persist.rs          # Cached session + sync metadata persistence
+│   │   ├── crypto.rs           # UMK unwrap (Argon2id KEK), AES-256-GCM, X25519 key exchange
+│   │   ├── types.rs            # Wire types mirrored from the backend contract
 │   │   ├── commands.rs         # Tauri commands: sync_login, sync_logout, sync_now, etc.
-│   │   └── config.rs           # Server URL + sync-enabled flag (persisted in settings.json)
+│   │   └── config.rs           # Server/Supabase endpoints + sync-enabled flag
 │   ├── runtime/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── clipboard_watcher.rs # Background polling thread (220ms)
@@ -183,11 +191,13 @@ src/
 │   │   │   └── entry-card/     # Entry cards (EntryCard, ChipBar, VideoPlayer)
 │   │   ├── topbar/             # Sort/layout/filter/group controls (shared)
 │   │   ├── notes-screen/       # Notes UI (editor-engine, list, filters, groups)
-│   │   ├── sync-screen/        # Cloud sync + Live Share content browser (Phase 6/8)
+│   │   ├── sync-screen/        # Cloud sync + Live Share content browser
+│   │   ├── account-screen/     # Sync auth, devices/presence, groups, sharing
 │   │   ├── settings-screen/    # User preferences + Cloud Sync controls
 │   │   ├── shortcuts-screen/   # Keyboard shortcut reference
 │   │   ├── card-menu/          # Right-click context menu (portal)
 │   │   ├── status-pill/        # Entry count summary bar
+│   │   ├── update-banner/      # In-app update prompt (check/download/install)
 │   │   ├── toast/              # Toast notifications (undo clear)
 │   │   └── tooltip/            # Tooltip portal
 │   ├── entry-types/            # EntryTypePill (shared type badge)
@@ -426,18 +436,22 @@ Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sy
 
 ### Cloud Sync Module
 
-> **Status:** Rust client implemented (Phase 6) against the *previous* backend
-> contract. React UI pending.
-> **Location:** `src-tauri/src/sync/`
+> **Status:** Implemented against the current Supabase-based backend contract,
+> Rust module and React UI both.
+> **Location:** `src-tauri/src/sync/` (UI in `src/components/app/account-screen/`
+> and `sync-screen/`)
 > **Principle:** Additive only — no existing capture, storage, or popup logic changes.
 >
-> **⚠ Backend contract updated (Supabase).** The backend now uses Supabase Auth +
-> Postgres. The module below must be reworked to: authenticate via **Supabase Auth**
-> (not a backend `/auth/login`), call `POST /auth/bootstrap` to fetch `kdf_salt`,
-> call `POST /auth/devices` to obtain a `device_id`, send the `X-Device-Id` header on
-> every device-scoped request, and open the WebSocket as
-> `/ws?token=<supabase jwt>&device_id=…`. Deletes are tombstones via `POST /sync/push`
-> (no dedicated delete route). See `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md §14`.
+> **Auth path as built:** identity comes from **Supabase Auth** (`sync/supabase.rs`
+> — password login, signup, refresh, recovery, and PKCE for Google via
+> `sync/oauth.rs`), not from a backend login route. Sign-in then calls
+> `POST /api/v1/auth/bootstrap` for `kdf_salt` and the password-wrapped UMK, and
+> `POST /api/v1/auth/devices` for a `device_id`. Every device-scoped request carries
+> `Authorization: Bearer <supabase jwt>` plus `X-Device-Id`, and the WebSocket opens
+> as `/ws?token=<jwt>&device_id=…`. Deletes are tombstones pushed through
+> `POST /api/v1/sync/push`; there is no delete route. Sharing uses
+> `POST /api/v1/sharing/invite` to create-and-invite and `POST /api/v1/groups/join`
+> to accept. See `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
 
 #### Overview
 
@@ -1163,197 +1177,49 @@ The following constraints span both this app and the backend. Violating any of t
 
 ---
 
-## TODO — Implementation Checklist
+## Cloud Sync — Implementation Status
 
-Tracks all client-side work not yet implemented. Organized by phase matching the backend sequencing (see `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`).
+Cloud sync shipped across what were originally sequenced as phases 6–8; this
+section records what that left behind rather than tracking work. Checklists are
+gone because they had drifted — verify anything load-bearing in the source.
 
-> **⚠ Auth migrated to Supabase — supersedes the auth items below.** Many Phase 6/8
-> items are marked done, but they were built against the previous custom-auth backend.
-> Regardless of the checkmarks, the auth path needs rework before the client works
-> against the current backend:
->
-> - [ ] Integrate a Supabase Auth (GoTrue) client for sign-up / login / refresh / verify / reset
-> - [ ] `sync_login` → Supabase login **+** `POST /auth/bootstrap` (kdf_salt → UMK) **+** `POST /auth/devices` (device_id)
-> - [ ] Attach `Authorization: Bearer <supabase jwt>` **+** `X-Device-Id` to every device-scoped call
-> - [ ] Connect the WebSocket as `?token=<supabase jwt>&device_id=…`
-> - [ ] Drop the old `/auth/login` `/auth/refresh` `/auth/register` paths and the keychain refresh-token flow
-> - [ ] Point sharing at the current backend routes: `POST /sharing/invite` (create+invite) and `POST /groups/join` (accept)
-> - [ ] Confirm deletes push a tombstone via `POST /sync/push` (no `DELETE /sync/entries/{id}`)
+**Built and in use**
 
----
+- **Sync module** — `mod.rs`, `client.rs`, `supabase.rs`, `oauth.rs`, `ws_listener.rs`,
+  `pending_queue.rs`, `id_map.rs`, `sync_state.rs`, `persist.rs`, `crypto.rs`,
+  `types.rs`, `commands.rs`, `config.rs`, on a dedicated Tokio runtime.
+- **Auth** — Supabase Auth for password login, signup, refresh, and recovery, plus
+  Google via loopback PKCE. `POST /api/v1/auth/bootstrap` supplies `kdf_salt` and the
+  password-wrapped UMK; `POST /api/v1/auth/devices` supplies the `device_id` sent as
+  `X-Device-Id`. `GET /api/v1/auth/umk/device` backs silent session restore.
+- **Mutation hooks** — capture (watcher and hotkey), single and bulk deletes, pin and
+  group changes, `clear_history`, and note CRUD all notify `SyncClient`. Bulk paths
+  funnel through `finish_bulk_update` in `clipboard/commands.rs`.
+- **Settings sync** — 2-second debounced push, the `sync:collect-settings` →
+  `sync_receive_local_settings` bridge for `localStorage` keys, and last-write-wins
+  resolution with `sync:settings` applied without a reload.
+- **Blob sync** — files and videos upload through `request-upload` → presigned PUT →
+  `confirm-upload`, and download through `{key}/download-url`. Entries over the 5 MB
+  gate emit `sync:file-skipped`, surfaced in the UI.
+- **Group and Live Share encryption** — pool group keys and per-session Group Keys are
+  held in `SyncClient`, recovered from the wrapped copy on reconnect, and chosen as the
+  content-encryption key for tagged entries (`keyed_pool_groups`, `session_group_key`).
+  A group whose key we don't hold is skipped rather than encrypted unreadably.
+- **Sharing UI** — create, invite by email with scope, accept/decline, per-member scope,
+  leave, and end-session, driven by the `sharing:*` WebSocket events. Device list with
+  revoke lives in the account screen.
 
-### Phase 6 — Cloud Sync (Rust module + React UI)
+**Known gaps**
 
-#### Rust: new module `src-tauri/src/sync/`
+- **Settings are not pulled at sign-in.** `sync_pull_settings` runs only on the
+  `settings:updated` WebSocket event (App.tsx) or an explicit invoke, so a freshly
+  signed-in device keeps its local preferences until another device changes one.
 
-- [x] Create `sync/mod.rs` — `SyncClient` struct, background Tokio runtime init, `Option<Arc<SyncClient>>` in `AppState`
-- [x] Create `sync/crypto.rs` — `derive_umk`, `encrypt`, `decrypt`, `generate_x25519_keypair`, `x25519_shared_secret`, `wrap_key`, `unwrap_key`
-- [x] Create `sync/client.rs` — `reqwest` HTTP client, base URL config, `Authorization` header injection, automatic 401 → token refresh → retry
-- [x] Create `sync/ws_listener.rs` — `tokio-tungstenite` WebSocket connection, reconnect backoff, dispatch table for all `sync:*`, `device:*`, `group:*` events
-- [x] Create `sync/pending_queue.rs` — read/write `{app_data}/sync_pending.json`; operations: `push`, `delete`, `update`; flush-in-order on reconnect
-- [x] Create `sync/commands.rs` — register all sync Tauri commands (see list below)
-- [x] Create `sync/config.rs` — read/write `sync_enabled` and `sync_server_url` from `settings.json`
+**Superseded by later design decisions** — these appeared in the original plan and will
+not be built:
 
-#### Rust: Cargo.toml additions
-
-- [x] `reqwest = { features = ["json", "rustls-tls"] }`
-- [x] `tokio-tungstenite = { features = ["rustls-tls-webpki-roots", "connect"] }`
-- [x] `argon2`
-- [x] `aes-gcm`
-- [x] `x25519-dalek`
-- [x] `keyring`
-
-#### Rust: integration into existing files
-
-- [x] `state/app_state.rs` — add `sync_client: Mutex<Option<Arc<SyncClient>>>`
-- [x] `clipboard/history.rs` — add transient fields `server_id: Option<String>` and `sync_status: SyncStatus` to `ClipboardEntry` (skip serialization to `history.bin`)
-- [x] `notes/store.rs` — same transient fields on `Note`
-- [x] `runtime/clipboard_watcher.rs` — call `SyncClient.on_new_clipboard_entry(entry)` after successful history push
-- [x] `runtime/hotkeys.rs` — call `SyncClient.on_new_clipboard_entry(entry)` for Ctrl+Shift+C path
-- [x] `clipboard/commands.rs` — call `SyncClient.on_delete_clipboard_entry(id)` from `delete_entry`; `on_update_clipboard_entry` from `toggle_pin`, `set_entry_groups`
-- [ ] `clipboard/commands.rs` — call `SyncClient.on_delete_clipboard_entry` from `clear_history`; `on_update_clipboard_entry` from bulk pin/group mutations
-- [x] `notes/commands.rs` — call `SyncClient.on_new_note` / `on_update_note` / `on_delete_note` from note CRUD commands
-- [x] `lib.rs` — register sync commands; initialize `SyncClient` in `setup_runtime()` if `sync_enabled`
-
-#### Rust: sync Tauri commands to implement
-
-- [x] `sync_login(email, password, device_name) → Result<SyncUser>`
-- [x] `sync_logout() → ()`
-- [x] `sync_get_user() → Option<SyncUser>`
-- [x] `sync_get_status() → SyncStatusInfo` — `{ connected, pending_count, skipped_count }`
-- [x] `sync_now() → ()`
-- [x] `sync_set_enabled(enabled: bool) → ()`
-- [x] `sync_set_server_url(url: String) → ()`
-- [x] `sync_get_groups() → Vec<SyncGroup>`
-- [x] `sync_create_group(name: String) → SyncGroup`
-- [x] `sync_join_group(invite_code: String) → ()`
-- [x] `sync_leave_group(group_id: String) → ()`
-
-#### Rust: persistence files to implement
-
-- [x] `{app_data}/id_map.json` — read/write `{ entries: { client_id → server_uuid }, groups: { name → server_uuid } }`
-- [x] `{app_data}/sync_state.json` — read/write `{ last_server_ts, device_id, user_id }`
-- [x] `{app_data}/sync_pending.json` — managed by `pending_queue.rs`
-
-#### React: App.tsx event wiring
-
-- [ ] Listen for `sync:remote-entry` Tauri event → decrypt (via invoke) → prepend to `entries[]` state
-- [ ] Listen for `sync:remote-delete` Tauri event → remove from `entries[]` state
-- [x] Listen for `sync:status-changed` Tauri event → update sync dot indicator in Sidebar
-
-#### React: Settings screen — Cloud Sync section
-
-- [x] Enable/disable Cloud Sync toggle → `sync_set_enabled`
-- [x] Server URL input field → `sync_set_server_url`
-- [x] Login form (email + password) → `sync_login`
-- [x] Logout button → `sync_logout`
-- [x] Logged-in user display (email, display name)
-- [ ] Connected devices list (fetched from backend) with current device highlighted and revoke button
-- [x] Sync status indicator: `Synced ✓` / `Syncing…` / `Offline` / `Re-login required` — driven by `sync_get_status`
-- [x] Shared Groups sub-panel: list joined groups, create new group, copy invite link, leave group
-
-#### React: Entry card
-
-- [x] Cloud sync icon on each card: filled cloud ✓ (`Synced`) / outline cloud (`Pending`) / no icon (`LocalOnly`)
-
-#### React: Settings screen — Settings Sync UX
-
-- [x] Show a "Settings synced" indicator (last synced timestamp) in the Cloud Sync section
-- [x] On `sync:settings` Tauri event: apply received `localStorage` keys (theme, layout, sort, paste_slots, group_names, group_colors) without a full page reload
-
----
-
-### Phase 6b — Settings Sync
-
-#### Rust: `sync/commands.rs`
-
-- [x] Implement `sync_push_settings()`:
-  - Collect synced keys from `settings.json` (via `get_setting` helpers)
-  - Emit `sync:collect-settings` Tauri event → React responds with `localStorage` values via `sync_receive_local_settings(json)` command
-  - Merge into one JSON blob, encrypt with UMK, `PUT /api/v1/settings { encrypted_blob, updated_at }`
-  - If response `winner == 'server'`: decrypt server blob and apply (emit `sync:settings`)
-- [x] Implement `sync_pull_settings()`:
-  - `GET /api/v1/settings`
-  - If 404: skip (no settings on server yet)
-  - Decrypt blob; if `server_updated_at > local_updated_at`: apply and emit `sync:settings`
-- [x] Debounce timer (2 seconds) inside `SyncClient` — `schedule_settings_push()` resets timer; poller fires push at 2s elapsed
-
-#### Rust: hook settings push into existing commands
-
-- [x] In `set_setting()` command: after writing to `settings.json`, call `sync_client.schedule_settings_push()` if sync is enabled and the key is in the synced-keys list
-- [ ] In `lib.rs` setup: after successful auth + delta pull, call `sync_pull_settings()`
-
-#### Rust: `ws_listener.rs`
-
-- [x] `settings:updated` WS event → emits `sync:settings-updated` Tauri event (React or command handler should call `sync_pull_settings()`)
-
-#### React: App.tsx
-
-- [x] Listen for `sync:collect-settings` Tauri event → collect `localStorage` synced keys → call `sync_receive_local_settings(json)` Tauri command
-- [x] Listen for `sync:settings` Tauri event → apply received settings to `localStorage` (theme, layout, sort, paste_slots, group_names, group_colors) and re-render affected components
-
-#### Rust: new Tauri command
-
-- [x] `sync_receive_local_settings(json: String) → ()` — receives `localStorage` values from React; stores payload to `sync_settings_local.json` for next push
-
----
-
-### Phase 7 — File & Video Sync (5 MB gate)
-
-#### Rust: `sync/client.rs` or `sync/mod.rs`
-
-- [ ] In `on_new_entry`: if `entry.kind == File`, read each file path from `entry.content` (newline-delimited)
-- [ ] Sum file sizes; if total > 5 MB → emit `sync:file-skipped` Tauri event, increment `skipped_count`, return early (do not push)
-- [ ] If within limit → for each file: `POST /blobs/request-upload` → PUT bytes to pre-signed R2 URL → `POST /blobs/confirm-upload`
-- [ ] Build `encrypted_content` = `encrypt(UMK, JSON([{ filename, mime_type, size_bytes, blob_key }, ...]), aad=client_id)`
-- [ ] Set `blob_key` on push payload to the first file's key
-
-#### Rust: `ws_listener.rs` / pull handler
-
-- [ ] On receiving a `kind: 'file'` entry from pull or WebSocket: for each `blob_key` in decrypted content list → `GET /blobs/{key}/download-url` → download to `{app_data}/sync-downloads/{filename}`
-- [ ] Update local `entry.content` to the downloaded local file paths
-
-#### React
-
-- [x] Listen for `sync:file-skipped` Tauri event → show dismissible notification in sync status area ("File too large to sync — must be under 5 MB")
-
----
-
-### Phase 8 — Live Share
-
-#### Rust: `SyncClient` additions
-
-- [x] `sharing_sessions: Arc<Mutex<Vec<SharingSession>>>` field in `SyncClient`
-- [x] `SharingSession` struct: `{ share_group_id, name, my_scope, members, group_key: Option<[u8; 32]> }` (in `types.rs`)
-
-#### Rust: sync Tauri commands to implement
-
-- [x] `sharing_invite(email: String, scope: String) → Result<SharingInvite>` — **backend now: `POST /sharing/invite`** (was `POST /sharing` + `POST /sharing/{id}/invite`) — needs update
-- [x] `sharing_accept(invite_code: String, scope: String) → Result<()>` — **backend now: `POST /groups/join`** (was `POST /sharing/join`); X25519 key exchange skeleton (full GK decryption pending WS `group:rekey` flow) — needs update
-- [x] `sharing_get_sessions() → Vec<SharingSession>`
-- [x] `sharing_update_scope(share_group_id: String, scope: String) → ()` — `PATCH /sharing/sessions/{id}/scope`
-- [x] `sharing_end_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}`; remove from `id_map.json`
-- [x] `sharing_leave_session(share_group_id: String) → ()` — `DELETE /sharing/sessions/{id}/leave`; remove from local session list
-
-#### Rust: `on_new_entry` Live Share fan-out
-
-- [x] Fan-out skeleton: `spawn_push_clipboard_entry` / `spawn_push_note` append active session `share_group_id` values to `group_ids` based on scope
-- [ ] Full GK re-encryption: re-encrypt `encrypted_content` with session `group_key` instead of UMK (pending GK decryption from `sharing:accepted` WS flow)
-
-#### Rust: `ws_listener.rs` — Live Share WS events
-
-- [x] `sharing:invite` → emit `sharing:invite-received` Tauri event to React
-- [x] `sharing:accepted` → emit `sharing:accepted` Tauri event (full GK store pending)
-- [x] `sharing:ended` → emit `sharing:ended` Tauri event
-- [x] `sharing:member_left` → emit `sharing:member-left` Tauri event
-- [x] `sharing:scope_changed` → emit `sharing:scope-changed` Tauri event
-
-#### React: Settings screen — Live Share panel
-
-- [x] Create Live Share button → `sharing_invite` (opens invite form)
-- [x] Invite form: email field + scope selector (`clipboard` / `notes` / `both`) → `sharing_invite`
-- [x] Active sessions list: session name, member list (display name + their scope + online indicator)
-- [x] Own scope selector per session → `sharing_update_scope`
-- [x] Leave session button (non-owner) → `sharing_leave_session`
-- [x] End session button (owner only) → `sharing_end_session`
-- [x] Incoming invite notification (driven by `sharing:invite-received` Tauri event): accept/decline with scope selection → `sharing_accept`
+- `sync:remote-entry` / `sync:remote-delete` per-entry React events. Merging happens in
+  Rust, which owns the UMK; the frontend refreshes on `sync:history-merged` and
+  `sync:notes-merged` instead.
+- `sync_set_server_url` and a server URL field in settings. Endpoints are compiled into
+  `sync/config.rs`; self-hosting overrides them through `settings.json` with no UI.
