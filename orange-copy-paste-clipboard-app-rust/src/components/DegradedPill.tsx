@@ -17,10 +17,14 @@ export const DegradedPill: React.FC<{ className?: string }> = ({ className }) =>
   const health = useHealthWarning();
   if (!health) return null;
 
-  const detail =
-    health.kind === "degraded"
-      ? "History and notes are not being saved — restart the app from the main window."
-      : "History and notes may not be saving. If it does not pick up again on its own, restart from the main window.";
+  const detail = {
+    degraded:
+      "History and notes are not being saved — restart the app from the main window.",
+    stalled:
+      "History and notes may not be saving. If it does not pick up again on its own, restart from the main window.",
+    unwritable:
+      "History and notes are not being saved: the disk is refusing them. Check for free space, then saving picks up on its own.",
+  }[health.kind];
 
   return (
     <span

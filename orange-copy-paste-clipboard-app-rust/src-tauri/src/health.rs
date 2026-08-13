@@ -178,10 +178,21 @@ pub fn recovery_notice() -> Option<String> {
 static START: LazyLock<Instant> = LazyLock::new(Instant::now);
 /// Uptime in ms at the flush loop's last completed pass. 0 = no pass yet.
 static LAST_BEAT_MS: AtomicU64 = AtomicU64::new(0);
-/// Set while the flush loop looks wedged. Unlike [`DEGRADED`] this clears itself:
-/// a stall is an inference about a thread that is still alive, not a proven
-/// fault, and a wrong guess must not permanently stop the app from saving.
-static STALL_REASON: Mutex<Option<String>> = Mutex::new(None);
+/// Why saving is not working right now, or `None` while it is. Unlike
+/// [`DEGRADED`] this clears itself: both causes below are inferences about a
+/// process that is still running, not proven faults, and a wrong guess must never
+/// permanently stop the app from saving.
+static TROUBLE: Mutex<Option<Trouble>> = Mutex::new(None);
+
+/// A recoverable reason saving is not working. Two causes, one signal, because to
+/// the user they are the same fact — with different advice attached.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Trouble {
+    /// `stalled`: the flush loop stopped completing passes, most likely wedged on
+    /// a lock. `unwritable`: it is running fine and the writes are being refused.
+    pub kind: &'static str,
+    pub reason: String,
+}
 
 const WATCHDOG_INTERVAL_MS: u64 = 2_000;
 /// How stale the last completed pass may get before the user is told. Generous
@@ -201,9 +212,9 @@ pub fn beat() {
     LAST_BEAT_MS.store(uptime_ms().max(1), Ordering::Relaxed);
 }
 
-/// How the flush loop is doing, or `None` while it is keeping up.
-pub fn stall_reason() -> Option<String> {
-    STALL_REASON.lock().clone()
+/// Why saving is not working, or `None` while it is.
+pub fn trouble() -> Option<Trouble> {
+    TROUBLE.lock().clone()
 }
 
 /// One watchdog round's verdict. `None` means this round proves nothing;
@@ -225,35 +236,82 @@ fn stall_verdict(slept_ms: u64, age_ms: u64, first_pass_done: bool) -> Option<bo
     Some(age_ms >= STALL_AFTER_MS)
 }
 
-/// What one round changed, so a stall that persists is reported once rather than
-/// every two seconds for as long as it lasts.
-#[derive(Debug, PartialEq, Eq)]
-enum StallChange {
-    Began(String),
-    Ended,
-    Unchanged,
-}
+// The other way saving stops without anything panicking: the loop ticks along
+// completing its passes, and every write inside them is refused. A full disk, an
+// antivirus lock, a permissions change under a running app. Every call site
+// discarded the error, so the app looked healthy while saving nothing.
+//
+// One later success re-persists everything — each write is a whole-file snapshot,
+// not an append — so a blip costs nothing and must not raise a banner. What costs
+// something is a failure that lasts until the user quits.
 
-/// Fold this round's verdict into [`STALL_REASON`].
-fn apply_stall(stalled: bool, age_ms: u64) -> StallChange {
-    let mut guard = STALL_REASON.lock();
-    match (stalled, guard.is_some()) {
-        (true, false) => {
-            let reason = format!("saving has not completed a pass in {}s", age_ms / 1000);
-            *guard = Some(reason.clone());
-            StallChange::Began(reason)
-        }
-        (false, true) => {
-            *guard = None;
-            StallChange::Ended
-        }
-        _ => StallChange::Unchanged,
+/// Whether a failure is outstanding. Checked on every successful write, so it
+/// stays an atomic: the lock is only taken when there is an episode to open or
+/// close.
+static WRITE_FAILING: AtomicBool = AtomicBool::new(false);
+/// The failure that opened the current episode, and the uptime it happened at —
+/// the first one, not the latest, so the grace period below measures how long
+/// saving has actually been broken.
+static WRITE_FAILURE: Mutex<Option<(String, u64)>> = Mutex::new(None);
+
+/// How long a write failure must persist before the user hears about it. Windows
+/// hands out transient sharing violations from antivirus scanners and the search
+/// indexer; [`RENAME_ATTEMPTS`] already rides those out, and the next dirty tick
+/// retries anyway. Long enough not to cry wolf, short enough to beat a quit.
+const WRITE_GRACE_MS: u64 = 6_000;
+
+/// Called on every successful write, so the common path is one relaxed load.
+fn note_write_ok() {
+    if WRITE_FAILING.swap(false, Ordering::Relaxed) {
+        *WRITE_FAILURE.lock() = None;
     }
 }
 
-/// Watch the flush loop and surface a stall. Deliberately does **not** latch
-/// [`mark_degraded`]: a hang is not evidence that memory was torn, and refusing
-/// writes forever over a transient stall would cost more than it saves.
+/// Called on every failed write. Keeps the episode's first error, since that is
+/// the one that says when saving stopped working.
+fn note_write_failed(path: &Path, err: &io::Error) {
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let mut guard = WRITE_FAILURE.lock();
+    if guard.is_none() {
+        *guard = Some((format!("could not write {name}: {err}"), uptime_ms()));
+    }
+    WRITE_FAILING.store(true, Ordering::Relaxed);
+}
+
+/// Whether a write failure is outstanding, before the grace period has any say.
+/// Public so degraded mode can prove it raises no write warning: setting state
+/// aside is a decision, not a fault, and two banners for one event is one too many.
+pub fn write_failure_pending() -> bool {
+    WRITE_FAILING.load(Ordering::Relaxed)
+}
+
+/// The outstanding write failure, once it has lasted past the grace period.
+fn overdue_write_failure(now_ms: u64) -> Option<String> {
+    let guard = WRITE_FAILURE.lock();
+    let (reason, since) = guard.as_ref()?;
+    (now_ms.saturating_sub(*since) >= WRITE_GRACE_MS).then(|| reason.clone())
+}
+
+/// Publish `next`, returning it when this round changed something — so a problem
+/// that lasts is reported once, not every two seconds for as long as it lasts.
+fn set_trouble(next: Option<Trouble>) -> Option<Option<Trouble>> {
+    let mut guard = TROUBLE.lock();
+    if *guard == next {
+        return None;
+    }
+    *guard = next.clone();
+    Some(next)
+}
+
+/// Watch for saving silently not working, from either cause, and say so.
+///
+/// Deliberately does **not** latch [`mark_degraded`]: neither a wedged thread nor
+/// a refused write is evidence that memory was torn, and refusing to save forever
+/// over a problem that usually clears would cost more than it saves.
 pub fn start_stall_watchdog(app_data: Option<PathBuf>, app: tauri::AppHandle) {
     use tauri::Emitter;
 
@@ -265,31 +323,52 @@ pub fn start_stall_watchdog(app_data: Option<PathBuf>, app: tauri::AppHandle) {
 
             let last = LAST_BEAT_MS.load(Ordering::Relaxed);
             let age = now.saturating_sub(last);
-            let Some(stalled) = stall_verdict(now.saturating_sub(before), age, last != 0) else {
-                continue;
+            let stalled = stall_verdict(now.saturating_sub(before), age, last != 0);
+
+            // A refused write is the more specific finding and carries advice the
+            // user can act on, so it outranks a stall. In practice they exclude
+            // each other: a wedged loop attempts no writes to fail.
+            let next = match (overdue_write_failure(now), stalled) {
+                (Some(reason), _) => Some(Trouble {
+                    kind: "unwritable",
+                    reason,
+                }),
+                (None, Some(true)) => Some(Trouble {
+                    kind: "stalled",
+                    reason: format!("saving has not completed a pass in {}s", age / 1000),
+                }),
+                (None, Some(false)) => None,
+                // No verdict this round (frozen process, or no first pass yet) and
+                // no write failure: leave whatever is published alone.
+                (None, None) => continue,
             };
 
-            // `apply_stall` takes and releases the lock; everything below runs
+            // `set_trouble` takes and releases the lock; everything below runs
             // without it, because a Tauri emit re-enters the event machinery and
             // that is not somewhere to be holding one of our own mutexes.
-            match apply_stall(stalled, age) {
-                StallChange::Began(reason) => {
-                    eprintln!("[health] {reason} — likely a deadlock");
+            let Some(changed) = set_trouble(next) else {
+                continue;
+            };
+            match changed {
+                Some(t) => {
+                    eprintln!("[health] {} ({})", t.reason, t.kind);
+                    let detail = if t.kind == "stalled" {
+                        "  most likely a lock taken twice on one thread, or two locks taken in \
+                         opposite orders on two\n"
+                    } else {
+                        "  the flush loop is running; the disk is refusing it\n"
+                    };
                     record(
                         app_data.as_deref(),
-                        "stall",
-                        &format!(
-                            "  {reason}\n  most likely a lock taken twice on one thread, or two \
-                             locks taken in opposite orders on two\n"
-                        ),
+                        t.kind,
+                        &format!("  {}\n{detail}", t.reason),
                     );
-                    let _ = app.emit("health:stalled", Some(reason));
+                    let _ = app.emit("health:trouble", Some(t));
                 }
-                StallChange::Ended => {
+                None => {
                     eprintln!("[health] saving recovered");
-                    let _ = app.emit("health:stalled", None::<String>);
+                    let _ = app.emit("health:trouble", None::<Trouble>);
                 }
-                StallChange::Unchanged => {}
             }
         }
     });
@@ -328,6 +407,21 @@ pub fn replace_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
 }
 
 fn replace(path: &Path, data: &[u8], flush: bool) -> io::Result<()> {
+    let result = try_replace(path, data, flush);
+
+    // Every write in the app funnels through here, and every caller discards what
+    // it returns, so this is the one place that can notice saving has stopped
+    // working. Deliberately outside `try_replace`, which the quarantine write also
+    // uses: `write_state`'s refusal while degraded is a decision, not a failure,
+    // and must not be reported as one.
+    match &result {
+        Ok(()) => note_write_ok(),
+        Err(e) => note_write_failed(path, e),
+    }
+    result
+}
+
+fn try_replace(path: &Path, data: &[u8], flush: bool) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -447,12 +541,12 @@ pub fn health_degraded_reason() -> Option<String> {
     degraded_reason()
 }
 
-/// Stall reason, or `None` while the flush loop is keeping up. Polled for the
-/// same reason as [`health_degraded_reason`], and additionally because a stall
-/// can begin long after any window finished loading.
+/// Why saving is not working, or `None` while it is. Polled for the same reason
+/// as [`health_degraded_reason`], and additionally because either cause can begin
+/// long after any window finished loading.
 #[tauri::command]
-pub fn health_stall_reason() -> Option<String> {
-    stall_reason()
+pub fn health_trouble() -> Option<Trouble> {
+    trouble()
 }
 
 /// What a degraded previous session left behind and this one adopted, so the app
@@ -633,38 +727,83 @@ mod tests {
         assert_eq!(stall_verdict(slept, u64::MAX, false), None);
     }
 
-    /// A stall lasting a minute is 30 watchdog rounds. The user should hear about
+    fn stalled_for(secs: u64) -> Option<Trouble> {
+        Some(Trouble {
+            kind: "stalled",
+            reason: format!("saving has not completed a pass in {secs}s"),
+        })
+    }
+
+    /// Trouble lasting a minute is 30 watchdog rounds. The user should hear about
     /// it once, and hear about the recovery once.
     ///
-    /// Leaves `STALL_REASON` cleared: unlike `DEGRADED` it is not a latch, so
-    /// restoring it keeps this test from leaking into the shared test binary.
+    /// Leaves `TROUBLE` cleared: unlike `DEGRADED` it is not a latch, so restoring
+    /// it keeps this test from leaking into the shared test binary.
     #[test]
-    fn apply_stall_reports_each_transition_once() {
-        assert_eq!(stall_reason(), None, "started dirty");
+    fn set_trouble_reports_each_transition_once() {
+        assert_eq!(trouble(), None, "started dirty");
 
-        assert_eq!(
-            apply_stall(true, 20_000),
-            StallChange::Began("saving has not completed a pass in 20s".into())
-        );
-        assert_eq!(
-            stall_reason().as_deref(),
-            Some("saving has not completed a pass in 20s")
-        );
+        assert_eq!(set_trouble(stalled_for(20)), Some(stalled_for(20)));
+        assert_eq!(trouble(), stalled_for(20));
 
-        // Still stalled, and now for longer: no second report, and the original
-        // reason stands rather than being rewritten every round.
-        assert_eq!(apply_stall(true, 40_000), StallChange::Unchanged);
-        assert_eq!(apply_stall(true, 60_000), StallChange::Unchanged);
-        assert_eq!(
-            stall_reason().as_deref(),
-            Some("saving has not completed a pass in 20s")
-        );
+        // Same round's verdict again: nothing to report, nothing republished.
+        assert_eq!(set_trouble(stalled_for(20)), None);
+        assert_eq!(trouble(), stalled_for(20));
+
+        // A worse reason for the same problem is still worth publishing — the
+        // banner quotes it, and "in 20s" going stale would understate a real hang.
+        assert_eq!(set_trouble(stalled_for(40)), Some(stalled_for(40)));
 
         // Recovered — announced once, then quiet.
-        assert_eq!(apply_stall(false, 500), StallChange::Ended);
-        assert_eq!(stall_reason(), None);
-        assert_eq!(apply_stall(false, 500), StallChange::Unchanged);
-        assert_eq!(apply_stall(false, 500), StallChange::Unchanged);
+        assert_eq!(set_trouble(None), Some(None));
+        assert_eq!(trouble(), None);
+        assert_eq!(set_trouble(None), None);
+    }
+
+    /// The other silent failure: passes complete, writes are refused. Windows hands
+    /// out transient sharing violations constantly, so the grace period is the
+    /// whole point — a blip costs nothing, because the next write re-persists
+    /// everything.
+    ///
+    /// Touches process-global `WRITE_FAILURE`, and leaves it clear.
+    #[test]
+    fn a_write_failure_is_reported_only_once_it_has_outlasted_the_grace_period() {
+        let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
+        let at = |ms: u64| overdue_write_failure(ms);
+
+        assert_eq!(at(u64::MAX), None, "started dirty");
+
+        note_write_failed(Path::new("/tmp/history.bin"), &denied());
+        let opened = WRITE_FAILURE.lock().as_ref().unwrap().1;
+
+        // Inside the grace period the user hears nothing at all.
+        assert_eq!(at(opened), None);
+        assert_eq!(at(opened + WRITE_GRACE_MS - 1), None);
+
+        // Past it, with the failing file named — "could not write history.bin" is
+        // actionable in a way "a write failed" is not.
+        let reason = at(opened + WRITE_GRACE_MS).expect("overdue failure not reported");
+        assert!(reason.contains("history.bin"), "unhelpful reason: {reason}");
+
+        // A later failure does not restart the clock: saving has been broken since
+        // the first one, and resetting would let a repeating failure stay hidden
+        // forever.
+        note_write_failed(Path::new("/tmp/notes.bin"), &denied());
+        assert_eq!(WRITE_FAILURE.lock().as_ref().unwrap().1, opened);
+        assert_eq!(
+            at(opened + WRITE_GRACE_MS).as_deref(),
+            Some(reason.as_str()),
+            "the episode's original reason was overwritten"
+        );
+
+        // One real write is enough to close the episode: each one is a whole-file
+        // snapshot, so nothing from the failed attempts is still missing.
+        let dir = scratch_dir("write-failure");
+        write_state(&dir.join("history.bin"), b"payload").expect("healthy write");
+        assert!(!write_failure_pending());
+        assert_eq!(at(u64::MAX), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The cases `tests/degraded_mode.rs` does not reach, since it only exercises

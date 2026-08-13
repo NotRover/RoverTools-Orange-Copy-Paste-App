@@ -411,7 +411,7 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
-            crate::health::health_stall_reason,
+            crate::health::health_trouble,
             crate::health::health_recovery_notice,
             crate::health::health_restart_app,
             crate::clipboard::commands::get_history,
