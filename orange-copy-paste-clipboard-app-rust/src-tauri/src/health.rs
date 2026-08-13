@@ -238,67 +238,128 @@ pub fn health_restart_app(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicU32;
 
-    /// Names of everything sitting next to `path`, to catch leftover scratch
-    /// files whose names are deliberately unpredictable.
+    /// Anything sitting next to `path`. Scratch names are deliberately
+    /// unpredictable, so leftovers can only be caught by listing the directory.
     fn siblings_of(path: &Path) -> Vec<String> {
-        let dir = path.parent().unwrap();
-        std::fs::read_dir(dir)
+        std::fs::read_dir(path.parent().unwrap())
             .unwrap()
             .flatten()
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect()
     }
 
-    /// `DEGRADED` is process-global and one-way, so both halves live in a single
-    /// test: latching it from a separate test would race every other one.
+    /// Test directory named after the calling test, so tests cannot collide.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("rovertools-health-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Nothing here may latch `DEGRADED`: it is process-global and one-way, so a
+    /// test that trips it would change the behaviour of every test running
+    /// alongside it. The degraded path is covered by `tests/degraded_mode.rs`,
+    /// which gets its own process.
     #[test]
-    fn writes_are_durable_then_quarantined_once_degraded() {
-        let dir = std::env::temp_dir().join(format!("rovertools-health-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn creates_missing_directories_and_replaces_existing_files() {
+        let dir = scratch_dir("create");
         let path = dir.join("history.bin");
-        let quarantine = sibling(&path, ".quarantine");
 
-        // Healthy: writes land, and no scratch file is left behind. The parent
-        // directory does not exist yet — the write is expected to create it.
-        write_state(&path, b"good").expect("healthy write");
-        assert_eq!(std::fs::read(&path).unwrap(), b"good");
+        // The parent does not exist yet.
+        write_atomic(&path, b"first").expect("first write");
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+
+        // Replacing an existing file is the case that regresses on Windows,
+        // where a plain rename onto an occupied name fails.
+        write_atomic(&path, b"second").expect("replace");
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        replace_atomic(&path, b"third").expect("replace unflushed");
+        assert_eq!(std::fs::read(&path).unwrap(), b"third");
+
+        // No scratch file survived any of that.
         assert_eq!(siblings_of(&path), vec!["history.bin".to_string()]);
-
-        // Replacing an existing file must also work — on Windows a plain rename
-        // over an existing target fails, so this is the case that regresses.
-        write_state(&path, b"better").expect("healthy overwrite");
-        assert_eq!(std::fs::read(&path).unwrap(), b"better");
-
-        // The unflushed variant has the same replace semantics.
-        replace_atomic(&path, b"unflushed").expect("replace_atomic");
-        assert_eq!(std::fs::read(&path).unwrap(), b"unflushed");
-        write_atomic(&path, b"better").expect("restore");
-
-        mark_degraded("test");
-        assert!(is_degraded());
-        assert_eq!(degraded_reason().as_deref(), Some("test"));
-
-        // Degraded: the real file keeps its pre-panic bytes, and the payload is
-        // diverted so it is recoverable by hand.
-        write_state(&path, b"suspect").expect_err("degraded write should report failure");
-        assert_eq!(
-            std::fs::read(&path).unwrap(),
-            b"better",
-            "degraded write overwrote good state"
-        );
-        assert_eq!(std::fs::read(&quarantine).unwrap(), b"suspect");
-
-        // The flush loop keeps ticking; the newest payload wins, since it is a
-        // superset of the earlier one.
-        write_state(&path, b"suspect and more").expect_err("degraded write should report failure");
-        assert_eq!(std::fs::read(&quarantine).unwrap(), b"suspect and more");
-        assert_eq!(std::fs::read(&path).unwrap(), b"better");
-
-        // The first reason wins — it describes the fault, not its consequences.
-        mark_degraded("second");
-        assert_eq!(degraded_reason().as_deref(), Some("test"));
-
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The guarantee the flush loop depends on: a reader either sees the old file
+    /// or the new one, never a partial or blended write. Payloads differ in
+    /// length so a mixture cannot masquerade as a valid one.
+    #[test]
+    fn concurrent_writers_never_expose_a_torn_file() {
+        let dir = scratch_dir("concurrent");
+        let path = dir.join("history.bin");
+        let payloads: [Vec<u8>; 3] = [vec![b'a'; 4096], vec![b'b'; 65536], vec![b'c'; 200_000]];
+        write_atomic(&path, &payloads[0]).expect("seed");
+
+        let reads = AtomicU32::new(0);
+        std::thread::scope(|s| {
+            for payload in &payloads {
+                s.spawn(|| {
+                    for _ in 0..40 {
+                        write_atomic(&path, payload).expect("concurrent write");
+                    }
+                });
+            }
+            // Reader runs against all three writers at once.
+            s.spawn(|| {
+                for _ in 0..600 {
+                    let seen = std::fs::read(&path).expect("file always readable");
+                    assert!(
+                        payloads.contains(&seen),
+                        "torn read: {} bytes, first byte {:?}",
+                        seen.len(),
+                        seen.first()
+                    );
+                    reads.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+        });
+
+        assert_eq!(reads.load(Ordering::Relaxed), 600);
+        // Every writer cleaned up after itself, so only the target remains.
+        assert_eq!(siblings_of(&path), vec!["history.bin".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A failed replace must leave the previous file intact and no scratch file
+    /// behind. A directory standing where the target should be makes the rename
+    /// fail on every platform without needing to simulate a disk fault.
+    #[test]
+    fn failed_replace_leaves_no_scratch_file() {
+        let dir = scratch_dir("failure");
+        let path = dir.join("occupied");
+        std::fs::create_dir_all(&path).expect("make the target a directory");
+
+        write_atomic(&path, b"payload").expect_err("rename onto a directory must fail");
+
+        assert_eq!(
+            siblings_of(&path),
+            vec!["occupied".to_string()],
+            "scratch file left behind after a failed replace"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Documents the hazard this module exists for: unlike `std::sync::Mutex`,
+    /// `parking_lot` hands the next caller a lock that was released mid-mutation
+    /// by an unwinding panic, with no error to distinguish it from a clean one.
+    /// Nothing but the degraded latch stands between that and the flush loop.
+    #[test]
+    fn parking_lot_does_not_poison_after_a_panic() {
+        let guarded: Mutex<Vec<u8>> = Mutex::new(vec![1, 2, 3]);
+
+        let torn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut v = guarded.lock();
+            v.clear(); // half of a "replace the contents" mutation
+            panic!("interrupted mid-mutation");
+        }));
+        assert!(torn.is_err());
+
+        assert!(!guarded.is_locked(), "guard released, as expected");
+        assert!(
+            guarded.lock().is_empty(),
+            "the half-finished mutation is visible with no signal"
+        );
     }
 }
