@@ -76,7 +76,9 @@ fn update_settings(
         .unwrap_or_default();
     f(&mut map);
     if let Ok(json) = serde_json::to_string_pretty(&map) {
-        let _ = std::fs::write(&path, json);
+        // Read-modify-write of the whole settings file: a truncated write here
+        // silently resets preferences, so replace it atomically.
+        let _ = crate::health::write_atomic(&path, json.as_bytes());
     }
 }
 

@@ -219,12 +219,11 @@ pub fn set_setting(
         .and_then(|d| serde_json::from_str(&d).ok())
         .unwrap_or_default();
     map.insert(key.clone(), value);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let written = std::fs::write(
+    // Read-modify-write of the whole preferences file, so a torn write loses
+    // every setting rather than one key.
+    let written = crate::health::write_atomic(
         &path,
-        serde_json::to_string_pretty(&map).unwrap_or_default(),
+        serde_json::to_string_pretty(&map).unwrap_or_default().as_bytes(),
     )
     .is_ok();
 

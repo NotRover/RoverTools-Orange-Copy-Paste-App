@@ -699,9 +699,10 @@ impl SyncClient {
     /// `sync_receive_local_settings` command.  They will be merged with
     /// `settings.json` values on the next debounced push.
     pub fn store_local_settings_payload(&self, json: String) {
-        // Persist temporarily to disk so the push task can read it
+        // Persist temporarily to disk so the push task can read it. Scratch data
+        // read back moments later, so it needs the atomic swap but not the flush.
         let path = self.app_data.join("sync_settings_local.json");
-        let _ = std::fs::write(&path, json);
+        let _ = crate::health::replace_atomic(&path, json.as_bytes());
     }
 
     // ── Entry sync hooks ──────────────────────────────────────────
@@ -1166,7 +1167,13 @@ impl SyncClient {
     }
 
     pub fn status_info(&self) -> SyncStatusInfo {
-        self.status.lock().clone()
+        let mut info = self.status.lock().clone();
+        // A worker that panicked leaves `connected` stuck true, so the pill would
+        // claim everything is synced while nothing is running. Report the truth.
+        if crate::health::is_degraded() {
+            info.connected = false;
+        }
+        info
     }
 
     pub fn sharing_sessions(&self) -> Vec<SharingSession> {
@@ -1716,11 +1723,10 @@ impl SyncClient {
                 return;
             };
             let Some(dir) = images_dir else { return };
-            if std::fs::create_dir_all(&dir).is_err() {
-                return;
-            }
             let path = dir.join(format!("{}.{}", meta.client_id, ext_for_mime(&meta.mime)));
-            if std::fs::write(&path, &bytes).is_err() {
+            // Atomic, because the entry upserted below points at this file — a
+            // torn write would leave history referencing a truncated image.
+            if crate::health::replace_atomic(&path, &bytes).is_err() {
                 return;
             }
 
