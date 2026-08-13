@@ -267,7 +267,14 @@ fn setup_runtime(
                     let _ = notes_store.lock().save_to_file(nf);
                 }
             }
+
+            // Reached only by taking and releasing every state lock above, so it
+            // doubles as proof that none of them are wedged. The watchdog warns
+            // the user if these stop arriving.
+            crate::health::beat();
         });
+
+        crate::health::start_stall_watchdog(app.path().app_data_dir().ok(), app.handle().clone());
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
@@ -391,6 +398,7 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
+            crate::health::health_stall_reason,
             crate::health::health_restart_app,
             crate::clipboard::commands::get_history,
             crate::clipboard::commands::delete_entry,

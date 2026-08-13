@@ -20,7 +20,7 @@ import NotesScreen from "./notes-screen/NotesScreen";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
 import TooltipPortal from "./tooltip/TooltipPortal";
-import { useDegraded } from "../../hooks/useDegraded";
+import { useHealthWarning } from "../../hooks/useHealthWarning";
 import {
   TrashIcon,
   UndoIcon,
@@ -229,7 +229,7 @@ const App: React.FC = () => {
 
   // An internal error left the process running but no longer trusted, so saving
   // is paused until a restart.
-  const degraded = useDegraded();
+  const health = useHealthWarning();
 
   useEffect(() => {
     let cancelled = false;
@@ -1169,14 +1169,25 @@ const App: React.FC = () => {
           <WindowControls />
         </div>
 
-        {degraded && (
+        {health && (
           <div className="app-degraded" role="alert">
             <div className="app-degraded-text">
-              <strong>Saving is paused.</strong> Something went wrong inside the
-              app, so your saved history and notes are being left untouched
-              rather than risk overwriting them. Anything captured since is kept
-              in memory only — restart to start saving again.
-              <span className="app-degraded-reason">{degraded}</span>
+              {health.kind === "degraded" ? (
+                <>
+                  <strong>Saving is paused.</strong> Something went wrong inside
+                  the app, so your saved history and notes are being left
+                  untouched rather than risk overwriting them. Anything captured
+                  since is kept in memory only — restart to start saving again.
+                </>
+              ) : (
+                <>
+                  <strong>Saving has stopped responding.</strong> The part of the
+                  app that writes history and notes to disk has not finished a
+                  pass in a while, so anything captured recently may not be
+                  saved. If it does not pick up again on its own, restart.
+                </>
+              )}
+              <span className="app-degraded-reason">{health.reason}</span>
             </div>
             <button
               type="button"

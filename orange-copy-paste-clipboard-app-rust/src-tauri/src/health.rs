@@ -23,12 +23,17 @@
 //!   can be rebuilt: sync bookkeeping, and image blobs written to a fresh name.
 //!   A torn file would still be poison, so the rename stays; a power cut just
 //!   costs a re-download or a re-push.
+//!
+//! A deadlock produces no panic and so latches nothing — see the liveness
+//! section below for the separate, self-clearing signal that covers it.
 
 use parking_lot::Mutex;
 use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::LazyLock;
+use std::time::Instant;
 
 /// Set once a panic has been observed. One-way: nothing clears it, because
 /// nothing can prove the state became trustworthy again. Only a restart does.
@@ -64,6 +69,163 @@ pub fn is_degraded() -> bool {
 /// Why the process is degraded, for the UI to show and the log to record.
 pub fn degraded_reason() -> Option<String> {
     REASON.lock().clone()
+}
+
+/// Append a diagnostic to `crash.log`. Both callers are last-resort paths — a
+/// thread already unwinding, or a watchdog reporting one that stopped — so every
+/// failure in here is swallowed. There is nothing better to fall back to.
+fn record(app_data: Option<&Path>, headline: &str, detail: &str) {
+    let Some(dir) = app_data else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(dir);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("crash.log"))
+    {
+        let _ = f.write_all(format!("── {headline} @ epoch {secs}s\n{detail}\n").as_bytes());
+    }
+}
+
+// ── Liveness ────────────────────────────────────────────────────────
+//
+// The latch above only fires on a panic, and a deadlock never produces one.
+// `parking_lot` locks are not reentrant, so a thread that takes one twice — or
+// two threads that take a pair in opposite orders — simply stops, still holding
+// it, and everything that wants that lock stops behind them. No panic, nothing
+// logged, and the window often keeps painting as if all were well.
+//
+// The flush loop makes a good probe: it wakes every couple of seconds and it
+// touches every state mutex there is, so a completed pass proves none of them
+// are wedged. It reports each pass with [`beat`]; the watchdog notices when the
+// reports stop and says so, instead of leaving the user with an app that has
+// quietly stopped saving.
+
+/// Monotonic origin for liveness timing. `Instant` cannot be a `const`, and a
+/// wall clock would let an NTP correction or a timezone change read as a stall.
+static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+/// Uptime in ms at the flush loop's last completed pass. 0 = no pass yet.
+static LAST_BEAT_MS: AtomicU64 = AtomicU64::new(0);
+/// Set while the flush loop looks wedged. Unlike [`DEGRADED`] this clears itself:
+/// a stall is an inference about a thread that is still alive, not a proven
+/// fault, and a wrong guess must not permanently stop the app from saving.
+static STALL_REASON: Mutex<Option<String>> = Mutex::new(None);
+
+const WATCHDOG_INTERVAL_MS: u64 = 2_000;
+/// How stale the last completed pass may get before the user is told. Generous
+/// on purpose — a few missed ticks are a slow disk, not a hang. Must stay several
+/// multiples of the flush loop's own `FLUSH_INTERVAL_MS` (2 s): raising that
+/// without raising this would report a loop that is keeping up as wedged.
+const STALL_AFTER_MS: u64 = 15_000;
+
+fn uptime_ms() -> u64 {
+    START.elapsed().as_millis() as u64
+}
+
+/// Report that the state-flush loop completed a pass. Cheap enough to call every
+/// tick: one clock read and one relaxed store.
+pub fn beat() {
+    // `max(1)` keeps 0 meaning "no pass yet" during the first millisecond.
+    LAST_BEAT_MS.store(uptime_ms().max(1), Ordering::Relaxed);
+}
+
+/// How the flush loop is doing, or `None` while it is keeping up.
+pub fn stall_reason() -> Option<String> {
+    STALL_REASON.lock().clone()
+}
+
+/// One watchdog round's verdict. `None` means this round proves nothing;
+/// `Some(true)` means the flush loop looks wedged.
+///
+/// Split out from the loop so the policy can be tested without waiting on real
+/// clocks — the thresholds are tens of seconds apart.
+fn stall_verdict(slept_ms: u64, age_ms: u64, first_pass_done: bool) -> Option<bool> {
+    // Our own sleep overshooting means the whole process was frozen — suspend,
+    // hibernate, a swap storm — in which case every thread's last beat looks
+    // stale through no fault of its own, and blaming the flush loop would put a
+    // warning on the screen of a laptop that just woke up working fine.
+    if slept_ms > WATCHDOG_INTERVAL_MS * 3 {
+        return None;
+    }
+    if !first_pass_done {
+        return None;
+    }
+    Some(age_ms >= STALL_AFTER_MS)
+}
+
+/// What one round changed, so a stall that persists is reported once rather than
+/// every two seconds for as long as it lasts.
+#[derive(Debug, PartialEq, Eq)]
+enum StallChange {
+    Began(String),
+    Ended,
+    Unchanged,
+}
+
+/// Fold this round's verdict into [`STALL_REASON`].
+fn apply_stall(stalled: bool, age_ms: u64) -> StallChange {
+    let mut guard = STALL_REASON.lock();
+    match (stalled, guard.is_some()) {
+        (true, false) => {
+            let reason = format!("saving has not completed a pass in {}s", age_ms / 1000);
+            *guard = Some(reason.clone());
+            StallChange::Began(reason)
+        }
+        (false, true) => {
+            *guard = None;
+            StallChange::Ended
+        }
+        _ => StallChange::Unchanged,
+    }
+}
+
+/// Watch the flush loop and surface a stall. Deliberately does **not** latch
+/// [`mark_degraded`]: a hang is not evidence that memory was torn, and refusing
+/// writes forever over a transient stall would cost more than it saves.
+pub fn start_stall_watchdog(app_data: Option<PathBuf>, app: tauri::AppHandle) {
+    use tauri::Emitter;
+
+    std::thread::spawn(move || {
+        loop {
+            let before = uptime_ms();
+            std::thread::sleep(std::time::Duration::from_millis(WATCHDOG_INTERVAL_MS));
+            let now = uptime_ms();
+
+            let last = LAST_BEAT_MS.load(Ordering::Relaxed);
+            let age = now.saturating_sub(last);
+            let Some(stalled) = stall_verdict(now.saturating_sub(before), age, last != 0) else {
+                continue;
+            };
+
+            // `apply_stall` takes and releases the lock; everything below runs
+            // without it, because a Tauri emit re-enters the event machinery and
+            // that is not somewhere to be holding one of our own mutexes.
+            match apply_stall(stalled, age) {
+                StallChange::Began(reason) => {
+                    eprintln!("[health] {reason} — likely a deadlock");
+                    record(
+                        app_data.as_deref(),
+                        "stall",
+                        &format!(
+                            "  {reason}\n  most likely a lock taken twice on one thread, or two \
+                             locks taken in opposite orders on two\n"
+                        ),
+                    );
+                    let _ = app.emit("health:stalled", Some(reason));
+                }
+                StallChange::Ended => {
+                    eprintln!("[health] saving recovered");
+                    let _ = app.emit("health:stalled", None::<String>);
+                }
+                StallChange::Unchanged => {}
+            }
+        }
+    });
 }
 
 /// Sibling path with `suffix` appended to the full file name, so `history.bin`
@@ -187,24 +349,15 @@ pub fn install_panic_hook(app_data: Option<PathBuf>, app: tauri::AppHandle) {
         // nothing else in the process, while emitting re-enters Tauri's event
         // machinery from a thread that is already unwinding. Ordering it this
         // way means a blocked or broken emit still leaves a diagnosable trace.
-        if let Some(dir) = app_data.as_ref() {
-            let _ = std::fs::create_dir_all(dir);
-            let secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or_default();
-            let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-            let entry = format!(
-                "── panic @ epoch {secs}s\n  thread:   {thread}\n  location: {location}\n  message:  {info}\n\n"
-            );
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("crash.log"))
-            {
-                let _ = f.write_all(entry.as_bytes());
-            }
-        }
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_string();
+        record(
+            app_data.as_deref(),
+            "panic",
+            &format!("  thread:   {thread}\n  location: {location}\n  message:  {info}\n"),
+        );
 
         // A panic in here would be a double panic, which aborts regardless of
         // the unwind setting. Swallow it — the latch and the log already landed.
@@ -225,6 +378,14 @@ pub fn install_panic_hook(app_data: Option<PathBuf>, app: tauri::AppHandle) {
 #[tauri::command]
 pub fn health_degraded_reason() -> Option<String> {
     degraded_reason()
+}
+
+/// Stall reason, or `None` while the flush loop is keeping up. Polled for the
+/// same reason as [`health_degraded_reason`], and additionally because a stall
+/// can begin long after any window finished loading.
+#[tauri::command]
+pub fn health_stall_reason() -> Option<String> {
+    stall_reason()
 }
 
 /// Restart the app. The only real recovery from a degraded process: it rebuilds
@@ -361,5 +522,107 @@ mod tests {
             guarded.lock().is_empty(),
             "the half-finished mutation is visible with no signal"
         );
+    }
+
+    /// The watchdog policy, without waiting out the real thresholds. A wrong
+    /// verdict here is expensive in both directions: a missed stall leaves the
+    /// user with an app that silently stopped saving, and a false one puts a
+    /// scary banner on a laptop that just woke from sleep working fine.
+    #[test]
+    fn stall_verdict_blames_the_flush_loop_only_when_it_is_at_fault() {
+        let slept = WATCHDOG_INTERVAL_MS;
+
+        // Keeping up: a pass finished within the last interval.
+        assert_eq!(stall_verdict(slept, 500, true), Some(false));
+        // Late but not yet late enough — a slow disk gets the benefit of doubt.
+        assert_eq!(stall_verdict(slept, STALL_AFTER_MS - 1, true), Some(false));
+        // Wedged.
+        assert_eq!(stall_verdict(slept, STALL_AFTER_MS, true), Some(true));
+        assert_eq!(stall_verdict(slept, 600_000, true), Some(true));
+
+        // Frozen process: our own 2 s sleep took 10 minutes, so a stale beat
+        // says nothing about the flush loop. No verdict either way.
+        assert_eq!(stall_verdict(600_000, 600_000, true), None);
+        // Boundary: an overshoot up to 3× is still ordinary scheduling jitter.
+        assert_eq!(
+            stall_verdict(WATCHDOG_INTERVAL_MS * 3, STALL_AFTER_MS, true),
+            Some(true)
+        );
+        assert_eq!(
+            stall_verdict(WATCHDOG_INTERVAL_MS * 3 + 1, STALL_AFTER_MS, true),
+            None
+        );
+
+        // Startup: the loop sleeps before its first pass, so an unset beat must
+        // not read as a stall — the watchdog outlives the app's first seconds.
+        assert_eq!(stall_verdict(slept, u64::MAX, false), None);
+    }
+
+    /// A stall lasting a minute is 30 watchdog rounds. The user should hear about
+    /// it once, and hear about the recovery once.
+    ///
+    /// Leaves `STALL_REASON` cleared: unlike `DEGRADED` it is not a latch, so
+    /// restoring it keeps this test from leaking into the shared test binary.
+    #[test]
+    fn apply_stall_reports_each_transition_once() {
+        assert_eq!(stall_reason(), None, "started dirty");
+
+        assert_eq!(
+            apply_stall(true, 20_000),
+            StallChange::Began("saving has not completed a pass in 20s".into())
+        );
+        assert_eq!(
+            stall_reason().as_deref(),
+            Some("saving has not completed a pass in 20s")
+        );
+
+        // Still stalled, and now for longer: no second report, and the original
+        // reason stands rather than being rewritten every round.
+        assert_eq!(apply_stall(true, 40_000), StallChange::Unchanged);
+        assert_eq!(apply_stall(true, 60_000), StallChange::Unchanged);
+        assert_eq!(
+            stall_reason().as_deref(),
+            Some("saving has not completed a pass in 20s")
+        );
+
+        // Recovered — announced once, then quiet.
+        assert_eq!(apply_stall(false, 500), StallChange::Ended);
+        assert_eq!(stall_reason(), None);
+        assert_eq!(apply_stall(false, 500), StallChange::Unchanged);
+        assert_eq!(apply_stall(false, 500), StallChange::Unchanged);
+    }
+
+    /// The watchdog's whole value in the frozen-UI case is the file it leaves
+    /// behind, since a wedged app cannot render a banner to explain itself.
+    #[test]
+    fn record_appends_diagnostics_to_the_crash_log() {
+        let dir = scratch_dir("record");
+        let log = dir.join("crash.log");
+
+        // Nested path the app has not created yet — the real app-data dir on a
+        // first run — must not stop the diagnostic from landing.
+        record(
+            Some(&dir),
+            "stall",
+            "  saving has not completed a pass in 20s\n",
+        );
+        record(Some(&dir), "panic", "  location: src/lib.rs:1\n");
+
+        let text = std::fs::read_to_string(&log).expect("crash.log written");
+        assert!(
+            text.contains("── stall @ epoch"),
+            "missing stall entry: {text}"
+        );
+        assert!(
+            text.contains("── panic @ epoch"),
+            "second entry overwrote the first"
+        );
+        assert!(text.contains("saving has not completed a pass in 20s"));
+
+        // No app-data dir resolved (portable/unwritable install): a no-op, not a
+        // panic on the path that exists to report panics.
+        record(None, "stall", "  dropped\n");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
