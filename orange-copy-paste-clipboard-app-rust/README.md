@@ -292,8 +292,15 @@ build.
 Two optional flags: `-f dry_run=true` builds and verifies without publishing (worth it
 after editing the workflow), and `-f prerelease=true` publishes a beta — offered to
 beta subscribers only, invisible to everyone else, and promoted later with a
-`gh release edit` of the same bundles rather than another build. Details in
-[docs/RELEASING.md](../docs/RELEASING.md).
+`gh release edit` of the same bundles rather than another build.
+
+From Claude Code:
+`/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]`.
+Every argument is optional and anything omitted is **asked for, not defaulted**.
+
+The one-time setup — signing keypair, public releases repo, three Actions secrets — is
+in [docs/RELEASING.md](../docs/RELEASING.md), along with the versioning rules and the
+smoke test. The workflow checks all three itself and names whichever is missing.
 
 ### What users get
 

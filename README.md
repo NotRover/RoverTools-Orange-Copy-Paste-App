@@ -128,9 +128,29 @@ A release is one manual workflow run: `gh workflow run release.yml` for a patch,
 
 `.github/workflows/release.yml` (dispatch only) checks its own prerequisites, bumps the version in `src-tauri/Cargo.toml`, takes the commit subjects since the last release tag as the notes, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
 
-Add `-f prerelease=true` to publish a beta — offered only to installs that opted in under Settings → Updates → *Get beta versions*, and promoted to everyone later with a `gh release edit`, no rebuild.
+### Dispatch flags
 
-Every installed copy trusts only bundles signed with the updater private key, which makes that key load-bearing — lose it and the update channel is dead. Setup, versioning rules, and the pre-trust smoke test are in [`docs/RELEASING.md`](docs/RELEASING.md). In Claude Code, `/create-rovertools-orangecp-release` ([`.claude/skills/`](.claude/skills/create-rovertools-orangecp-release/SKILL.md)) drives the same flow interactively — it asks for the bump, channel and mode instead of defaulting any of them, and verifies both channels afterwards.
+| Flag | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `bump` | `patch` · `minor` · `major` | `patch` | `1.1.1` → `1.1.2` · `1.2.0` · `2.0.0` |
+| `prerelease` | `true` · `false` | `false` | A beta: offered only to installs opted in under Settings → Updates → *Get beta versions*, invisible to everyone else. Promote it later with `gh release edit <tag> --prerelease=false --latest` — the same bundles, no rebuild. |
+| `dry_run` | `true` · `false` | `false` | Build, sign and verify, then stop without publishing. Worth it after editing the workflow. |
+
+A bump zeroes everything to its right, so no dispatch reaches `2.1.1` from `1.1.1` directly — set the predecessor by hand (`cargo set-version 2.1.0`) and release a `patch`.
+
+### From Claude Code
+
+`/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]` — [`SKILL.md`](.claude/skills/create-rovertools-orangecp-release/SKILL.md). Every argument is optional and the skill **asks for whatever you leave out rather than defaulting it**; it shows the version and the notes about to ship, dispatches only after an explicit yes, then verifies both channels. `preview` prints what the next release would contain and dispatches nothing.
+
+### One-time setup
+
+Three things, before the first release. The workflow checks all of them in its first step and names whichever is missing, so a misconfigured release fails in seconds rather than after a build.
+
+1. **Signing keypair** — `cd orange-copy-paste-clipboard-app-rust && bun tauri signer generate -w ~/.tauri/rovertools-updater.key`. Put the public half in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey` and commit it. **Back the private key and its password up outside CI** — every installed copy trusts only bundles signed by it, so losing it kills the update channel: a new public key means a new build, which users can only get by installing by hand.
+2. **Public releases repo** — `gh repo create Spectrewolf8/RoverTools-Releases --public --add-readme`. It holds no source, only assets and the update manifests. Public because the updater fetches over plain HTTPS with no credentials; `--add-readme` because a release needs a commit to tag.
+3. **Three Actions secrets** on the source repo — `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and `RELEASES_REPO_TOKEN` (a fine-grained PAT with **Contents: read and write** on the releases repo — the workflow's own token cannot write to another repo).
+
+No baseline tag is needed; the first release's notes are just "First release." Versioning rules, the two-channel design, and the pre-trust smoke test are in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 `.github/workflows/build-linux.yml` builds Linux bundles on demand when you don't have a Linux machine handy.
 
