@@ -105,6 +105,7 @@ const SettingsScreen: React.FC = () => {
 
   // ── Updates ────────────────────────────────────────────────────
   const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
+  const [betaChannel, setBetaChannel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   // Its own instance, independent of App's: this one drives the manual check and
   // its result, while App's drives the banner. Both read the same Rust-side state,
@@ -127,6 +128,9 @@ const SettingsScreen: React.FC = () => {
     loadBool("autosave", setAutosave, false);
     loadBool("show_splash", setShowSplash, true);
     loadBool("auto_check_updates", setAutoCheckUpdates, true);
+    invoke<string | null>("get_setting", { key: "update_channel" })
+      .then((v) => setBetaChannel(v === "beta"))
+      .catch(() => {});
     invoke<boolean>("get_autostart").then(setRunOnStartup);
     invoke<string>("updater_current_version").then(setAppVersion).catch(() => {});
   }, []);
@@ -181,6 +185,17 @@ const SettingsScreen: React.FC = () => {
   // and only one of them should say "you're up to date".
   const [checkedOnce, setCheckedOnce] = useState(false);
   const handleCheckUpdates = async () => {
+    setCheckedOnce(true);
+    await updater.check();
+  };
+
+  // Switching channel changes which feed is asked, so the previous answer is
+  // stale — re-check immediately rather than leaving a result from the old one on
+  // screen.
+  const handleBetaToggle = async () => {
+    const next = !betaChannel;
+    setBetaChannel(next);
+    await invoke("set_setting", { key: "update_channel", value: next ? "beta" : "stable" });
     setCheckedOnce(true);
     await updater.check();
   };
@@ -428,6 +443,12 @@ const SettingsScreen: React.FC = () => {
               onToggle={() =>
                 toggleBoolSetting(autoCheckUpdates, setAutoCheckUpdates, "auto_check_updates")
               }
+            />
+            <ToggleRow
+              label="Get beta versions"
+              desc="Receive new features early, alongside every normal release. Betas are tested less, so expect the occasional rough edge. Turning this off stops future betas — it cannot move you back to an older version."
+              active={betaChannel}
+              onToggle={handleBetaToggle}
             />
           </div>
         </section>

@@ -1,151 +1,168 @@
 # Releasing the Smart Clipboard app
 
-Shipping a release means running one workflow. Version numbers, the changelog and
-the update feed are all derived from commit history — none of them are edited by
-hand.
+Shipping a release is one workflow run. Everything else — version number, release
+notes, the update feed, the signed bundles — is derived from that.
 
-- **Workflow:** [`.github/workflows/release.yml`](../.github/workflows/release.yml) — manual dispatch only
-- **Changelog/version rules:** [`cliff.toml`](../cliff.toml)
-- **Feed the app reads:** `https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json`
+```bash
+gh workflow run release.yml
+```
+
+That is a patch release. For a feature release, `-f bump=minor`; for a breaking one or
+the move to 1.0, `-f bump=major`. Or click **Run workflow** on [`.github/workflows/release.yml`](../.github/workflows/release.yml) in
+the Actions tab and pick from the dropdown.
+
+The workflow checks its own prerequisites first and stops in the first few seconds
+with a message telling you what to fix, so a misconfigured release fails before it
+spends a build rather than after.
+
+**Or from Claude Code:** `/create-rovertools-orangecp-release`
+([`.claude/skills/…/SKILL.md`](../.claude/skills/create-rovertools-orangecp-release/SKILL.md)).
+It asks for the bump, the channel and the mode — assuming none of them, on every call —
+shows the version and the notes about to ship, dispatches only after an explicit yes,
+then verifies both channels. Arguments pre-answer whatever you already know:
+`/create-rovertools-orangecp-release minor beta`, or `preview` to see what the next
+release would contain without dispatching anything.
 
 ---
 
 ## How it fits together
 
 ```
-commits (feat:/fix:/…)
+you dispatch release.yml
    │
-   ├─ git-cliff ──► next version ──► Cargo.toml (single source of truth)
-   │                └──────────────► CHANGELOG.md + release notes
+   ├─ bump the version in Cargo.toml   (patch or minor — your choice)
+   ├─ notes = commit subjects since the last release tag
    │
-   └─ matrix build ─► signed NSIS (Windows) + AppImage/deb (Linux)
-                          │
-                          └─► public releases repo: bundles + latest.json
-                                      │
-                                      └─► app checks it a few seconds after launch
+   ├─ build signed NSIS (Windows) + AppImage/deb (Linux)
+   │
+   └─ publish to the PUBLIC releases repo: bundles + latest.json
+              │
+              └─ app checks that feed ~8s after launch → banner → user installs
 ```
 
 The source repo stays private. The **releases** repo is public because the updater
 fetches over plain HTTPS with no credentials — a private repo's assets are behind
 auth, and the only way to reach them would be shipping a token inside the app.
 
-Nothing about this touches the sync backend.
+Nothing here touches the sync backend.
 
 ---
 
 ## One-time setup
 
-### 1. Create the releases repo
+Three things. The workflow will tell you if any are missing.
 
-A **public** repo named `RoverTools-Releases`, with **at least one commit** (a
-README is enough). `gh release create` needs a commit to hang the release tag on;
-an empty repo fails.
-
-It holds no source — only release assets and `latest.json`.
-
-### 2. Generate the signing keypair
+### 1. Signing keypair
 
 ```bash
-bun tauri signer generate -w ~/.tauri/rovertools-updater.key
+cd orange-copy-paste-clipboard-app-rust && bun tauri signer generate -w ~/.tauri/rovertools-updater.key
 ```
 
-This prints a public key and writes the private key. Then:
+Put the **public** key in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`,
+replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`, and commit it.
 
-- Put the **public** key in `src-tauri/tauri.conf.json` under
-  `plugins.updater.pubkey`, replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`.
-- Keep the **private** key and its password somewhere durable — a password
-  manager, not just the CI secret store.
+> **Back the private key and its password up outside CI, before the first release.**
+> Every installed copy only trusts bundles signed by it. Lose it and the update
+> channel is dead — shipping a new public key means a new build, which users can only
+> get by installing by hand, which is the friction this exists to remove.
 
-> **The private key is load-bearing.** Every installed copy of the app only trusts
-> bundles signed by it. Lose it and the update channel is dead: you would have to
-> ship a new public key inside a new build, which users can only get by installing
-> manually — exactly the friction this system exists to remove. Back it up before
-> the first release, not after.
+### 2. Public releases repo
 
-### 3. Add the repository secrets
+```bash
+gh repo create Spectrewolf8/RoverTools-Releases --public --add-readme
+```
 
-In the **source** repo's Settings → Secrets and variables → Actions:
+`--add-readme` matters: a release needs a commit to tag, and an empty repo has none.
+It holds no source, only assets and `latest.json`.
+
+### 3. Three secrets
+
+In the **source** repo → Settings → Secrets and variables → Actions:
 
 | Secret | What it is |
 |---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | Contents of the private key file |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password set when generating it |
-| `RELEASES_REPO_TOKEN` | A PAT with `contents: write` on `RoverTools-Releases` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you set when generating it |
+| `RELEASES_REPO_TOKEN` | A fine-grained PAT with `contents: write` on the releases repo |
 
-The workflow's own token cannot write to another repo, hence the PAT. A
-fine-grained token scoped to just that one repo is enough.
+The PAT is needed because the workflow's own token cannot write to another repo.
 
-### 4. Tag today's `main` as the baseline
-
-```bash
-git tag -a v0.1.0 -m "v0.1.0 baseline" && git push origin v0.1.0
-```
-
-Without this there is no release tag for git-cliff to measure from, and two things
-go wrong: `--bumped-version` has no baseline and refuses to compute one, and the
-first release's notes would be **every commit in the project's history** — hundreds
-of bullets in the update prompt.
-
-`v0.1.0-build.2` does not count; it is excluded by `tag_pattern` as a CI build.
-
-### 5. Check branch protection
-
-The workflow pushes a `chore(release): vX.Y.Z` commit to `main`. If `main` is
-protected, either allow the Actions bot to push or run releases from an unprotected
-branch.
-
----
-
-## Cutting a release
-
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=true
-```
-
-`dry_run=true` does everything except commit, tag and publish. Use it the first
-time, and after any edit to the workflow. When the rehearsal looks right:
-
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=false
-```
-
-**Inputs**
-
-- `bump` — `auto` derives the version from the commits since the last release tag:
-  `feat:` → minor, `fix:` / `perf:` → patch. `patch` / `minor` override it.
-- `dry_run` — build and verify without publishing.
-- `prerelease` — publish for real, but keep it out of the update feed. See
-  [Beta channel](#beta-channel-free).
-
-> **"No version bump — there are no releasable commits"** means everything since the
-> last tag was a `chore:`, `docs:`, `refactor:`, `test:`, `ci:` or `build:` commit.
-> Those are excluded from the version calculation as well as the notes, so `auto`
-> has nothing to work from. That is deliberate — it stops a release that would be
-> byte-identical to the last one from being published. Ship it with
-> `-f bump=patch` if you want it out regardless; the notes fall back to
-> "Maintenance release — internal changes only."
-
-**What users see:** within a few seconds of their next launch, a strip under the
-titlebar saying the new version is available, with the generated notes behind
-"What's new". Nothing downloads or installs until they press a button.
+**No baseline tag is required.** The first release's notes are just "First release" —
+nobody is updating *to* a first release, they install it.
 
 ---
 
 ## Versioning
 
-`src-tauri/Cargo.toml` is the **single source of truth**. `tauri.conf.json` has no
-`version` field on purpose — Tauri falls back to Cargo.toml, so there is one place
-to be wrong instead of three. `package.json`'s version is cosmetic and kept in step
-by the workflow.
+You choose the bump at dispatch. Nothing is inferred from commit messages.
 
-Pre-1.0 rules (set in `cliff.toml`): `feat:` bumps the minor, everything else the
-patch, and a breaking change also only bumps the minor — `0.x` promises nothing
-that a major bump would be announcing. When cutting 1.0, flip
-`breaking_always_bump_major` in `cliff.toml`.
+| Bump | `1.1.1` becomes | When |
+|---|---|---|
+| `patch` | `1.1.2` | Bug fixes, tweaks |
+| `minor` | `1.2.0` | New features |
+| `major` | `2.0.0` | Breaking changes — or `0.9.x` → `1.0.0`, committing to stability |
 
-Only plain `vX.Y.Z` tags count as releases. The `v0.1.0-build.N` tags from
-[`build-linux.yml`](../.github/workflows/build-linux.yml) are throwaway CI builds
-and are excluded by `tag_pattern`.
+A bump zeroes everything to its right, so there is no way to reach a version like
+`2.1.1` directly from `1.1.1`. If you ever need an exact version, set its predecessor by
+hand (`cargo set-version 2.1.0` in `src-tauri`, committed and pushed) and then release a
+`patch`.
+
+A major bump is not special to the updater — it compares semver and offers anything
+higher, so `1.1.1` → `2.0.0` reaches users through the same banner as a patch.
+
+`src-tauri/Cargo.toml` is the single source of truth; `tauri.conf.json` has no
+`version` field on purpose (Tauri falls back to Cargo.toml) and `package.json`'s copy
+is cosmetic, kept in step by the workflow. Only plain `vX.Y.Z` tags count as releases —
+the `v0.1.0-build.N` tags from [`build-linux.yml`](../.github/workflows/build-linux.yml)
+are throwaway CI builds and are ignored.
+
+Release notes are the commit subjects since the last release tag, merge commits
+dropped, nothing filtered. Users read those lines, so write subjects worth reading.
+
+---
+
+## Beta releases
+
+```bash
+gh workflow run release.yml -f bump=minor -f prerelease=true
+```
+
+There are **two channels**, and anyone can opt in from Settings → Updates → *Get beta
+versions*. Beta subscribers are offered betas **and** every normal release; stable
+users are only ever offered normal releases.
+
+| | Feed the app asks | Serves |
+|---|---|---|
+| Stable (default) | `releases/latest/download/latest.json` | Newest non-prerelease |
+| Beta | `raw.githubusercontent.com/…/HEAD/beta.json` | Newest release of **either** kind |
+
+Two different mechanisms because each is the simplest thing that works for its job.
+Stable rides on GitHub's own `latest` resolution, which needs no maintenance and makes
+promotion a one-line edit. Beta needs a pointer that *can* name a prerelease, and no
+GitHub URL does that — so the workflow rewrites `beta.json` on **every** publish. That
+"every" is what gives beta subscribers stable releases too.
+
+`beta.json` is a committed file rather than a release asset on some fixed tag: a
+mutable pointer *release* would either hijack `latest` or have to be excluded from
+pruning by hand.
+
+Promoting a beta to everyone, once you are happy with it:
+
+```bash
+gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
+```
+
+An edit of the same bundles, not another build — so stable users receive exactly what
+testers approved. Beta subscribers already have it and see nothing new, which is
+correct.
+
+Two things to know:
+
+- **The version number is spent either way.** The bump and tag land on `main`
+  regardless, so a beta that fails testing means the next attempt is the following
+  patch.
+- **Leaving the beta channel does not downgrade anyone.** The updater only moves
+  forward. Someone on a beta stays there until a stable release passes it.
 
 ---
 
@@ -157,109 +174,69 @@ and are excluded by `tag_pattern`.
 | AppImage | **Yes** | A single file the updater can swap |
 | `.deb` / `.rpm` | No | Owned by the package manager; published for manual install only |
 
-`.deb`/`.rpm` are still built and attached, they just never appear in
-`latest.json` — offering an update the client cannot install would be worse than
-offering none.
-
-macOS is not built at all today. Adding it means a `.app.tar.gz` target plus Apple
-notarization, which is its own piece of work.
+`.deb`/`.rpm` never appear in `latest.json` — offering an update the client cannot
+install is worse than offering none. macOS is not built at all; that needs a
+`.app.tar.gz` target plus Apple notarization.
 
 ---
 
-## Beta channel (free)
-
-`releases/latest/download/…` resolves to the newest **non-prerelease**, so a
-prerelease is published and simply never served. That is the whole channel — no
-second feed, no app-side setting.
-
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=false -f prerelease=true
-```
-
-The release is **born invisible**: installed apps keep seeing the previous stable,
-and the workflow asserts that before finishing. Testers install it by hand from the
-releases repo. When you are happy with it:
-
-```bash
-gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
-```
-
-Promotion is an edit, not another build — the bundles users get are byte-identical
-to the ones that were tested, and the feed picks them up on the next check.
-
-**It is one channel, not two.** There is no opt-in: a prerelease is absent from the
-feed, so testers install every beta by hand, including each new one. Real opt-in
-would need a second feed plus a channel setting driving
-`updater_builder().endpoints()` at runtime — deliberately not built.
-
-**A beta consumes its version number.** `prerelease` only changes how the release is
-published; the version bump, the `chore(release):` commit and the tag still land on
-`main`. So a beta that does not survive testing is not free — the next attempt is
-the following patch, and `main`'s changelog keeps the abandoned section. For a 0.x
-app that is a fair trade for keeping promotion a one-line edit; if betas start
-needing several attempts each, that is the signal to reconsider.
-
----
-
-## Verification and safety rails
+## Safety rails
 
 The workflow fails rather than shipping something broken:
 
-- **Non-semver version** → refused before building. The updater compares semver, so
-  an unparseable version would publish and then never be offered.
-- **No bump** → refused. Nothing releasable since the last tag.
-- **Missing signing key** → refused before spending a build.
-- **A missing `.sig`** for an updatable bundle → refused. Unsigned bundles build
-  fine and are then rejected by every client, which is the worst failure mode:
-  invisible until users are stuck.
-- **Feed verification** → after publishing, the workflow fetches `latest.json`
-  through the same URL the app uses and range-requests every bundle URL it
-  advertises, so a broken redirect or a mangled asset name surfaces in CI.
-- **Prerelease invisibility** → a `prerelease=true` run verifies the feed at its own
-  tag, then confirms the public feed is *not* serving it. A beta that leaks to
-  everyone is the failure mode worth catching, and it is silent otherwise.
-- **Pruning** keeps the newest 5 releases and explicitly skips whichever is marked
-  latest, so the release currently being served is never deleted.
+- **Prerequisites** — placeholder pubkey, missing secret, or a releases repo that is
+  missing, private or empty. Checked before building.
+- **Non-semver version** → refused. The updater compares semver, so an unparseable
+  version would publish and then never be offered.
+- **A missing `.sig`** for an updatable bundle → refused. Unsigned bundles build fine
+  and are then rejected by every client: invisible until users are stuck.
+- **Feed verification** → after publishing, fetches `latest.json` through the same URL
+  the app uses and range-requests every bundle URL it advertises.
+- **Channel correctness** → every run confirms `beta.json` names the release just
+  published, and a beta run additionally confirms the *stable* feed is **not** serving
+  it. A beta leaking to everyone is silent otherwise.
+- **Pruning** keeps the newest 5 releases and skips whichever is marked latest, so the
+  release being served is never deleted.
+
+Use `-f dry_run=true` to build and verify without publishing. Worth doing after editing
+the workflow itself; not needed for an ordinary release.
 
 ### Asset names have no spaces, deliberately
 
 Tauri names bundles after `productName` — "Orange Copy Paste" — and GitHub rewrites
-spaces in uploaded asset names to dots. That would silently invalidate every URL in
-`latest.json`. The workflow renames bundles to a `RoverTools_<version>_…` prefix and
-builds the URLs from the renamed files.
+spaces in uploaded asset names to dots, which would break every URL in `latest.json`.
+The workflow renames bundles to a `RoverTools_<version>_…` prefix and builds the URLs
+from the renamed files.
 
 ---
 
 ## Things worth knowing
 
-**Updates are disabled in debug builds.** A dev build reports the Cargo.toml
-version, so it would see any release as an upgrade and happily install over
-`target/debug` — replacing a build that loads from `devUrl` with one that doesn't.
-`updater.rs` refuses instead; "Check now" in Settings says so.
+**Updates are disabled in debug builds.** A dev build reports the Cargo.toml version,
+so it would see any release as an upgrade and install over `target/debug` — replacing a
+build that loads from `devUrl` with one that doesn't. `updater.rs` refuses instead.
 
-**"Run on startup" survives an update.** An update reinstalls rather than patches,
-so the recorded startup path can end up naming a replaced executable. The app
-rewrites the entry from its own location at every launch when the setting is on
-(`reconcile_autostart`).
+**"Run on startup" survives an update.** An update reinstalls rather than patches, so
+the recorded path can name a replaced executable. The app rewrites the entry from its
+own location at every launch when the setting is on (`reconcile_autostart`).
 
 **Windows installs are per-user** (`nsis.installMode: currentUser`), which keeps the
 install path stable across versions and avoids a UAC prompt on every update.
 
 **Install ends the process.** On Windows the installer takes over and the app exits
-mid-call; on Linux the AppImage is replaced and the app restarts itself. This is why
+mid-call; on Linux the AppImage is replaced and the app restarts itself. That is why
 installing sits behind a second confirmation rather than following the download —
 nobody should lose their window to a background download finishing.
 
 ---
 
-## Manual smoke test before trusting it
+## Smoke test before trusting it
 
-Full end-to-end can only be checked with two real releases:
+The updater itself can only be checked with two releases:
 
-1. Release `0.2.0`. Install it normally.
-2. Release `0.2.1`.
-3. Launch the `0.2.0` install. Within ~8 seconds the banner should appear with the
-   `0.2.1` notes.
-4. Download → progress bar → "Restart & install" → app comes back on `0.2.1`.
-5. With "Run on startup" on, confirm it is still on and pointing at the new
-   executable after the update.
+1. Release once. Install it from the published `.exe` — not a local `tauri build`,
+   which is unsigned and would not test the signing key.
+2. Release again.
+3. Launch the older install. Within ~8 seconds the banner should appear.
+4. Download → progress → **Restart & install** → the app comes back on the new version.
+5. With "Run on startup" on, confirm it is still on and pointing at the new executable.
