@@ -1,258 +1,224 @@
 ---
 name: create-rovertools-orangecp-release
-description: Cut a release of the Orange Copy Paste desktop app. Preflights the signing key, baseline tag and secrets, computes the semantic version from conventional commits, rehearses with a dry run, then dispatches the real release and verifies the published update feed. Use when asked to create/cut/ship a release, publish a new version, bump the app version, or preview what the next version would be.
+description: "Cut a release of the Orange Copy Paste desktop app — optional args: [patch|minor|major] [stable|beta] [dry-run|preview]. Asks for whatever is not specified rather than assuming, shows the version and notes about to ship, dispatches the release workflow after an explicit yes, then verifies both update channels. Use when asked to create/cut/ship a release, publish a new version, bump the app version, ship a beta, or preview what the next release would contain."
+argument-hint: "[patch|minor|major] [stable|beta] [dry-run|preview] — asks for anything omitted"
 ---
 
 # Cut an Orange Copy Paste release
 
-Drives `.github/workflows/release.yml`. That workflow computes the next version with
-git-cliff, builds signed NSIS + AppImage bundles, assembles `latest.json`, and
-publishes to the **public** releases repo the in-app updater reads.
+## Nothing is assumed
 
-Read [`docs/RELEASING.md`](../../../docs/RELEASING.md) if anything here is unclear —
-it is the reference; this file is the procedure.
+Three things decide what a run does. **Every one of them must come from the user, in
+this conversation, on this call.** There are no defaults here — not `patch`, not
+"stable", not "publish for real". A release is irreversible in public, and a silent
+default is how the wrong one ships.
+
+| Decision | Values |
+| --- | --- |
+| **Bump** | `patch` (bug fixes), `minor` (new features), or `major` (breaking, or committing to 1.0) |
+| **Channel** | `stable` (everyone) or `beta` (subscribers only) |
+| **Mode** | `publish`, `dry-run` (build only), or `preview` (dispatch nothing) |
+
+Whatever the invocation supplies, take it. For anything it does not, **ask** — see
+Step 0. Never infer one decision from another: "ship a release" says nothing about the
+bump, and `beta` says nothing about whether it is a patch or a minor.
+
+Drives [`.github/workflows/release.yml`](../../../.github/workflows/release.yml), which
+bumps the version, builds signed bundles, and publishes to the public releases repo the
+in-app updater reads.
+
+**The workflow checks its own prerequisites** — placeholder signing key, missing
+secrets, missing or private releases repo — and stops in seconds with a message saying
+what to fix. Do not re-implement those checks here; dispatch and read the failure.
+
+Reference: [`docs/RELEASING.md`](../../../docs/RELEASING.md).
 
 ## Arguments
 
-| Invocation | Behaviour |
-| --- | --- |
-| *(none)* | Full flow: preflight → preview → dry run → confirm → release → verify |
-| `preview` | Preflight and preview only. Dispatches nothing. |
-| `patch` / `minor` | Force the bump instead of deriving it from commits |
-| `dry-run` | Stop after the dry run; do not offer the real release |
-| `beta` | Full flow, but the real dispatch adds `-f prerelease=true` |
+Arguments are optional shortcuts that pre-answer one of the three decisions. They
+combine — `beta minor` answers two, leaving only the mode to ask about.
 
-## Constants
+| Argument | Answers | Meaning | Publishes? |
+| --- | --- | --- | --- |
+| `patch` | Bump | `0.2.0` → `0.2.1` | — |
+| `minor` | Bump | `0.2.0` → `0.3.0` | — |
+| `major` | Bump | `0.2.0` → `1.0.0` | — |
+| `beta` | Channel | Offered only to beta subscribers | Yes, betas only |
+| `stable` | Channel | Offered to everyone | Yes, to everyone |
+| `dry-run` | Mode | Build and verify, then stop | No |
+| `preview` | Mode | Print the version and notes, then stop | No |
 
-- Source repo: `Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST`
-- Releases repo: `Spectrewolf8/RoverTools-Releases` (public)
-- App dir: `orange-copy-paste-clipboard-app-rust`
-- Version source of truth: `orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml`
-- Feed: `https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json`
+A bare invocation with no arguments answers nothing, so all three get asked.
 
 ## Hard rules
 
-- **Never dispatch with `dry_run=false` without the user saying yes in that turn.** A
-  real run pushes a commit and a tag to `main` and publishes a public release.
-- **Never push a tag, commit, or edit a secret yourself.** Preflight *reports*
-  problems; the user fixes them or explicitly asks you to.
-- **Only pass `prerelease=true` when the user asked for a beta**, and only via the
-  workflow input — never by editing a release afterwards. The feed resolves to the
-  newest *non*-prerelease, so an accidental prerelease reaches nobody, and an
+- **Never guess a decision.** Bump, channel and mode each come from the user or get
+  asked. "They probably meant patch" is exactly the reasoning that ships the wrong thing.
+- **Never dispatch a real release without the user saying yes in that turn.** It pushes
+  a commit and tag to `main` and publishes publicly.
+- **Never push tags, commit, or edit secrets yourself.**
+- **Always pass all three flags explicitly** — `-f bump=…`, `-f prerelease=…`,
+  `-f dry_run=…` — even when a value matches the workflow's own default. The default can
+  change; an explicit flag is a record of what was chosen.
+- **Never flip the prerelease flag by editing a release afterwards.** Getting the channel
+  wrong is silent in both directions: an accidental beta reaches nobody, an
   accidentally-omitted one reaches everybody.
-- If a preflight gate fails, **stop and report**. Do not "helpfully" continue —
-  every gate below is something that silently produces a broken release.
 
 ---
 
-## Step 1 — Preflight
+## Step 0 — Gather what is missing
 
-Run these and report a compact pass/fail table. Do not proceed past a failure.
+Read the invocation. For every decision it did **not** answer, ask — all of them in a
+single `AskUserQuestion` call, not one at a time. Skip a question only when the argument
+already answered it.
 
-```bash
-git rev-parse --abbrev-ref HEAD && git status --porcelain && git fetch origin main -q && git rev-list --left-right --count origin/main...HEAD
-```
+- **Bump** — "Patch (bug fixes)" / "Minor (new features)" / "Major (breaking changes, or
+  committing to 1.0)". Show what each produces from the current version, e.g.
+  `0.1.0 → 0.1.1` vs `0.1.0 → 0.2.0` vs `0.1.0 → 1.0.0`; run Step 1's first command
+  before asking, so those numbers are real rather than illustrative. Offer major only
+  when it was asked for by name — it is rarely what someone means by "a new release",
+  and 1.0.0 is a statement about stability, not a bigger number.
+- **Channel** — "Stable (everyone)" / "Beta (subscribers only)".
+- **Mode** — "Publish" / "Dry run (build only, publishes nothing)" / "Preview (show the
+  version and notes, dispatch nothing)".
 
-| Gate | Requirement | If it fails |
-| --- | --- | --- |
-| Branch | On `main` | Releases are cut from `main`; the workflow pushes its release commit there |
-| Working tree | Clean | A dirty tree means the release may not match what is committed |
-| Sync with origin | 0 behind, 0 ahead | Pull or push first — the workflow builds from the pushed ref |
-
-```bash
-grep -n 'pubkey' orange-copy-paste-clipboard-app-rust/src-tauri/tauri.conf.json
-```
-
-| Gate | Requirement | If it fails |
-| --- | --- | --- |
-| Signing pubkey | **Not** `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY` | Blocker. Builds would succeed and every client would reject them. Point the user at `docs/RELEASING.md` §2 to generate the keypair, and remind them to back the private key up **outside CI** — losing it kills the update channel permanently. |
-
-```bash
-git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -3
-```
-
-| Gate | Requirement | If it fails |
-| --- | --- | --- |
-| Baseline tag | At least one plain `vX.Y.Z` tag | Blocker for `bump=auto`. git-cliff has nothing to measure from, and the notes would be the entire project history. Tell the user to run `git tag -a v0.1.0 -m "v0.1.0 baseline" && git push origin v0.1.0`. Do not create it yourself. |
-
-`v0.1.0-build.N` tags do **not** count — they are throwaway CI builds excluded by
-`tag_pattern` in `cliff.toml`.
-
-```bash
-gh secret list --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
-```
-
-| Gate | Requirement | If it fails |
-| --- | --- | --- |
-| Secrets | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `RELEASES_REPO_TOKEN` all present | Blocker. The workflow fails fast on a missing key, but `RELEASES_REPO_TOKEN` is only needed at publish time — so a dry run passes and the real run dies after building. |
-
-```bash
-gh repo view Spectrewolf8/RoverTools-Releases --json visibility,defaultBranchRef --jq '"\(.visibility) default=\(.defaultBranchRef.name // "NO COMMITS")"'
-```
-
-| Gate | Requirement | If it fails |
-| --- | --- | --- |
-| Releases repo | Exists, `PUBLIC`, and has a default branch | Must be public — the updater fetches with no credentials. `NO COMMITS` means `gh release create` has nothing to tag; tell the user to add a README. |
+If the user's answer to any question is ambiguous or arrives as free text that does not
+map to one of the values, ask again rather than picking the nearest. Do not proceed to
+Step 3 until all three are settled.
 
 ---
 
-## Step 2 — Preview the version and notes
+## Step 1 — Show what will ship
 
-Only if every gate passed. If `git-cliff` is unavailable locally, say so and skip to
-the dry run, which computes the same thing in CI.
-
-```bash
-git cliff --bumped-version
-```
+Constants: source repo `Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST`, releases repo
+`Spectrewolf8/RoverTools-Releases`.
 
 ```bash
-git cliff --unreleased --strip all
+grep -m1 '^version = ' orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml && git fetch origin main --tags -q && git rev-parse --abbrev-ref HEAD && git status --porcelain
 ```
 
-Report: **current version → next version**, and the notes verbatim. These notes are
-what users read in the update prompt, so flag anything that reads as internal jargon
-rather than a user-facing change — that is a cue to reword commits, not the template.
+Releases are cut from `main`, and the workflow builds from the pushed ref — so an unpushed
+commit will not be in the release. Say so if the branch is not `main` or the tree is dirty.
 
-**If the output is "There is nothing to bump":** everything since the last tag was a
-`chore:`, `docs:`, `refactor:`, `test:`, `ci:` or `build:` commit. Those are excluded
-from both the notes and the version calculation. This is intended — it stops a
-release identical to the last one. Report it and offer `patch` as the override.
+The notes users will read are the commit subjects since the last release tag. Nothing is
+filtered by prefix, so `chore:` and `docs:` subjects appear too:
+
+```bash
+LAST=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1); if [ -n "$LAST" ]; then echo "since $LAST:"; git log --no-merges --pretty='format:- %s' "$LAST..HEAD"; else echo "No release tag yet — the notes will be \"First release.\""; fi
+```
+
+Report the current version, the version being cut (patch bumps the third number, minor
+the second and zeroes the third), and the notes verbatim. Flag any subject that reads as
+internal jargon — that is a cue to reword the commit, not to hand-edit the notes.
 
 Stop here if invoked with `preview`.
 
----
+## Step 2 — Confirm
 
-## Step 3 — Dry run
+Restate all three settled decisions together, so a wrong answer in Step 0 is visible
+before it becomes public:
 
-Always rehearse first. This builds and verifies real signed bundles but commits,
-tags and publishes nothing.
-
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=true --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
+```text
+0.1.0 → 0.1.1 · stable (everyone) · publish
+pushes a commit and tag to main, and publishes publicly
+yes · or: change bump · change channel · dry-run · cancel
 ```
 
-Substitute the user's bump override for `auto` when one was given. Then watch it.
+**Wait for an explicit yes.** Anything else is a new choice, not a confirmation — go back
+to Step 0 for whichever decision they are changing, and show this block again.
 
-Shell state does not persist between commands here, so each block resolves the run id
-itself rather than relying on a variable or a `<RUN_ID>` placeholder — a literal
-placeholder would be parsed as an input redirection and fail confusingly:
+Skip this step only in `preview` mode, which never dispatches. `dry-run` still gets
+confirmed: it costs a full matrix build.
+
+## Step 3 — Dispatch
+
+All three flags, always, filled in from Step 0 — never shortened by leaning on a
+workflow default:
+
+```bash
+gh workflow run release.yml -f bump=patch -f prerelease=false -f dry_run=false --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
+```
+
+Substitute the settled values: `bump=patch|minor|major`, `prerelease=true` for a beta,
+`dry_run=true` for a rehearsal. Read the command back before running it — it is the last
+point where a wrong channel is still cheap to fix.
+
+Then watch it. Each block resolves the run id itself — shell state does not persist
+between commands, and a literal `<RUN_ID>` placeholder parses as input redirection. The
+`sleep` matters: `workflow run` returns before the run is queryable, so watching
+immediately picks up the *previous* run.
 
 ```bash
 sleep 8 && RUN_ID=$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId' --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST) && echo "watching run $RUN_ID" && gh run watch "$RUN_ID" --exit-status --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
 ```
 
-The `sleep` matters: `workflow run` returns before the run is queryable, so watching
-immediately picks up the *previous* run.
-
-On failure, pull the failing step's log rather than guessing:
+On failure, read the log rather than guessing:
 
 ```bash
 gh run view "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId' --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST)" --log-failed --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
 ```
 
-Report the resolved version and whether both bundles produced a `.sig`. Stop here if
-invoked with `dry-run`.
+Stop here if invoked with `dry-run` — nothing was published, so there is nothing to verify.
 
----
+## Step 4 — Verify both channels
 
-## Step 4 — Ask before the real release
+The workflow already asserts all of this and fails if it is wrong, so a green run is
+strong evidence. Confirm independently anyway — this is the one thing users depend on.
 
-Present, in one short block: the version being cut, the release notes, whether it is a
-beta or a stable release, and that this will push a commit and tag to `main` and
-publish a public release. Then **wait for an explicit yes.**
+What "correct" looks like depends on which kind of release it was:
 
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=false --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
-```
+| | Stable release | Beta |
+| --- | --- | --- |
+| Stable feed reports | the new version | the **previous** version |
+| Beta feed reports | the new version | the new version |
 
-For a beta — invoked as `beta`, or the user asked for one — add `prerelease=true`
-instead. It publishes normally but stays out of the feed, so testers install by hand
-and nobody else is offered it:
+A beta showing up in the stable feed means every user is being offered an untested
+build — treat that as urgent, not cosmetic.
 
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=false -f prerelease=true --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
-```
-
-Say plainly, when cutting a beta, that the version number is spent either way: the
-bump, commit and tag land on `main` regardless, so a beta that fails testing means the
-next attempt is the following patch.
-
-Watch it the same way as Step 3.
-
----
-
-## Step 5 — Verify
-
-The workflow verifies the feed itself and fails if it is wrong, so a green run is
-strong evidence. Confirm independently anyway — this is the one thing users depend on:
+Neither block needs a local `jq` or `base64` — `gh --jq` runs the whole expression
+itself, including the base64 decode, so these work on a bare machine:
 
 ```bash
-curl -fsSL https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json
+echo "stable channel:" && curl -fsSL https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64"'
 ```
 
-Check: `version` matches what was cut; `platforms` has **both** `windows-x86_64` and
-`linux-x86_64`; each has a non-empty `signature`. A `.deb` entry here would be a bug —
+```bash
+echo "beta channel:" && gh api repos/Spectrewolf8/RoverTools-Releases/contents/beta.json --jq '.content | gsub("\n";"") | @base64d | fromjson | "version=\(.version)  platforms=\(.platforms | keys | join(", "))"'
+```
+
+Both must list `windows-x86_64` and `linux-x86_64`. A `.deb` entry would be a bug —
 package-manager installs cannot self-update, so they are published for manual download
-only and must never appear in the feed.
-
-**For a beta this expectation inverts.** The URL above must still report the *previous*
-stable version, because a prerelease is deliberately absent from the feed — seeing the
-beta's version there means the prerelease flag did not take, and every user is being
-offered an untested build. Verify the beta's own feed at its tag instead, substituting
-the version:
-
-```bash
-curl -fsSL https://github.com/Spectrewolf8/RoverTools-Releases/releases/download/v0.3.0/latest.json
-```
-
-Then confirm the new release is the one marked latest and is not a prerelease —
-either would hide it from every client (for a beta, expect the opposite: the beta
-`prerelease=true`, and the previous stable still `latest=true`):
+only and must never appear in a feed.
 
 ```bash
 gh release list --repo Spectrewolf8/RoverTools-Releases --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'
 ```
 
-And that the expected assets are attached (`isLatest` is **not** a valid field on
-`release view` — only on `release list`, hence the two calls):
+## Step 5 — Report
 
-```bash
-gh release view --repo Spectrewolf8/RoverTools-Releases --json tagName,isDraft,assets --jq '"\(.tagName) draft=\(.isDraft)\n\([.assets[].name] | join("\n"))"'
-```
-
-Expect the NSIS `.exe`, the AppImage, the `.deb`, a `.sig` beside each updatable
-bundle, and `latest.json`.
-
----
-
-## Step 6 — Report
-
-Tell the user:
-
-- The version published, and the link to the release.
-- That installed copies will be offered it within ~8 seconds of their next launch,
-  notify-first — nothing installs without the user pressing Download then
+- The version published and a link to the release.
+- **Stable release:** installed copies are offered it within ~8 seconds of their next
+  launch, notify-first — nothing installs until the user presses Download, then
   Restart & install.
-- **For a beta:** that nobody is being offered it, that testers install the `.exe` or
-  AppImage by hand from the release page, and the one command that promotes it once
-  they are happy — same bundles, no rebuild:
+- **Beta:** only beta subscribers are offered it (Settings → Updates → *Get beta
+  versions*); everyone else is unaffected. Promoting it later is an edit of the same
+  bundles, no rebuild:
 
   ```bash
   gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
   ```
-- That `main` now carries the `chore(release): vX.Y.Z` commit and tag, so their local
-  clone needs a `git pull`.
-- Any gate that was skipped or any check that could not be run, and why.
+- `main` now carries the `release: vX.Y.Z` commit and tag, so the local clone needs a
+  `git pull`.
+- Anything that could not be checked, and why.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
-| `No version bump — there are no releasable commits` | Only skipped commit types since the last tag. Use `bump=patch`. |
-| `Resolved version '…' is not a plain X.Y.Z semver` | git-cliff returned something odd; check `tag_pattern` in `cliff.toml` still has the optional `v?`, or pass an explicit bump. |
+| Stops immediately on prerequisites | Read the message — it names the missing piece. Setup is `docs/RELEASING.md`; the user fixes it, not you. |
 | `has no .sig` | `createUpdaterArtifacts` was removed from `tauri.conf.json`, or the signing secrets are wrong. |
 | Publish step 403 / not found | `RELEASES_REPO_TOKEN` is missing, expired, or lacks `contents: write` on the releases repo. |
-| Release published but nobody is offered it | It was published with `prerelease=true`, or the pubkey in the shipped build does not match the signing key. |
-| `marked prerelease but the update feed is serving it` | The prerelease flag did not take on the release. Fix with `gh release edit <tag> --prerelease=true` before anyone launches the app. |
+| Published but nobody is offered it | It went out as a beta, or the pubkey in the shipped build does not match the signing key. |
+| `stable feed is serving it` on a beta run | The prerelease flag did not take. Fix with `gh release edit <tag> --prerelease=true` before anyone launches. |
+| `beta.json serves <older>` | The beta-feed step failed or was skipped. Beta subscribers are stuck on the previous release until it is rewritten. |
 | Release commit rejected on push | Branch protection on `main` blocks the Actions bot. |
-| Feed serves an older version | The publish succeeded but a newer release is marked `latest`, or the run failed after `gh release create`. Check the run log. |

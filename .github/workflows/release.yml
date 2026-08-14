@@ -1,21 +1,22 @@
 name: Release (manual)
 
-# Manual-only, on purpose: a release is a decision, not a side effect of merging.
-# Start it from the Actions tab or with `gh workflow run release.yml`.
+# Releasing is one run of this workflow. Click "Run workflow" in the Actions tab,
+# or `gh workflow run release.yml`. Every input has a working default, so a bare
+# run is a real patch release.
 #
 # What it does, in order:
-#   1. Works out the next version from the conventional commits since the last
-#      release tag, and regenerates CHANGELOG.md from them.
-#   2. Builds signed Windows (NSIS) and Linux (AppImage + deb) bundles.
-#   3. Assembles `latest.json` and publishes everything to the PUBLIC releases
+#   1. Checks its own prerequisites and stops with an actionable message if any
+#      are missing — before spending a build.
+#   2. Bumps the version, and collects the commit subjects since the last release
+#      tag as the notes users will read.
+#   3. Builds signed Windows (NSIS) and Linux (AppImage + deb) bundles.
+#   4. Assembles `latest.json` and publishes everything to the PUBLIC releases
 #      repo, which is what the app's updater reads.
 #
-# `dry_run` defaults to true — it does everything except commit, tag and publish,
-# so a first run (or a run after editing this file) is a rehearsal.
-#
-# `prerelease` publishes for real but marks the release as a prerelease, which the
-# update feed skips — so beta testers install it by hand and nobody is offered it.
-# Promoting it later is an edit of the same bundles, not another build.
+# Two escape hatches, both off by default:
+#   dry_run     build and verify, publish nothing. For after editing this file.
+#   prerelease  publish, but stay out of the update feed — a beta testers install
+#               by hand. Promoting it later is an edit, not another build.
 #
 # Required secrets (see docs/RELEASING.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
@@ -28,15 +29,15 @@ on:
       bump:
         description: "Version bump"
         type: choice
-        default: auto
+        default: patch
         options:
-          - auto # from the commits since the last release tag
-          - patch
-          - minor
+          - patch # 0.2.0 -> 0.2.1  bug fixes
+          - minor # 0.2.0 -> 0.3.0  new features
+          - major # 0.2.0 -> 1.0.0  breaking changes, or committing to 1.0
       dry_run:
         description: "Rehearse: build and verify, but publish nothing"
         type: boolean
-        default: true
+        default: false
       prerelease:
         description: "Beta: publish, but keep it out of the update feed"
         type: boolean
@@ -53,11 +54,11 @@ env:
   ASSET_PREFIX: RoverTools
 
 jobs:
-  # ── 1. Decide the version and write the changelog ──────────────────────────
+  # ── 1. Check prerequisites, decide the version, collect the notes ───────────
   prepare:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # commit the version bump + changelog, push the tag
+      contents: write # commit the version bump, push the tag
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: v${{ steps.version.outputs.version }}
@@ -65,15 +66,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # git-cliff needs the whole history and every tag to find the last
-          # release and the commits since it.
+          # Whole history and every tag: the notes are the commits since the last
+          # release tag, so both have to be present.
           fetch-depth: 0
           submodules: false
 
-      - name: Install git-cliff
-        uses: taiki-e/install-action@v2
-        with:
-          tool: git-cliff
+      - name: Check prerequisites
+        # All of it up front, before a build is spent. Each of these fails
+        # silently or expensively otherwise, and the message says what to do
+        # rather than what went wrong.
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+        run: |
+          set -uo pipefail
+          fail=0
+          bad() { echo "::error::$1"; fail=1; }
+
+          # A build with the placeholder key succeeds and is then rejected by
+          # every client — the one failure that is invisible until users are stuck.
+          if grep -q 'REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY' "$APP_DIR/src-tauri/tauri.conf.json"; then
+            bad "The updater pubkey in tauri.conf.json is still the placeholder. Generate a keypair (docs/RELEASING.md step 1) and commit the public half, or every client will reject this release."
+          fi
+
+          [ -n "$SIGNING_KEY" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY is not set. Bundles would be unsigned and unusable as updates."
+          [ -n "$SIGNING_PASSWORD" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set."
+
+          # Checked here rather than at publish time, where it would fail only
+          # after both platforms have finished building.
+          if [ -z "$GH_TOKEN" ]; then
+            bad "Secret RELEASES_REPO_TOKEN is not set. Needs a PAT with contents:write on $RELEASES_REPO."
+          else
+            repo=$(gh repo view "$RELEASES_REPO" --json visibility,defaultBranchRef 2>&1) || repo=""
+            if [ -z "$repo" ]; then
+              bad "Cannot see $RELEASES_REPO. Create it as a PUBLIC repo with a README, and check RELEASES_REPO_TOKEN grants contents:write on it."
+            else
+              [ "$(jq -r '.visibility' <<< "$repo")" = "PUBLIC" ] || bad "$RELEASES_REPO must be PUBLIC — the app fetches the update feed with no credentials."
+              [ "$(jq -r '.defaultBranchRef.name // ""' <<< "$repo")" != "" ] || bad "$RELEASES_REPO has no commits. Add a README — a release needs a commit to tag."
+            fi
+          fi
+
+          [ "$fail" -eq 0 ] || exit 1
+          echo "All prerequisites present."
 
       - name: Install cargo-edit
         # `cargo set-version` keeps Cargo.toml and Cargo.lock consistent, which
@@ -91,26 +126,12 @@ jobs:
           current=$(grep -m1 '^version = ' "$APP_DIR/src-tauri/Cargo.toml" | sed -E 's/version = "(.*)"/\1/')
           echo "Current version: $current"
 
+          IFS=. read -r maj min pat <<< "$current"
           case "$BUMP" in
-            auto)
-              # git-cliff prints the tag form (vX.Y.Z); strip the prefix.
-              # `|| true`, because under `set -e` a failure inside the substitution
-              # would abort the step with no explanation — the empty check below
-              # says something useful instead.
-              next=$(git cliff --bumped-version 2>&1 | tail -1 | sed 's/^v//') || true
-              if [ -z "$next" ]; then
-                echo "::error::git-cliff could not work out the next version. Check cliff.toml and that release tags exist."
-                exit 1
-              fi
-              ;;
-            patch|minor)
-              IFS=. read -r maj min pat <<< "$current"
-              if [ "$BUMP" = "minor" ]; then
-                next="${maj}.$((min + 1)).0"
-              else
-                next="${maj}.${min}.$((pat + 1))"
-              fi
-              ;;
+            major) next="$((maj + 1)).0.0" ;;
+            minor) next="${maj}.$((min + 1)).0" ;;
+            patch) next="${maj}.${min}.$((pat + 1))" ;;
+            *) echo "::error::Unknown bump '$BUMP'."; exit 1 ;;
           esac
 
           # The updater compares semver, so a version it cannot parse would be
@@ -119,11 +140,6 @@ jobs:
             echo "::error::Resolved version '$next' is not a plain X.Y.Z semver."
             exit 1
           fi
-          if [ "$next" = "$current" ]; then
-            echo "::error::No version bump — there are no releasable commits since v$current."
-            exit 1
-          fi
-
           echo "Next version: $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
@@ -141,26 +157,38 @@ jobs:
           mv package.json.tmp package.json
           git diff --stat
 
-      - name: Generate changelog and release notes
-        env:
-          TAG: v${{ steps.version.outputs.version }}
+      - name: Collect release notes
         run: |
           set -euo pipefail
-          git cliff --tag "$TAG" --output CHANGELOG.md
+          # The commit subjects since the last release, which is what the app shows
+          # under "What's new". No filtering by prefix: every commit that landed is
+          # a change that shipped, and hiding some of them from the list is how a
+          # release ends up describing itself inaccurately.
+          #
+          # Merge commits are dropped — "Merge pull request #24 from …" says nothing
+          # a user can act on, and the branch's own commits are listed anyway.
+          # Matched with a regex, not a glob: `v[0-9]*.[0-9]*.[0-9]*` also matches
+          # the `v0.1.0-build.N` tags from build-linux.yml, which are throwaway CI
+          # builds. Treating one as the last release would silently truncate the
+          # notes to "everything since a random CI build".
+          last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
 
-          # Just this release's bullets for the in-app "What's new". Its own body
-          # template, not the changelog's: that one opens with a `## 0.2.0 — date`
-          # heading, which is noise directly under a banner already saying
-          # "Version 0.2.0 is available".
-          notes_body='{% for group, group_commits in commits | group_by(attribute="group") %}### {{ group | upper_first }}
-          {% for commit in group_commits %}- {{ commit.message | upper_first }}
-          {% endfor %}
-          {% endfor %}'
-          git cliff --tag "$TAG" --unreleased --strip all --body "$notes_body" --output RELEASE_NOTES.md
-
-          if [ ! -s RELEASE_NOTES.md ]; then
-            echo "Maintenance release — internal changes only." > RELEASE_NOTES.md
+          if [ -n "$last" ]; then
+            echo "Notes cover $last..HEAD"
+            git log --no-merges --pretty='format:- %s' "$last..HEAD" > RELEASE_NOTES.md
+          else
+            # No previous release: listing the entire history would put hundreds of
+            # bullets in the update prompt, and nobody is updating *to* a first
+            # release anyway — they install it.
+            echo "No previous release tag — first release."
+            echo "First release." > RELEASE_NOTES.md
           fi
+
+          # An empty file would publish a release with a blank body.
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No code changes since $last." > RELEASE_NOTES.md
+          fi
+
           echo "── release notes ──"
           cat RELEASE_NOTES.md
 
@@ -181,8 +209,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$APP_DIR/package.json" "$APP_DIR/src-tauri/Cargo.toml" \
-                  "$APP_DIR/src-tauri/Cargo.lock" CHANGELOG.md
-          git commit -m "chore(release): $TAG"
+                  "$APP_DIR/src-tauri/Cargo.lock"
+          git commit -m "release: $TAG"
           git tag -a "$TAG" -m "$TAG"
           git push origin HEAD:${{ github.ref_name }}
           git push origin "$TAG"
@@ -211,19 +239,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: false
-
-      - name: Verify signing key is present
-        # First, before anything expensive: without a key Tauri builds unsigned
-        # bundles and skips the .sig files, and the release would publish and then
-        # be rejected by every client.
-        shell: bash
-        env:
-          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set — see docs/RELEASING.md."
-            exit 1
-          fi
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -389,12 +404,14 @@ jobs:
         run: |
           set -euo pipefail
           # `releases/latest/download/latest.json` resolves to the newest
-          # NON-prerelease, which is the whole mechanism behind the beta channel:
-          # a prerelease is published and simply never served. `--latest` and
-          # `--prerelease` contradict each other, so it is one or the other.
+          # NON-prerelease, which is what keeps a beta away from the stable
+          # channel: a prerelease is published and simply never served there.
+          # Beta subscribers reach it through beta.json instead (next step).
+          # `--latest` and `--prerelease` contradict each other, so it is one or
+          # the other.
           if [ "$PRERELEASE" = "true" ]; then
             visibility=(--prerelease)
-            echo "Publishing $TAG as a PRERELEASE — it will not enter the update feed."
+            echo "Publishing $TAG as a PRERELEASE — stable installs will not be offered it."
           else
             visibility=(--latest)
             echo "Publishing $TAG as the latest release — the update feed will serve it."
@@ -406,6 +423,32 @@ jobs:
             --notes-file artifacts/release-notes/RELEASE_NOTES.md \
             "${visibility[@]}" \
             release/*
+
+      - name: Update the beta channel feed
+        # Written on EVERY publish, beta or stable, so beta.json always names the
+        # newest release of either kind — that is what gives beta subscribers
+        # stable releases as well as prereleases.
+        #
+        # A file in the releases repo rather than a release asset: the stable
+        # channel gets its mutability from GitHub's own `latest` resolution, and a
+        # mutable pointer *release* would either hijack that or have to be excluded
+        # from pruning by hand. A committed file has neither problem.
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Updating an existing file needs its blob sha; creating one must omit it.
+          sha=$(gh api "repos/$RELEASES_REPO/contents/beta.json" --jq '.sha' 2>/dev/null || true)
+          args=(--method PUT "repos/$RELEASES_REPO/contents/beta.json"
+                -f "message=beta channel -> $TAG"
+                -f "content=$(base64 -w0 release/latest.json)")
+          # `if`, not `[ … ] && …`: a bare test that fails is a non-zero command,
+          # which `set -e` treats as fatal — and it fails on the first release,
+          # when there is no file to get a sha from.
+          if [ -n "$sha" ]; then args+=(-f "sha=$sha"); fi
+
+          gh api "${args[@]}" --jq '.content.path + " @ " + .commit.sha[0:7]'
 
       - name: Verify the published feed
         env:
@@ -444,16 +487,25 @@ jobs:
             echo "ok: $u"
           done
 
+          # The beta channel must name this release whichever kind it was, since
+          # subscribers there get both. Read through the API rather than the raw
+          # CDN: raw.githubusercontent caches for minutes, so a fresh commit would
+          # flake here for reasons that have nothing to do with the release.
+          beta=$(gh api "repos/$RELEASES_REPO/contents/beta.json" --jq '.content' | base64 -d | jq -r '.version')
+          [ "$beta" = "$VERSION" ] || { echo "::error::beta.json serves $beta, expected $VERSION"; exit 1; }
+          echo "ok: beta channel serves $beta"
+
           if [ "$PRERELEASE" = "true" ]; then
-            # The guarantee worth checking: installed apps still see the previous
-            # stable, or nothing at all when this is the first release ever. An
-            # unreachable stable feed is a pass here, hence `|| true`.
+            # The guarantee worth checking: installed apps on the STABLE channel
+            # still see the previous stable, or nothing at all when this is the
+            # first release ever. An unreachable stable feed is a pass here, hence
+            # `|| true`.
             public=$(curl -fsSL "$stable" 2>/dev/null | jq -r '.version' 2>/dev/null || true)
             if [ "$public" = "$VERSION" ]; then
-              echo "::error::$TAG is marked prerelease but the update feed is serving it."
+              echo "::error::$TAG is marked prerelease but the stable feed is serving it."
               exit 1
             fi
-            echo "Update feed still serves: ${public:-nothing yet} — $TAG is beta-only, as intended."
+            echo "Stable channel still serves: ${public:-nothing yet} — $TAG is beta-only, as intended."
           fi
 
       - name: Prune old releases (keep last 5)

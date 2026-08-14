@@ -67,7 +67,7 @@ RoverTools/
 ├─ .github/workflows/
 │  ├─ release.yml                          # manual: version, build, sign, publish
 │  └─ build-linux.yml                      # manual: Linux bundles without a Linux machine
-├─ cliff.toml                              # conventional commits → version + changelog
+├─ .claude/skills/                         # Claude Code skills — e.g. cutting a release
 └─ CLAUDE.md                               # workspace guide for AI coding agents
 ```
 
@@ -124,11 +124,13 @@ Full end-to-end sync needs a live backend, a Supabase project, and two accounts.
 
 ## Releasing
 
-A release is one manual workflow run. Version numbers, `CHANGELOG.md`, and the update feed are all derived from conventional commits — none are hand-edited.
+A release is one manual workflow run: `gh workflow run release.yml` for a patch, `-f bump=minor` for a feature release, `-f bump=major` for a breaking one.
 
-`.github/workflows/release.yml` (dispatch only, `dry_run` defaults to true) computes the next version with git-cliff, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
+`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, bumps the version in `src-tauri/Cargo.toml`, takes the commit subjects since the last release tag as the notes, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
 
-Every installed copy trusts only bundles signed with the updater private key, which makes that key load-bearing — lose it and the update channel is dead. Setup, versioning rules, and the pre-trust smoke test are in [`docs/RELEASING.md`](docs/RELEASING.md).
+Add `-f prerelease=true` to publish a beta — offered only to installs that opted in under Settings → Updates → *Get beta versions*, and promoted to everyone later with a `gh release edit`, no rebuild.
+
+Every installed copy trusts only bundles signed with the updater private key, which makes that key load-bearing — lose it and the update channel is dead. Setup, versioning rules, and the pre-trust smoke test are in [`docs/RELEASING.md`](docs/RELEASING.md). In Claude Code, `/create-rovertools-orangecp-release` ([`.claude/skills/`](.claude/skills/create-rovertools-orangecp-release/SKILL.md)) drives the same flow interactively — it asks for the bump, channel and mode instead of defaulting any of them, and verifies both channels afterwards.
 
 `.github/workflows/build-linux.yml` builds Linux bundles on demand when you don't have a Linux machine handy.
 
@@ -138,7 +140,7 @@ Releases never touch the sync backend; it deploys on its own.
 
 ## Conventions
 
-- **Commit messages:** lowercase `type(scope): subject`, then a few single-line bullets on what changed and why. The type drives the version bump, so `feat:` and `fix:` are load-bearing.
+- **Commit messages:** lowercase `type(scope): subject`, then a few single-line bullets on what changed and why. Subjects ship verbatim as release notes, so write them for users.
 - **Pull requests** open as drafts against each repo's own `main`.
 - **Migrations are written, never auto-applied.** Authoring an Alembic revision is normal work; applying it to a real database is a separate, explicitly approved step.
 - **Backend work goes on its own branches** in the backend repo, not alongside client changes.

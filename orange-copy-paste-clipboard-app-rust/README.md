@@ -250,19 +250,22 @@ Use the real installed binary name/path (check the `Exec=` line in the installed
 
 Nobody hand-distributes an installer after the first one. Cutting a release is a
 single manual workflow; installed copies notice it on their next launch and offer
-it. Version numbers, the changelog, and the update feed are all derived from commit
-history — none of them are edited by hand.
+it. You pick the bump at dispatch — nothing is inferred from commit messages — and
+the version number, release notes and update feed follow from that one choice.
 
 Full operational detail, including one-time setup, lives in
-[`../docs/RELEASING.md`](../docs/RELEASING.md).
+[`../docs/RELEASING.md`](../docs/RELEASING.md). Working through Claude Code, the
+`/create-rovertools-orangecp-release` skill walks the same flow: it asks for the
+bump, channel and mode rather than assuming any of them, shows the version and notes
+about to ship, dispatches only after an explicit yes, then verifies both channels.
 
 ### The shape of it
 
 ```text
-commits (feat:/fix:/…)
+you dispatch release.yml (patch, minor or major)
    │
-   ├─ git-cliff ──► next version ──► src-tauri/Cargo.toml
-   │                └──────────────► CHANGELOG.md + release notes
+   ├─ bump src-tauri/Cargo.toml
+   ├─ notes = commit subjects since the last release tag
    │
    └─ matrix build ─► signed NSIS (Windows) + AppImage/deb (Linux)
                           │
@@ -277,25 +280,20 @@ would mean shipping a token inside the app.
 
 ### Cutting a release
 
-Rehearse first — this does everything except commit, tag, and publish:
-
 ```bash
-gh workflow run release.yml -f bump=auto -f dry_run=true
+gh workflow run release.yml
 ```
 
-Then, once the rehearsal looks right:
+That is a patch release. Use `-f bump=minor` for a feature release or `-f bump=major` for
+a breaking one, or click **Run workflow** in the Actions tab and pick from the dropdown. The workflow checks its own
+prerequisites first, so a misconfigured release fails in seconds rather than after a
+build.
 
-```bash
-gh workflow run release.yml -f bump=auto -f dry_run=false
-```
-
-`bump=auto` reads the commits since the last release tag; `patch` and `minor`
-override it. Re-run with `dry_run=true` after any edit to the workflow itself.
-
-To ship a beta instead, add `-f prerelease=true`. It publishes for real but stays
-out of the update feed, so testers install it by hand and nobody else is offered it;
-promoting it later is a `gh release edit` of the same bundles rather than another
-build. Details in [docs/RELEASING.md](../docs/RELEASING.md#beta-channel-free).
+Two optional flags: `-f dry_run=true` builds and verifies without publishing (worth it
+after editing the workflow), and `-f prerelease=true` publishes a beta — offered to
+beta subscribers only, invisible to everyone else, and promoted later with a
+`gh release edit` of the same bundles rather than another build. Details in
+[docs/RELEASING.md](../docs/RELEASING.md).
 
 ### What users get
 
@@ -305,23 +303,28 @@ Nothing downloads or installs until they press something — **Download**, then
 **Restart & install** as a separate confirmation, so a background download
 finishing never takes the window out from under someone mid-paste. **Skip this
 version** silences that one release; the ✕ defers to the next launch. Settings →
-**Updates** shows the running version, a manual check, and a toggle for the
-automatic one.
+**Updates** shows the running version, a manual check, a toggle for the automatic
+one, and **Get beta versions**.
+
+Beta is opt-in per install and additive: subscribers are offered betas *and* every
+normal release, so nobody has to choose between early features and staying current.
+Turning it off stops future betas but never moves anyone backwards — the updater only
+goes forward.
 
 ### What to watch out for
 
 | Trap | Why it matters |
 | --- | --- |
 | **The signing key is load-bearing** | Every installed copy only trusts bundles signed by it. Lose it and the update channel is dead — users would have to reinstall by hand to get a build carrying a new public key. Back it up outside CI before the first release. |
-| **Commit messages *are* the changelog** | A `feat:` subject ships verbatim into the update prompt. Write them for users, not for yourself. |
-| **Only `feat:`, `fix:` and `perf:` move the version** | `chore:`, `docs:`, `refactor:`, `test:`, `ci:`, `build:` and non-conventional commits are excluded from both the notes and the bump. A batch of nothing but those makes `bump=auto` fail with *"no releasable commits"* — which is the intent, not a bug. To ship it anyway, dispatch with `-f bump=patch`. |
+| **Commit messages *are* the release notes** | Every commit subject since the last release ships verbatim into the update prompt — nothing is filtered by prefix. Write them for users, not for yourself. |
 | **`bun run tauri build` output cannot be served as an update** | Local builds are unsigned. Only `release.yml` produces the `.sig` files the feed needs. Use local bundles for testing, never for publishing. |
 | **Only NSIS and AppImage self-update** | `.deb`/`.rpm` are owned by the package manager. They are still built and attached for manual install, but never appear in `latest.json` — offering an update the client can't apply is worse than offering none. |
 | **The version lives in exactly one place** | `src-tauri/Cargo.toml`. `tauri.conf.json` has no `version` field on purpose (Tauri falls back to Cargo.toml), and `package.json`'s copy is cosmetic. Don't reintroduce it. |
-| **`build-linux.yml` is not a release** | Its `v0.1.0-build.N` tags are throwaway CI builds, excluded from versioning by `tag_pattern` in `cliff.toml`, and it publishes to this repo rather than the releases repo. Never point the updater at it — its prune step would then be a way to break every install. |
+| **`build-linux.yml` is not a release** | Its `v0.1.0-build.N` tags are throwaway CI builds, ignored when picking the last release, and it publishes to this repo rather than the releases repo. Never point the updater at it — its prune step would then be a way to break every install. |
 | **Dev builds refuse to update** | A debug build reports the Cargo.toml version, so it would see any release as an upgrade and install over `target/debug`, replacing a build that loads from `devUrl`. Settings says so rather than letting it happen. |
-| **Prereleases are invisible to the updater** | `releases/latest/download/…` resolves to the newest *non*-prerelease. That is exactly how `-f prerelease=true` works, so it is a feature when deliberate — and a silent one when not. Marking a release as a prerelease by hand in the releases repo pulls it out of the feed too. |
-| **A beta still spends its version number** | `prerelease=true` changes only how the release is published: the bump, the `chore(release):` commit and the tag still land on `main`. A beta that fails testing costs you that number, and leaves its section in the changelog. |
+| **Prereleases are invisible to the *stable* channel** | `releases/latest/download/…` resolves to the newest *non*-prerelease. That is exactly how `-f prerelease=true` works, so it is a feature when deliberate — and a silent one when not. Marking a release as a prerelease by hand pulls it out of the stable feed too. Beta subscribers read `beta.json` instead and still get it. |
+| **`beta.json` is what makes the beta channel additive** | The workflow rewrites it on *every* publish, beta or stable, so it always names the newest release of either kind. Skip that step for a stable release and beta subscribers silently stop receiving stable updates — they would sit on the last beta forever. |
+| **A beta still spends its version number** | `prerelease=true` changes only how the release is published: the bump, the `release:` commit and the tag still land on `main`. A beta that fails testing costs you that number. |
 
 Two safety rails worth knowing about, because they mean a bad release fails in CI
 rather than in front of users: the workflow refuses to publish a version that isn't

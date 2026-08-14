@@ -34,6 +34,22 @@ const STARTUP_CHECK_DELAY_MS: u64 = 8_000;
 const KEY_AUTO_CHECK: &str = "auto_check_updates";
 /// Settings key: a version the user asked not to be told about again.
 const KEY_SKIPPED: &str = "update_skipped_version";
+/// Settings key: `"beta"` opts into prereleases. Anything else means stable.
+const KEY_CHANNEL: &str = "update_channel";
+
+/// The beta channel's feed.
+///
+/// A separate file because the stable endpoint in `tauri.conf.json` points at
+/// `releases/latest/download/…`, which GitHub resolves to the newest
+/// *non*-prerelease — that is what keeps betas away from everyone else, and it
+/// also means there is no URL that would offer one. So the release workflow
+/// rewrites this file on every publish, beta or stable, and it therefore always
+/// names the newest release of either kind. A beta subscriber gets both.
+///
+/// `HEAD` rather than a branch name so renaming the default branch cannot break
+/// the channel for already-installed copies.
+const BETA_FEED: &str =
+    "https://raw.githubusercontent.com/Spectrewolf8/RoverTools-Releases/HEAD/beta.json";
 
 /// What the UI needs to describe an update. Field names are snake_case to match
 /// the rest of the Rust→TS surface (see `src/types.ts`).
@@ -140,12 +156,39 @@ fn skipped_version(app: &tauri::AppHandle) -> Option<String> {
     read_setting(app, KEY_SKIPPED)?.as_str().map(str::to_owned)
 }
 
+/// True when this install is subscribed to prereleases.
+fn on_beta_channel(app: &tauri::AppHandle) -> bool {
+    read_setting(app, KEY_CHANNEL)
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .as_deref()
+        == Some("beta")
+}
+
+/// The updater pointed at the channel this install follows.
+///
+/// Stable uses the endpoint compiled into `tauri.conf.json`; beta overrides it at
+/// runtime. Signature checking is unchanged either way — both feeds serve bundles
+/// signed with the same key, so a compromised feed still cannot install anything.
+fn updater_for(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    if !on_beta_channel(app) {
+        return app.updater().map_err(|e| e.to_string());
+    }
+    let url = BETA_FEED
+        .parse()
+        .map_err(|e| format!("beta feed URL is invalid: {e}"))?;
+    app.updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())
+}
+
 /// Ask the feed for a newer version and remember it if there is one.
 ///
 /// A check that finds nothing clears any previously pending update, so a release
 /// that gets pulled stops being offered.
 async fn run_check(app: &tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = updater_for(app)?;
     let found = updater.check().await.map_err(|e| e.to_string())?;
 
     let Some(update) = found else {
