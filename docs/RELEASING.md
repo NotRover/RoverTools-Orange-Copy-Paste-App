@@ -114,6 +114,8 @@ gh workflow run release.yml -f bump=auto -f dry_run=false
 - `bump` — `auto` derives the version from the commits since the last release tag:
   `feat:` → minor, `fix:` / `perf:` → patch. `patch` / `minor` override it.
 - `dry_run` — build and verify without publishing.
+- `prerelease` — publish for real, but keep it out of the update feed. See
+  [Beta channel](#beta-channel-free).
 
 > **"No version bump — there are no releasable commits"** means everything since the
 > last tag was a `chore:`, `docs:`, `refactor:`, `test:`, `ci:` or `build:` commit.
@@ -166,10 +168,36 @@ notarization, which is its own piece of work.
 
 ## Beta channel (free)
 
-`releases/latest/download/…` resolves to the newest **non-prerelease**. So a
-release marked as a prerelease in the releases repo is invisible to the updater:
-install it by hand to test, and no one else is offered it. Publishing a normal
-release afterwards promotes the feed.
+`releases/latest/download/…` resolves to the newest **non-prerelease**, so a
+prerelease is published and simply never served. That is the whole channel — no
+second feed, no app-side setting.
+
+```bash
+gh workflow run release.yml -f bump=auto -f dry_run=false -f prerelease=true
+```
+
+The release is **born invisible**: installed apps keep seeing the previous stable,
+and the workflow asserts that before finishing. Testers install it by hand from the
+releases repo. When you are happy with it:
+
+```bash
+gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
+```
+
+Promotion is an edit, not another build — the bundles users get are byte-identical
+to the ones that were tested, and the feed picks them up on the next check.
+
+**It is one channel, not two.** There is no opt-in: a prerelease is absent from the
+feed, so testers install every beta by hand, including each new one. Real opt-in
+would need a second feed plus a channel setting driving
+`updater_builder().endpoints()` at runtime — deliberately not built.
+
+**A beta consumes its version number.** `prerelease` only changes how the release is
+published; the version bump, the `chore(release):` commit and the tag still land on
+`main`. So a beta that does not survive testing is not free — the next attempt is
+the following patch, and `main`'s changelog keeps the abandoned section. For a 0.x
+app that is a fair trade for keeping promotion a one-line edit; if betas start
+needing several attempts each, that is the signal to reconsider.
 
 ---
 
@@ -185,8 +213,11 @@ The workflow fails rather than shipping something broken:
   fine and are then rejected by every client, which is the worst failure mode:
   invisible until users are stuck.
 - **Feed verification** → after publishing, the workflow fetches `latest.json`
-  through the same URL the app uses and HEADs every bundle URL it advertises, so a
-  broken redirect or a mangled asset name surfaces in CI.
+  through the same URL the app uses and range-requests every bundle URL it
+  advertises, so a broken redirect or a mangled asset name surfaces in CI.
+- **Prerelease invisibility** → a `prerelease=true` run verifies the feed at its own
+  tag, then confirms the public feed is *not* serving it. A beta that leaks to
+  everyone is the failure mode worth catching, and it is silent otherwise.
 - **Pruning** keeps the newest 5 releases and explicitly skips whichever is marked
   latest, so the release currently being served is never deleted.
 

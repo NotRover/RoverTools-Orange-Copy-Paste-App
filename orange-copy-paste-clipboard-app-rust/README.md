@@ -292,6 +292,11 @@ gh workflow run release.yml -f bump=auto -f dry_run=false
 `bump=auto` reads the commits since the last release tag; `patch` and `minor`
 override it. Re-run with `dry_run=true` after any edit to the workflow itself.
 
+To ship a beta instead, add `-f prerelease=true`. It publishes for real but stays
+out of the update feed, so testers install it by hand and nobody else is offered it;
+promoting it later is a `gh release edit` of the same bundles rather than another
+build. Details in [docs/RELEASING.md](../docs/RELEASING.md#beta-channel-free).
+
 ### What users get
 
 Within a few seconds of their next launch, a strip appears under the titlebar:
@@ -315,7 +320,8 @@ automatic one.
 | **The version lives in exactly one place** | `src-tauri/Cargo.toml`. `tauri.conf.json` has no `version` field on purpose (Tauri falls back to Cargo.toml), and `package.json`'s copy is cosmetic. Don't reintroduce it. |
 | **`build-linux.yml` is not a release** | Its `v0.1.0-build.N` tags are throwaway CI builds, excluded from versioning by `tag_pattern` in `cliff.toml`, and it publishes to this repo rather than the releases repo. Never point the updater at it — its prune step would then be a way to break every install. |
 | **Dev builds refuse to update** | A debug build reports the Cargo.toml version, so it would see any release as an upgrade and install over `target/debug`, replacing a build that loads from `devUrl`. Settings says so rather than letting it happen. |
-| **Prereleases are invisible to the updater** | `releases/latest/download/…` resolves to the newest *non*-prerelease. Marking a release as a prerelease makes it a beta you install by hand — useful, but easy to do by accident and then wonder why nobody is offered it. |
+| **Prereleases are invisible to the updater** | `releases/latest/download/…` resolves to the newest *non*-prerelease. That is exactly how `-f prerelease=true` works, so it is a feature when deliberate — and a silent one when not. Marking a release as a prerelease by hand in the releases repo pulls it out of the feed too. |
+| **A beta still spends its version number** | `prerelease=true` changes only how the release is published: the bump, the `chore(release):` commit and the tag still land on `main`. A beta that fails testing costs you that number, and leaves its section in the changelog. |
 
 Two safety rails worth knowing about, because they mean a bad release fails in CI
 rather than in front of users: the workflow refuses to publish a version that isn't

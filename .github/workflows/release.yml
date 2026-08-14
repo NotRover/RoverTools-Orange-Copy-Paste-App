@@ -13,6 +13,10 @@ name: Release (manual)
 # `dry_run` defaults to true — it does everything except commit, tag and publish,
 # so a first run (or a run after editing this file) is a rehearsal.
 #
+# `prerelease` publishes for real but marks the release as a prerelease, which the
+# update feed skips — so beta testers install it by hand and nobody is offered it.
+# Promoting it later is an edit of the same bundles, not another build.
+#
 # Required secrets (see docs/RELEASING.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
@@ -33,6 +37,10 @@ on:
         description: "Rehearse: build and verify, but publish nothing"
         type: boolean
         default: true
+      prerelease:
+        description: "Beta: publish, but keep it out of the update feed"
+        type: boolean
+        default: false
 
 env:
   # Public, releases-only repo. Source stays private; this holds binaries and
@@ -331,7 +339,7 @@ jobs:
       - name: Assemble release assets and latest.json
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          TAG: v${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p release
@@ -376,36 +384,57 @@ jobs:
           # A PAT: the workflow token is scoped to this repo and cannot write to
           # the releases repo.
           GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
-          TAG: v${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          # Not a prerelease: `releases/latest/download/latest.json` resolves to the
-          # newest NON-prerelease, so marking this one would publish a release the
-          # updater never sees. Prereleases in this repo are a deliberate beta
-          # channel for exactly that reason.
+          # `releases/latest/download/latest.json` resolves to the newest
+          # NON-prerelease, which is the whole mechanism behind the beta channel:
+          # a prerelease is published and simply never served. `--latest` and
+          # `--prerelease` contradict each other, so it is one or the other.
+          if [ "$PRERELEASE" = "true" ]; then
+            visibility=(--prerelease)
+            echo "Publishing $TAG as a PRERELEASE — it will not enter the update feed."
+          else
+            visibility=(--latest)
+            echo "Publishing $TAG as the latest release — the update feed will serve it."
+          fi
+
           gh release create "$TAG" \
             --repo "$RELEASES_REPO" \
             --title "$TAG" \
             --notes-file artifacts/release-notes/RELEASE_NOTES.md \
-            --latest \
+            "${visibility[@]}" \
             release/*
 
       - name: Verify the published feed
         env:
           GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          # Fetch through the same stable URL the app uses, so a broken redirect or
-          # a mangled asset name fails here rather than in front of users.
-          url="https://github.com/${RELEASES_REPO}/releases/latest/download/latest.json"
-          served=$(curl -fsSL "$url")
+          stable="https://github.com/${RELEASES_REPO}/releases/latest/download/latest.json"
+
+          # A prerelease is not reachable through the `latest` URL — that is the
+          # point of it — so verify the feed at its own tag and then confirm the
+          # invisibility actually holds.
+          if [ "$PRERELEASE" = "true" ]; then
+            feed="https://github.com/${RELEASES_REPO}/releases/download/${TAG}/latest.json"
+          else
+            # The same URL the app uses, so a broken redirect or a mangled asset
+            # name fails here rather than in front of users.
+            feed="$stable"
+          fi
+
+          served=$(curl -fsSL "$feed")
           echo "$served"
           got=$(jq -r '.version' <<< "$served")
           [ "$got" = "$VERSION" ] || { echo "::error::feed serves $got, expected $VERSION"; exit 1; }
 
-          # And every bundle URL it advertises is actually reachable. A `for` over
-          # the expanded list, not `| while read`: a pipeline's loop body runs in a
+          # Every bundle URL it advertises is actually reachable. A `for` over the
+          # expanded list, not `| while read`: a pipeline's loop body runs in a
           # subshell, where `exit 1` ends the subshell and the step still passes.
           # Asset names are renamed to be space-free above, so word splitting here
           # is safe. One byte rather than HEAD — the asset CDN is more consistent
@@ -414,6 +443,18 @@ jobs:
             curl -fsL -r 0-0 -o /dev/null "$u" || { echo "::error::unreachable: $u"; exit 1; }
             echo "ok: $u"
           done
+
+          if [ "$PRERELEASE" = "true" ]; then
+            # The guarantee worth checking: installed apps still see the previous
+            # stable, or nothing at all when this is the first release ever. An
+            # unreachable stable feed is a pass here, hence `|| true`.
+            public=$(curl -fsSL "$stable" 2>/dev/null | jq -r '.version' 2>/dev/null || true)
+            if [ "$public" = "$VERSION" ]; then
+              echo "::error::$TAG is marked prerelease but the update feed is serving it."
+              exit 1
+            fi
+            echo "Update feed still serves: ${public:-nothing yet} — $TAG is beta-only, as intended."
+          fi
 
       - name: Prune old releases (keep last 5)
         # Storage hygiene. Sorted newest-first and sliced from index 5, so the

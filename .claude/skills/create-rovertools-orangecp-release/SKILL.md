@@ -20,6 +20,7 @@ it is the reference; this file is the procedure.
 | `preview` | Preflight and preview only. Dispatches nothing. |
 | `patch` / `minor` | Force the bump instead of deriving it from commits |
 | `dry-run` | Stop after the dry run; do not offer the real release |
+| `beta` | Full flow, but the real dispatch adds `-f prerelease=true` |
 
 ## Constants
 
@@ -35,8 +36,10 @@ it is the reference; this file is the procedure.
   real run pushes a commit and a tag to `main` and publishes a public release.
 - **Never push a tag, commit, or edit a secret yourself.** Preflight *reports*
   problems; the user fixes them or explicitly asks you to.
-- **Never mark a release as a prerelease** unless the user asks for a beta. The feed
-  resolves to the newest *non*-prerelease, so a prerelease reaches nobody.
+- **Only pass `prerelease=true` when the user asked for a beta**, and only via the
+  workflow input — never by editing a release afterwards. The feed resolves to the
+  newest *non*-prerelease, so an accidental prerelease reaches nobody, and an
+  accidentally-omitted one reaches everybody.
 - If a preflight gate fails, **stop and report**. Do not "helpfully" continue —
   every gate below is something that silently produces a broken release.
 
@@ -154,13 +157,25 @@ invoked with `dry-run`.
 
 ## Step 4 — Ask before the real release
 
-Present, in one short block: the version being cut, the release notes, and that this
-will push a commit and tag to `main` and publish a public release. Then **wait for an
-explicit yes.**
+Present, in one short block: the version being cut, the release notes, whether it is a
+beta or a stable release, and that this will push a commit and tag to `main` and
+publish a public release. Then **wait for an explicit yes.**
 
 ```bash
 gh workflow run release.yml -f bump=auto -f dry_run=false --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
 ```
+
+For a beta — invoked as `beta`, or the user asked for one — add `prerelease=true`
+instead. It publishes normally but stays out of the feed, so testers install by hand
+and nobody else is offered it:
+
+```bash
+gh workflow run release.yml -f bump=auto -f dry_run=false -f prerelease=true --repo Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST
+```
+
+Say plainly, when cutting a beta, that the version number is spent either way: the
+bump, commit and tag land on `main` regardless, so a beta that fails testing means the
+next attempt is the following patch.
 
 Watch it the same way as Step 3.
 
@@ -180,8 +195,19 @@ Check: `version` matches what was cut; `platforms` has **both** `windows-x86_64`
 package-manager installs cannot self-update, so they are published for manual download
 only and must never appear in the feed.
 
+**For a beta this expectation inverts.** The URL above must still report the *previous*
+stable version, because a prerelease is deliberately absent from the feed — seeing the
+beta's version there means the prerelease flag did not take, and every user is being
+offered an untested build. Verify the beta's own feed at its tag instead, substituting
+the version:
+
+```bash
+curl -fsSL https://github.com/Spectrewolf8/RoverTools-Releases/releases/download/v0.3.0/latest.json
+```
+
 Then confirm the new release is the one marked latest and is not a prerelease —
-either would hide it from every client:
+either would hide it from every client (for a beta, expect the opposite: the beta
+`prerelease=true`, and the previous stable still `latest=true`):
 
 ```bash
 gh release list --repo Spectrewolf8/RoverTools-Releases --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'
@@ -207,6 +233,13 @@ Tell the user:
 - That installed copies will be offered it within ~8 seconds of their next launch,
   notify-first — nothing installs without the user pressing Download then
   Restart & install.
+- **For a beta:** that nobody is being offered it, that testers install the `.exe` or
+  AppImage by hand from the release page, and the one command that promotes it once
+  they are happy — same bundles, no rebuild:
+
+  ```bash
+  gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
+  ```
 - That `main` now carries the `chore(release): vX.Y.Z` commit and tag, so their local
   clone needs a `git pull`.
 - Any gate that was skipped or any check that could not be run, and why.
@@ -219,6 +252,7 @@ Tell the user:
 | `Resolved version '…' is not a plain X.Y.Z semver` | git-cliff returned something odd; check `tag_pattern` in `cliff.toml` still has the optional `v?`, or pass an explicit bump. |
 | `has no .sig` | `createUpdaterArtifacts` was removed from `tauri.conf.json`, or the signing secrets are wrong. |
 | Publish step 403 / not found | `RELEASES_REPO_TOKEN` is missing, expired, or lacks `contents: write` on the releases repo. |
-| Release published but nobody is offered it | It was marked prerelease, or the pubkey in the shipped build does not match the signing key. |
+| Release published but nobody is offered it | It was published with `prerelease=true`, or the pubkey in the shipped build does not match the signing key. |
+| `marked prerelease but the update feed is serving it` | The prerelease flag did not take on the release. Fix with `gh release edit <tag> --prerelease=true` before anyone launches the app. |
 | Release commit rejected on push | Branch protection on `main` blocks the Actions bot. |
 | Feed serves an older version | The publish succeeded but a newer release is marked `latest`, or the run failed after `gh release create`. Check the run log. |
