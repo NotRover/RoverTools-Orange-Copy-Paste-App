@@ -117,7 +117,7 @@ The same logical entities exist in both systems with different representations:
 | Note | `Note { id, title, content, created_at, updated_at, pinned, groups }` | `sync_entries { client_id, entry_type="note", encrypted_content, encrypted_metadata, ... }` |
 | Group tag | `Vec<String>` (flat list per entry) | `group_ids UUID[]` (server-side) + group names in `encrypted_metadata` |
 
-**Key distinction:** The desktop app uses local sequential integer IDs. The backend assigns UUIDs (`server_id`). The sync module maintains the mapping between them.
+**Key distinction:** The desktop app generates a UUID v4 per entry, which travels to the server as the `client_id`. The backend assigns its own UUID (`server_id`) as the row's primary key, and deduplicates on `(user_id, client_id, entry_type)`. The sync module keeps a `client_id → server_id` map in `id_map.json`; losing that file is safe, because the server dedupes on `client_id` regardless.
 
 ---
 
@@ -427,7 +427,7 @@ Device A (clipboard capture)
 
 **Encryption scheme:**
 - Algorithm: AES-256-GCM
-- Key: User Master Key (UMK), 32 bytes, derived via Argon2id
+- Key: User Master Key (UMK), 32 random bytes, stored server-side wrapped under `KEK = Argon2id(password, kdf_salt)` and unwrapped in memory at login
 - Nonce: 12 random bytes prepended to ciphertext, fresh per encryption
 - AAD: `client_id` — binds ciphertext to its entry
 - Wire format: `base64(nonce || ciphertext || auth_tag)`
@@ -521,53 +521,73 @@ A **Live Share** is a specialised group (`group_type: 'live_share'`, `max_member
 
 ---
 
-## 11. Desktop App Changes for Cloud
+## 11. Desktop App Cloud Integration
 
-The following additions are needed in `orange-copy-paste-clipboard-app-rust` to support cloud sync. **All changes are additive** — no existing capture, storage, or popup logic changes.
+How cloud sync sits inside `orange-copy-paste-clipboard-app-rust`. **The integration is additive** — no existing capture, storage, or popup logic changed.
 
-### 11.1 New Tauri module: `src-tauri/src/sync/`
+### 11.1 Tauri module: `src-tauri/src/sync/`
 
 ```
 src-tauri/src/sync/
-  mod.rs              -- SyncClient init, background runtime
-  client.rs           -- reqwest HTTP client, token refresh middleware
+  mod.rs              -- SyncClient init, background Tokio runtime
+  client.rs           -- reqwest HTTP client, Bearer + X-Device-Id injection, 401 refresh
+  supabase.rs         -- Supabase Auth (GoTrue): login, signup, refresh, recovery, PKCE
+  oauth.rs            -- Google sign-in via a loopback redirect server
   ws_listener.rs      -- WebSocket connection, event dispatch to Tauri event system
   pending_queue.rs    -- sync_pending.json read/write
-  crypto.rs           -- UMK derivation (Argon2id), AES-256-GCM, X25519
+  id_map.rs           -- client_id → server_id mapping (id_map.json)
+  sync_state.rs       -- connection/status state surfaced to the UI
+  persist.rs          -- cached session and sync metadata
+  crypto.rs           -- UMK unwrap (Argon2id KEK), AES-256-GCM, X25519
+  types.rs            -- wire types mirroring the backend contract
   commands.rs         -- Tauri commands exposed to React UI
-  config.rs           -- server URL, sync enabled flag, persisted in settings.json
+  config.rs           -- server + Supabase endpoints, sync enabled flag
 ```
 
-### 11.2 New Cargo dependencies
+### 11.2 Cargo dependencies
 ```toml
-reqwest        = { version = "0.12", features = ["json", "rustls-tls"] }
-tokio-tungstenite = { version = "0.23", features = ["rustls-tls-webpki-roots"] }
-argon2         = "0.5"
-aes-gcm        = "0.10"
-x25519-dalek   = "2"
-keyring        = "2"      # OS credential store (refresh token, device private key)
+reqwest           = { version = "0.12", features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots", "connect"] }
+argon2            = "0.5"
+aes-gcm           = "0.10"
+x25519-dalek      = { version = "2", features = ["static_secrets"] }
+sha2              = "0.10"    # blob checksums
+keyring           = "2"       # OS credential store (device private key, cached session)
+zeroize           = { version = "1", features = ["derive"] }
+open              = "5"       # system browser for the OAuth hop
 ```
 
-### 11.3 New Tauri commands (frontend-accessible)
+### 11.3 Tauri commands (frontend-accessible)
+
+Registered in `lib.rs`; see `src-tauri/src/sync/commands.rs` for exact signatures.
 ```
-sync_login(email, password, device_name) → Result<SyncUser>
+sync_login(email, password, …)           → Result<SyncUser>
+sync_signup(…)                           // Supabase sign-up
+sync_oauth_begin() / sync_oauth_complete() / sync_oauth_cancel()   // Google, loopback PKCE
+sync_reset_password(email)               // Supabase recovery
+sync_restore_session()                   // silent re-auth from cached session + device UMK wrap
 sync_logout()
 sync_get_user()                          → Option<SyncUser>
 sync_get_status()                        → SyncStatus
-  // { connected: bool, last_synced_at: Option<u64>, pending_count: u32 }
+sync_get_connection()                    → connection state for the UI
 sync_now()
 sync_set_enabled(enabled: bool)
-sync_set_server_url(url: String)
+sync_get_quota()                         → blob quota usage
+sync_list_devices() / sync_revoke_device(device_id)
 sync_get_groups()                        → Vec<SyncGroup>
 sync_create_group(name: String)          → SyncGroup
 sync_join_group(invite_code: String)
 sync_leave_group(group_id: String)
+sync_remove_member(…) / sync_delete_group(group_id)
+sync_list_invites() / sync_send_invite(…) / sync_accept_invite(…)
+sync_decline_invite(…) / sync_revoke_invite(…)
 sync_push_settings()                     // encrypt settings blob → PUT /settings; debounced 2s
 sync_pull_settings()                     // GET /settings; decrypt; emit sync:settings if server wins
 sync_receive_local_settings(json: String) // React → Rust bridge: pass localStorage values for next push
 sharing_invite(email: String, scope: String)    → SharingInvite
 sharing_accept(invite_code: String, scope: String)
 sharing_get_sessions()                          → Vec<SharingSession>
+sharing_refresh_sessions()                      // force a re-fetch
 sharing_update_scope(share_group_id: String, scope: String)
 sharing_end_session(share_group_id: String)     // owner dissolves group
 sharing_leave_session(share_group_id: String)   // non-owner leaves group
@@ -583,10 +603,10 @@ sharing_leave_session(share_group_id: String)   // non-owner leaves group
 | `src-tauri/src/state/app_state.rs` | Add `sync_client: Option<Arc<SyncClient>>` |
 | `src/components/app/App.tsx` | Listen for `sync:entry` and `sync:note` Tauri events to refresh history/notes |
 
-### 11.5 New React UI (settings screen additions)
+### 11.5 React UI (account screen + settings additions)
 - Cloud Sync toggle (enable/disable)
-- Server URL input (self-hosted support)
-- Login / logout form
+- Login / signup / Google sign-in / logout, with the account password prompt that establishes the E2E secret
+- Endpoints are compiled in — there is deliberately **no** server URL input; self-hosting overrides them through `settings.json` (`sync_server_url`, `supabase_url`, `supabase_anon_key`)
 - Connected devices list
 - Sync status indicator: Synced / Syncing / Offline / Re-login required
 - Per-entry cloud icon (synced ✓ / pending ○ / local-only —)
@@ -600,8 +620,8 @@ sharing_leave_session(share_group_id: String)   // non-owner leaves group
 
 ### Development
 ```
-localhost:5173   Vite dev server (React hot reload)
-localhost:1420   Tauri webview (app window)
+localhost:1420   Vite dev server, loaded by the Tauri webview (strict port)
+localhost:1421   Vite HMR websocket
 localhost:8000   FastAPI (uvicorn --reload)
 localhost:5432   PostgreSQL (Docker)
 localhost:6379   Redis (Docker)
@@ -656,7 +676,7 @@ These constraints must be preserved across any change to either submodule:
 | 1 | **Local store is always plaintext.** `history.bin` and `notes.bin` are never encrypted. The encryption boundary is the network. |
 | 2 | **Sync is always optional.** The app works fully without a network connection or server. Sync may be disabled at any time. |
 | 3 | **Server never sees plaintext content.** `encrypted_content` and `encrypted_metadata` must be encrypted on-device before any network call. |
-| 4 | **UMK never leaves the device.** It lives in memory only, derived from the user's password + `kdf_salt` at login. Cleared on lock or exit. |
+| 4 | **UMK never leaves the device in the clear.** It lives in memory only, unwrapped at login with a key derived from the user's password + `kdf_salt`. The server holds only the wrapped envelope. Cleared on lock or exit. |
 | 5 | **Tombstones always propagate.** A `deleted_at` value on a sync entry must be honoured by the receiving device. Deletion wins over concurrent update. |
 | 6 | **Capture pipeline is untouched.** The clipboard watcher and suppress-flag flow must not be modified by sync logic. Sync is a post-capture side-effect. |
 | 7 | **Pin/group operations sync bidirectionally.** A pin or group change on any device must propagate to all other devices for that entry. |
