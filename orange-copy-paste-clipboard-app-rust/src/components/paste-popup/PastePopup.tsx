@@ -38,7 +38,7 @@ const MIN_EMPTY_H = 100;
 
 function textPreview(content: string, max = 60): string {
   const line = content.replace(/[\r\n]+/g, " ").trim();
-  return line.length > max ? line.slice(0, max) + "…" : line;
+  return line.length > max ? line.slice(0, max) + "..." : line;
 }
 
 interface PastePayload {

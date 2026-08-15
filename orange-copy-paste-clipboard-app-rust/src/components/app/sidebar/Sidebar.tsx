@@ -52,9 +52,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 undefined;
 
   const syncTooltip =
-    syncState === "connected" ? "Sync & Groups · Connected" :
-    syncState === "syncing"   ? "Sync & Groups · Syncing…" :
-    syncState === "offline"   ? "Sync & Groups · Offline" :
+    syncState === "connected" ? "Sync & Groups - Connected" :
+    syncState === "syncing"   ? "Sync & Groups - Syncing..." :
+    syncState === "offline"   ? "Sync & Groups - Offline" :
                                 "Sync & Groups";
 
   return (

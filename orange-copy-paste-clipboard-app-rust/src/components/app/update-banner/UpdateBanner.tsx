@@ -28,7 +28,7 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
         <span className="app-update-from">You have {info.current_version}.</span>
         {stage === "downloading" && (
           <span className="app-update-note">
-            {percent === null ? "Downloading…" : `Downloading — ${percent}%`}
+            {percent === null ? "Downloading..." : `Downloading ${percent}%`}
           </span>
         )}
         {stage === "ready" && (
@@ -36,7 +36,7 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
             Downloaded and verified. The app restarts to finish installing.
           </span>
         )}
-        {stage === "installing" && <span className="app-update-note">Installing…</span>}
+        {stage === "installing" && <span className="app-update-note">Installing...</span>}
         {stage === "error" && error && (
           <span className="app-update-note app-update-error">{error}</span>
         )}

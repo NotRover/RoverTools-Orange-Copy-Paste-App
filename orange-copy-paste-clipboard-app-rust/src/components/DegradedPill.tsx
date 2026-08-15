@@ -19,7 +19,7 @@ export const DegradedPill: React.FC<{ className?: string }> = ({ className }) =>
 
   const detail = {
     degraded:
-      "History and notes are not being saved — restart the app from the main window.",
+      "History and notes are not being saved. Restart the app from the main window.",
     stalled:
       "History and notes may not be saving. If it does not pick up again on its own, restart from the main window.",
     unwritable:

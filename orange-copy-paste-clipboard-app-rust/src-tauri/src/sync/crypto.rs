@@ -68,7 +68,7 @@ pub fn unwrap_umk(kek: &[u8; 32], wrapped_b64: &str) -> Result<Zeroizing<[u8; 32
         .decode(wrapped_b64)
         .map_err(|e| format!("wrapped_umk base64: {e}"))?;
     let bytes = decrypt_bytes(kek, &combined, UMK_WRAP_AAD).map_err(|_| {
-        "Incorrect password — it doesn't match the one this account was encrypted with."
+        "Incorrect password. It does not match the one this account was encrypted with."
             .to_string()
     })?;
     if bytes.len() != 32 {

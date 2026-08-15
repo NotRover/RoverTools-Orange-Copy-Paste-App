@@ -342,7 +342,7 @@ const AccountScreen: React.FC = () => {
     try {
       const res = await invoke<{ email: string; is_new: boolean }>("sync_oauth_begin", {
         provider: "google",
-        deviceName: `Orange CP — ${navigator.platform || "Desktop"}`,
+        deviceName: `Orange CP - ${navigator.platform || "Desktop"}`,
       });
       setOauthEmail(res.email);
       setOauthIsNew(res.is_new);
@@ -434,7 +434,7 @@ const AccountScreen: React.FC = () => {
       const user = await invoke<SyncUser>(command, {
         email: loginEmail,
         password: loginPassword,
-        deviceName: `Orange CP — ${navigator.platform || "Desktop"}`,
+        deviceName: `Orange CP - ${navigator.platform || "Desktop"}`,
       });
       setLoginEmail("");
       setLoginPassword("");
@@ -721,7 +721,7 @@ const AccountScreen: React.FC = () => {
   };
 
   const status = !syncStatus
-    ? { kind: "checking", label: "Checking…" }
+    ? { kind: "checking", label: "Checking..." }
     : syncStatus.connected
       ? { kind: "connected", label: "Synced" }
       : syncStatus.pending_count > 0
@@ -746,7 +746,7 @@ const AccountScreen: React.FC = () => {
       : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" - ");
   // Amber is for the one case that needs a look: entries sync refused to send.
   const queueNoteWarn = !!syncStatus && syncStatus.skipped_count > 0;
 
@@ -821,7 +821,7 @@ const AccountScreen: React.FC = () => {
             <span className="scr-eyebrow">Cloud</span>
             <h2 className="scr-title">Account &amp; Sync</h2>
             <p className="scr-subtitle">
-              Sign in, manage your devices, and share across the cloud — end-to-end encrypted.
+              Sign in, manage your devices, and share across the cloud. End-to-end encrypted.
             </p>
           </header>
         )}
@@ -832,7 +832,7 @@ const AccountScreen: React.FC = () => {
             <div className="acct-hero-badge"><CloudCheck size={26} /></div>
             <h3 className="acct-hero-title">Sync across your devices</h3>
             <p className="acct-hero-desc">
-              Keep your clipboard history and notes in sync on every device — end-to-end
+              Keep your clipboard history and notes in sync on every device. End-to-end
               encrypted, so only you can read them.
             </p>
             <button type="button" className="auth-submit acct-hero-btn" onClick={handleSyncToggle}>
@@ -864,7 +864,7 @@ const AccountScreen: React.FC = () => {
                     : forgotOpen
                       ? "We'll email you a link to set a new password."
                       : authMode === "signup"
-                        ? "Sync your clipboard & notes — end-to-end encrypted."
+                        ? "Sync your clipboard and notes. End-to-end encrypted."
                         : "Sign in to sync across your devices."}
                 </p>
               </div>
@@ -874,7 +874,7 @@ const AccountScreen: React.FC = () => {
                 <div className="auth-form">
                   <p className="auth-hint">
                     {oauthIsNew
-                      ? "Set a password to encrypt your data — you'll enter it on each device, and it also lets you sign in with email."
+                      ? "Set a password to encrypt your data. You'll enter it on each device, and it also lets you sign in with email."
                       : "Enter your account password to unlock your encrypted data."}
                   </p>
                   <label className="auth-field">
@@ -882,7 +882,7 @@ const AccountScreen: React.FC = () => {
                     <input
                       className="auth-input"
                       type="password"
-                      placeholder="••••••••"
+                      placeholder={oauthIsNew ? "At least 8 characters" : "Your password"}
                       value={oauthPassword}
                       autoFocus
                       onChange={(e) => setOauthPassword(e.target.value)}
@@ -896,7 +896,7 @@ const AccountScreen: React.FC = () => {
                       <input
                         className="auth-input"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="Repeat the password"
                         value={oauthConfirm}
                         onChange={(e) => setOauthConfirm(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") handleOauthComplete(); }}
@@ -912,7 +912,7 @@ const AccountScreen: React.FC = () => {
                     disabled={oauthLoading || !oauthPassword}
                   >
                     {oauthLoading
-                      ? "Unlocking…"
+                      ? "Unlocking..."
                       : oauthIsNew
                         ? "Set password & continue"
                         : "Unlock"}
@@ -959,7 +959,7 @@ const AccountScreen: React.FC = () => {
                         onClick={handleResetPassword}
                         disabled={resetLoading || !resetEmail.trim()}
                       >
-                        {resetLoading ? "Sending…" : "Send reset link"}
+                        {resetLoading ? "Sending..." : "Send reset link"}
                       </button>
                     </>
                   )}
@@ -973,7 +973,7 @@ const AccountScreen: React.FC = () => {
                     className="auth-textlink auth-textlink--center"
                     onClick={closeForgot}
                   >
-                    ← Back to sign in
+                    Back to sign in
                   </button>
                 </div>
               ) : (
@@ -1028,7 +1028,7 @@ const AccountScreen: React.FC = () => {
                       <input
                         className="auth-input"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder={authMode === "signup" ? "At least 8 characters" : "Your password"}
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
@@ -1053,8 +1053,8 @@ const AccountScreen: React.FC = () => {
                     >
                       {loginLoading
                         ? authMode === "signup"
-                          ? "Creating account…"
-                          : "Signing in…"
+                          ? "Creating account..."
+                          : "Signing in..."
                         : authMode === "signup"
                           ? "Create account"
                           : "Sign in"}
@@ -1069,7 +1069,7 @@ const AccountScreen: React.FC = () => {
                       disabled={loginLoading || oauthLoading || conn?.configured === false}
                     >
                       <GoogleIcon size={16} />
-                      {oauthLoading ? "Waiting for browser…" : "Continue with Google"}
+                      {oauthLoading ? "Waiting for browser..." : "Continue with Google"}
                     </button>
                   </div>
                 </>
@@ -1087,7 +1087,7 @@ const AccountScreen: React.FC = () => {
 
               <div className="auth-secure">
                 <Key size={12} weight="fill" />
-                End-to-end encrypted — only you can read your data
+                End-to-end encrypted. Only you can read your data
               </div>
             </div>
 
@@ -1111,11 +1111,11 @@ const AccountScreen: React.FC = () => {
                   <span className="acct-id-dot" />
                   {status.label}
                   {status.kind === "connected" && lastSynced
-                    ? ` · ${formatLastSynced(lastSynced)}`
+                    ? ` - ${formatLastSynced(lastSynced)}`
                     : ""}
                   {/* Presence is only trustworthy while this device is connected. */}
                   {status.kind === "connected" && devices.length > 0
-                    ? ` · ${onlineDevices} device${onlineDevices === 1 ? "" : "s"} online`
+                    ? ` - ${onlineDevices} device${onlineDevices === 1 ? "" : "s"} online`
                     : ""}
                 </span>
                 {queueNote && (
@@ -1131,7 +1131,7 @@ const AccountScreen: React.FC = () => {
                   onClick={handleSyncNow}
                   disabled={syncNowLoading}
                 >
-                  {syncNowLoading ? "Syncing…" : "Sync now"}
+                  {syncNowLoading ? "Syncing..." : "Sync now"}
                 </button>
                 <button type="button" className="acct-btn acct-btn--quiet" onClick={handleLogout}>
                   Sign out
@@ -1244,7 +1244,7 @@ const AccountScreen: React.FC = () => {
                           onClick={handleCreateLasting}
                           disabled={createLoading || !newGroupName.trim()}
                         >
-                          {createLoading ? "Creating…" : "Create"}
+                          {createLoading ? "Creating..." : "Create"}
                         </button>
                       </div>
                       {/* Decided at creation and fixed per member at join, so changing it
@@ -1284,7 +1284,7 @@ const AccountScreen: React.FC = () => {
                           onClick={handleCreateQuick}
                           disabled={createLoading || !quickEmail.trim()}
                         >
-                          {createLoading ? "Sending…" : "Invite"}
+                          {createLoading ? "Sending..." : "Invite"}
                         </button>
                       </div>
                       {scopePills(quickScope, setQuickScope)}
@@ -1321,7 +1321,7 @@ const AccountScreen: React.FC = () => {
                       onClick={handleJoin}
                       disabled={joinLoading || !joinCode.trim()}
                     >
-                      {joinLoading ? "Joining…" : "Join"}
+                      {joinLoading ? "Joining..." : "Join"}
                     </button>
                   </div>
                 </div>
@@ -1367,8 +1367,8 @@ const AccountScreen: React.FC = () => {
                         <span className="acct-row-meta">
                           {memberCount} member{memberCount === 1 ? "" : "s"}
                           {isPool
-                            ? ` · history ${space.group.share_history ? "on" : "off"}`
-                            : ` · ${scopeLabel(space.session.my_scope)}`}
+                            ? ` - history ${space.group.share_history ? "on" : "off"}`
+                            : ` - ${scopeLabel(space.session.my_scope)}`}
                         </span>
                       </span>
                       <span className="acct-space-pills">
@@ -1600,10 +1600,10 @@ const AccountScreen: React.FC = () => {
                             <span className="acct-row-meta">
                               {d.platform}
                               {online
-                                ? " · online"
+                                ? " - online"
                                 : seen
-                                  ? ` · last seen ${seen}`
-                                  : " · offline"}
+                                  ? ` - last seen ${seen}`
+                                  : " - offline"}
                             </span>
                           </div>
                           <span className={`acct-dot${online ? " online" : ""}`} />
@@ -1653,7 +1653,7 @@ const AccountScreen: React.FC = () => {
 
             <p className="auth-secure acct-secure-foot">
               <Key size={12} weight="fill" />
-              End-to-end encrypted — only you can read your data
+              End-to-end encrypted. Only you can read your data
             </p>
 
           </>

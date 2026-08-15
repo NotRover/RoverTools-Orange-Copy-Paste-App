@@ -293,7 +293,7 @@ const GroupManagerCard: React.FC<GroupManagerCardProps> = ({
           ref={inputRef}
           type="text"
           className={`gm-add-input${error ? " gm-add-input--error" : ""}`}
-          placeholder={isRenaming ? "Rename group…" : "New group name…"}
+          placeholder={isRenaming ? "Rename group..." : "New group name..."}
           value={inputValue}
           onChange={(e) => {
             setInputValue(e.target.value);
