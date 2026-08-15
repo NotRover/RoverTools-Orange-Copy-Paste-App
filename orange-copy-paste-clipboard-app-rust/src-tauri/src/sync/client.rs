@@ -4,7 +4,8 @@
 //!   - Base URL injection
 //!   - `Authorization: Bearer <supabase jwt>` from the in-memory access token
 //!   - `X-Device-Id` header on device-scoped routes
-//!   - Automatic 401 → Supabase token refresh → retry (once)
+//!   - Automatic 401 → Supabase token refresh → retry (once), plus a proactive
+//!     refresh once the JWT is close to expiry
 //!   - 10-second request timeout
 //!
 //! Identity itself (login / signup / refresh) is Supabase's; see
@@ -15,6 +16,7 @@
 //! using (Tauri's runtime for commands, or the sync module's dedicated runtime
 //! for background tasks).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -24,6 +26,52 @@ use serde::{Deserialize, Serialize};
 use crate::sync::supabase::SupabaseAuth;
 
 const REQUEST_TIMEOUT_SECS: u64 = 10;
+
+/// Refresh the access token this many seconds before it actually expires, so a
+/// request (or a WebSocket handshake) never goes out holding a JWT that dies
+/// mid-flight.
+const TOKEN_REFRESH_SKEW_SECS: u64 = 120;
+
+/// A failed backend call, keeping the HTTP status alongside the message.
+///
+/// Same reason as [`crate::sync::supabase::AuthError`]: session restore must
+/// distinguish "the backend is unreachable" from "the backend rejected us".
+#[derive(Debug, Clone)]
+pub struct ApiError {
+    /// Status the backend replied with, or `None` when no response arrived.
+    pub status: Option<u16>,
+    pub message: String,
+}
+
+impl ApiError {
+    /// True when retrying later could plausibly succeed.
+    pub fn is_transient(&self) -> bool {
+        match self.status {
+            None => true,
+            Some(status) => status == 408 || status == 429 || status >= 500,
+        }
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<ApiError> for String {
+    fn from(e: ApiError) -> Self {
+        e.message
+    }
+}
+
+/// Seconds since the Unix epoch, or 0 if the clock is before it.
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 // ── API request / response types ─────────────────────────────────────
 
@@ -411,12 +459,39 @@ pub struct SyncHttpClient {
     /// This device's server-assigned UUID (sent as `X-Device-Id`).
     device_id: Mutex<Option<String>>,
     user_id: Mutex<Option<String>>,
+    /// Serialises token refresh.
+    ///
+    /// GoTrue rotates the refresh token on every use and revokes the whole
+    /// token family when a spent one is presented outside its reuse window.
+    /// Startup fires the WebSocket listener and the initial sync at the same
+    /// time, so without this two concurrent 401s would each spend the same
+    /// stored token and log the user out permanently.
+    refresh_lock: tokio::sync::Mutex<()>,
+    /// Bumped on every access-token replacement.  A caller that entered
+    /// [`Self::refresh_access_token`] at generation N and finds a higher one
+    /// after taking `refresh_lock` knows a concurrent refresh already produced
+    /// the fresh token it wanted, and must not spend the rotated token again.
+    token_generation: AtomicU64,
+    /// Unix seconds at which the current access token expires; 0 when unknown.
+    access_token_expires_at: AtomicU64,
 }
 
 impl SyncHttpClient {
     pub fn new(base_url: String, supabase: Arc<SupabaseAuth>) -> Arc<Self> {
+        Self::with_timeout(base_url, supabase, REQUEST_TIMEOUT_SECS)
+    }
+
+    /// Same client with a custom request timeout.  Session restore uses a
+    /// longer one: it runs while the app is still starting up (often right
+    /// after an update, before the network is fully back), and a timeout there
+    /// costs the user a manual login.
+    pub fn with_timeout(
+        base_url: String,
+        supabase: Arc<SupabaseAuth>,
+        timeout_secs: u64,
+    ) -> Arc<Self> {
         let inner = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
             .expect("reqwest client");
         Arc::new(Self {
@@ -427,11 +502,26 @@ impl SyncHttpClient {
             refresh_token: Mutex::new(None),
             device_id: Mutex::new(None),
             user_id: Mutex::new(None),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            token_generation: AtomicU64::new(0),
+            access_token_expires_at: AtomicU64::new(0),
         })
     }
 
-    pub fn set_access_token(&self, token: String) {
+    /// Store a freshly issued access token.  `expires_in` is the lifetime
+    /// GoTrue reported in seconds; 0 means "unknown", which disables the
+    /// proactive refresh and falls back to the reactive 401 path.
+    pub fn set_access_token(&self, token: String, expires_in: u64) {
         *self.access_token.lock() = Some(token);
+        self.access_token_expires_at.store(
+            if expires_in == 0 {
+                0
+            } else {
+                now_secs().saturating_add(expires_in)
+            },
+            Ordering::SeqCst,
+        );
+        self.token_generation.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn set_refresh_token(&self, token: String) {
@@ -455,6 +545,8 @@ impl SyncHttpClient {
         *self.refresh_token.lock() = None;
         *self.device_id.lock() = None;
         *self.user_id.lock() = None;
+        self.access_token_expires_at.store(0, Ordering::SeqCst);
+        self.token_generation.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn is_authenticated(&self) -> bool {
@@ -494,20 +586,55 @@ impl SyncHttpClient {
 
     /// Exchange the stored refresh token for a fresh access token via Supabase.
     /// Rotates and persists the refresh token on success.
-    async fn refresh_access_token(&self) -> Result<(), String> {
+    ///
+    /// Single-flight: concurrent callers queue on `refresh_lock`, and whoever
+    /// gets in after the token has already moved on returns straight away
+    /// instead of spending the rotated token a second time.
+    pub(crate) async fn refresh_access_token(&self) -> Result<(), String> {
+        // Read the generation *before* queueing, so it reflects the token the
+        // caller found stale rather than one a winner installed while we waited.
+        let seen = self.token_generation.load(Ordering::SeqCst);
+        let _guard = self.refresh_lock.lock().await;
+        if self.token_generation.load(Ordering::SeqCst) != seen {
+            // Someone refreshed while we were queued; their token is ours too.
+            return Ok(());
+        }
+
         let refresh = self
             .refresh_token
             .lock()
             .clone()
             .ok_or("session expired, log in again")?;
         let session = self.supabase.refresh(&refresh).await?;
-        self.set_access_token(session.access_token);
+        // Rotate the stored token before publishing the access token: the
+        // generation bump in set_access_token is what releases queued callers,
+        // and they must never observe the spent refresh token.
         *self.refresh_token.lock() = Some(session.refresh_token.clone());
         let user_id = self.user_id.lock().clone();
         if let Some(user_id) = user_id {
             let _ = crate::sync::crypto::store_refresh_token(&user_id, &session.refresh_token);
         }
+        self.set_access_token(session.access_token, session.expires_in);
         Ok(())
+    }
+
+    /// Refresh ahead of expiry so a request never leaves with a JWT that dies
+    /// in flight, and so the WebSocket reconnect loop stops handshaking with a
+    /// token that expired while the app sat idle.
+    ///
+    /// Best-effort: on failure the caller proceeds and the reactive 401 path in
+    /// [`Self::run`] gets its turn.
+    pub async fn ensure_fresh_access_token(&self) {
+        let expires_at = self.access_token_expires_at.load(Ordering::SeqCst);
+        if expires_at == 0 || self.access_token.lock().is_none() {
+            return;
+        }
+        if now_secs().saturating_add(TOKEN_REFRESH_SKEW_SECS) < expires_at {
+            return;
+        }
+        if let Err(e) = self.refresh_access_token().await {
+            eprintln!("[sync] proactive token refresh failed: {e}");
+        }
     }
 
     /// Run a request built by `factory`, retrying once after a Supabase token
@@ -520,19 +647,32 @@ impl SyncHttpClient {
         tag: &str,
         allow_404: bool,
         factory: F,
-    ) -> Result<Option<reqwest::Response>, String>
+    ) -> Result<Option<reqwest::Response>, ApiError>
     where
         F: Fn() -> Result<reqwest::RequestBuilder, String>,
     {
+        self.ensure_fresh_access_token().await;
         let mut refreshed = false;
         loop {
-            let resp = factory()?
+            let resp = factory()
+                .map_err(|message| ApiError {
+                    // A request we could not even build is a local problem
+                    // (no token yet), not something a retry fixes.
+                    status: Some(0),
+                    message,
+                })?
                 .send()
                 .await
-                .map_err(|e| format!("{tag}: {e}"))?;
+                .map_err(|e| ApiError {
+                    status: None,
+                    message: format!("{tag}: {e}"),
+                })?;
             let code = resp.status().as_u16();
             if code == 401 && !refreshed {
-                self.refresh_access_token().await?;
+                self.refresh_access_token().await.map_err(|message| ApiError {
+                    status: Some(401),
+                    message,
+                })?;
                 refreshed = true;
                 continue;
             }
@@ -541,14 +681,30 @@ impl SyncHttpClient {
             }
             if !resp.status().is_success() {
                 let body = resp.text().await.unwrap_or_default();
-                return Err(format!("{tag} {code}: {body}"));
+                return Err(ApiError {
+                    status: Some(code),
+                    message: format!("{tag} {code}: {body}"),
+                });
             }
             return Ok(Some(resp));
         }
     }
 
-    /// Run and parse the JSON body as `T`.
+    /// Run and parse the JSON body as `T`, flattening the error to a string.
+    /// Most callers only ever surface the message; the handful that need the
+    /// status use [`Self::get_json_classified`] directly.
     async fn get_json<T, F>(&self, tag: &str, factory: F) -> Result<T, String>
+    where
+        T: serde::de::DeserializeOwned,
+        F: Fn() -> Result<reqwest::RequestBuilder, String>,
+    {
+        self.get_json_classified(tag, factory)
+            .await
+            .map_err(String::from)
+    }
+
+    /// Run and parse the JSON body as `T`, keeping the HTTP status.
+    async fn get_json_classified<T, F>(&self, tag: &str, factory: F) -> Result<T, ApiError>
     where
         T: serde::de::DeserializeOwned,
         F: Fn() -> Result<reqwest::RequestBuilder, String>,
@@ -557,9 +713,12 @@ impl SyncHttpClient {
             .run(tag, false, factory)
             .await?
             .expect("404 not allowed here");
-        resp.json::<T>()
-            .await
-            .map_err(|e| format!("{tag} parse: {e}"))
+        // The call succeeded; only the body was unreadable, so leave the status
+        // off rather than let it read as a verdict on our credentials.
+        resp.json::<T>().await.map_err(|e| ApiError {
+            status: None,
+            message: format!("{tag} parse: {e}"),
+        })
     }
 
     /// Run and discard the response body.
@@ -567,19 +726,25 @@ impl SyncHttpClient {
     where
         F: Fn() -> Result<reqwest::RequestBuilder, String>,
     {
-        self.run(tag, allow_404, factory).await.map(|_| ())
+        self.run(tag, allow_404, factory)
+            .await
+            .map(|_| ())
+            .map_err(String::from)
     }
 
     // ── Auth (profile / devices / keys) ───────────────────────────
 
     /// Idempotently ensure a profile exists; returns the KDF salt for UMK
     /// derivation.  Called right after a successful Supabase login.
+    ///
+    /// Returns [`ApiError`] so session restore can retry an unreachable backend
+    /// instead of dropping the user at the login screen.
     pub async fn bootstrap(
         &self,
         display_name: Option<String>,
-    ) -> Result<BootstrapResponse, String> {
+    ) -> Result<BootstrapResponse, ApiError> {
         let body = BootstrapRequest { display_name };
-        self.get_json("bootstrap", || {
+        self.get_json_classified("bootstrap", || {
             Ok(self.authed(Method::POST, "/api/v1/auth/bootstrap")?.json(&body))
         })
         .await
@@ -903,7 +1068,7 @@ impl SyncHttpClient {
 
     /// The UMK wrapped for this device (silent restore path); `None` when no
     /// wrap is stored or the device was revoked.
-    pub async fn get_device_wrapped_umk(&self) -> Result<Option<String>, String> {
+    pub async fn get_device_wrapped_umk(&self) -> Result<Option<String>, ApiError> {
         match self
             .run("device umk", true, || {
                 self.authed(Method::GET, "/api/v1/auth/umk/device")
@@ -914,7 +1079,10 @@ impl SyncHttpClient {
             Some(resp) => resp
                 .json::<serde_json::Value>()
                 .await
-                .map_err(|e| format!("device umk parse: {e}"))
+                .map_err(|e| ApiError {
+                    status: None,
+                    message: format!("device umk parse: {e}"),
+                })
                 .map(|v| v.get("wrapped_umk").and_then(|w| w.as_str()).map(String::from)),
         }
     }

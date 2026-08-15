@@ -84,6 +84,11 @@ impl WsListener {
     }
 
     async fn connect_once(&self) -> Result<(), String> {
+        // The handshake carries the JWT, and this loop can be reconnecting
+        // after the app sat idle past the token's lifetime. Without this the
+        // reconnect would keep failing on an expired token, since nothing else
+        // refreshes it while no HTTP request is going out.
+        self.http.ensure_fresh_access_token().await;
         let token = self
             .http
             .current_access_token()

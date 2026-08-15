@@ -215,6 +215,17 @@ pub async fn sync_restore_session(
             let _ = app.emit("sync:session-restored", &user);
             Ok(Some(user))
         }
+        Err(e) if e.is_transient() => {
+            // The stored credentials are still good, we just could not reach
+            // the server yet — very common right after an update, when the app
+            // autostarts before the network is back. Keep trying in the
+            // background instead of making the user log in again; the UI shows
+            // the login screen meanwhile and swaps over on
+            // `sync:session-restored`.
+            eprintln!("[sync] session restore deferred, will retry: {e}");
+            Arc::clone(&sync).spawn_session_restore_retry();
+            Ok(None)
+        }
         Err(e) => {
             // Expected on first run / after logout / after revocation — the UI
             // just shows the login screen.

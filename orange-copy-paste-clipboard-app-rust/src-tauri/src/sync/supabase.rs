@@ -14,6 +14,51 @@ use serde::Deserialize;
 
 const REQUEST_TIMEOUT_SECS: u64 = 15;
 
+/// A failed GoTrue call, keeping the HTTP status the message was flattened from.
+///
+/// Session restore has to tell "GoTrue was unreachable" (the stored refresh
+/// token is still good, try again later) from "GoTrue rejected the token"
+/// (only a fresh login fixes it).  Once the status is folded into a string
+/// that distinction is gone, so it travels alongside.
+#[derive(Debug, Clone)]
+pub struct AuthError {
+    /// Status GoTrue replied with, or `None` when no response arrived at all.
+    pub status: Option<u16>,
+    pub message: String,
+}
+
+impl AuthError {
+    fn transport(tag: &str, e: impl std::fmt::Display) -> Self {
+        Self {
+            status: None,
+            message: format!("{tag}: {e}"),
+        }
+    }
+
+    /// True when retrying later could plausibly succeed.  No response means
+    /// offline / DNS / timeout; 5xx and 429 are the server's problem, not the
+    /// token's.  Everything else (notably 400 "Invalid Refresh Token") is a
+    /// verdict on the credentials and will fail identically forever.
+    pub fn is_transient(&self) -> bool {
+        match self.status {
+            None => true,
+            Some(status) => status == 408 || status == 429 || status >= 500,
+        }
+    }
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<AuthError> for String {
+    fn from(e: AuthError) -> Self {
+        e.message
+    }
+}
+
 /// A GoTrue session: the tokens plus the authenticated user.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SupabaseSession {
@@ -69,11 +114,15 @@ impl SupabaseAuth {
         self.configured
     }
 
-    fn ensure_configured(&self) -> Result<(), String> {
+    fn ensure_configured(&self) -> Result<(), AuthError> {
         if !self.is_configured() {
-            return Err(
-                "Supabase is not configured. Set supabase_url and supabase_anon_key".into(),
-            );
+            return Err(AuthError {
+                // Not a transient failure: no amount of retrying configures a
+                // build that shipped without endpoints.
+                status: Some(0),
+                message: "Supabase is not configured. Set supabase_url and supabase_anon_key"
+                    .into(),
+            });
         }
         Ok(())
     }
@@ -89,12 +138,12 @@ impl SupabaseAuth {
         &self,
         req: reqwest::RequestBuilder,
         tag: &str,
-    ) -> Result<T, String> {
+    ) -> Result<T, AuthError> {
         let resp = req
             .header("apikey", &self.anon_key)
             .send()
             .await
-            .map_err(|e| format!("{tag}: {e}"))?;
+            .map_err(|e| AuthError::transport(tag, e))?;
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         if !status.is_success() {
@@ -108,9 +157,14 @@ impl SupabaseAuth {
                         .map(str::to_string)
                 })
                 .unwrap_or(body);
-            return Err(format!("{tag} ({}): {msg}", status.as_u16()));
+            return Err(AuthError {
+                status: Some(status.as_u16()),
+                message: format!("{tag} ({}): {msg}", status.as_u16()),
+            });
         }
-        serde_json::from_str::<T>(&body).map_err(|e| format!("{tag} parse: {e}"))
+        // A body we cannot parse came from a 2xx, so the call itself worked —
+        // report it without a status so it is not read as a credential verdict.
+        serde_json::from_str::<T>(&body).map_err(|e| AuthError::transport(&format!("{tag} parse"), e))
     }
 
     // ── Endpoints ─────────────────────────────────────────────────────
@@ -129,10 +183,15 @@ impl SupabaseAuth {
             "supabase login",
         )
         .await
+        .map_err(String::from)
     }
 
     /// Refresh grant: `POST /token?grant_type=refresh_token`.
-    pub async fn refresh(&self, refresh_token: &str) -> Result<SupabaseSession, String> {
+    ///
+    /// Returns [`AuthError`] rather than a string so callers can tell a dead
+    /// refresh token from an unreachable GoTrue — session restore retries the
+    /// second and only the second.
+    pub async fn refresh(&self, refresh_token: &str) -> Result<SupabaseSession, AuthError> {
         self.ensure_configured()?;
         self.send_json(
             self.inner
@@ -187,6 +246,7 @@ impl SupabaseAuth {
             "supabase oauth exchange",
         )
         .await
+        .map_err(String::from)
     }
 
     /// Set (or change) the account password for the authenticated user:

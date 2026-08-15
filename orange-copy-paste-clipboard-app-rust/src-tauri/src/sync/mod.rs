@@ -149,6 +149,66 @@ pub struct OAuthBegin {
 
 // ── SyncClient ───────────────────────────────────────────────────────
 
+/// Request timeout for the session-restore chain, longer than the default.
+/// Restore runs during startup — often right after an update, while the network
+/// stack is still coming back — and a timeout there costs a manual login.
+const RESTORE_TIMEOUT_SECS: u64 = 30;
+
+/// Backoff schedule for the background restore retry, in seconds. Repeats the
+/// last value forever: an app that was offline for an hour should still restore
+/// itself the moment the network returns, and one poll a minute is cheap.
+const RESTORE_RETRY_BACKOFF_SECS: [u64; 5] = [3, 10, 30, 60, 60];
+
+/// Why a silent session restore did not produce a session.
+///
+/// Only [`RestoreError::Transient`] is worth retrying; the other two mean the
+/// user genuinely has to sign in, and retrying would just burn requests.
+#[derive(Debug)]
+pub enum RestoreError {
+    /// Nothing was stored to restore from (first run, or after a logout).
+    NoSession(String),
+    /// Stored credentials exist but are dead — refresh token revoked, device
+    /// wrap gone, keychain unreadable. Only a fresh login fixes it.
+    Terminal(String),
+    /// The server or Supabase could not be reached, or answered 5xx. The stored
+    /// credentials are still good; this should be retried.
+    Transient(String),
+}
+
+impl RestoreError {
+    fn from_auth(e: crate::sync::supabase::AuthError) -> Self {
+        if e.is_transient() {
+            Self::Transient(e.message)
+        } else {
+            Self::Terminal(e.message)
+        }
+    }
+
+    fn from_api(e: crate::sync::client::ApiError) -> Self {
+        if e.is_transient() {
+            Self::Transient(e.message)
+        } else {
+            Self::Terminal(e.message)
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Transient(_))
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::NoSession(m) | Self::Terminal(m) | Self::Transient(m) => m,
+        }
+    }
+}
+
+impl std::fmt::Display for RestoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
 pub struct SyncClient {
     pub server_url: String,
     app: tauri::AppHandle,
@@ -184,6 +244,10 @@ pub struct SyncClient {
 
     /// WebSocket listener — replaced on reconnect.
     ws_listener: Mutex<Option<Arc<WsListener>>>,
+
+    /// True while a background session-restore retry loop is running, so a
+    /// second one is never started alongside it.
+    restore_retrying: Arc<std::sync::atomic::AtomicBool>,
 
     /// When set, a settings push is pending at this instant.
     settings_push_at: Arc<Mutex<Option<Instant>>>,
@@ -295,6 +359,7 @@ impl SyncClient {
             sharing_sessions: Arc::new(Mutex::new(Vec::new())),
             group_keys: Arc::new(Mutex::new(HashMap::new())),
             ws_listener: Mutex::new(None),
+            restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             settings_push_at,
             settings_notify,
             handle,
@@ -377,7 +442,7 @@ impl SyncClient {
 
         // Probe the account: does it already have a registered identity key?
         let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
-        http.set_access_token(session.access_token.clone());
+        http.set_access_token(session.access_token.clone(), session.expires_in);
         http.set_refresh_token(session.refresh_token.clone());
         http.set_user_id(session.user.id.clone());
         let boot = http.bootstrap(None).await?;
@@ -450,7 +515,7 @@ impl SyncClient {
 
         // 2. Build the authenticated backend client.
         let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
-        http.set_access_token(session.access_token);
+        http.set_access_token(session.access_token, session.expires_in);
         http.set_refresh_token(session.refresh_token.clone());
         http.set_user_id(user_id.clone());
 
@@ -583,11 +648,18 @@ impl SyncClient {
     /// refresh token and device private key in the OS keychain, and a
     /// device-wrapped UMK on the server (uploaded at login, cleared on device
     /// revocation — so a revoked device cannot restore even with an intact
-    /// keychain). Any missing piece returns Err and the UI shows the login
-    /// screen; nothing is mutated on failure.
-    pub async fn try_restore_session(&self) -> Result<SyncUser, String> {
+    /// keychain).
+    ///
+    /// The error tells the caller whether retrying is worth it: this runs while
+    /// the app is still starting (often right after an update, before the
+    /// network is back), and treating an unreachable server the same as a
+    /// rejected credential is what makes a working login look like a logout.
+    /// Nothing is mutated on failure either way.
+    pub async fn try_restore_session(&self) -> Result<SyncUser, RestoreError> {
         if self.user.lock().is_some() {
-            return self.current_user().ok_or_else(|| "no session".into());
+            return self
+                .current_user()
+                .ok_or_else(|| RestoreError::NoSession("no session".into()));
         }
 
         let (stored_user, stored_device) = {
@@ -595,36 +667,54 @@ impl SyncClient {
             (s.data.user_id.clone(), s.data.device_id.clone())
         };
         if stored_user.is_empty() || stored_device.is_empty() {
-            return Err("no previous session".into());
+            return Err(RestoreError::NoSession("no previous session".into()));
         }
         // Keep the underlying keychain error: "not found" and "found but
         // unreadable" are different problems, and collapsing both into one
         // message makes a failed restore impossible to diagnose from a log.
-        let refresh = crypto::load_refresh_token(&stored_user)
-            .map_err(|e| format!("no stored credentials for user {stored_user}: {e}"))?;
-        let device_priv = crypto::load_device_private_key(&stored_user)
-            .map_err(|e| format!("no stored device key for user {stored_user}: {e}"))?;
+        // Either way the keychain is not going to start answering differently
+        // on a retry, so these are terminal.
+        let refresh = crypto::load_refresh_token(&stored_user).map_err(|e| {
+            RestoreError::Terminal(format!("no stored credentials for user {stored_user}: {e}"))
+        })?;
+        let device_priv = crypto::load_device_private_key(&stored_user).map_err(|e| {
+            RestoreError::Terminal(format!("no stored device key for user {stored_user}: {e}"))
+        })?;
 
         // Fresh tokens from Supabase; the refresh token rotates, so persist it.
-        let session = self.supabase.refresh(&refresh).await?;
-        crypto::store_refresh_token(&stored_user, &session.refresh_token)?;
+        let session = self
+            .supabase
+            .refresh(&refresh)
+            .await
+            .map_err(RestoreError::from_auth)?;
+        crypto::store_refresh_token(&stored_user, &session.refresh_token)
+            .map_err(RestoreError::Terminal)?;
 
-        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
-        http.set_access_token(session.access_token);
+        let http = SyncHttpClient::with_timeout(
+            self.server_url.clone(),
+            Arc::clone(&self.supabase),
+            RESTORE_TIMEOUT_SECS,
+        );
+        http.set_access_token(session.access_token, session.expires_in);
         http.set_refresh_token(session.refresh_token);
         http.set_user_id(stored_user.clone());
         http.set_device_id(stored_device.clone());
 
-        let boot = http.bootstrap(None).await?;
+        let boot = http.bootstrap(None).await.map_err(RestoreError::from_api)?;
 
         // Recover the UMK from the device wrap — no password involved.
         let wrapped = http
             .get_device_wrapped_umk()
-            .await?
-            .ok_or("no device key wrap (revoked or never stored), log in again")?;
+            .await
+            .map_err(RestoreError::from_api)?
+            .ok_or_else(|| {
+                RestoreError::Terminal(
+                    "no device key wrap (revoked or never stored), log in again".into(),
+                )
+            })?;
         let device_pub = crypto::device_public_key(&device_priv);
         let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
-        let umk = crypto::unwrap_key(&shared, &wrapped)?;
+        let umk = crypto::unwrap_key(&shared, &wrapped).map_err(RestoreError::Terminal)?;
 
         let user = SyncUser {
             user_id: stored_user,
@@ -639,6 +729,64 @@ impl SyncClient {
         self.start_ws_listener();
 
         Ok(user)
+    }
+
+    /// Keep retrying a session restore that failed for a transient reason,
+    /// backing off up to a minute between attempts and continuing for as long
+    /// as the failures stay transient.
+    ///
+    /// This is what stops "the app was launched before the network came back"
+    /// from reading as a logout: the stored credentials were fine all along, so
+    /// the session comes back on its own instead of waiting for the user to
+    /// retype a password. Emits `sync:session-restored` on success, the same
+    /// event the immediate path uses, so the UI needs no special case.
+    ///
+    /// At most one loop runs at a time, and it stops as soon as a session
+    /// exists — including one the user established by logging in manually.
+    pub fn spawn_session_restore_retry(self: Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        if self
+            .restore_retrying
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return; // a loop is already running
+        }
+
+        let handle = self.handle.clone();
+        handle.spawn(async move {
+            let mut attempt = 0usize;
+            loop {
+                let delay = RESTORE_RETRY_BACKOFF_SECS
+                    [attempt.min(RESTORE_RETRY_BACKOFF_SECS.len() - 1)];
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+                attempt += 1;
+
+                // The user may have signed in by hand while we were asleep.
+                if self.user.lock().is_some() {
+                    break;
+                }
+
+                match self.try_restore_session().await {
+                    Ok(user) => {
+                        eprintln!("[sync] session restored after {attempt} retries");
+                        Arc::clone(&self).trigger_initial_sync();
+                        let _ = self.app.emit("sync:session-restored", &user);
+                        break;
+                    }
+                    Err(e) if e.is_transient() => {
+                        eprintln!("[sync] session restore retry {attempt} failed: {e}");
+                    }
+                    Err(e) => {
+                        // Credentials are genuinely dead — stop and leave the
+                        // login screen up.
+                        eprintln!("[sync] session restore gave up: {e}");
+                        break;
+                    }
+                }
+            }
+            self.restore_retrying.store(false, Ordering::SeqCst);
+        });
     }
 
     /// Clear all in-memory state and delete keychain entries.

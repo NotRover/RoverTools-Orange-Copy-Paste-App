@@ -174,6 +174,7 @@ Covers every string a user reads: labels, buttons, empty states, toasts, errors,
 **Client** (from `orange-copy-paste-clipboard-app-rust/`):
 - Install: `bun install` · Frontend dev: `bun run dev` · Full app: `bun run tauri dev`
 - Frontend typecheck+build: `bun run build` · Rust check: `cd src-tauri && cargo check` · Bundle: `bun run tauri build`
+- Release (from the workspace root, only when asked): `/create-rovertools-orangecp-release`, or `gh workflow run release.yml -f bump=… -f prerelease=… -f dry_run=…`
 
 **Backend** (from `orange-copy-paste-clipboard-backend/`, via `uv`):
 - Lint: `uv run ruff check src` · Types: `uv run ty check src` · Tests: `uv run pytest`
@@ -200,6 +201,30 @@ Pick the smallest valid check set for what you touched.
 - Commit messages: lowercase `type(scope): subject`, then 3–5 single-line bullets on what changed and why. No wall of text, and **no AI attribution footer** (`Co-Authored-By`, "Generated with…") anywhere — commits, PRs, or comments.
 - PRs are always opened as drafts (`gh pr create --draft`); never merge or mark ready without being asked. When editing a PR body, fetch the existing body first and splice — don't clobber screenshots or bot summaries.
 
+## Releases (client only)
+
+Shipping is one dispatch of `.github/workflows/release.yml`: it bumps the version, builds
+signed bundles and publishes them to the **public** `Spectrewolf8/RoverTools-Releases` repo
+the in-app updater reads. The backend has no release pipeline. Reference:
+[`docs/RELEASING.md`](docs/RELEASING.md).
+
+- **Never dispatch unless the user asks in that turn**, and never guess the three inputs —
+  bump, channel, mode. Ask for whatever wasn't stated; the
+  `/create-rovertools-orangecp-release` skill enforces this.
+- **Never hand-edit what the workflow owns:** versions, tags, `latest.json`, `beta.json`,
+  or a published release's prerelease flag.
+- `src-tauri/Cargo.toml` is the single source of version truth (`tauri.conf.json` has no
+  `version` field on purpose; `package.json`'s copy is cosmetic). Only plain `vX.Y.Z` tags
+  are releases — `v0.1.0-build.N` are throwaway CI builds.
+- **Commit subjects become the release notes**, so they are user-facing copy and the
+  No-AI-Slop rules apply. Only `feat`/`fix`/`perf`/`revert` reach users; internal types and
+  the workflow's own `release: vX.Y.Z` are filtered out. Write a sentence about the app,
+  not about the repo, and pick the type deliberately — `chore:` means users are not told.
+- The minisign signing key is the one irreplaceable secret: never read, print or commit it,
+  and let the user run anything that touches it. Losing it kills updates for every install.
+- Updates are off in debug builds by design, so the flow can only be verified from two
+  published releases — never from `tauri dev`.
+
 ## Docs & Source Priority
 
 Use live code first; docs are context and may be stale — confirm behavior in code, and report mismatches rather than trusting docs.
@@ -207,6 +232,7 @@ Use live code first; docs are context and may be stale — confirm behavior in c
 - Client: `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md`, `docs/BUGFIX_HISTORY.md` (high-value regression history), `README.md`.
 - Backend: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` (the definitive sync/crypto/contract reference), `TODO.md`.
 - Root `docs/ARCHITECTURE.md` — shared/workspace-level context. Read selectively; if it conflicts with code, trust the code.
+- Root `docs/RELEASING.md` — the release pipeline: setup, channels, safety rails, smoke test. Read before touching `.github/workflows/release.yml`.
 
 ## Token-Saving
 
