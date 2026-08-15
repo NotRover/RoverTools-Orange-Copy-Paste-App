@@ -318,6 +318,28 @@ normal release, so nobody has to choose between early features and staying curre
 Turning it off stops future betas but never moves anyone backwards — the updater only
 goes forward.
 
+### Windows will warn on the first install
+
+The bundles carry a minisign signature — that is what the updater verifies — but
+no **Authenticode** certificate, which is the separate, paid thing Windows checks.
+So a downloaded installer gets *"Windows protected your PC — unrecognized app"*
+from SmartScreen. **More info** → **Run anyway** installs it.
+
+It's a one-time cost per user, not per version: SmartScreen keys off the Mark of
+the Web, a tag the *browser* attaches to downloads. The updater fetches the
+installer itself, so no MOTW and no prompt — every update after the first install
+is silent.
+
+Removing the warning entirely means an Authenticode certificate, and there is no
+free one for a closed-source project. [SignPath
+Foundation](https://signpath.org/) signs open-source projects at no cost (the
+codebase must be public under an OSS licence, and the publisher shows as
+"SignPath Foundation"); [Azure Trusted
+Signing](https://azure.microsoft.com/en-in/pricing/details/trusted-signing/) is
+~$10/month but individual accounts are US/Canada only. EV certificates no longer
+skip the reputation period — that behaviour was removed in 2024 — so the
+expensive option is no longer a shortcut.
+
 ### What to watch out for
 
 | Trap | Why it matters |

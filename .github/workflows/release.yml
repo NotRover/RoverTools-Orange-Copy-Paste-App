@@ -436,10 +436,29 @@ jobs:
             echo "Publishing $TAG as the latest release — the update feed will serve it."
           fi
 
+          # The GitHub release body gets a SmartScreen footer; `latest.json` does
+          # not. The bundles carry no Authenticode signature, so Windows shows
+          # "unrecognized app" on a downloaded installer — an unexplained warning
+          # is what makes people abandon an install. In-app updates never hit it
+          # (the app fetches the installer itself, so no Mark of the Web), which
+          # is exactly why the footer would be noise in the updater's notes.
+          cp artifacts/release-notes/RELEASE_NOTES.md RELEASE_BODY.md
+          cat >> RELEASE_BODY.md <<'FOOTER'
+
+          ---
+
+          **Windows will warn you the first time.** The installer isn't signed with a
+          paid code-signing certificate, so SmartScreen shows *"Windows protected your
+          PC — unrecognized app"*. Click **More info** → **Run anyway**.
+
+          You'll see this once, on a manual install. Updates from inside the app don't
+          trigger it.
+          FOOTER
+
           gh release create "$TAG" \
             --repo "$RELEASES_REPO" \
             --title "$TAG" \
-            --notes-file artifacts/release-notes/RELEASE_NOTES.md \
+            --notes-file RELEASE_BODY.md \
             "${visibility[@]}" \
             release/*
 
