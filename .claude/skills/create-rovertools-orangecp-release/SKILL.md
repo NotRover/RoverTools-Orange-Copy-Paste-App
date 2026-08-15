@@ -106,8 +106,16 @@ internal ones. This reproduces the workflow's own filter — internal types and 
 capitalised, duplicates collapsed — so what it prints is what ships:
 
 ```bash
-LAST=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1); if [ -n "$LAST" ]; then echo "since $LAST:"; git log --no-merges --pretty='format:%s' "$LAST..HEAD" | grep -vE '^(chore|ci|build|test|refactor|style|docs)(\([^)]*\))?!?:' | grep -vE '^release: v[0-9]' | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' | sed -E 's/^(.)/\U\1/' | awk '!seen[$0]++' | sed 's/^/- /'; else echo "No release tag yet — the notes will be \"First release.\""; fi
+LAST=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1); if [ -n "$LAST" ]; then echo "since $LAST:"; git log --no-merges --pretty='format:%s' "$LAST..HEAD" | grep -vE '^(chore|ci|build|test|refactor|style|docs)(\([^)]*\))?!?:' | grep -vE '^release: v[0-9]' | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' | sed -E 's/^(.)/\U\1/' | sed -e 's/—/-/g' -e 's/–/-/g' -e 's/“/"/g' -e 's/”/"/g' -e "s/’/'/g" -e "s/‘/'/g" -e 's/…/.../g' | cat -n | sort -u -k2 | sort -n | cut -f2- | sed 's/^/- /'; else echo "No release tag yet — the notes will be \"First release.\""; fi
 ```
+
+> The de-duplication is that `cat -n | sort | cut` pipeline rather than the obvious
+> `awk '!seen[$0]++'` for one reason: a `$0` in this file is rewritten to the skill's
+> first argument before the command ever reaches a shell, so invoking
+> `/create-rovertools-orangecp-release patch preview` would silently turn it into
+> `awk '!seen[patch]++'` — a constant key, collapsing the whole list to one line. Keep
+> every command here free of `$0`, `$1`, `$2`. The workflow itself has no such
+> constraint and still uses `awk`.
 
 Report the current version, the version being cut (patch bumps the third number, minor
 the second and zeroes the third), and the notes verbatim. No output means every commit

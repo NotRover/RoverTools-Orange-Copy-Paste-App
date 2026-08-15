@@ -22,7 +22,14 @@ const MIN_HEIGHT: u32 = 200;
 static PENDING: Mutex<Option<WindowGeometry>> = Mutex::new(None);
 const PERSIST_INTERVAL_MS: u64 = 700;
 
-#[derive(Serialize, Deserialize)]
+/// `(maximized, fullscreen)` that startup could not apply because the window
+/// was still hidden.  Consumed by [`apply_deferred_zoom`] on first show.
+static DEFERRED_ZOOM: Mutex<Option<(bool, bool)>> = Mutex::new(None);
+
+/// The window rectangle in its *normal* (restored) state, plus whichever
+/// zoomed state was active on top of it. The two are stored separately so
+/// un-maximizing after a restart lands back on the size the user last chose.
+#[derive(Clone, Serialize, Deserialize)]
 struct WindowGeometry {
     x: i32,
     y: i32,
@@ -30,6 +37,8 @@ struct WindowGeometry {
     height: u32,
     #[serde(default)]
     maximized: bool,
+    #[serde(default)]
+    fullscreen: bool,
 }
 
 fn load(app: &tauri::AppHandle) -> Option<WindowGeometry> {
@@ -112,13 +121,57 @@ pub fn restore(app: &tauri::App) {
                 let _ = win.set_focus();
             }
         }
-        if geo.maximized && !start_minimized {
-            let _ = win.maximize();
+        // Re-apply the zoomed state. Windows ignores a maximize aimed at a
+        // hidden window, so when starting minimised to tray it has to wait for
+        // the first show instead of being dropped — dropping it is what used to
+        // lose the state on every launch, since the next move or resize then
+        // wrote the un-zoomed flag over it for good.
+        if geo.maximized || geo.fullscreen {
+            if start_minimized {
+                *DEFERRED_ZOOM.lock() = Some((geo.maximized, geo.fullscreen));
+            } else if geo.fullscreen {
+                let _ = win.set_fullscreen(true);
+            } else {
+                let _ = win.maximize();
+            }
         }
     } else if !start_minimized {
         let _ = win.show();
         let _ = win.center();
         let _ = win.set_focus();
+    }
+}
+
+/// Write whatever the handler last recorded.
+///
+/// Deliberately does not re-query the window's zoom state: this also runs on
+/// the way out, and a window that is hidden or already tearing down reports
+/// itself as not maximized — which would write the flag away at the very moment
+/// it needs to survive. The handler samples the state while the window is still
+/// live, so its snapshot is the one to trust.
+fn flush(handle: &tauri::AppHandle) {
+    let pending = PENDING.lock().take();
+    if let Some(geo) = pending {
+        save(handle, &geo);
+    }
+}
+
+/// Apply the zoom state startup had to defer, now that the window is being
+/// shown for the first time.  Call right after `show()` on the main window.
+///
+/// A no-op once consumed, and whenever the window was already visible at
+/// startup (the state was applied directly then).
+pub fn apply_deferred_zoom(app: &tauri::AppHandle) {
+    let Some((maximized, fullscreen)) = DEFERRED_ZOOM.lock().take() else {
+        return;
+    };
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    if fullscreen {
+        let _ = win.set_fullscreen(true);
+    } else if maximized {
+        let _ = win.maximize();
     }
 }
 
@@ -136,10 +189,7 @@ pub fn setup_tracking(app: &tauri::App) {
         std::thread::spawn(move || {
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(PERSIST_INTERVAL_MS));
-                let pending = PENDING.lock().take();
-                if let Some(geo) = pending {
-                    save(&handle, &geo);
-                }
+                flush(&handle);
             }
         });
     }
@@ -150,10 +200,7 @@ pub fn setup_tracking(app: &tauri::App) {
             // On the way out the timer gets no further turn, so write now — this
             // is what keeps "moved the window, then quit" from losing the move.
             tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
-                let pending = PENDING.lock().take();
-                if let Some(geo) = pending {
-                    save(&handle, &geo);
-                }
+                flush(&handle);
                 return;
             }
             _ => return,
@@ -163,18 +210,24 @@ pub fn setup_tracking(app: &tauri::App) {
         };
 
         let is_maximized = w.is_maximized().unwrap_or(false);
+        let is_fullscreen = w.is_fullscreen().unwrap_or(false);
         let is_minimized = w.is_minimized().unwrap_or(false);
 
-        // When the window is maximized or minimized, only update the
-        // maximized flag — never overwrite the normal-state geometry,
-        // because the OS-reported size in those states is meaningless
-        // for the restored window rectangle.
-        if is_maximized || is_minimized {
-            // Take the pending value if there is one, so this does not read back
-            // a file the writer thread has not caught up to yet.
+        // While minimized the OS-reported rectangle says nothing about where
+        // the window should return to, so leave the stored one alone. Nothing
+        // to record either: minimizing is not a state we restore into.
+        if is_minimized {
+            return;
+        }
+
+        // Zoomed: keep the stored normal rectangle and update only the flags.
+        // Take the pending value if there is one, so this does not read back a
+        // file the writer thread has not caught up to yet.
+        if is_maximized || is_fullscreen {
             let mut pending = PENDING.lock();
             if let Some(mut geo) = pending.take().or_else(|| load(&handle)) {
                 geo.maximized = is_maximized;
+                geo.fullscreen = is_fullscreen;
                 *pending = Some(geo);
             }
             return;
@@ -192,6 +245,7 @@ pub fn setup_tracking(app: &tauri::App) {
             width: size.width,
             height: size.height,
             maximized: false,
+            fullscreen: false,
         });
     });
 }
