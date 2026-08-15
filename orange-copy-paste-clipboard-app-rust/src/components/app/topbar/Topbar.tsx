@@ -33,7 +33,7 @@ const Topbar: React.FC<TopbarProps> = ({
   rightSlot,
   searchQuery,
   onSearchChange,
-  searchPlaceholder = "Search…",
+  searchPlaceholder = "Search...",
   searchInputRef: externalRef,
 }) => {
   const internalRef = useRef<HTMLInputElement>(null);

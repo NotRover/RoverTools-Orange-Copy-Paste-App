@@ -813,7 +813,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                       }}
                     >
                       {c.value == null && (
-                        <span className="ns-color-swatch-none">×</span>
+                        <span className="ns-color-swatch-none">x</span>
                       )}
                     </button>
                   ))}
@@ -861,7 +861,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                       }}
                     >
                       {c.value == null && (
-                        <span className="ns-color-swatch-none">×</span>
+                        <span className="ns-color-swatch-none">x</span>
                       )}
                     </button>
                   ))}
@@ -910,7 +910,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                       }}
                     >
                       {c.value == null && (
-                        <span className="ns-color-swatch-none">×</span>
+                        <span className="ns-color-swatch-none">x</span>
                       )}
                     </button>
                   ))}
@@ -1288,7 +1288,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 <div className="ns-link-picker-row">
                   <input
                     className="ns-embed-search ns-link-input"
-                    placeholder="https://…"
+                    placeholder="https://..."
                     value={linkUrl}
                     onChange={(e) => setLinkUrl(e.target.value)}
                     onKeyDown={(e) => {
@@ -1386,8 +1386,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   className="ns-embed-search"
                   placeholder={
                     embedTab === "entries"
-                      ? "Search entries…"
-                      : "Search groups…"
+                      ? "Search entries..."
+                      : "Search groups..."
                   }
                   value={embedSearch}
                   onChange={(e) => setEmbedSearch(e.target.value)}
@@ -1506,8 +1506,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             Updated {timeAgo(note.updated_at)}
           </span>
           <span className="ns-editor-footer-stats">
-            Ln {stats.line} / {stats.blocks} · {stats.words} word
-            {stats.words === 1 ? "" : "s"} · {stats.chars} char
+            Ln {stats.line} / {stats.blocks} - {stats.words} word
+            {stats.words === 1 ? "" : "s"} - {stats.chars} char
             {stats.chars === 1 ? "" : "s"}
           </span>
         </div>

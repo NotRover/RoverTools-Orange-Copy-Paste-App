@@ -476,7 +476,7 @@ pub async fn sync_revoke_device(
     let (sync, http) = sync_http(&state)?;
     // Refuse to revoke the device we're running on — sign out is the way.
     if sync.device_id().as_deref() == Some(device_id.as_str()) {
-        return Err("can't remove this device while signed in on it — sign out instead".into());
+        return Err("can't remove this device while signed in on it. Sign out instead".into());
     }
     http.revoke_device(&device_id).await
 }

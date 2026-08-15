@@ -14,8 +14,8 @@ export type SortMode = "newest" | "oldest" | "a-z" | "z-a" | "type";
 export const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode }[] = [
   { id: "newest", label: "Newest", icon: <SortNewestIcon /> },
   { id: "oldest", label: "Oldest", icon: <SortOldestIcon /> },
-  { id: "a-z", label: "A → Z", icon: <SortAZIcon /> },
-  { id: "z-a", label: "Z → A", icon: <SortZAIcon /> },
+  { id: "a-z", label: "A to Z", icon: <SortAZIcon /> },
+  { id: "z-a", label: "Z to A", icon: <SortZAIcon /> },
   { id: "type", label: "Type", icon: <SortTypeIcon /> },
 ];
 

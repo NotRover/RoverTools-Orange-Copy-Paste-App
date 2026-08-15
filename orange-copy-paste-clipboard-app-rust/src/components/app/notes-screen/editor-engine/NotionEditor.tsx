@@ -240,7 +240,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           placeholder: ({ node }) => {
             if (node.type.name === "heading") return "Heading";
             if (node.type.name === "codeBlock") return "";
-            return "Type something — or press Enter to start a new block";
+            return "Type something, or press Enter to start a new block";
           },
           showOnlyCurrent: false,
           includeChildren: true,
