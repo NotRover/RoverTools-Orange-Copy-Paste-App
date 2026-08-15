@@ -1,6 +1,6 @@
 [package]
 name = "notrover-smart-clipboard-app-rust"
-version = "0.1.0"
+version = "0.1.1"
 description = "Smart Clipboard – Tauri/Rust port of the Electron clipboard manager"
 authors = ["you"]
 edition = "2021"
