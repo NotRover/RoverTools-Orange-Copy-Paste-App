@@ -1199,7 +1199,7 @@ const App: React.FC = () => {
                   <strong>Saving is paused.</strong> Something went wrong inside
                   the app, so your saved history and notes are being left
                   untouched rather than risk overwriting them. Anything captured
-                  since is kept in memory only — restart to start saving again.
+                  since is kept in memory only. Restart to start saving again.
                 </>
               )}
               {health.kind === "stalled" && (
@@ -1213,7 +1213,7 @@ const App: React.FC = () => {
               {health.kind === "unwritable" && (
                 <>
                   <strong>Your disk is refusing to save.</strong> The app is
-                  working, but writing history and notes keeps failing — usually
+                  working, but writing history and notes keeps failing. Usually
                   a full drive, or antivirus holding the file open. Free up space
                   or check the folder, and saving picks up on its own.
                 </>
@@ -1422,7 +1422,7 @@ const App: React.FC = () => {
 
         {fileSyncSkipped && (
           <ToastNotification
-            message="File too large to sync — must be under 5 MB"
+            message="File too large to sync. Must be under 5 MB"
             icon={<CloudSyncIcon size={13} />}
             duration={5000}
             onDismiss={() => setFileSyncSkipped(false)}
@@ -1459,8 +1459,8 @@ class AppBoundary extends React.Component<
       <div className="app-crash">
         <h1>Something broke on screen</h1>
         <p>
-          Your clipboard history and notes are safe — they're stored outside the
-          window. Reloading usually clears this.
+          Your clipboard history and notes are safe. They're stored outside the
+          window, so reloading usually clears this.
         </p>
         <pre>{this.state.error.message}</pre>
         <button onClick={() => window.location.reload()}>Reload</button>

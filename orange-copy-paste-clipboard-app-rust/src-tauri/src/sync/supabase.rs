@@ -72,7 +72,7 @@ impl SupabaseAuth {
     fn ensure_configured(&self) -> Result<(), String> {
         if !self.is_configured() {
             return Err(
-                "Supabase is not configured — set supabase_url and supabase_anon_key".into(),
+                "Supabase is not configured. Set supabase_url and supabase_anon_key".into(),
             );
         }
         Ok(())

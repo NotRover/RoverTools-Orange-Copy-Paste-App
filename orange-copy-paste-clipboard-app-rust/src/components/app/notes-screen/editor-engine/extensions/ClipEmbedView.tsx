@@ -139,7 +139,7 @@ const PanelContent: React.FC<{
       {meta}
       <div className="ee-embed-panel-body">
         <div className="ee-embed-panel-text">
-          {text.slice(0, 700) || "—"}
+          {text.slice(0, 700) || "-"}
         </div>
       </div>
     </>

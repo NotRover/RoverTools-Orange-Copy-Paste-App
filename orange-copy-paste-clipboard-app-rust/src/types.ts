@@ -254,7 +254,7 @@ export function timeAgo(ts: number): string {
 }
 
 export function truncateText(text: string, max = 180): string {
-  return text.length <= max ? text : text.slice(0, max) + "…";
+  return text.length <= max ? text : text.slice(0, max) + "...";
 }
 
 const HTML_SEPARATOR = "\n---PLAINTEXT---\n";

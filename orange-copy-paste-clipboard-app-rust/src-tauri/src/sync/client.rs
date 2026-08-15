@@ -499,7 +499,7 @@ impl SyncHttpClient {
             .refresh_token
             .lock()
             .clone()
-            .ok_or("session expired — re-login required")?;
+            .ok_or("session expired, log in again")?;
         let session = self.supabase.refresh(&refresh).await?;
         self.set_access_token(session.access_token);
         *self.refresh_token.lock() = Some(session.refresh_token.clone());

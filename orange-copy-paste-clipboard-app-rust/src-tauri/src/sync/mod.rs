@@ -338,7 +338,7 @@ impl SyncClient {
                     .await
             }
             SignUpOutcome::ConfirmationRequired => {
-                Err("Account created — check your email to confirm it, then log in.".into())
+                Err("Account created. Check your email to confirm it, then log in.".into())
             }
         }
     }
@@ -403,7 +403,7 @@ impl SyncClient {
             .pending_oauth
             .lock()
             .take()
-            .ok_or("no pending sign-in — start again")?;
+            .ok_or("no pending sign-in, start again")?;
 
         if pending.is_new {
             self.supabase
@@ -621,7 +621,7 @@ impl SyncClient {
         let wrapped = http
             .get_device_wrapped_umk()
             .await?
-            .ok_or("no device key wrap (revoked or never stored) — log in again")?;
+            .ok_or("no device key wrap (revoked or never stored), log in again")?;
         let device_pub = crypto::device_public_key(&device_priv);
         let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
         let umk = crypto::unwrap_key(&shared, &wrapped)?;

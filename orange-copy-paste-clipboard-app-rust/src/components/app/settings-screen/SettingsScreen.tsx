@@ -203,17 +203,17 @@ const SettingsScreen: React.FC = () => {
   const updateStatus = (() => {
     switch (updater.stage) {
       case "checking":
-        return "Checking…";
+        return "Checking...";
       case "available":
         return `Version ${updater.info?.version} is available.`;
       case "downloading":
         return updater.percent === null
-          ? "Downloading…"
-          : `Downloading — ${updater.percent}%`;
+          ? "Downloading..."
+          : `Downloading ${updater.percent}%`;
       case "ready":
         return `Version ${updater.info?.version} is downloaded and ready to install.`;
       case "installing":
-        return "Installing…";
+        return "Installing...";
       case "error":
         return updater.error;
       default:
@@ -428,7 +428,7 @@ const SettingsScreen: React.FC = () => {
                     disabled={updateBusy}
                   >
                     <ArrowClockwise size={14} />
-                    {updater.stage === "checking" ? "Checking…" : "Check now"}
+                    {updater.stage === "checking" ? "Checking..." : "Check now"}
                   </button>
                 )}
               </div>
@@ -446,7 +446,7 @@ const SettingsScreen: React.FC = () => {
             />
             <ToggleRow
               label="Get beta versions"
-              desc="Receive new features early, alongside every normal release. Betas are tested less, so expect the occasional rough edge. Turning this off stops future betas — it cannot move you back to an older version."
+              desc="Receive new features early, alongside every normal release. Betas are tested less, so expect the occasional rough edge. Turning this off stops future betas. It cannot move you back to an older version."
               active={betaChannel}
               onToggle={handleBetaToggle}
             />

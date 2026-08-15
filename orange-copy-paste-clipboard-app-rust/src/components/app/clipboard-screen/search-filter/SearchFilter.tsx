@@ -162,7 +162,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ sf }) => (
       ref={sf.searchInputRef}
       type="text"
       className="cs-search-input"
-      placeholder="Search…"
+      placeholder="Search..."
       value={sf.searchQuery}
       onChange={(e) => sf.setSearchQuery(e.target.value)}
     />
@@ -288,7 +288,7 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
           </div>
           <div className="cs-date-row">
             <input type="date" className="cs-date-input" value={sf.dateAfter} onChange={(e) => sf.setDateAfter(e.target.value)} title="After" />
-            <span className="cs-date-sep">–</span>
+            <span className="cs-date-sep">-</span>
             <input type="date" className="cs-date-input" value={sf.dateBefore} onChange={(e) => sf.setDateBefore(e.target.value)} title="Before" />
           </div>
         </div>

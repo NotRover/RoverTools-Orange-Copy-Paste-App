@@ -156,6 +156,15 @@ These bind the client and backend. Changing one side usually means changing the 
 - Shared TS shapes live in `src/types.ts`; keep them in sync with the serde structs they mirror.
 - Screens keep their own CSS next to the component; shared page-header/section styles come from `settings-screen/SettingsScreen.css`.
 
+### User-Facing Copy: No AI Slop
+
+Covers every string a user reads: labels, buttons, empty states, toasts, errors, emails, landing copy. Not code comments, commit messages, or PR bodies.
+
+- ASCII punctuation only. No `—`, `–`, `“ ” ‘ ’`, `…`, `•`, `→`, `×`, `✓`, `★`, `✨`, non-breaking spaces. Hyphens are fine ("real-time"). Emoji only if the design calls for it, never as an icon.
+- No stock AI words: delve, tapestry, landscape, seamless, robust, elevate, empower, unlock, transform, unleash, supercharge, leverage, utilize, harness, journey, effortless.
+- No stock shapes: "It's not just X, it's Y", three-adjective lists, "In today's ... world", Furthermore/Moreover openers, two-abstract-noun feature titles ("Seamless Integration").
+- Short, specific, concrete. Name the real action or number. Cut any sentence that can go without losing meaning.
+
 **Backend**
 - Routers stay thin: HTTP concerns in the route, logic in the domain service. Versions and route prefixes come from `src/version.py` — never hardcode `/api/v1`.
 - Device-scoped routes go through the shared JWT + `X-Device-Id` dependencies in `dependencies.py`; don't re-parse tokens per route.

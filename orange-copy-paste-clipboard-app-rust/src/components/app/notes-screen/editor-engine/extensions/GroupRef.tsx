@@ -47,7 +47,7 @@ function rowLabel(entry: { type: EntryType; content: string; label?: string }): 
     return paths[0] ? paths[0].split(/[\\/]/).pop() ?? paths[0] : "File";
   }
   const raw = entry.type === "html" ? stripHtml(entry.content) : entry.content;
-  return truncateText(raw.replace(/\s+/g, " ").trim(), 52) || "—";
+  return truncateText(raw.replace(/\s+/g, " ").trim(), 52) || "-";
 }
 
 

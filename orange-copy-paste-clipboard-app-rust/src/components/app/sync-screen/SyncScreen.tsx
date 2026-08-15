@@ -315,7 +315,7 @@ const SyncFilterDropdown: React.FC<{
                 onChange={(e) => sf.setDateAfter(e.target.value)}
                 title="After"
               />
-              <span className="cs-date-sep">–</span>
+              <span className="cs-date-sep">-</span>
               <input
                 type="date"
                 className="cs-date-input"
@@ -770,7 +770,7 @@ const InlineForm: React.FC<{
       <input
         ref={inputRef}
         className="sync-inline-input"
-        placeholder={mode === "create" ? "Group name…" : "Invite code…"}
+        placeholder={mode === "create" ? "Group name..." : "Invite code..."}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -784,7 +784,7 @@ const InlineForm: React.FC<{
           disabled={!value.trim() || loading}
           onClick={() => value.trim() && onSubmit(value.trim())}
         >
-          {loading ? "…" : mode === "create" ? "Create" : "Join"}
+          {loading ? "..." : mode === "create" ? "Create" : "Join"}
         </button>
         <button className="sync-inline-btn" onClick={onCancel}>
           <X size={10} />
@@ -1172,7 +1172,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
           rightSlot={rightSlot}
           searchQuery={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search in group…"
+          searchPlaceholder="Search in group..."
           searchInputRef={searchRef}
         />
 
@@ -1442,7 +1442,7 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
                 {syncConnected === null
                   ? "Sign in to sync across your devices."
                   : syncConnected === false
-                    ? "Reconnecting…"
+                    ? "Reconnecting..."
                     : "Create one from the Account screen, or join with an invite code."}
               </span>
             </div>

@@ -46,10 +46,10 @@ const SECTIONS: ShortcutSection[] = [
     title: "Paste Popup",
     icon: <ClipboardPasteIcon />,
     entries: [
-      { keys: ["1–9, 0"], description: "Paste entry by slot number" },
-      { keys: ["↑", "↓"], description: "Navigate entries" },
+      { keys: ["1-9, 0"], description: "Paste entry by slot number" },
+      { keys: ["Up", "Down"], description: "Navigate entries" },
       { keys: ["Enter"], description: "Paste selected entry" },
-      { keys: ["←", "→"], description: "Switch between Recent / Pinned" },
+      { keys: ["Left", "Right"], description: "Switch between Recent / Pinned" },
       { keys: ["Tab"], description: "Toggle Recent / Pinned" },
       { keys: ["Esc"], description: "Close popup" },
     ],
@@ -74,10 +74,10 @@ const SECTIONS: ShortcutSection[] = [
     title: "Pin & Save",
     icon: <PinIcon size={13} filled strokeWidth={1.5} />,
     entries: [
-      { keys: ["Pin"], description: "Pin entry — shows in quick-paste popup (max 10)" },
+      { keys: ["Pin"], description: "Pin entry. Shows in quick-paste popup (max 10)" },
       {
         keys: ["Save"],
-        description: "Save entry — survives app restarts independently of pin",
+        description: "Save entry. Survives app restarts independently of pin",
       },
       {
         keys: ["Unsave"],
@@ -85,7 +85,7 @@ const SECTIONS: ShortcutSection[] = [
       },
       {
         keys: ["Max 10"],
-        description: "Pin limit reached — a toast notification appears",
+        description: "Pin limit reached. A toast notification appears",
       },
     ],
   },
@@ -103,7 +103,7 @@ const SECTIONS: ShortcutSection[] = [
       },
       {
         keys: ["Click chip"],
-        description: "Select a group — input switches to rename mode",
+        description: "Select a group. Input switches to rename mode",
       },
       {
         keys: ["Click chip again"],
@@ -115,8 +115,8 @@ const SECTIONS: ShortcutSection[] = [
       },
       { keys: ["Enter"], description: "Confirm add or rename" },
       {
-        keys: ["Delete × btn"],
-        description: "Delete group — undo available for 5 seconds via toast",
+        keys: ["Delete button"],
+        description: "Delete group. Undo available for 5 seconds via toast",
       },
       {
         keys: ["Color swatches"],
@@ -131,11 +131,11 @@ const SECTIONS: ShortcutSection[] = [
       {
         keys: ["Pinned"],
         description:
-          "System group — shows entries currently pinned to the popup",
+          "System group. Shows entries currently pinned to the popup",
       },
       {
         keys: ["Saved"],
-        description: "System group — shows entries saved to survive restarts",
+        description: "System group. Shows entries saved to survive restarts",
       },
       {
         keys: ["Reserved"],
@@ -149,7 +149,7 @@ const SECTIONS: ShortcutSection[] = [
     icon: <SearchIcon size={13} />,
     entries: [
       { keys: ["Type"], description: "Filter entries by content" },
-      { keys: ["Esc / ×"], description: "Clear search" },
+      { keys: ["Esc / clear btn"], description: "Clear search" },
     ],
   },
 ];

@@ -43,7 +43,7 @@ pub fn bind() -> Result<Loopback, String> {
         }
     }
     Err(format!(
-        "could not bind an OAuth loopback port (tried {REDIRECT_PORTS:?}) — close whatever is using them and retry"
+        "could not bind an OAuth loopback port (tried {REDIRECT_PORTS:?}). Close whatever is using them and retry"
     ))
 }
 

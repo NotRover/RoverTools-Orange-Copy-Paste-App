@@ -506,7 +506,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
       <Topbar
         searchQuery={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Search notes…"
+        searchPlaceholder="Search notes..."
         searchInputRef={searchRef}
         leftSlot={
           <>
