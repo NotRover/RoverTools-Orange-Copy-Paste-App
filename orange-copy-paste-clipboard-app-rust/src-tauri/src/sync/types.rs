@@ -90,6 +90,19 @@ pub struct SyncDevice {
 
 // ── Sync status info ────────────────────────────────────────────────
 
+/// One entry sync refused to send, and why.  The count alone told the user
+/// something was wrong without telling them what, so every skip records the
+/// entry it happened to and a reason short enough to show verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedEntry {
+    pub client_id: String,
+    /// Short label for the entry ("Screenshot", a text preview, a file name).
+    pub label: String,
+    /// User-facing explanation, e.g. "File is 12.4 MB - the limit is 5 MB".
+    pub reason: String,
+    pub at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
 pub struct SyncStatusInfo {
@@ -97,6 +110,9 @@ pub struct SyncStatusInfo {
     pub last_synced_at: Option<u64>,
     pub pending_count: usize,
     pub skipped_count: usize,
+    /// Most recent skips, newest first (capped — see `SKIPPED_HISTORY_LIMIT`).
+    #[serde(default)]
+    pub skipped: Vec<SkippedEntry>,
 }
 
 

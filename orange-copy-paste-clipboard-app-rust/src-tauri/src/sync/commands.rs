@@ -17,7 +17,7 @@ use crate::sync::types::{
     ShareScope, SharingInvite, SharingSession, SyncDevice, SyncGroup, SyncQuota, SyncStatusInfo,
     SyncUser,
 };
-use crate::sync::SyncClient;
+use crate::sync::{live_share_name, SyncClient};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -265,6 +265,50 @@ pub fn sync_get_status(state: State<'_, AppState>) -> SyncStatusInfo {
         .as_ref()
         .map(|s| s.status_info())
         .unwrap_or_default()
+}
+
+/// Per-entry sync state (`"synced"` | `"pending"`), keyed `"clipboard:{id}"` /
+/// `"note:{id}"`.  Entry cards read the cloud badge from this: the state is
+/// sync bookkeeping and is deliberately not persisted in the entry itself.
+#[tauri::command]
+pub fn sync_get_entry_states(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, String> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| {
+            s.entry_states()
+                .into_iter()
+                .map(|(k, v)| (k, v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Which shared spaces each entry belongs to, keyed `"clipboard:{id}"` /
+/// `"note:{id}"` with server group ids as values.  The Sync screen joins this
+/// against its feed; entries themselves only carry user-chosen group names.
+#[tauri::command]
+pub fn sync_get_entry_shares(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, Vec<String>> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.entry_shares())
+        .unwrap_or_default()
+}
+
+/// Dismiss the list of skipped entries once the user has read it.  Skips are a
+/// report on past pushes, not a queue — nothing is retried or lost by clearing.
+#[tauri::command]
+pub fn sync_clear_skipped(state: State<'_, AppState>) {
+    if let Some(sync) = state.sync_client.lock().as_ref() {
+        sync.clear_skipped();
+    }
 }
 
 #[tauri::command]
@@ -577,7 +621,7 @@ pub async fn sharing_invite(
         .set_sharing_session(&invite_resp.share_group_id);
     sync.set_sharing_session(SharingSession {
         share_group_id: invite_resp.share_group_id.clone(),
-        name: "Live Share".into(),
+        name: live_share_name(&[]),
         my_scope: parsed_scope,
         members: Vec::new(),
         group_key: Some(*group_key),
@@ -614,7 +658,9 @@ pub async fn sharing_accept(
         .set_sharing_session(&join_resp.group_id);
     sync.set_sharing_session(SharingSession {
         share_group_id: join_resp.group_id,
-        name: join_resp.name,
+        // Members arrive with the next refresh; until then there is nobody to
+        // name the session after.
+        name: live_share_name(&[]),
         my_scope: parsed_scope,
         members: Vec::new(),
         group_key: None, // arrives via `group:rekey`

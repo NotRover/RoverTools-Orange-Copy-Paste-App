@@ -19,6 +19,13 @@ struct IdMapData {
     /// Sharing session group UUIDs by share_group_id.
     #[serde(default)]
     sharing_sessions: HashMap<String, String>,
+    /// Server group ids each entry is shared into, keyed like `entries`.
+    /// Which space an entry belongs to is sync bookkeeping, not a user tag, so
+    /// it lives here next to the server ids rather than in the entry model —
+    /// history.bin is a compact (positional) MessagePack array, and it also
+    /// keeps machine ids out of the group chips the user sees.
+    #[serde(default)]
+    entry_shares: HashMap<String, Vec<String>>,
 }
 
 pub struct IdMap {
@@ -49,6 +56,11 @@ impl IdMap {
         self.data.entries.get(client_id).map(String::as_str)
     }
 
+    /// Keys of every entry the server has acknowledged.
+    pub fn entry_keys(&self) -> Vec<String> {
+        self.data.entries.keys().cloned().collect()
+    }
+
     pub fn get_client_id_by_server(&self, server_id: &str) -> Option<String> {
         self.data
             .entries
@@ -59,7 +71,35 @@ impl IdMap {
 
     pub fn remove_entry(&mut self, client_id: &str) {
         self.data.entries.remove(client_id);
+        self.data.entry_shares.remove(client_id);
         self.persist();
+    }
+
+    // ── Share membership ──────────────────────────────────────────
+
+    /// Record which server groups an entry is shared into. An empty list drops
+    /// the key, so an entry that stops being shared leaves nothing behind.
+    pub fn set_entry_shares(&mut self, client_id: &str, group_ids: &[String]) {
+        let changed = match self.data.entry_shares.get(client_id) {
+            Some(existing) => existing.as_slice() != group_ids,
+            None => !group_ids.is_empty(),
+        };
+        if !changed {
+            return; // every push would otherwise rewrite the file for nothing
+        }
+        if group_ids.is_empty() {
+            self.data.entry_shares.remove(client_id);
+        } else {
+            self.data
+                .entry_shares
+                .insert(client_id.to_string(), group_ids.to_vec());
+        }
+        self.persist();
+    }
+
+    /// The whole share map, for the Sync screen to match its feed against.
+    pub fn entry_shares(&self) -> HashMap<String, Vec<String>> {
+        self.data.entry_shares.clone()
     }
 
     pub fn remove_entry_by_server_id(&mut self, server_id: &str) -> Option<String> {
@@ -70,6 +110,7 @@ impl IdMap {
             .find(|(_, v)| v.as_str() == server_id)
             .map(|(k, _)| k.clone())?;
         self.data.entries.remove(&key);
+        self.data.entry_shares.remove(&key);
         self.persist();
         Some(key)
     }

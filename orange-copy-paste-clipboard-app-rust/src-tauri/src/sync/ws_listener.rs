@@ -4,6 +4,9 @@
 //! Connection lifecycle:
 //!   1. `connect()` is called after a successful login / token refresh.
 //!   2. On disconnect, reconnects with exponential backoff (5s → 10s → …max 60s).
+//!      A server-side close is a disconnect like any other — backend restarts,
+//!      idle proxy timeouts and load-balancer recycles all arrive that way, so
+//!      only `disconnect()` ends the loop.
 //!   3. `disconnect()` aborts the running task.
 //!
 //! Invariant: this module must never touch the clipboard history or note store
@@ -69,21 +72,36 @@ impl WsListener {
     async fn run_reconnect_loop(&self) {
         let mut backoff = INITIAL_BACKOFF_SECS;
         loop {
-            match self.connect_once().await {
-                Ok(()) => {
-                    // Clean disconnect — do not reconnect.
-                    break;
-                }
-                Err(e) => {
-                    eprintln!("[sync:ws] disconnected: {e}; reconnecting in {backoff}s");
-                    tokio::time::sleep(Duration::from_secs(backoff)).await;
-                    backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
-                }
+            // `established` says the socket came up before it dropped, which is
+            // what the backoff is meant to measure — a live connection that the
+            // server later closed should retry promptly, not inherit the delay
+            // built up while the backend was unreachable.
+            let (established, err) = self.connect_once().await;
+            if established {
+                backoff = INITIAL_BACKOFF_SECS;
+            }
+            self.set_connected(false);
+            eprintln!("[sync:ws] disconnected: {err}; reconnecting in {backoff}s");
+            tokio::time::sleep(Duration::from_secs(backoff)).await;
+            if !established {
+                backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
             }
         }
     }
 
-    async fn connect_once(&self) -> Result<(), String> {
+    /// Run one connection to completion. Returns whether the socket was ever
+    /// established, plus why it ended — it never succeeds permanently, since
+    /// the only way out of the loop is `disconnect()` aborting the task.
+    async fn connect_once(&self) -> (bool, String) {
+        match self.run_connection().await {
+            Ok(reason) => (true, reason),
+            Err(e) => (false, e),
+        }
+    }
+
+    /// `Ok(reason)` means the socket connected and later ended for `reason`;
+    /// `Err` means it never came up.
+    async fn run_connection(&self) -> Result<String, String> {
         // The handshake carries the JWT, and this loop can be reconnecting
         // after the app sat idle past the token's lifetime. Without this the
         // reconnect would keep failing on an expired token, since nothing else
@@ -113,11 +131,10 @@ impl WsListener {
         // Endpoint and device only: the token is a live bearer credential, and
         // stdout here is a log file that outlives the session.
         eprintln!("[sync:ws] connected to {endpoint} as device {device_id}");
-        let _ = self.app.emit("sync:status-changed", serde_json::json!({ "connected": true }));
+        self.set_connected(true);
 
         let (mut write, mut read) = ws_stream.split();
 
-        // Reset backoff on successful connection
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
@@ -127,16 +144,28 @@ impl WsListener {
                     let _ = write.send(Message::Pong(data)).await;
                 }
                 Ok(Message::Close(_)) => {
-                    return Ok(()); // Clean close — stop reconnecting
+                    return Ok("server closed the socket".into());
                 }
                 Err(e) => {
-                    return Err(format!("ws read: {e}"));
+                    return Ok(format!("ws read: {e}"));
                 }
                 _ => {}
             }
         }
 
-        Err("ws stream ended unexpectedly".into())
+        Ok("ws stream ended".into())
+    }
+
+    /// Publish connection state to both the status snapshot (`sync_get_status`)
+    /// and the UI event bus, so neither can claim "Synced" while the socket is
+    /// down.
+    fn set_connected(&self, connected: bool) {
+        if let Some(sync) = self.sync_client() {
+            sync.set_connected(connected);
+        }
+        let _ = self
+            .app
+            .emit("sync:status-changed", serde_json::json!({ "connected": connected }));
     }
 
     /// Look up the live `SyncClient` from managed state (it owns the UMK and
@@ -184,6 +213,18 @@ impl WsListener {
                     "sync:device-presence",
                     &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": true }),
                 );
+            }
+            // A member of one of our shared groups came online or went fully
+            // offline. Update the cached session members so the presence dots
+            // stop waiting on a manual refresh.
+            "user:presence" => {
+                let user_id = msg.payload.get("user_id").and_then(|v| v.as_str());
+                let online = msg.payload.get("online").and_then(|v| v.as_bool());
+                if let (Some(user_id), Some(online), Some(sync)) =
+                    (user_id, online, self.sync_client())
+                {
+                    sync.apply_member_presence(user_id, online);
+                }
             }
             "device:offline" => {
                 let _ = self.app.emit(

@@ -14,8 +14,8 @@ export interface ClipboardEntry {
   groups: string[];
   /** Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images). */
   label?: string;
-  /** Cloud sync status (populated at runtime from id_map; not persisted to disk). */
-  sync_status?: "synced" | "pending" | "local_only";
+  // Sync state is not part of the entry: Rust keeps it in id_map.json and the
+  // pending queue. Read it with useEntrySyncStates().
 }
 
 /** Matches the Rust `Note` struct. */
@@ -111,10 +111,20 @@ export interface SharingSession {
   members: SharingMember[];
 }
 
+/** One entry sync refused to send, with the reason to show the user. */
+export interface SkippedEntry {
+  client_id: string;
+  label: string;
+  reason: string;
+  at: number;
+}
+
 export interface SyncStatusInfo {
   connected: boolean;
   pending_count: number;
   skipped_count: number;
+  /** Most recent skips, newest first. */
+  skipped: SkippedEntry[];
   last_synced_at?: number;
 }
 

@@ -557,6 +557,67 @@
 
 .acct-id-note--warn { color: var(--acct-warn); }
 
+/* The skipped count is a disclosure control, not a label. */
+.acct-id-note--action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.acct-id-note--action:hover { text-decoration: underline; }
+
+.acct-skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--acct-warn);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.acct-skipped-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.acct-skipped-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--acct-warn);
+}
+
+.acct-skipped-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.acct-skipped-label {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct-skipped-reason,
+.acct-skipped-empty {
+  font-size: 11.5px;
+  color: var(--text-muted, #909090);
+}
+
+.acct-skipped-dismiss { align-self: flex-start; }
+
 .acct-id-actions {
   display: flex;
   align-items: center;

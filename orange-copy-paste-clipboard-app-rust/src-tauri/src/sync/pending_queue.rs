@@ -60,6 +60,30 @@ impl PendingQueue {
         ops
     }
 
+    /// id_map-style keys (`"clipboard:{id}"` / `"note:{id}"`) for every queued
+    /// op, so the UI can mark those entries as still waiting to upload.
+    pub fn pending_keys(&self) -> Vec<String> {
+        self.ops
+            .iter()
+            .filter_map(|op| match op {
+                PendingOp::Push { entry_json, entry_type }
+                | PendingOp::Update { entry_json, entry_type } => {
+                    serde_json::from_str::<serde_json::Value>(entry_json)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("client_id")
+                                .and_then(|c| c.as_str())
+                                .map(str::to_string)
+                        })
+                        .map(|id| format!("{entry_type}:{id}"))
+                }
+                PendingOp::Delete { client_id, entry_type } => {
+                    Some(format!("{entry_type}:{client_id}"))
+                }
+            })
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.ops.len()
     }

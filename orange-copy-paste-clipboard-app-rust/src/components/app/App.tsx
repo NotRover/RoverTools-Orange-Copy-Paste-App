@@ -609,21 +609,22 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // File-too-large-to-sync notification
-  const [fileSyncSkipped, setFileSyncSkipped] = useState(false);
+  // An entry sync refused to send. The reason comes from Rust so the toast can
+  // say what actually happened instead of guessing at the file-size case.
+  const [syncSkipReason, setSyncSkipReason] = useState<string | null>(null);
   const fileSyncSkippedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<{ client_id: string; size_bytes: number }>("sync:file-skipped", () => {
+    listen<{ client_id: string; label: string; reason: string }>("sync:entry-skipped", (event) => {
       if (cancelled) return;
       if (fileSyncSkippedTimerRef.current !== null)
         clearTimeout(fileSyncSkippedTimerRef.current);
-      setFileSyncSkipped(true);
+      setSyncSkipReason(event.payload.reason || "Item could not be synced");
       fileSyncSkippedTimerRef.current = setTimeout(() => {
         fileSyncSkippedTimerRef.current = null;
-        setFileSyncSkipped(false);
+        setSyncSkipReason(null);
       }, 5000);
     }).then((fn) => {
       if (cancelled) fn();
@@ -1422,12 +1423,12 @@ const App: React.FC = () => {
           />
         )}
 
-        {fileSyncSkipped && (
+        {syncSkipReason && (
           <ToastNotification
-            message="File too large to sync. Must be under 5 MB"
+            message={`Not synced. ${syncSkipReason}`}
             icon={<CloudSyncIcon size={13} />}
             duration={5000}
-            onDismiss={() => setFileSyncSkipped(false)}
+            onDismiss={() => setSyncSkipReason(null)}
           />
         )}
       </div>

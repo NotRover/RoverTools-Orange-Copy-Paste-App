@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../../types";
+import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
 import {
   fileNameFromPath,
   filePaths,
@@ -218,6 +219,8 @@ interface EntryCardProps {
   onRangeSelect?: (id: string) => void;
   /** Whether this entry is currently in the OS clipboard. */
   isInClipboard?: boolean;
+  /** Cloud badge state for this entry, if sync is on. */
+  syncState?: EntrySyncState;
 }
 
 const EntryCardImpl: React.FC<EntryCardProps> = ({
@@ -232,6 +235,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   onToggleSelect,
   onRangeSelect,
   isInClipboard = false,
+  syncState,
 }) => {
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
@@ -624,6 +628,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
         {/* Footer: type chip + pinned chip + timestamp */}
         <ChipBar
           entry={entry}
+          syncState={syncState}
           entryGroups={entryGroups}
           displayGroups={displayGroups}
           isInClipboard={isInClipboard}
