@@ -232,6 +232,10 @@ jobs:
   # ── 2. Build signed bundles ────────────────────────────────────────────────
   build:
     needs: prepare
+    # The version isn't known at dispatch, so `run-name` above can't carry it.
+    # Job names are resolved after `prepare`, which is the earliest anything can
+    # say which version is being built.
+    name: build ${{ needs.prepare.outputs.tag }} (${{ matrix.artifact }})
     permissions:
       contents: read
     strategy:
@@ -355,6 +359,7 @@ jobs:
   # ── 3. Publish to the public releases repo ─────────────────────────────────
   publish:
     needs: [prepare, build]
+    name: publish ${{ needs.prepare.outputs.tag }}
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
