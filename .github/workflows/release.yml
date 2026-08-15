@@ -1,5 +1,14 @@
 name: Release (manual)
 
+# The run's title in the Actions list. Evaluated at dispatch, so it can only name
+# the inputs — the version is computed later and isn't knowable here. Worth it
+# anyway: "#6" tells you nothing, and the one thing you want to see at a glance
+# is whether a run was a beta, a rehearsal, or the real thing.
+run-name: >-
+  release · ${{ inputs.bump }} ·
+  ${{ inputs.prerelease && 'beta' || 'stable' }} ·
+  ${{ inputs.dry_run && 'dry run' || 'publish' }}
+
 # Releasing is one run of this workflow. Click "Run workflow" in the Actions tab,
 # or `gh workflow run release.yml`. Every input has a working default, so a bare
 # run is a real patch release.
@@ -15,8 +24,9 @@ name: Release (manual)
 #
 # Two escape hatches, both off by default:
 #   dry_run     build and verify, publish nothing. For after editing this file.
-#   prerelease  publish, but stay out of the update feed — a beta testers install
-#               by hand. Promoting it later is an edit, not another build.
+#   prerelease  publish as a beta: offered only to installs that opted in under
+#               Settings → Updates, invisible to the stable feed. Promoting it
+#               later is an edit of the same bundles, not another build.
 #
 # Required secrets (see docs/RELEASING.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
