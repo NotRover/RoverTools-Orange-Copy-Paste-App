@@ -366,6 +366,10 @@ pub struct SessionMemberOut {
     pub identity_pubkey: Option<String>,
     #[serde(default)]
     pub has_group_key: bool,
+    /// Presence snapshot from the server: true when any of this member's
+    /// devices is connected. Defaulted for backends predating the field.
+    #[serde(default)]
+    pub online: bool,
 }
 
 #[derive(Debug, Deserialize)]

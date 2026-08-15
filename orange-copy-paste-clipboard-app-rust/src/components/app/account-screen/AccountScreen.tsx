@@ -13,7 +13,9 @@ import type {
   SyncQuota,
 } from "../../../types";
 import {
+  CaretDown,
   CaretRight,
+  CaretUp,
   Check,
   CloudCheck,
   Copy,
@@ -25,6 +27,7 @@ import {
   Plus,
   ShareNetwork,
   Key,
+  WarningCircle,
 } from "@phosphor-icons/react";
 import { GoogleIcon } from "../../icons";
 import { UserAvatar } from "../../UserAvatar";
@@ -123,6 +126,7 @@ const AccountScreen: React.FC = () => {
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [syncUser, setSyncUser] = useState<SyncUser | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatusInfo | null>(null);
+  const [showSkipped, setShowSkipped] = useState(false);
   const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
   const [devices, setDevices] = useState<SyncDevice[]>([]);
   // Live presence overrides on top of the server snapshot (device.online):
@@ -244,6 +248,18 @@ const AccountScreen: React.FC = () => {
     }).then((fn) => { unlisten = fn; });
     return () => unlisten?.();
   }, [refreshSpaces, refreshInvites, refreshQuota]);
+
+  // ── Member presence: another user in a shared space came or went ──
+  // Rust already updated its cached sessions, so re-reading the cache is enough.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("sharing:presence-changed", () => {
+      invoke<SharingSession[]>("sharing_get_sessions")
+        .then(setSharingSessions)
+        .catch(() => {});
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
 
   // ── Device presence: mark devices online/offline as events arrive ──
   useEffect(() => {
@@ -736,19 +752,25 @@ const AccountScreen: React.FC = () => {
 
   // Queue detail that the old status pill folded into its label — kept as a
   // second line so nothing is lost when the pill says "Synced".
-  const queueNote = [
-    // Skip when the status label already reads "N pending".
+  const queueNote =
     syncStatus && syncStatus.pending_count > 0 && status.kind !== "pending"
       ? `${syncStatus.pending_count} change${syncStatus.pending_count === 1 ? "" : "s"} waiting to upload`
-      : null,
-    syncStatus && syncStatus.skipped_count > 0
-      ? `${syncStatus.skipped_count} skipped`
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" - ");
-  // Amber is for the one case that needs a look: entries sync refused to send.
-  const queueNoteWarn = !!syncStatus && syncStatus.skipped_count > 0;
+      : null;
+  // Entries sync refused to send. The count alone said nothing about which
+  // items or why, so it opens a list carrying the reason for each.
+  const skipped = syncStatus?.skipped ?? [];
+  const skippedCount = syncStatus?.skipped_count ?? 0;
+
+  const handleDismissSkipped = async () => {
+    try {
+      await invoke("sync_clear_skipped");
+      const s = await invoke<SyncStatusInfo>("sync_get_status");
+      setSyncStatus(s);
+    } catch {
+      /* clearing a local report can't fail in a way the user can act on */
+    }
+    setShowSkipped(false);
+  };
 
   const scopePills = (value: string, onPick: (v: string) => void) => (
     <div className="acct-scope">
@@ -1118,10 +1140,20 @@ const AccountScreen: React.FC = () => {
                     ? ` - ${onlineDevices} device${onlineDevices === 1 ? "" : "s"} online`
                     : ""}
                 </span>
-                {queueNote && (
-                  <span className={`acct-id-note${queueNoteWarn ? " acct-id-note--warn" : ""}`}>
-                    {queueNote}
-                  </span>
+                {queueNote && <span className="acct-id-note">{queueNote}</span>}
+                {skippedCount > 0 && (
+                  <button
+                    type="button"
+                    className="acct-id-note acct-id-note--warn acct-id-note--action"
+                    onClick={() => setShowSkipped((v) => !v)}
+                  >
+                    {skippedCount} not synced
+                    {showSkipped ? (
+                      <CaretUp size={10} weight="bold" />
+                    ) : (
+                      <CaretDown size={10} weight="bold" />
+                    )}
+                  </button>
                 )}
               </div>
               <div className="acct-id-actions">
@@ -1138,6 +1170,35 @@ const AccountScreen: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* What sync refused to send, and why */}
+            {showSkipped && skippedCount > 0 && (
+              <div className="acct-skipped">
+                {skipped.length === 0 ? (
+                  <span className="acct-skipped-empty">
+                    {skippedCount} item{skippedCount === 1 ? "" : "s"} were skipped before
+                    this app was restarted. The details are gone.
+                  </span>
+                ) : (
+                  skipped.map((item) => (
+                    <div key={`${item.client_id}-${item.at}`} className="acct-skipped-row">
+                      <WarningCircle size={13} className="acct-skipped-icon" />
+                      <span className="acct-skipped-text">
+                        <span className="acct-skipped-label">{item.label}</span>
+                        <span className="acct-skipped-reason">{item.reason}</span>
+                      </span>
+                    </div>
+                  ))
+                )}
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--sm acct-skipped-dismiss"
+                  onClick={handleDismissSkipped}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             {/* Attention strip — invites waiting on you */}
             {receivedPending.length > 0 && (

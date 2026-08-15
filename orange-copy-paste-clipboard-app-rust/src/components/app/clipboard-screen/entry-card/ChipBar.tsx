@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEntry } from "../../../../types";
+import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
 import { deriveDisplayKind, groupColor } from "../../../../types";
 import {
   ImageIcon,
@@ -16,6 +17,8 @@ const CHIP_GAP_PX = 4;
 
 interface ChipBarProps {
   entry: ClipboardEntry;
+  /** Cloud badge state, resolved from Rust's sync bookkeeping. */
+  syncState?: EntrySyncState;
   entryGroups: string[];
   displayGroups: string[];
   isInClipboard: boolean;
@@ -35,6 +38,7 @@ interface ChipBarProps {
 
 const ChipBar: React.FC<ChipBarProps> = ({
   entry,
+  syncState,
   entryGroups,
   displayGroups,
   isInClipboard,
@@ -364,7 +368,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             </button>
           </div>
         </div>
-        {entry.sync_status === "synced" && (
+        {syncState === "synced" && (
           <span
             className="card-sync-icon card-sync-icon--synced"
             data-tooltip="Synced"
@@ -372,7 +376,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             <CloudSyncIcon size={11} />
           </span>
         )}
-        {entry.sync_status === "pending" && (
+        {syncState === "pending" && (
           <span
             className="card-sync-icon card-sync-icon--pending"
             data-tooltip="Sync pending"

@@ -46,11 +46,30 @@ use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
-use crate::sync::types::{EntryType, ShareScope, SharingSession, SyncStatusInfo, SyncUser};
+use crate::sync::types::{
+    EntryType, ShareScope, SharingSession, SkippedEntry, SyncStatusInfo, SyncUser,
+};
 use crate::sync::ws_listener::WsListener;
 
 /// How long after the last `schedule_settings_push()` call before the push fires.
 const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
+
+/// Display name for a Live Share session, built from the other members.
+/// Sessions have no user-chosen name, so two running at once would otherwise be
+/// two identical "Live Share" rows with no way to tell which is which.
+pub(crate) fn live_share_name(other_members: &[String]) -> String {
+    let names: Vec<&str> = other_members
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .collect();
+    match names.len() {
+        0 => "Live Share".into(),
+        1 => format!("Live Share with {}", names[0]),
+        2 => format!("Live Share with {} and {}", names[0], names[1]),
+        n => format!("Live Share with {} and {} others", names[0], n - 1),
+    }
+}
 
 /// Shared handles cloned out of `SyncClient` for a spawned push/delete task.
 struct PushCtx {
@@ -91,6 +110,9 @@ struct ImageMergeMeta {
     mime: String,
     label: Option<String>,
     groups: Vec<String>,
+    /// Server groups this entry was shared into, recorded alongside its server
+    /// id so an image lands under the right space like every other entry.
+    group_ids: Vec<String>,
     created_at: u64,
     pinned: bool,
 }
@@ -634,9 +656,10 @@ impl SyncClient {
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
-        self.status.lock().connected = true;
 
-        // 10. Start the realtime listener.
+        // 10. Start the realtime listener.  It owns `connected` from here on —
+        // setting it true at login made the status pill claim "Synced" for as
+        // long as the app ran, even when the socket never came up.
         self.start_ws_listener();
 
         Ok(user)
@@ -725,7 +748,6 @@ impl SyncClient {
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
-        self.status.lock().connected = true;
         self.start_ws_listener();
 
         Ok(user)
@@ -815,6 +837,13 @@ impl SyncClient {
     }
 
     // ── WS management ─────────────────────────────────────────────
+
+    /// Record whether the realtime socket is up.  Called by the WS listener on
+    /// every connect and drop — it is the only writer, so the status pill and
+    /// the actual connection can no longer disagree.
+    pub(crate) fn set_connected(&self, connected: bool) {
+        self.status.lock().connected = connected;
+    }
 
     fn start_ws_listener(&self) {
         let current = self.http.lock().clone();
@@ -925,6 +954,8 @@ impl SyncClient {
             self.share_target(umk, &entry.groups, |s| s.my_scope.includes_clipboard());
 
         self.handle.spawn(async move {
+            let skip_label = skip_label_for(&entry);
+
             // Skip file entries larger than 5 MB (Phase 7 enforcement)
             if entry.kind == EntryKind::File {
                 let total_bytes: u64 = entry
@@ -935,10 +966,14 @@ impl SyncClient {
                     .sum();
                 const FILE_SIZE_LIMIT: u64 = 5 * 1024 * 1024;
                 if total_bytes > FILE_SIZE_LIMIT {
-                    ctx.status.lock().skipped_count += 1;
-                    let _ = ctx.app.emit(
-                        "sync:file-skipped",
-                        serde_json::json!({ "client_id": entry.id, "size_bytes": total_bytes }),
+                    record_skip(
+                        &ctx,
+                        &entry.id,
+                        &skip_label,
+                        format!(
+                            "{} is over the 5 MB limit for synced files",
+                            format_bytes(total_bytes)
+                        ),
                     );
                     return;
                 }
@@ -955,13 +990,19 @@ impl SyncClient {
             // a small descriptor inline; text/html/file keep content inline.
             let (content, blob_key, blob_size) = if entry.kind == EntryKind::Image {
                 let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) else {
+                    record_skip(
+                        &ctx,
+                        &entry.id,
+                        &skip_label,
+                        "Not signed in to sync when this image was copied".into(),
+                    );
                     return; // image sync needs connectivity — nothing to queue
                 };
                 match upload_image_blob(http, &enc_key, &entry.id, &entry.content).await {
                     Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
                     Err(e) => {
                         eprintln!("[sync] image blob upload failed: {e}");
-                        ctx.status.lock().skipped_count += 1;
+                        record_skip(&ctx, &entry.id, &skip_label, format!("Image upload failed: {e}"));
                         return;
                     }
                 }
@@ -1157,6 +1198,7 @@ impl SyncClient {
                                     mime,
                                     label,
                                     groups,
+                                    group_ids: e.group_ids.clone(),
                                     created_at: e.created_at,
                                     pinned: e.pinned,
                                 },
@@ -1190,7 +1232,13 @@ impl SyncClient {
                 if is_note { "note" } else { "clipboard" },
                 e.client_id
             );
-            self.id_map.lock().set_entry(&key, &e.server_id);
+            let mut id_map = self.id_map.lock();
+            id_map.set_entry(&key, &e.server_id);
+            // The sender's metadata carries *their* local group names, which say
+            // nothing about the space the entry travelled through. Recording the
+            // server ids is what lets the Sync screen place a received entry
+            // under the group or session it actually came from.
+            id_map.set_entry_shares(&key, &e.group_ids);
         }
 
         if clip_changed {
@@ -1254,14 +1302,19 @@ impl SyncClient {
         let ops = self.pending_queue.lock().drain();
         for op in ops {
             match op {
-                PendingOp::Push { entry_json, .. } | PendingOp::Update { entry_json, .. } => {
+                PendingOp::Push { entry_json, entry_type }
+                | PendingOp::Update { entry_json, entry_type } => {
                     if let Ok(req) = serde_json::from_str::<PushEntryRequest>(&entry_json) {
+                        let group_ids = req.group_ids.clone();
                         if let Ok(result) = http.push_entries(vec![req]).await {
                             for r in result.accepted {
-                                // client_id is unique across types; the row is
-                                // keyed by (client_id, entry_type) server-side.
-                                let key = format!("clipboard:{}", r.client_id);
-                                self.id_map.lock().set_entry(&key, &r.server_id);
+                                // Key by the op's own type. Hardcoding
+                                // "clipboard" filed every flushed note under a
+                                // key nothing would ever look up or clean out.
+                                let key = format!("{entry_type}:{}", r.client_id);
+                                let mut id_map = self.id_map.lock();
+                                id_map.set_entry(&key, &r.server_id);
+                                id_map.set_entry_shares(&key, &group_ids);
                             }
                         }
                     }
@@ -1329,6 +1382,35 @@ impl SyncClient {
         info
     }
 
+    /// Per-entry sync state keyed `"clipboard:{id}"` / `"note:{id}"`, for the
+    /// cloud badge on entry cards.  Queued work wins over an earlier ack: an
+    /// entry that synced and then got edited offline is pending, not synced.
+    pub fn entry_states(&self) -> HashMap<String, &'static str> {
+        let mut states: HashMap<String, &'static str> = self
+            .id_map
+            .lock()
+            .entry_keys()
+            .into_iter()
+            .map(|key| (key, "synced"))
+            .collect();
+        for key in self.pending_queue.lock().pending_keys() {
+            states.insert(key, "pending");
+        }
+        states
+    }
+
+    /// Server group ids per entry, for the Sync screen's feed matching.
+    pub fn entry_shares(&self) -> HashMap<String, Vec<String>> {
+        self.id_map.lock().entry_shares()
+    }
+
+    /// Drop the recorded skips (and their count) after the user has seen them.
+    pub fn clear_skipped(&self) {
+        let mut status = self.status.lock();
+        status.skipped_count = 0;
+        status.skipped.clear();
+    }
+
     pub fn sharing_sessions(&self) -> Vec<SharingSession> {
         self.sharing_sessions.lock().clone()
     }
@@ -1342,6 +1424,29 @@ impl SyncClient {
             *existing = session;
         } else {
             guard.push(session);
+        }
+    }
+
+    /// Flip a member's presence across every cached session they appear in,
+    /// then tell the UI.  Driven by the `user:presence` WS event.
+    pub(crate) fn apply_member_presence(&self, user_id: &str, online: bool) {
+        let mut changed = false;
+        {
+            let mut sessions = self.sharing_sessions.lock();
+            for session in sessions.iter_mut() {
+                for member in session.members.iter_mut() {
+                    if member.user_id == user_id && member.online != online {
+                        member.online = online;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            let _ = self.app.emit(
+                "sharing:presence-changed",
+                serde_json::json!({ "user_id": user_id, "online": online }),
+            );
         }
     }
 
@@ -1684,9 +1789,15 @@ impl SyncClient {
                 }
             }
 
+            let other_names: Vec<String> = s
+                .members
+                .iter()
+                .filter(|m| m.user_id != me)
+                .map(|m| m.display_name.clone())
+                .collect();
             let session = SharingSession {
                 share_group_id: s.share_group_id.clone(),
-                name: "Live Share".into(),
+                name: live_share_name(&other_names),
                 my_scope: ShareScope::parse(&s.my_scope).unwrap_or(ShareScope::Clipboard),
                 members: s
                     .members
@@ -1697,7 +1808,7 @@ impl SyncClient {
                         avatar_url: m.avatar_url,
                         email: String::new(),
                         scope: ShareScope::parse(&m.scope).unwrap_or(ShareScope::Clipboard),
-                        online: false,
+                        online: m.online,
                     })
                     .collect(),
                 group_key: self.session_group_key(&s.share_group_id),
@@ -1898,9 +2009,11 @@ impl SyncClient {
             });
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
-            id_map
-                .lock()
-                .set_entry(&format!("clipboard:{}", meta.client_id), &meta.server_id);
+            let key = format!("clipboard:{}", meta.client_id);
+            let mut id_map = id_map.lock();
+            id_map.set_entry(&key, &meta.server_id);
+            id_map.set_entry_shares(&key, &meta.group_ids);
+            drop(id_map);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
     }
@@ -1955,6 +2068,68 @@ fn ext_for_mime(mime: &str) -> &'static str {
         "image/bmp" => "bmp",
         _ => "png",
     }
+}
+
+/// How many skips the status snapshot keeps.  Enough to explain a bad run
+/// without letting a broken blob store grow the list without bound.
+const SKIPPED_HISTORY_LIMIT: usize = 20;
+
+fn format_bytes(bytes: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    const KB: f64 = 1024.0;
+    let b = bytes as f64;
+    if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.0} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// A short human label for an entry, used when telling the user which item
+/// sync refused to send.
+fn skip_label_for(entry: &ClipboardEntry) -> String {
+    if let Some(label) = entry.label.as_ref().filter(|l| !l.trim().is_empty()) {
+        return label.clone();
+    }
+    match entry.kind {
+        EntryKind::Image => "Image".into(),
+        EntryKind::File => entry
+            .content
+            .lines()
+            .next()
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "File".into()),
+        _ => {
+            let text: String = entry.content.trim().chars().take(40).collect();
+            if text.is_empty() { "Clipboard item".into() } else { text }
+        }
+    }
+}
+
+/// Record an entry sync refused to send: bump the count, keep the reason for
+/// the Account screen, and tell the UI so it can surface it immediately.
+fn record_skip(ctx: &PushCtx, client_id: &str, label: &str, reason: String) {
+    {
+        let mut status = ctx.status.lock();
+        status.skipped_count += 1;
+        status.skipped.insert(
+            0,
+            SkippedEntry {
+                client_id: client_id.to_string(),
+                label: label.to_string(),
+                reason: reason.clone(),
+                at: now_ms(),
+            },
+        );
+        status.skipped.truncate(SKIPPED_HISTORY_LIMIT);
+    }
+    let _ = ctx.app.emit(
+        "sync:entry-skipped",
+        serde_json::json!({ "client_id": client_id, "label": label, "reason": reason }),
+    );
 }
 
 /// Encrypt an image entry's bytes and upload them as a blob.  Returns
@@ -2015,6 +2190,12 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
             return;
         }
     };
+
+    // Record the spaces this entry went into before the push is attempted, so
+    // the sender's own Sync screen shows their contribution whether or not the
+    // request succeeds (a queued push carries the same group_ids).
+    let entry_key = format!("{entry_type}:{client_id}");
+    ctx.id_map.lock().set_entry_shares(&entry_key, &group_ids);
 
     let push_req = PushEntryRequest {
         client_id: client_id.clone(),
@@ -2084,4 +2265,11 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
     };
     ctx.queue.lock().push(op);
     ctx.status.lock().pending_count = ctx.queue.lock().len();
+    // Nothing else fires when a push falls back to the queue, so without this
+    // the card's "waiting to upload" badge would not appear until some
+    // unrelated sync event happened to refresh it.
+    let _ = ctx.app.emit(
+        "sync:entry-queued",
+        serde_json::json!({ "client_id": client_id, "entry_type": entry_type }),
+    );
 }

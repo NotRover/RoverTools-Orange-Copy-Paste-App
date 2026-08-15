@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
+import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
@@ -174,6 +175,9 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   // Multi-select state
   const multiSelect = useMultiSelect();
+
+  // Cloud badge state, keyed "clipboard:{id}". Kept out of the entry model.
+  const entrySyncStates = useEntrySyncStates();
 
   // Day groups: entries sorted within each day, and the day buckets themselves
   // ordered by date — oldest-first only for the "oldest" sort, newest-first for
@@ -512,6 +516,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onToggleSelect={multiSelect.toggleSelect}
                           onRangeSelect={handleRangeSelect}
                           isInClipboard={entry.id === activeClipboardId}
+                          syncState={entrySyncStates[`clipboard:${entry.id}`]}
                         />
                       ))}
                     </div>

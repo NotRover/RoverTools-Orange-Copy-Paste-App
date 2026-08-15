@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   ClipboardEntry,
   DisplayKind,
@@ -814,6 +815,8 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
 }) => {
   const [syncGroups, setSyncGroups] = useState<SyncGroup[]>([]);
   const [sessions, setSessions] = useState<SharingSession[]>([]);
+  // "clipboard:{id}" / "note:{id}" -> server group ids the entry is shared into.
+  const [entryShares, setEntryShares] = useState<Record<string, string[]>>({});
   const [selected, setSelected] = useState<SelectedGroup | null>(null);
   const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
   const [search, setSearch] = useState("");
@@ -907,6 +910,12 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   }, [filtersOpen]);
 
 
+  const refreshShares = useCallback(() => {
+    invoke<Record<string, string[]>>("sync_get_entry_shares")
+      .then(setEntryShares)
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     invoke<SyncGroup[]>("sync_get_groups")
       .then(setSyncGroups)
@@ -914,7 +923,42 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
     invoke<SharingSession[]>("sharing_refresh_sessions")
       .then(setSessions)
       .catch(() => {});
-  }, [syncConnected]);
+    refreshShares();
+  }, [syncConnected, refreshShares]);
+
+  // Share membership changes whenever an entry is pushed or merged, and it
+  // lives outside the entry model, so it needs its own refresh on those events.
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
+    let cancelled = false;
+    for (const event of [
+      "sync:history-merged",
+      "sync:notes-merged",
+      "sync:entry-synced",
+      "sync:note-synced",
+    ]) {
+      listen(event, refreshShares).then((fn) => {
+        if (cancelled) fn();
+        else unlisteners.push(fn);
+      });
+    }
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [refreshShares]);
+
+  // Live member presence: Rust keeps the cached sessions current, so the dots
+  // just need a re-read when it says something moved.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("sharing:presence-changed", () => {
+      invoke<SharingSession[]>("sharing_get_sessions")
+        .then(setSessions)
+        .catch(() => {});
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     setDetailItem(null);
@@ -923,21 +967,33 @@ const SyncScreen: React.FC<SyncScreenProps> = ({
   // Base feed items (group + type filter)
   const allFeedItems = useMemo((): FeedItem[] => {
     if (!selected) return [];
-    const matchesGroup = (groups: string[]) => {
+    // Two separate things decide membership. A pool group is something the user
+    // tags into, so it matches its *name* against the entry's own tags. A shared
+    // space also matches on server group id via entryShares, which is how
+    // received entries — and Live Share items, which carry no tag at all — find
+    // their space. Matching the server uuid against `groups` found nothing ever,
+    // because entries only hold names.
+    const matchesGroup = (groups: string[], shareKey: string) => {
+      const shares = entryShares[shareKey];
       if (selected.kind === "local") return groups.includes(selected.name);
-      if (selected.kind === "sync") return groups.includes(selected.group.id);
-      return groups.includes(selected.session.share_group_id);
+      if (selected.kind === "sync")
+        return (
+          groups.includes(selected.group.name) ||
+          !!shares?.includes(selected.group.id)
+        );
+      return !!shares?.includes(selected.session.share_group_id);
     };
     const items: FeedItem[] = [];
     if (feedFilter !== "notes")
       for (const entry of entries)
-        if (matchesGroup(entry.groups))
+        if (matchesGroup(entry.groups, `clipboard:${entry.id}`))
           items.push({ kind: "clipboard", entry });
     if (feedFilter !== "clipboard")
       for (const note of notes)
-        if (matchesGroup(note.groups)) items.push({ kind: "note", note });
+        if (matchesGroup(note.groups, `note:${note.id}`))
+          items.push({ kind: "note", note });
     return items;
-  }, [selected, feedFilter, entries, notes]);
+  }, [selected, feedFilter, entries, notes, entryShares]);
 
   // Apply search + advanced filters + sort
   const feedItems = useMemo((): FeedItem[] => {
