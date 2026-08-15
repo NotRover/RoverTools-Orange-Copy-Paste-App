@@ -171,7 +171,11 @@ jobs:
           # the `v0.1.0-build.N` tags from build-linux.yml, which are throwaway CI
           # builds. Treating one as the last release would silently truncate the
           # notes to "everything since a random CI build".
-          last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          #
+          # `|| true` is load-bearing: with no release tag yet, grep finds nothing
+          # and exits 1, which under `set -e` + pipefail aborts the step. That is
+          # exactly the first release — the one case this branch exists to handle.
+          last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
 
           if [ -n "$last" ]; then
             echo "Notes cover $last..HEAD"
