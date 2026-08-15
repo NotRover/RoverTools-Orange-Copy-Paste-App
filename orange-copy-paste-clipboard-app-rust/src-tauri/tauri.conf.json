@@ -54,7 +54,7 @@
       "endpoints": [
         "https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwNThCN0U4QTg3MzY0RUEKUldUcVpIT282TGRZTUgrKzA1QWtOWUNuWE9IOXNkdHVFS05Gc1JaQ3JnQVlHbmhMeXphY2hoWWMK",
       "windows": {
         "installMode": "passive"
       }
