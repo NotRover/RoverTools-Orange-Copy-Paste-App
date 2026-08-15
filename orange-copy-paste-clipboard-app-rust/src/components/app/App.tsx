@@ -225,7 +225,9 @@ const App: React.FC = () => {
   }, []);
 
   // Silent session restore: refresh token + device-wrapped UMK, no password.
-  // Fire-and-forget — a null result just means the login screen shows as usual.
+  // Fire-and-forget — a null result shows the login screen, but Rust keeps
+  // retrying in the background when the cause was only a network hiccup and
+  // emits sync:session-restored once it gets through (AccountScreen listens).
   useEffect(() => {
     invoke("sync_restore_session").catch(() => {});
   }, []);
