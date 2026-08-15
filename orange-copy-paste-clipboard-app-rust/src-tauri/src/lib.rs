@@ -411,6 +411,7 @@ pub fn run() {
                 dispatch_trigger(app, &argv);
             } else if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
+                crate::runtime::window_state::apply_deferred_zoom(app);
                 let _ = w.set_focus();
             }
         }))

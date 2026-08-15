@@ -9,6 +9,7 @@ fn show_main_window(app_handle: &tauri::AppHandle) {
     if let Some(win) = app_handle.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
+        crate::runtime::window_state::apply_deferred_zoom(app_handle);
         let _ = win.set_focus();
     }
 }
