@@ -1,8 +1,8 @@
 [package]
 name = "notrover-smart-clipboard-app-rust"
 version = "0.1.1"
-description = "Smart Clipboard – Tauri/Rust port of the Electron clipboard manager"
-authors = ["you"]
+description = "Cross-device smart clipboard with history, notes and end-to-end encrypted sync"
+authors = ["Spectrewolf8"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
