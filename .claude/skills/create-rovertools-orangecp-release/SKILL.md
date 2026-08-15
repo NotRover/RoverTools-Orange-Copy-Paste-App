@@ -100,16 +100,20 @@ grep -m1 '^version = ' orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml
 Releases are cut from `main`, and the workflow builds from the pushed ref — so an unpushed
 commit will not be in the release. Say so if the branch is not `main` or the tree is dirty.
 
-The notes users will read are the commit subjects since the last release tag. Nothing is
-filtered by prefix, so `chore:` and `docs:` subjects appear too:
+The notes users will read are the commit subjects since the last release tag, minus the
+internal ones. This reproduces the workflow's own filter — internal types and its
+`release: vX.Y.Z` bumps dropped, the `type(scope):` prefix stripped, first letter
+capitalised, duplicates collapsed — so what it prints is what ships:
 
 ```bash
-LAST=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1); if [ -n "$LAST" ]; then echo "since $LAST:"; git log --no-merges --pretty='format:- %s' "$LAST..HEAD"; else echo "No release tag yet — the notes will be \"First release.\""; fi
+LAST=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1); if [ -n "$LAST" ]; then echo "since $LAST:"; git log --no-merges --pretty='format:%s' "$LAST..HEAD" | grep -vE '^(chore|ci|build|test|refactor|style|docs)(\([^)]*\))?!?:' | grep -vE '^release: v[0-9]' | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' | sed -E 's/^(.)/\U\1/' | awk '!seen[$0]++' | sed 's/^/- /'; else echo "No release tag yet — the notes will be \"First release.\""; fi
 ```
 
 Report the current version, the version being cut (patch bumps the third number, minor
-the second and zeroes the third), and the notes verbatim. Flag any subject that reads as
-internal jargon — that is a cue to reword the commit, not to hand-edit the notes.
+the second and zeroes the third), and the notes verbatim. No output means every commit
+in the range was internal, and the release will read "Maintenance and internal
+improvements." — say so. Flag any surviving line that reads as jargon: the fix is to
+reword the commit, not to hand-edit the notes.
 
 Stop here if invoked with `preview`.
 

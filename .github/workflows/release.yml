@@ -170,10 +170,11 @@ jobs:
       - name: Collect release notes
         run: |
           set -euo pipefail
-          # The commit subjects since the last release, which is what the app shows
-          # under "What's new". No filtering by prefix: every commit that landed is
-          # a change that shipped, and hiding some of them from the list is how a
-          # release ends up describing itself inaccurately.
+          # The commit subjects since the last release, cleaned up into something a
+          # user can read. These lines are the app's "What's new" panel, not a
+          # changelog for us: `chore(release): reset the version after a cancelled
+          # run` is bookkeeping, and `release: v0.1.2` inside the v0.1.2 notes is
+          # nonsense. Both were shipped to users before this filter existed.
           #
           # Merge commits are dropped — "Merge pull request #24 from …" says nothing
           # a user can act on, and the branch's own commits are listed anyway.
@@ -189,7 +190,28 @@ jobs:
 
           if [ -n "$last" ]; then
             echo "Notes cover $last..HEAD"
-            git log --no-merges --pretty='format:- %s' "$last..HEAD" > RELEASE_NOTES.md
+            # Each stage, in order:
+            #   1. drop internal commit types — nothing a user of the app can see
+            #   2. drop the workflow's own `release: vX.Y.Z` bump commits
+            #   3. strip the `type(scope):` prefix — conventional-commit syntax is
+            #      ours, not theirs
+            #   4. capitalise the first letter (GNU sed; this job is ubuntu-latest)
+            #   5. fold typographic punctuation to ASCII — these lines are
+            #      user-facing copy, and a commit subject written with an em dash
+            #      would otherwise carry it into the app's "What's new" panel
+            #   6. de-duplicate — the same subject can land twice across branches
+            #   7. re-add the bullet, after the text has settled
+            # `|| true`: when every commit is internal, the greps output nothing and
+            # exit 1, which under `set -e` + pipefail would abort. An empty file is
+            # a valid outcome and is handled below.
+            git log --no-merges --pretty='format:%s' "$last..HEAD" \
+              | grep -vE '^(chore|ci|build|test|refactor|style|docs)(\([^)]*\))?!?:' \
+              | grep -vE '^release: v[0-9]' \
+              | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' \
+              | sed -E 's/^(.)/\U\1/' \
+              | sed -e 's/—/-/g' -e 's/–/-/g' -e 's/“/"/g' -e 's/”/"/g' -e "s/’/'/g" -e "s/‘/'/g" -e 's/…/.../g' \
+              | awk '!seen[$0]++' \
+              | sed 's/^/- /' > RELEASE_NOTES.md || true
           else
             # No previous release: listing the entire history would put hundreds of
             # bullets in the update prompt, and nobody is updating *to* a first
@@ -198,9 +220,10 @@ jobs:
             echo "First release." > RELEASE_NOTES.md
           fi
 
-          # An empty file would publish a release with a blank body.
+          # Empty means the release is real but every commit in it was internal —
+          # a blank body is not an option, and neither is listing them.
           if [ ! -s RELEASE_NOTES.md ]; then
-            echo "No code changes since $last." > RELEASE_NOTES.md
+            echo "- Maintenance and internal improvements." > RELEASE_NOTES.md
           fi
 
           echo "── release notes ──"
@@ -484,7 +507,7 @@ jobs:
 
           **Windows will warn you the first time.** The installer isn't signed with a
           paid code-signing certificate, so SmartScreen shows *"Windows protected your
-          PC — unrecognized app"*. Click **More info** → **Run anyway**.
+          PC - unrecognized app"*. Click **More info**, then **Run anyway**.
 
           You'll see this once, on a manual install. Updates from inside the app don't
           trigger it.

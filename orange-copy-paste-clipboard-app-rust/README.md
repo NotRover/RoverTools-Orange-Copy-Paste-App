@@ -249,8 +249,8 @@ Use the real installed binary name/path (check the `Exec=` line in the installed
 ## Releases & updates
 
 Nobody hand-distributes an installer after the first one. Cutting a release is a
-single manual workflow; installed copies notice it on their next launch and offer
-it. You pick the bump at dispatch — nothing is inferred from commit messages — and
+single manual workflow; installed copies notice it and offer it, at launch and
+every six hours after. You pick the bump at dispatch — nothing is inferred from commit messages — and
 the version number, release notes and update feed follow from that one choice.
 
 Full operational detail, including one-time setup, lives in
@@ -265,13 +265,13 @@ about to ship, dispatches only after an explicit yes, then verifies both channel
 you dispatch release.yml (patch, minor or major)
    │
    ├─ bump src-tauri/Cargo.toml
-   ├─ notes = commit subjects since the last release tag
+   ├─ notes = user-facing commit subjects since the last release tag
    │
    └─ matrix build ─► signed NSIS (Windows) + AppImage/deb (Linux)
                           │
                           └─► public releases repo: bundles + latest.json
                                       │
-                                      └─► app checks it ~8s after launch
+                                      └─► app checks ~8s after launch, then 6-hourly
 ```
 
 The source repo is private; the **releases** repo is public because the updater
@@ -304,7 +304,8 @@ smoke test. The workflow checks all three itself and names whichever is missing.
 
 ### What users get
 
-Within a few seconds of their next launch, a strip appears under the titlebar:
+Within a few seconds of launch — and every six hours while the app keeps running,
+since this one lives in the tray for weeks — a strip appears under the titlebar:
 *"Version 0.3.0 is available"*, with the generated notes behind **What's new**.
 Nothing downloads or installs until they press something — **Download**, then
 **Restart & install** as a separate confirmation, so a background download
