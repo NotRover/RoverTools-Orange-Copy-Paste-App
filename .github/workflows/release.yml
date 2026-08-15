@@ -206,6 +206,41 @@ jobs:
           echo "── release notes ──"
           cat RELEASE_NOTES.md
 
+      - name: Write the run summary
+        # `run-name` is fixed when the run is created, before the version exists,
+        # and a run cannot be renamed afterwards. This panel is the first place
+        # the run page can state what is actually being cut.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: v${{ steps.version.outputs.version }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            channel="beta — offered only to installs opted into beta versions"
+          else
+            channel="stable — offered to everyone"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            mode="dry run — builds and verifies, publishes nothing"
+          else
+            mode="publish"
+          fi
+
+          {
+            echo "## $TAG"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`$VERSION\` (\`$BUMP\` bump) |"
+            echo "| Channel | $channel |"
+            echo "| Mode | $mode |"
+            echo
+            echo "### Release notes"
+            echo
+            cat RELEASE_NOTES.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload release notes
         # Passed to the publish job as a file: multi-line job outputs get mangled.
         uses: actions/upload-artifact@v7
