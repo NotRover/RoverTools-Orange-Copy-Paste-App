@@ -30,6 +30,14 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 /// or the sync engine's own startup for the network and the disk.
 const STARTUP_CHECK_DELAY_MS: u64 = 8_000;
 
+/// How often to look again while the app keeps running.
+///
+/// This app starts with the machine and lives in the tray, so it is routinely up
+/// for weeks. A check that only ran at launch would never fire for exactly the
+/// people most likely to be on an old build. Still notify-only: nothing
+/// downloads or installs without the user pressing something.
+const RECHECK_INTERVAL_MS: u64 = 6 * 60 * 60 * 1_000;
+
 /// Settings key: whether to check automatically at launch. Absent means yes.
 const KEY_AUTO_CHECK: &str = "auto_check_updates";
 /// Settings key: a version the user asked not to be told about again.
@@ -96,6 +104,11 @@ static PENDING: LazyLock<Mutex<Option<Pending>>> = LazyLock::new(|| Mutex::new(N
 /// both write to `PENDING` and race over which bytes belong to which release, so
 /// the second caller is turned away instead.
 static BUSY: AtomicBool = AtomicBool::new(false);
+
+/// The version the banner has already been raised for this session, so a
+/// periodic re-check does not reopen one the user dismissed. Per-process by
+/// design: a restart is a fresh chance to mention it.
+static ANNOUNCED: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
 /// Releases self-updates in debug builds.
 ///
@@ -173,7 +186,17 @@ fn updater_for(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, 
     if !on_beta_channel(app) {
         return app.updater().map_err(|e| e.to_string());
     }
-    let url = BETA_FEED
+    // Cache-busted per check. raw.githubusercontent serves the feed through a CDN
+    // with `Cache-Control: max-age=300`, so for five minutes after a release an
+    // edge node still hands out the previous `beta.json` — and the app truthfully
+    // reports that there is nothing new. A throwaway parameter makes every check
+    // a distinct cache key, which is the only way to see a release the moment it
+    // lands.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let url = format!("{BETA_FEED}?t={nonce}")
         .parse()
         .map_err(|e| format!("beta feed URL is invalid: {e}"))?;
     app.updater_builder()
@@ -214,33 +237,58 @@ pub fn spawn_startup_check(app: &tauri::AppHandle) {
     if !updates_permitted() {
         return;
     }
-    // Absent key means yes — an install that has never opened Settings still
-    // gets told about updates.
-    let auto_check = read_setting(app, KEY_AUTO_CHECK)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    if !auto_check {
-        return;
-    }
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(STARTUP_CHECK_DELAY_MS)).await;
-
-        let Some(_busy) = BusyGuard::acquire() else {
-            return;
-        };
-        let Ok(Some(info)) = run_check(&app).await else {
-            return;
-        };
-
-        // A skipped version stays in PENDING — Settings still shows it, and
-        // "Check for updates" still reports it — it just does not interrupt.
-        if info.skipped {
-            return;
+        loop {
+            // Read the setting each pass rather than once: turning automatic
+            // checks off takes effect without a restart. Absent key means yes —
+            // an install that has never opened Settings still gets told.
+            let auto_check = read_setting(&app, KEY_AUTO_CHECK)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if auto_check {
+                announce_if_new(&app).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(RECHECK_INTERVAL_MS)).await;
         }
-        let _ = app.emit("updater:available", info);
     });
+}
+
+/// Check, and raise the banner only for a version this session has not raised
+/// before.
+///
+/// Without the `ANNOUNCED` guard, every re-check would reopen a banner the user
+/// dismissed — the ✕ means "not now", and re-asking six hours later for the same
+/// version is the nagging it exists to prevent. A genuinely newer version still
+/// gets through, and a restart clears the memory.
+async fn announce_if_new(app: &tauri::AppHandle) {
+    let Some(_busy) = BusyGuard::acquire() else {
+        return;
+    };
+    let Ok(Some(info)) = run_check(app).await else {
+        return;
+    };
+
+    // A skipped version stays in PENDING — Settings still shows it, and
+    // "Check for updates" still reports it — it just does not interrupt.
+    if info.skipped {
+        return;
+    }
+
+    let is_new = {
+        let mut announced = ANNOUNCED.lock();
+        if announced.as_deref() == Some(info.version.as_str()) {
+            false
+        } else {
+            *announced = Some(info.version.clone());
+            true
+        }
+    };
+    if is_new {
+        let _ = app.emit("updater:available", info);
+    }
 }
 
 /// Ask the feed for a newer version. `None` means this build is current.

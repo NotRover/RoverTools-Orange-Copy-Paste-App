@@ -31,13 +31,13 @@ release would contain without dispatching anything.
 you dispatch release.yml
    │
    ├─ bump the version in Cargo.toml   (patch or minor — your choice)
-   ├─ notes = commit subjects since the last release tag
+   ├─ notes = user-facing commit subjects since the last release tag
    │
    ├─ build signed NSIS (Windows) + AppImage/deb (Linux)
    │
    └─ publish to the PUBLIC releases repo: bundles + latest.json
               │
-              └─ app checks that feed ~8s after launch → banner → user installs
+              └─ app checks that feed ~8s after launch, then every 6h → banner
 ```
 
 The source repo stays private. The **releases** repo is public because the updater
@@ -116,8 +116,17 @@ is cosmetic, kept in step by the workflow. Only plain `vX.Y.Z` tags count as rel
 the `v0.1.0-build.N` tags from [`build-linux.yml`](../.github/workflows/build-linux.yml)
 are throwaway CI builds and are ignored.
 
-Release notes are the commit subjects since the last release tag, merge commits
-dropped, nothing filtered. Users read those lines, so write subjects worth reading.
+Release notes come from the commit subjects since the last release tag, cleaned up for
+the people reading them: merge commits and the workflow's own `release: vX.Y.Z` bumps
+are dropped, so are `chore`/`ci`/`build`/`test`/`refactor`/`style`/`docs` subjects, the
+`type(scope):` prefix is stripped, the first letter is capitalised and duplicates are
+collapsed. A release whose commits are *all* internal gets one line — "Maintenance and
+internal improvements."
+
+So `feat(sync): retry a failed push` reaches users as "Retry a failed push", and
+`chore(release): reset the version` reaches nobody. Everything you want users to see
+must be a user-facing type — `feat`, `fix`, `perf`, `revert` — and read as a sentence
+about the app, not about the repo.
 
 ---
 
@@ -244,6 +253,7 @@ The updater itself can only be checked with two releases:
 1. Release once. Install it from the published `.exe` — not a local `tauri build`,
    which is unsigned and would not test the signing key.
 2. Release again.
-3. Launch the older install. Within ~8 seconds the banner should appear.
+3. Launch the older install. Within ~8 seconds the banner should appear (a
+   running app re-checks every 6 hours, so restarting is the fast way to see it).
 4. Download → progress → **Restart & install** → the app comes back on the new version.
 5. With "Run on startup" on, confirm it is still on and pointing at the new executable.

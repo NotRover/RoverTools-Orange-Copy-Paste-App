@@ -126,7 +126,7 @@ Full end-to-end sync needs a live backend, a Supabase project, and two accounts.
 
 A release is one manual workflow run: `gh workflow run release.yml` for a patch, `-f bump=minor` for a feature release, `-f bump=major` for a breaking one.
 
-`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, bumps the version in `src-tauri/Cargo.toml`, takes the commit subjects since the last release tag as the notes, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
+`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, bumps the version in `src-tauri/Cargo.toml`, takes the user-facing commit subjects since the last release tag as the notes (internal `chore`/`ci`/`docs`-style subjects and its own bump commits are filtered out, and the `type(scope):` prefix is stripped), builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
 
 ### Dispatch flags
 
