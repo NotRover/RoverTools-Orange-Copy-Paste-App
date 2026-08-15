@@ -212,6 +212,13 @@ from the renamed files.
 
 ## Things worth knowing
 
+**Windows warns on the first install.** The bundles have a minisign signature, not
+an Authenticode one, so SmartScreen shows "unrecognized app" — *More info → Run
+anyway*. The workflow appends a note saying so to every GitHub release body, but
+not to `latest.json`: SmartScreen keys off the Mark of the Web, which browsers
+attach to downloads and the updater doesn't, so in-app updates never trigger it.
+Removing the warning needs a paid certificate; the app README has the options.
+
 **Updates are disabled in debug builds.** A dev build reports the Cargo.toml version,
 so it would see any release as an upgrade and install over `target/debug` — replacing a
 build that loads from `devUrl` with one that doesn't. `updater.rs` refuses instead.
