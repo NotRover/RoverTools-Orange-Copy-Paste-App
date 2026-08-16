@@ -311,6 +311,8 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
     let sync = sync_client(&state)?;
     let skipped = sync.skipped();
     sync.clear_skipped();
+    // The user may have freed space since these were refused.
+    sync.invalidate_blob_budget();
 
     let mut retried = 0;
     for skip in skipped {
@@ -353,6 +355,7 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
 #[tauri::command]
 pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
+    sync.invalidate_blob_budget();
     let known = sync.entry_states();
 
     let entries: Vec<_> = state
@@ -382,6 +385,95 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, Str
         sync.on_new_note(note);
     }
     Ok(keys)
+}
+
+/// What a bulk upload would cost, checked before anything is sent.
+#[derive(serde::Serialize)]
+pub struct UnsyncedPreview {
+    /// Items the server has never seen.
+    pub total: usize,
+    /// How many of those are images, i.e. need blob storage.
+    pub images: usize,
+    /// What those images will occupy once encrypted.
+    pub image_bytes: u64,
+    /// Storage still available, from a fresh quota check.
+    pub free_bytes: u64,
+    /// How many images fit in what is free, filled in push order.
+    pub images_that_fit: usize,
+}
+
+/// Cloud storage one image will occupy: the file on disk (or the decoded
+/// length of an inline data URL) plus AES-GCM's nonce and tag.
+fn image_upload_size(content: &str) -> u64 {
+    const GCM_OVERHEAD: u64 = 12 + 16;
+    let raw = if let Some(pos) = content.find(";base64,") {
+        // 4 base64 chars carry 3 bytes; padding makes this a slight over-count,
+        // which is the right direction for a budget check.
+        (content.len() - pos - 8) as u64 * 3 / 4
+    } else {
+        std::fs::metadata(content).map(|m| m.len()).unwrap_or(0)
+    };
+    raw + GCM_OVERHEAD
+}
+
+/// Measure a bulk upload before starting it.
+///
+/// Images are externalized to disk, so this is one `stat` each - no reading and
+/// no encrypting. Worth doing: without it an account that is out of room finds
+/// out one refusal at a time, and the user reads a list of failures instead of
+/// a sentence they could have acted on.
+#[tauri::command]
+pub async fn sync_preview_unsynced(state: State<'_, AppState>) -> Result<UnsyncedPreview, String> {
+    let (sync, http) = sync_http(&state)?;
+    let known = sync.entry_states();
+
+    // Sizes first, so no store lock is held across the quota request.
+    let image_sizes: Vec<u64> = {
+        let history = state.history.lock();
+        history
+            .all()
+            .iter()
+            .filter(|e| !known.contains_key(&format!("clipboard:{}", e.id)))
+            .filter(|e| e.kind == crate::clipboard::history::EntryKind::Image)
+            .map(|e| image_upload_size(&e.content))
+            .collect()
+    };
+    let clipboard_total = state
+        .history
+        .lock()
+        .all()
+        .iter()
+        .filter(|e| !known.contains_key(&format!("clipboard:{}", e.id)))
+        .count();
+    let notes_total = state
+        .notes
+        .lock()
+        .all()
+        .iter()
+        .filter(|n| !known.contains_key(&format!("note:{}", n.id)))
+        .count();
+
+    let quota = http.blob_quota().await?;
+    sync.set_blob_budget(quota.used_bytes, quota.quota_bytes);
+    let free_bytes = quota.quota_bytes.saturating_sub(quota.used_bytes);
+
+    let mut spent = 0u64;
+    let mut images_that_fit = 0usize;
+    for size in &image_sizes {
+        if spent + size > free_bytes {
+            break;
+        }
+        spent += size;
+        images_that_fit += 1;
+    }
+
+    Ok(UnsyncedPreview {
+        total: clipboard_total + notes_total,
+        images: image_sizes.len(),
+        image_bytes: image_sizes.iter().sum(),
+        free_bytes,
+        images_that_fit,
+    })
 }
 
 /// Push the named local items, whether or not they have been pushed before.
@@ -798,8 +890,10 @@ pub fn sync_get_mode(state: State<'_, AppState>) -> String {
 
 #[tauri::command]
 pub async fn sync_get_quota(state: State<'_, AppState>) -> Result<SyncQuota, String> {
-    let (_sync, http) = sync_http(&state)?;
+    let (sync, http) = sync_http(&state)?;
     let q = http.blob_quota().await?;
+    // Every quota read doubles as the refill for the image-upload precheck.
+    sync.set_blob_budget(q.used_bytes, q.quota_bytes);
     Ok(SyncQuota {
         used_bytes: q.used_bytes,
         quota_bytes: q.quota_bytes,

@@ -81,7 +81,18 @@ struct PushCtx {
     app: tauri::AppHandle,
     /// Caps how many pushes are in flight at once. See [`PUSH_CONCURRENCY`].
     gate: Arc<Semaphore>,
+    /// Remaining blob storage, shared so one 402 stops the whole batch.
+    budget: BlobBudget,
 }
+
+/// Bytes of blob storage left on the account, as last known.
+///
+/// Without this, an account that is out of space asks the server for an upload
+/// slot once per image and is refused every time - 219 identical round trips
+/// and 219 identical rows in the skipped list. A successful upload subtracts
+/// its own size; a 402 sets it to zero, and every image after that is refused
+/// locally until the next quota check refills it.
+type BlobBudget = Arc<Mutex<Option<u64>>>;
 
 /// How many pushes may talk to the server at the same time.
 ///
@@ -306,6 +317,9 @@ pub struct SyncClient {
     pending_queue: Arc<Mutex<PendingQueue>>,
     /// Shared permit pool bounding concurrent pushes to [`PUSH_CONCURRENCY`].
     push_gate: Arc<Semaphore>,
+    /// Blob storage still available, as last known.  `None` until a quota
+    /// check has run.  See [`BlobBudget`].
+    blob_budget: BlobBudget,
     /// Client-to-server ID mapping.
     id_map: Arc<Mutex<IdMap>>,
     /// Sync state (cursor, device_id, user_id).
@@ -440,6 +454,7 @@ impl SyncClient {
             pending_oauth: Mutex::new(None),
             pending_queue,
             push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
+            blob_budget: Arc::new(Mutex::new(None)),
             id_map,
             sync_state,
             status,
@@ -1019,6 +1034,7 @@ impl SyncClient {
             status: Arc::clone(&self.status),
             app: self.app.clone(),
             gate: Arc::clone(&self.push_gate),
+            budget: Arc::clone(&self.blob_budget),
         }
     }
 
@@ -1095,7 +1111,9 @@ impl SyncClient {
                     );
                     return; // image sync needs connectivity — nothing to queue
                 };
-                match upload_image_blob(http, &enc_key, &entry.id, &entry.content).await {
+                match upload_image_blob(http, &enc_key, &entry.id, &entry.content, &ctx.budget)
+                    .await
+                {
                     Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
                     Err(e) => {
                         eprintln!("[sync] image blob upload failed: {e}");
@@ -1525,6 +1543,19 @@ impl SyncClient {
     /// Entry keys another member wrote, for the direction glyph on space rows.
     pub fn remote_entries(&self) -> Vec<String> {
         self.id_map.lock().remote_entries()
+    }
+
+    /// Record the storage the account has left, from a fresh quota check.
+    /// Clears the "full" latch when space has been freed.
+    pub fn set_blob_budget(&self, used_bytes: u64, quota_bytes: u64) {
+        *self.blob_budget.lock() = Some(quota_bytes.saturating_sub(used_bytes));
+    }
+
+    /// Forget the remaining-storage figure, so the next image asks the server
+    /// again.  Called when the user retries by hand: they may have just freed
+    /// space, and a stale zero would refuse every image without trying.
+    pub fn invalidate_blob_budget(&self) {
+        *self.blob_budget.lock() = None;
     }
 
     /// How many pushes are talking to the server right now.  A bulk upload
@@ -2198,6 +2229,7 @@ async fn upload_image_blob(
     enc_key: &[u8; 32],
     client_id: &str,
     content: &str,
+    budget: &BlobBudget,
 ) -> Result<(String, u64, String), String> {
     let (bytes, mime) = read_image_bytes(content)?;
     let ciphertext = crypto::encrypt_bytes(enc_key, &bytes, client_id)?;
@@ -2210,6 +2242,17 @@ async fn upload_image_blob(
             format_bytes(size)
         ));
     }
+    // Refuse locally when the account is known to be out of room, so a bulk
+    // upload asks the server once rather than once per image.
+    if let Some(remaining) = *budget.lock() {
+        if size > remaining {
+            return Err(format!(
+                "Cloud storage is full - {} free, this image needs {}",
+                format_bytes(remaining),
+                format_bytes(size)
+            ));
+        }
+    }
     let checksum = crypto::sha256_hex(&ciphertext);
     let up = http
         .request_blob_upload(BlobUploadRequest {
@@ -2218,13 +2261,25 @@ async fn upload_image_blob(
             checksum,
         })
         .await
-        .map_err(|e| format!("Image upload failed: {e}"))?;
+        .map_err(|e| {
+            if e.status == Some(402) {
+                // The server is the authority; latch it so the rest of the
+                // batch stops asking.
+                *budget.lock() = Some(0);
+                "Cloud storage is full - remove some synced images to make room".to_string()
+            } else {
+                format!("Image upload failed: {e}")
+            }
+        })?;
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, &mime)
         .await
         .map_err(|e| format!("Image upload failed: {e}"))?;
     http.confirm_blob_upload(&up.blob_key)
         .await
         .map_err(|e| format!("Image upload failed: {e}"))?;
+    if let Some(remaining) = budget.lock().as_mut() {
+        *remaining = remaining.saturating_sub(size);
+    }
     let descriptor = serde_json::json!({ "mime": mime }).to_string();
     Ok((up.blob_key, size, descriptor))
 }

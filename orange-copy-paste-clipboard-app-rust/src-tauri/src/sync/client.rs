@@ -1000,11 +1000,14 @@ impl SyncHttpClient {
 
     // ── Blob storage ──────────────────────────────────────────────
 
+    /// Returns [`ApiError`] rather than a string: a 402 here means the account
+    /// is out of storage, which the caller latches so it stops asking once per
+    /// image for the rest of a bulk upload.
     pub async fn request_blob_upload(
         &self,
         req: BlobUploadRequest,
-    ) -> Result<BlobUploadResponse, String> {
-        self.get_json("blob request-upload", || {
+    ) -> Result<BlobUploadResponse, ApiError> {
+        self.get_json_classified("blob request-upload", || {
             Ok(self
                 .authed(Method::POST, "/api/v1/blobs/request-upload")?
                 .json(&req))
