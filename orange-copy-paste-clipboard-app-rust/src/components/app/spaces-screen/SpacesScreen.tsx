@@ -1231,6 +1231,40 @@ const SpaceSettings: React.FC<{
   );
 };
 
+// ── Rules column placeholder ──────────────────────────────────────────
+
+/** The column keeps its shape with no space selected: the rules are per space,
+ *  so there is nothing to set yet, but showing what lives here beats an empty
+ *  gutter that reads as a missing feature. */
+const RulesPlaceholder: React.FC<{ hasSpaces: boolean }> = ({ hasSpaces }) => (
+  <div className="sp-settings sp-rules-ghost">
+    <p className="sp-rules-hint">
+      {hasSpaces
+        ? "Pick a space to set what it copies in and what it shares out."
+        : "Create a space to set what it copies in and what it shares out."}
+    </p>
+    <div className="sp-settings-block">
+      <div className="sp-settings-label">Incoming</div>
+      <p className="sp-rules-ghost-row">
+        Copy new items to your clipboard as they arrive, on this device only.
+      </p>
+    </div>
+    <div className="sp-settings-block">
+      <div className="sp-settings-label">Outgoing</div>
+      <p className="sp-rules-ghost-row">
+        Share new items automatically, narrowed by clipboard type and group. Off
+        by default, so only what you share by hand goes out.
+      </p>
+    </div>
+    <div className="sp-settings-block">
+      <div className="sp-settings-label">Members</div>
+      <p className="sp-rules-ghost-row">
+        Who is in the space, who is online, and the invite code.
+      </p>
+    </div>
+  </div>
+);
+
 // ── Props ─────────────────────────────────────────────────────────────
 
 interface SpacesScreenProps {
@@ -1994,8 +2028,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       {/* Rules column: what this space does with items, in and out. Pinned
           rather than collapsible - these are the settings a member checks
           while reading the feed, not a dialog they open once. */}
-      {selected && (
-        <aside className="sp-rules">
+      <aside className="sp-rules">
+        {selected ? (
           <SpaceSettings
             space={selected}
             selfUserId={selfUserId}
@@ -2010,22 +2044,36 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             onDelete={() => handleDelete(selected.id)}
             error={spaceError}
           />
-        </aside>
-      )}
+        ) : (
+          <RulesPlaceholder hasSpaces={spaces.length > 0} />
+        )}
+      </aside>
 
       {/* Space list */}
       <aside className="sp-panel-right">
         <div className="sp-panel-header">
           <span className="sp-panel-title">Spaces</span>
           <span
-            className={`sp-conn-chip sp-conn-chip--${syncConnected === true ? "on" : syncConnected === false ? "off" : "idle"}`}
+            className={`sp-conn-chip sp-conn-chip--${
+              !signedIn
+                ? "idle"
+                : syncConnected === true
+                  ? "on"
+                  : syncConnected === false
+                    ? "off"
+                    : "idle"
+            }`}
           >
             <span className="sp-conn-dot" />
-            {syncConnected === true
-              ? "Live"
-              : syncConnected === false
-                ? "Offline"
-                : "Inactive"}
+            {/* Account first: a socket state left over from an earlier session
+                said "Live" on a signed-out device. */}
+            {!signedIn
+              ? "Signed out"
+              : syncConnected === true
+                ? "Live"
+                : syncConnected === false
+                  ? "Offline"
+                  : "Inactive"}
           </span>
         </div>
 
