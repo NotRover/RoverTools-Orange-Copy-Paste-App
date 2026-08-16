@@ -167,14 +167,15 @@
 }
 
 .ns-tb-btn--danger {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--danger) 72%, var(--text-muted));
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
 }
 
 .ns-tb-btn--danger:hover {
   color: var(--danger);
   border-color: var(--danger);
-  background: rgba(239, 68, 68, 0.08);
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08);
+  background: var(--danger-dim);
+  box-shadow: 0 0 0 2px var(--danger-dim);
 }
 
 /* Group chips row */

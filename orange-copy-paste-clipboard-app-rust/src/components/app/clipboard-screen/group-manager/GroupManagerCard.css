@@ -330,8 +330,8 @@
 }
 
 .gm-detail-delete:hover {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 .gm-detail-colors {

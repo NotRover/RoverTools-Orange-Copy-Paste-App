@@ -296,7 +296,7 @@
 .auth-error {
   font-size: 11.5px;
   line-height: 1.4;
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .auth-notice,
@@ -443,9 +443,9 @@
 .acct-card--rows .acct-empty { padding: 12px 14px; margin: 0; }
 
 .acct-card-desc {
-  margin: -4px 0 12px;
+  margin: -4px 0 10px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--text-muted, #909090);
 }
 
@@ -671,8 +671,29 @@
   cursor: not-allowed;
 }
 
-.acct-btn--danger { color: #ef4444; }
-.acct-btn--danger:hover:not(:disabled) { border-color: #ef4444; }
+/* Destructive: red at rest, so it reads as different before it is hovered. */
+.acct-btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+}
+.acct-btn--danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-dim);
+}
+
+/* Quiet destructive — same red, no border, for actions that sit beside a
+   primary one (Sign out next to Sync now). */
+.acct-btn--quiet.acct-btn--danger {
+  color: color-mix(in srgb, var(--danger) 78%, var(--text-muted));
+  border-color: transparent;
+  background: transparent;
+}
+.acct-btn--quiet.acct-btn--danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-dim);
+}
 
 /* Recessive variant — for actions that must stay reachable but not compete
    (Sign out next to Sync now). */
@@ -855,7 +876,15 @@
 .acct-mode {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
+  padding: 11px 14px 12px;
+}
+
+/* The shared description carries a -4px/12px margin for cards that stack it
+   against other blocks. Inside a mode card the flex gap already does that
+   job, so the margin only opened a hole under the text. */
+.acct-mode .acct-card-desc {
+  margin: 0;
 }
 
 .acct-mode-head {
@@ -863,11 +892,53 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 26px;
+}
+
+/* Sits a step below the description it follows, not a paragraph apart. */
+/* Bulk upload / removal progress. A count alone reads as frozen on a large
+   history, so the bar carries the movement and the label carries the number. */
+.acct-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 0;
+}
+
+.acct-progress-track {
+  flex: 1;
+  height: 4px;
+  min-width: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  overflow: hidden;
+}
+
+.acct-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--cta, var(--accent));
+  transition: width 0.35s ease;
+}
+
+.acct-progress-label {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acct-progress-fill {
+    transition: none;
+  }
 }
 
 .acct-mode-note {
-  margin: 0;
+  margin: 2px 0 0;
   font-size: 10.5px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--text-muted);
 }

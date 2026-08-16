@@ -145,10 +145,13 @@
   color: var(--text-secondary);
 }
 
-/* Delete: full danger bg + white on hover (matches card-menu-item--danger) */
+/* Delete: red at rest so it never reads as one more neutral chip. */
+.bulk-popup-chip--delete {
+  color: var(--danger);
+}
 .bulk-popup-chip--delete:hover {
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 /* Chevron inside Groups chip */
@@ -363,6 +366,14 @@
 
 .bulk-popup-space-row--active {
   color: var(--accent);
+}
+
+.bulk-popup-space-row--danger {
+  color: var(--danger);
+}
+
+.bulk-popup-space-row--danger:hover {
+  background: var(--danger-dim);
 }
 
 .bulk-popup-space-check {

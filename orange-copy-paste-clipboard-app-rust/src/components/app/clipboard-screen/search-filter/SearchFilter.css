@@ -158,16 +158,16 @@
 
 .cs-card-clear-btn:hover {
   color: var(--danger);
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-dim);
 }
 
 .cs-card-clear-btn--danger {
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--danger) 68%, var(--text-muted));
 }
 
 .cs-card-clear-btn--danger:hover {
   color: var(--danger);
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-dim);
 }
 
 /* Type grid — compact 2-col checkboxes */

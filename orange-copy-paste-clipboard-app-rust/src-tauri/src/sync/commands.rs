@@ -345,9 +345,13 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
 /// Push every local item the server has never seen. Sync only ever picks up
 /// items as they are created, so anything captured before signing in (or while
 /// sync was off) stays local forever without this. Already-synced items are
-/// left alone. Returns how many pushes were started.
+/// left alone.
+///
+/// Returns the id_map keys it started a push for, not a count: each push is an
+/// independent background task, so the only way the UI can show progress is to
+/// watch these keys land in [`sync_settled_count`].
 #[tauri::command]
-pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<usize, String> {
+pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
     let known = sync.entry_states();
 
@@ -368,14 +372,16 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<usize, String> {
         .cloned()
         .collect();
 
-    let count = entries.len() + notes.len();
+    let mut keys = Vec::with_capacity(entries.len() + notes.len());
     for entry in entries {
+        keys.push(format!("clipboard:{}", entry.id));
         sync.on_new_clipboard_entry(entry);
     }
     for note in notes {
+        keys.push(format!("note:{}", note.id));
         sync.on_new_note(note);
     }
-    Ok(count)
+    Ok(keys)
 }
 
 /// Push the named local items, whether or not they have been pushed before.
@@ -436,12 +442,14 @@ pub fn sync_unpush_entries(
 
 /// Take everything this device has synced off the server, keeping the local
 /// copies. Same tombstone semantics as [`sync_unpush_entries`].
+///
+/// Returns the keys it tombstoned, so the UI can follow them out of
+/// [`sync_settled_count`] the same way an upload follows keys in.
 #[tauri::command]
-pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<usize, String> {
+pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
-    let keys = sync.entry_states();
-    let mut count = 0;
-    for key in keys.keys() {
+    let keys: Vec<String> = sync.entry_states().into_keys().collect();
+    for key in &keys {
         let Some((kind, id)) = key.split_once(':') else {
             continue;
         };
@@ -450,9 +458,55 @@ pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<usize, String> {
         } else {
             sync.on_delete_clipboard_entry(id.to_string());
         }
-        count += 1;
     }
-    Ok(count)
+    Ok(keys)
+}
+
+/// Where a bulk upload or removal has got to.
+#[derive(serde::Serialize)]
+pub struct BulkProgressOut {
+    /// How many of the asked-about keys the server has acknowledged.
+    pub settled: usize,
+    /// How many were refused and will never arrive without a manual retry.
+    pub failed: usize,
+    /// Pushes talking to the server right now, across the whole app.
+    pub in_flight: usize,
+}
+
+/// Progress of a bulk upload or removal. Both are fan-outs of independent
+/// background tasks with no completion signal of their own, so the UI polls
+/// this: an upload watches `settled` rise to the total, a removal watches it
+/// fall to zero.
+///
+/// `in_flight` is what keeps the UI honest. A batch of large images can go a
+/// long time without a single one finishing, which looks identical to a stall
+/// from the outside - and calling that a failure while the upload is still
+/// running is worse than saying nothing.
+#[tauri::command]
+pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> BulkProgressOut {
+    let guard = state.sync_client.lock();
+    let Some(sync) = guard.as_ref() else {
+        return BulkProgressOut { settled: 0, failed: 0, in_flight: 0 };
+    };
+    let states = sync.entry_states();
+    let refused: std::collections::HashSet<String> =
+        sync.skipped().into_iter().map(|s| s.client_id).collect();
+    let settled = keys
+        .iter()
+        .filter(|k| states.get(*k).is_some_and(|s| *s == "synced"))
+        .count();
+    let failed = keys
+        .iter()
+        .filter(|k| {
+            k.split_once(':')
+                .is_some_and(|(_, id)| refused.contains(id))
+        })
+        .count();
+    BulkProgressOut {
+        settled,
+        failed,
+        in_flight: sync.pushes_in_flight(),
+    }
 }
 
 #[tauri::command]

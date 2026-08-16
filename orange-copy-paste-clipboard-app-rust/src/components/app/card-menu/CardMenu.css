@@ -102,12 +102,12 @@
 }
 
 .card-menu-item--danger {
-  color: var(--text);
+  color: var(--danger);
 }
 
 .card-menu-item--danger:hover {
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 /* Expand / Collapse button */
