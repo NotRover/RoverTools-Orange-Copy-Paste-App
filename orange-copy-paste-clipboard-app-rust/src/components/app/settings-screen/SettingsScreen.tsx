@@ -13,6 +13,7 @@ import {
   DownloadSimple,
 } from "@phosphor-icons/react";
 import { useUpdater } from "../../../hooks/useUpdater";
+import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -100,6 +101,7 @@ const SettingsScreen: React.FC = () => {
   const [notifPaste, setNotifPaste] = useState(true);
   const [autosave, setAutosave] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
+  const [showSyncBadges, setShowSyncBadges] = useState(true);
   const [notifClosing, setNotifClosing] = useState(false);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
@@ -127,6 +129,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("notif_paste", setNotifPaste, true);
     loadBool("autosave", setAutosave, false);
     loadBool("show_splash", setShowSplash, true);
+    loadBool("show_sync_badges", setShowSyncBadges, true);
     loadBool("auto_check_updates", setAutoCheckUpdates, true);
     invoke<string | null>("get_setting", { key: "update_channel" })
       .then((v) => setBetaChannel(v === "beta"))
@@ -264,6 +267,20 @@ const SettingsScreen: React.FC = () => {
               desc="Display a brief startup screen when the app launches."
               active={showSplash}
               onToggle={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
+            />
+            <ToggleRow
+              label="Show sync badges on cards"
+              desc="The cloud icon that marks whether an entry has reached the server. Turning it off changes nothing about what syncs."
+              active={showSyncBadges}
+              onToggle={() => {
+                const next = !showSyncBadges;
+                toggleBoolSetting(showSyncBadges, setShowSyncBadges, "show_sync_badges");
+                // Open screens read the setting once on mount, so hand them the
+                // new value directly rather than racing the write to disk.
+                document.dispatchEvent(
+                  new CustomEvent(SYNC_BADGE_SETTING_EVENT, { detail: next }),
+                );
+              }}
             />
             <div className="set-row set-row--stack">
               <div className="set-row-header">
