@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../types";
 
 import type { SortMode } from "../sort-options";
@@ -22,6 +23,7 @@ import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
+import { useSpaceShares } from "../../../hooks/useSpaceShares";
 import NoteEditor from "./note-editor/NoteEditor";
 import NoteCard from "./note-card/NoteCard";
 import NotesFilterDropdown, {
@@ -301,6 +303,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const nf = useNotesFilter();
 
   const multiSelect = useMultiSelect();
+  const spaceShares = useSpaceShares();
 
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
@@ -596,6 +599,18 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                     if (onBulkRemoveGroup)
                       onBulkRemoveGroup([...multiSelect.selectedIds], group);
                   }}
+                  onBulkSync={() =>
+                    invoke("sync_push_entries", {
+                      clientIds: [...multiSelect.selectedIds],
+                      entryType: "note",
+                    }).catch(() => {})
+                  }
+                  onBulkUnsync={() =>
+                    invoke("sync_unpush_entries", {
+                      clientIds: [...multiSelect.selectedIds],
+                      entryType: "note",
+                    }).catch(() => {})
+                  }
                   availableGroups={availableGroups}
                   commonGroups={commonGroups}
                 />
@@ -787,6 +802,12 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 return next;
               });
             }}
+            spaces={spaceShares.spaces}
+            signedIn={spaceShares.signedIn}
+            itemSpaceIds={spaceShares.shares[`note:${menuNote.id}`]}
+            onToggleSpace={(spaceId) =>
+              spaceShares.toggle("note", menuNote.id, spaceId)
+            }
             showCopy={false}
             showSave={false}
           />

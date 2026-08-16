@@ -35,7 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNavigate,
   onToggleTheme,
 }) => {
-  const syncActive = screen === "sync";
+  const spacesActive = screen === "spaces";
 
   const syncIcon =
     syncState === "connected" ? <CloudCheck   size={20} weight="duotone" /> :
@@ -45,17 +45,17 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Status colour — suppressed while the Sync screen is active (use active style).
   const syncColor =
-    syncActive                ? undefined :
+    spacesActive                ? undefined :
     syncState === "connected" ? "#22c55e" :
     syncState === "syncing"   ? "#3b82f6" :
     syncState === "offline"   ? "#f59e0b" :
                                 undefined;
 
   const syncTooltip =
-    syncState === "connected" ? "Sync & Groups - Connected" :
-    syncState === "syncing"   ? "Sync & Groups - Syncing..." :
-    syncState === "offline"   ? "Sync & Groups - Offline" :
-                                "Sync & Groups";
+    syncState === "connected" ? "Spaces - Connected" :
+    syncState === "syncing"   ? "Spaces - Syncing..." :
+    syncState === "offline"   ? "Spaces - Offline" :
+                                "Spaces";
 
   return (
   <aside className="sidebar">
@@ -94,8 +94,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         <NotesIcon />
       </button>
       <button
-        className={`nav-btn ${syncActive ? "active" : ""} ${syncState === "syncing" ? "nav-btn--syncing" : ""}`}
-        onClick={() => onNavigate("sync")}
+        className={`nav-btn ${spacesActive ? "active" : ""} ${syncState === "syncing" ? "nav-btn--syncing" : ""}`}
+        onClick={() => onNavigate("spaces")}
         data-tooltip={syncTooltip}
         data-tooltip-pos="right"
         style={syncColor ? { color: syncColor } : undefined}

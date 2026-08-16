@@ -649,6 +649,25 @@ button.card-type-chip.open .card-type-chevron {
   color: #f59e0b;
 }
 
+/* Shared-to-a-space indicator. Sits next to the cloud badge because both
+   answer "where did this go" - one for your devices, one for other people. */
+
+.card-share-icon {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-top: 3px;
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+.card-share-count {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /*  Custom video player  */
 
 .video-player {

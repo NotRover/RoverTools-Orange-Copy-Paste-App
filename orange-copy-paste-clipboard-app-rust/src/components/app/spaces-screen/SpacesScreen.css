@@ -1,0 +1,1954 @@
+/* ── Spaces Screen ── */
+
+.sp-screen {
+  /* Brighter CTA accent, matching the Settings/Account screens. */
+  --cta: #ff5535;
+  --cta-hover: #ff6b4d;
+
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+[data-theme="light"] .sp-screen {
+  --cta: var(--accent);
+  --cta-hover: var(--accent-hover);
+}
+
+/* ── Feed panel (middle, flex-1) ── */
+
+.sp-feed-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Rules column (right) ── */
+
+.sp-rules {
+  position: relative;
+  width: 272px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  border-left: 1px solid var(--border);
+}
+
+/* ── Panel resizers ── */
+
+/* A grab strip on the panel's inner edge. It sits inside the panel rather than
+   in a gutter of its own, so dragging does not shift the layout by a column. */
+.sp-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 7px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.sp-resizer--left {
+  left: 0;
+}
+
+.sp-resizer--right {
+  right: 0;
+}
+
+/* The cursor carries the affordance. The only mark is the panel's own border
+   brightening while you drag - no element that was not already there. */
+.sp-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-light);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.sp-resizer--left::after {
+  left: -1px;
+}
+
+.sp-resizer--right::after {
+  right: -1px;
+}
+
+.sp-resizer--active::after {
+  opacity: 1;
+}
+
+/* Held down: the pointer owns the drag, so nothing else should react to it. */
+.sp-screen--dragging * {
+  pointer-events: none;
+}
+
+.sp-screen--dragging .sp-resizer {
+  pointer-events: auto;
+}
+
+/* The settings block is the whole column now: no panel chrome of its own, and
+   it splits into a fixed header, a scrolling middle, and a pinned footer
+   instead of the old 52vh drawer. */
+.sp-rules .sp-settings {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  gap: 0;
+  padding: 0;
+  border-bottom: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.sp-rules-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sp-rules-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #fff;
+}
+
+.sp-rules-avatar--ghost {
+  border: 1px dashed var(--border-light);
+  background: transparent;
+}
+
+.sp-rules-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sp-rules-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-rules-sub {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.sp-rules-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow: hidden auto;
+  scrollbar-width: thin;
+}
+
+.sp-rules-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* No space selected: same column shape, nothing to operate. */
+.sp-rules-ghost-row {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* A member row has no width to spare at 272px, so it wraps rather than
+   clipping the Remove button. */
+.sp-rules .sp-member-row {
+  flex-wrap: wrap;
+}
+
+/* Invite: two rows of equal width, each one field plus its actions. They must
+   not wrap - a full-width input that pushes Send onto its own line is what
+   made this read as four loose controls. */
+.sp-invite-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sp-invite-box .sp-invite-row {
+  flex-wrap: nowrap;
+}
+
+.sp-invite-box .sp-invite-code,
+.sp-invite-box .sp-inline-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.sp-btn--icon {
+  flex-shrink: 0;
+  padding: 5px 7px;
+}
+
+/* Icon-only until the panel is dragged wide enough to spell the action out. */
+.sp-btn-label {
+  display: none;
+}
+
+.sp-rules--wide .sp-btn--icon {
+  padding: 5px 9px;
+}
+
+.sp-rules--wide .sp-btn-label {
+  display: inline;
+}
+
+/* ── Topbar filter tabs (left slot) ── */
+
+.sp-filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Segmented feed filter control ── */
+
+.sp-feed-segment {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 2px;
+  gap: 0;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.06));
+}
+
+.sp-feed-segment-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(33.333% - 1.333px);
+  height: calc(100% - 4px);
+  border-radius: 6px;
+  background: var(--cta, var(--accent));
+  z-index: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.sp-feed-seg-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.18s ease;
+  user-select: none;
+}
+
+.sp-feed-seg-btn:hover {
+  color: var(--text);
+}
+
+.sp-feed-seg-btn--active {
+  color: #fff;
+}
+
+.sp-feed-seg-btn--active:hover {
+  color: #fff;
+}
+
+/* ── Card layout containers ── */
+
+/* Masonry tiles — matches clipboard screen's .entry-grid columns layout */
+.sp-feed-card-grid {
+  columns: 2;
+  column-gap: 10px;
+  padding-top: 4px;
+}
+
+.sp-feed-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Clipboard entry cards: masonry break + flex column so footer pins to bottom */
+
+.sp-feed-card-grid .entry-card {
+  break-inside: avoid;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+
+.sp-feed-card-grid .card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-feed-card-grid .card-footer {
+  margin-top: auto;
+}
+
+/* Note cards: same masonry treatment */
+
+.sp-feed-card-grid .ns-card {
+  break-inside: avoid;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-feed-card-grid .ns-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-feed-card-grid .ns-card-footer {
+  margin-top: auto;
+}
+
+/* ── List mode cards ── */
+
+.sp-list-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  overflow: hidden;
+}
+
+.sp-list-card:hover {
+  border-color: var(--border-light);
+  background: var(--surface-hover);
+}
+
+.sp-list-card--note {
+  height: 46px;
+}
+
+/* Direction: accent is reserved for what this account sent, which is the
+   smaller half of a busy space - if a row is orange, you put it there. */
+.sp-list-dir {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+
+.sp-list-dir--in {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.sp-list-dir--out {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.sp-list-type-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.sp-list-note-badge {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.sp-list-note-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sp-list-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-list-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-list-preview {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-list-time {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sp-list-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.sp-list-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.sp-list-action--done {
+  border-color: #22c55e;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+/* ── Clear filters inline button ── */
+
+.sp-clear-filters-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.sp-clear-filters-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Feed header ── */
+
+.sp-feed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 9px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.sp-feed-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sp-feed-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sp-feed-space-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-feed-item-count {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sp-feed-filtered-hint {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.sp-feed-member-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* ── Scrollable feed ── */
+
+.sp-feed-scroll {
+  flex: 1;
+  overflow: hidden auto;
+  padding: 10px 0 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Empty + error states inside scroll retain comfortable padding */
+.sp-feed-scroll .sp-feed-empty {
+  padding: 48px 24px;
+}
+
+.sp-feed-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sp-feed-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
+}
+
+/* ── Feed card overlays ── */
+
+.sp-feed-entry-card,
+.sp-feed-note-card {
+  cursor: pointer;
+}
+
+/* ── Empty / no-selection states ── */
+
+.sp-feed-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Icon-chip treatment for empty-state icons (matches acct/set card chips) */
+.sp-feed-empty > svg,
+.sp-no-selection-inner > svg {
+  box-sizing: content-box;
+  padding: 13px;
+  border-radius: 16px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  margin-bottom: 4px;
+}
+
+.sp-feed-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-feed-empty-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.sp-no-selection {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.sp-no-selection-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--text-muted);
+  max-width: 300px;
+}
+
+.sp-no-selection-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-no-selection-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* ── Space list (left) ── */
+
+.sp-panel-right {
+  /* Ordered ahead of the feed so the list of spaces reads first, the way the
+     app sidebar does. It stays last in the DOM to keep the diff small. */
+  order: -1;
+  position: relative;
+  /* Overridden by the dragged width; kept in step with LIST_PANE.def. */
+  width: 252px;
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Panel header */
+
+.sp-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sp-panel-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  color: var(--text);
+}
+
+/* Connection pill */
+
+.sp-conn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.sp-conn-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.sp-conn-chip--on {
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #22c55e;
+}
+.sp-conn-chip--on .sp-conn-dot {
+  background: #22c55e;
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
+}
+.sp-conn-chip--off {
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+}
+.sp-conn-chip--off .sp-conn-dot {
+  background: #f59e0b;
+}
+.sp-conn-chip--idle {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.sp-conn-chip--idle .sp-conn-dot {
+  background: var(--text-muted);
+}
+
+/* Scroll area */
+
+.sp-panel-scroll {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden auto;
+  padding: 12px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.sp-panel-scroll::-webkit-scrollbar { width: 4px; }
+.sp-panel-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
+}
+
+/* ── Group sections ── */
+
+.sp-space-section {
+  margin-bottom: 8px;
+}
+
+.sp-space-section + .sp-space-section {
+  margin-top: 6px;
+}
+
+/* Empty / signed-out state — centered in the scroll area */
+
+.sp-panel-empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 20px;
+  text-align: center;
+}
+
+.sp-panel-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.sp-panel-empty-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-panel-empty-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Group cards ── */
+
+/* Section header, shown only when the list actually splits. */
+.sp-space-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sp-space-group-n {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.sp-space-group-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.sp-space-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  /* A resting surface, so a row reads as a card sitting on the panel rather
+     than text floating on it. */
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  text-align: left;
+  position: relative;
+  margin-bottom: 5px;
+  user-select: none;
+}
+
+.sp-space-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+}
+
+.sp-space-card.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim-strong);
+}
+
+.sp-space-card.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.sp-space-card-wrap .sp-space-card {
+  margin-bottom: 0;
+}
+
+/* Member picture — a person, so a circle, against the squircle group avatars.
+   Falls back to initials in the same accent tint the Account screen uses. */
+
+.sp-member-pic {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 8px;
+  font-weight: 650;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Letter avatar */
+
+.sp-space-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+/* Card text body */
+
+.sp-space-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sp-space-card-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-space-card.active .sp-space-card-name {
+  color: var(--accent);
+}
+
+.sp-space-card-meta {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+/* ── Bottom actions ── */
+
+.sp-panel-actions {
+  flex-shrink: 0;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sp-panel-btns {
+  display: flex;
+  gap: 5px;
+}
+
+.sp-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.sp-action-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Signed out: the buttons stay visible so the screen still explains itself,
+   but they do not lead anywhere until there is an account behind them. */
+.sp-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sp-action-btn--primary {
+  border-color: transparent;
+  background: var(--cta, var(--accent));
+  color: #fff;
+}
+
+.sp-action-btn--primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--cta-hover, var(--accent-hover));
+  color: #fff;
+}
+
+/* ── Inline form ── */
+
+.sp-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sp-inline-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.14s ease;
+  box-sizing: border-box;
+}
+
+.sp-inline-input:focus {
+  border-color: var(--accent);
+}
+
+.sp-inline-input::placeholder {
+  color: var(--text-muted);
+}
+
+.sp-inline-form-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.sp-inline-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.sp-inline-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sp-inline-btn--primary {
+  flex: 1;
+  background: var(--cta, var(--accent));
+  border-color: transparent;
+  color: #fff;
+}
+
+.sp-inline-btn--primary:hover {
+  background: var(--cta-hover, var(--accent-hover));
+  border-color: transparent;
+  color: #fff;
+}
+
+.sp-inline-btn--primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Source type chips (shown in "all" mode) ── */
+/* These sit inside card-chips / ns-card-chips, styled as card-type-chip variants */
+
+.sp-source-chip--clip {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+}
+
+.sp-source-chip--note {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+}
+
+/* List-mode source indicator for clipboard cards (icon-only pill) */
+.sp-list-source-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sp-list-source-badge--clip {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+}
+
+/* ── Minimal card copy button (tiles mode) ── */
+
+.sp-card-copy-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.sp-card-copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* ── Hide NoteCard's delete button inside sync feed ── */
+
+.sp-feed-card-grid .ns-card-delete,
+.sp-feed-card-list .ns-card-delete {
+  display: none;
+}
+
+/* ── Detail panel ── */
+
+.sp-detail-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  animation: syncDetailIn 0.16s ease-out;
+}
+
+@keyframes syncDetailIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.sp-detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.sp-detail-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.sp-detail-back:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sp-detail-back-chevron {
+  transform: rotate(180deg);
+}
+
+.sp-detail-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.sp-detail-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sp-detail-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.sp-detail-copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.sp-detail-copy-btn--done {
+  border-color: #22c55e;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.sp-detail-scroll {
+  flex: 1;
+  overflow: hidden auto;
+  padding: 20px 24px 32px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.sp-detail-scroll::-webkit-scrollbar { width: 5px; }
+.sp-detail-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 4px;
+}
+
+.sp-detail-note-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 16px;
+  line-height: 1.3;
+}
+
+/* ── Clipboard entry detail body ── */
+
+.sp-detail-entry-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+.sp-detail-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-detail-file-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+/* ── Clipboard detail: rendered HTML ── */
+
+.sp-detail-html-preview {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+/* ── Clipboard detail: image preview ── */
+
+.sp-detail-image-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.sp-detail-image-img {
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+}
+
+.sp-detail-image-caption {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ── Read-only note badge ── */
+
+.sp-readonly-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  user-select: none;
+}
+
+/* ── Timeline rail (mirrors clipboard screen's timeline-* pattern) ── */
+
+.sp-timeline-wrap {
+  min-height: 100%;
+}
+
+.sp-timeline-groups {
+  display: flex;
+  flex-direction: column;
+  margin-left: 15px;
+}
+
+.sp-timeline-group {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.sp-timeline-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
+  top: 0;
+  bottom: 0;
+}
+
+.sp-timeline-group:first-child::before {
+  top: 15px;
+}
+
+.sp-timeline-group--last::before {
+  bottom: 0;
+  height: auto;
+  background: linear-gradient(to bottom, var(--accent) 70%, transparent 100%);
+}
+
+.sp-timeline-group--only::before {
+  display: none;
+}
+
+.sp-timeline-end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 16px 20px;
+}
+
+.sp-timeline-end-text {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+  user-select: none;
+  opacity: 0.6;
+}
+
+.sp-timeline-day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 8px 0;
+  position: relative;
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sp-timeline-day-row:hover .sp-timeline-day-label {
+  opacity: 0.8;
+}
+
+.sp-timeline-day-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  flex-shrink: 0;
+  margin-left: -5px;
+  position: relative;
+  z-index: 1;
+}
+
+.sp-timeline-day-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.2px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sp-timeline-day-chevron {
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.5;
+  margin-left: auto;
+  margin-right: 4px;
+  transition: transform 0.2s ease;
+}
+
+.sp-timeline-day-row--collapsed .sp-timeline-day-chevron {
+  transform: rotate(-90deg);
+}
+
+.sp-timeline-day-count {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 5px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.sp-timeline-day-row::after {
+  content: "";
+  flex: 1;
+  height: 0.5px;
+  background: var(--accent);
+  opacity: 0.25;
+  margin-left: 4px;
+}
+
+.sp-timeline-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.sp-timeline-group-body--collapsed {
+  grid-template-rows: 0fr;
+}
+
+.sp-timeline-group-body__inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.2s ease 0.25s,
+    transform 0.2s ease 0.25s;
+}
+
+.sp-timeline-group-body--collapsed .sp-timeline-group-body__inner {
+  opacity: 0;
+  transform: translateY(-6px);
+  visibility: hidden;
+  padding: 0 !important;
+  margin: 0 !important;
+  transition:
+    opacity 0.15s ease 0s,
+    transform 0.15s ease 0s,
+    visibility 0s linear 0.15s;
+}
+
+.sp-timeline-groups .sp-feed-card-grid,
+.sp-timeline-groups .sp-feed-card-list {
+  padding-left: 15px;
+  padding-right: 2px;
+}
+
+/* ── Space settings panel (in-context, under the feed header) ── */
+
+.sp-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2, var(--surface));
+  max-height: 52vh;
+  overflow: hidden auto;
+  scrollbar-width: thin;
+}
+
+.sp-settings-error {
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.sp-settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-settings-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sp-settings-count {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: none;
+}
+
+/* Toggle rows */
+
+.sp-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.sp-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-toggle-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sp-toggle-desc {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.sp-switch {
+  appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 17px;
+  margin-top: 1px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sp-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.sp-switch:checked {
+  background: var(--cta, var(--accent));
+  border-color: transparent;
+}
+
+.sp-switch:checked::after {
+  transform: translateX(13px);
+  background: #fff;
+}
+
+/* Send filter body */
+
+.sp-filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.sp-filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-filter-hint,
+.sp-danger-note {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.sp-filter-empty {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.sp-pill-row,
+.sp-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.sp-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sp-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sp-pill--on {
+  border-color: transparent;
+  background: var(--cta, var(--accent));
+  color: #fff;
+}
+
+.sp-group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sp-group-chip:hover {
+  border-color: var(--accent);
+}
+
+.sp-group-chip--on {
+  border-color: transparent;
+}
+
+.sp-group-chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Members inside the settings panel */
+
+.sp-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sp-member-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.sp-member-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-badge {
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* A role you rarely act on, so it labels rather than announces: no accent
+   outline, just a neutral wash a shade above the card it sits on. */
+.sp-badge--owner {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-muted);
+}
+
+.sp-badge--warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Small buttons shared by the settings panel and the invite strip */
+
+.sp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sp-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sp-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sp-btn--primary {
+  border-color: transparent;
+  background: var(--cta, var(--accent));
+  color: #fff;
+}
+
+.sp-btn--primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--cta-hover, var(--accent-hover));
+  color: #fff;
+}
+
+.sp-btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
+.sp-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+
+.sp-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sp-invite-code {
+  padding: 4px 9px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  letter-spacing: 1px;
+  color: var(--text);
+}
+
+/* Feed header flags */
+
+.sp-feed-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+/* Right rail: received invites, space flags, sent invites */
+
+.sp-invite-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sp-invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-dim);
+}
+
+.sp-invite-icon {
+  color: var(--accent);
+}
+
+.sp-invite-text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.sp-invite-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.sp-space-card-flags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.sp-flag-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.sp-sent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.sp-sent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.sp-sent-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-linkbtn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sp-linkbtn--danger {
+  color: var(--danger);
+}
+
+/* Create form: history checkbox */
+
+.sp-inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}

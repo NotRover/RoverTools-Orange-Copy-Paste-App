@@ -27,6 +27,22 @@ use crate::sync::supabase::SupabaseAuth;
 
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
+/// Blob transfers move up to 5 MB over a presigned S3/R2 URL, which the
+/// 10-second default cuts off on a slow link.
+const BLOB_TRANSFER_TIMEOUT_SECS: u64 = 90;
+
+/// How long to wait before each retry of a request that never reached the
+/// backend, in seconds.  The first is long enough for a host that spun down
+/// while idle to finish waking; the list ends so a genuinely offline machine
+/// still fails quickly.
+const TRANSPORT_RETRY_DELAYS: [u64; 2] = [3, 8];
+
+/// How many times to retry a request the server itself failed (502/503/504 from
+/// an overloaded or restarting backend, 429 from the rate limiter).  Without
+/// this a momentary backend hiccup permanently skips the entry, because a skip
+/// is never queued.
+const SERVER_RETRY_ATTEMPTS: u32 = 3;
+
 /// Refresh the access token this many seconds before it actually expires, so a
 /// request (or a WebSocket handshake) never goes out holding a JWT that dies
 /// mid-flight.
@@ -160,9 +176,16 @@ pub struct PushEntryRequest {
     pub blob_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_size: Option<u64>,
-    /// Live Share / pool group UUIDs this entry should fan out to.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub group_ids: Vec<String>,
+    /// Space UUIDs this entry fans out to.  `default` matters: queued pushes
+    /// round-trip through sync_pending.json, and a personal entry serializes
+    /// without this field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub space_ids: Vec<String>,
+    /// CEK envelope: JSON map of wrapped content-key copies — `"personal"`
+    /// (under the UMK) plus one per space id. Opaque to the server.  No serde
+    /// default on purpose: pre-CEK queue files fail to parse and are dropped
+    /// instead of pushing ciphertext nobody could unwrap.
+    pub wrapped_keys: String,
 }
 
 /// Request body for `POST /sync/push` — the backend expects `{ "entries": [...] }`.
@@ -212,7 +235,10 @@ pub struct PulledEntry {
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]
-    pub group_ids: Vec<String>,
+    pub space_ids: Vec<String>,
+    /// CEK envelope map (see `PushEntryRequest::wrapped_keys`).
+    #[serde(default)]
+    pub wrapped_keys: String,
     #[serde(default)]
     pub blob_key: Option<String>,
     #[serde(default)]
@@ -249,26 +275,25 @@ pub struct SettingsPullResponse {
     pub updated_at: u64,
 }
 
-// ── Pool groups ───────────────────────────────────────────────────────
+// ── Spaces ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-pub struct CreateGroupRequest {
+pub struct CreateSpaceRequest {
     pub name: String,
-    pub group_type: String, // "pool"
     /// Owner's choice: may members who join later read entries pushed before
     /// they joined? Resolved server-side into each member's history floor.
     pub share_history: bool,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateGroupResponse {
-    pub group_id: String,
+pub struct CreateSpaceResponse {
+    pub space_id: String,
     pub invite_code: String,
 }
 
-/// One member of a pool group; `identity_pubkey` is null until they register keys.
+/// One member of a space; `identity_pubkey` is null until they register keys.
 #[derive(Debug, Deserialize)]
-pub struct GroupMemberOut {
+pub struct SpaceMemberOut {
     pub user_id: String,
     #[serde(default)]
     pub display_name: String,
@@ -279,28 +304,32 @@ pub struct GroupMemberOut {
     pub joined_at: u64,
     #[serde(default)]
     pub identity_pubkey: Option<String>,
-    /// Whether this member already holds a wrapped Group Key.
+    /// Whether this member already holds a wrapped keyring.
     #[serde(default)]
-    pub has_group_key: bool,
+    pub has_space_key: bool,
+    /// Presence snapshot from the server: true when any of this member's
+    /// devices is connected.
+    #[serde(default)]
+    pub online: bool,
 }
 
-/// Full group record (`GET /groups` / `GET /groups/{id}`).
+/// Full space record (`GET /spaces` / `GET /spaces/{id}`).
 #[derive(Debug, Deserialize)]
-pub struct GroupOut {
+pub struct SpaceOut {
     pub id: String,
     pub owner_id: String,
     pub name: String,
-    pub group_type: String,
     #[serde(default)]
     pub invite_code: Option<String>,
     #[serde(default)]
     pub invite_expires_at: Option<u64>,
     #[serde(default)]
-    pub members: Vec<GroupMemberOut>,
-    /// Our *own* Group Key, wrapped against our identity key. Group keys are
-    /// held in memory only, so this is how a client recovers one after restart.
+    pub members: Vec<SpaceMemberOut>,
+    /// Our *own* wrapped keyring (JSON array of wrapped Space Keys, newest
+    /// first) against our identity key. Space Keys are held in memory only,
+    /// so this is how a client recovers them after restart.
     #[serde(default)]
-    pub my_wrapped_group_key: Option<String>,
+    pub my_wrapped_space_keys: Option<String>,
     #[serde(default = "default_true")]
     pub share_history: bool,
 }
@@ -310,79 +339,28 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Serialize)]
-pub struct JoinGroupRequest {
+pub struct JoinSpaceRequest {
     pub invite_code: String,
-    /// A member's own wrapped Group Key, when re-joining a group they already
-    /// hold a key for; `None` on a fresh join (the owner distributes the key).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wrapped_group_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct JoinGroupResponse {
-    pub group_id: String,
+pub struct JoinSpaceResponse {
+    pub space_id: String,
     pub name: String,
-    pub group_type: String,
 }
 
-// ── Group key distribution (§7.4) ───────────────────────────────────────
+// ── Space key distribution ──────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-pub struct WrappedKeyEntry {
+pub struct WrappedKeyringEntry {
     pub user_id: String,
-    pub wrapped_group_key: String,
+    /// JSON array of wrapped Space Keys, newest first — opaque to the server.
+    pub wrapped_space_keys: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DistributeKeysRequest {
-    pub wrapped_keys: Vec<WrappedKeyEntry>,
-}
-
-// ── Live Share ──────────────────────────────────────────────────────────
-
-/// `POST /sharing/invite` — creates a live_share group *and* emails the invite.
-#[derive(Debug, Serialize)]
-pub struct SharingInviteRequest {
-    pub email: String,
-    pub share_scope: String, // "clipboard" | "notes" | "both"
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SharingInviteResponse {
-    pub share_group_id: String,
-    pub invite_code: String,
-    pub expires_at: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SessionMemberOut {
-    pub user_id: String,
-    pub display_name: String,
-    /// Identity-provider avatar URL; `None` for accounts without one.
-    #[serde(default)]
-    pub avatar_url: Option<String>,
-    pub scope: String,
-    #[serde(default)]
-    pub identity_pubkey: Option<String>,
-    #[serde(default)]
-    pub has_group_key: bool,
-    /// Presence snapshot from the server: true when any of this member's
-    /// devices is connected. Defaulted for backends predating the field.
-    #[serde(default)]
-    pub online: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SessionOut {
-    pub share_group_id: String,
-    pub owner_id: String,
-    pub members: Vec<SessionMemberOut>,
-    pub my_scope: String,
-    pub active_since: u64,
-    /// Our own session Group Key wrapped against our identity key — the
-    /// restart-recovery path (session keys are memory-only on clients).
-    #[serde(default)]
-    pub my_wrapped_group_key: Option<String>,
+    pub wrapped_keyrings: Vec<WrappedKeyringEntry>,
 }
 
 // ── Addressed invites ───────────────────────────────────────────────────
@@ -390,9 +368,8 @@ pub struct SessionOut {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteOut {
     pub id: String,
-    pub group_id: String,
-    pub group_name: String,
-    pub group_type: String,
+    pub space_id: String,
+    pub space_name: String,
     pub inviter_id: String,
     pub inviter_name: String,
     pub invitee_email: String,
@@ -410,11 +387,6 @@ pub struct InviteListResponse {
 #[derive(Debug, Serialize)]
 pub struct SendInviteRequest {
     pub email: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct UpdateScopeRequest {
-    pub share_scope: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -478,6 +450,71 @@ pub struct SyncHttpClient {
     token_generation: AtomicU64,
     /// Unix seconds at which the current access token expires; 0 when unknown.
     access_token_expires_at: AtomicU64,
+}
+
+/// The readable half of an error response.
+///
+/// FastAPI answers with `{"detail": "..."}`, which used to reach the user as
+/// raw JSON; a proxy 502 answers with nothing at all, which reached them as a
+/// bare colon.  Both are the same problem: the message is the body's, not the
+/// wire format's.
+fn error_detail(code: u16, body: &str) -> String {
+    let body = body.trim();
+    if let Some(detail) = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("detail").and_then(|d| d.as_str()).map(str::to_string))
+    {
+        return detail;
+    }
+    if !body.is_empty() && !body.starts_with('{') && !body.starts_with('<') {
+        return body.to_string();
+    }
+    match code {
+        502 | 503 | 504 => "the server is busy, try again in a moment".to_string(),
+        _ => format!("the server rejected the request ({code})"),
+    }
+}
+
+/// Seconds the server asked us to wait, from a `Retry-After` header.  Only the
+/// delta-seconds form is honoured; the HTTP-date form is rare and not worth a
+/// date parser here.
+fn retry_after_secs(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|s| s.min(30))
+}
+
+/// Flatten a reqwest transport failure into something a user can act on.
+///
+/// `reqwest::Error`'s own `Display` stops at "error sending request for url
+/// (...)" and hides the cause in `source()`, so every network problem - DNS,
+/// TLS, refused connection, timeout - reaches the UI looking identical.
+fn transport_detail(e: &reqwest::Error) -> String {
+    let head = if e.is_timeout() {
+        "timed out"
+    } else if e.is_connect() {
+        "could not reach the server"
+    } else if e.is_body() || e.is_decode() {
+        "the response was cut short"
+    } else {
+        "request failed"
+    };
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    let mut deepest = String::new();
+    while let Some(c) = cause {
+        deepest = c.to_string();
+        cause = c.source();
+    }
+    if deepest.is_empty() {
+        head.to_string()
+    } else {
+        format!("{head} ({deepest})")
+    }
 }
 
 impl SyncHttpClient {
@@ -657,8 +694,10 @@ impl SyncHttpClient {
     {
         self.ensure_fresh_access_token().await;
         let mut refreshed = false;
+        let mut transport_tries = 0usize;
+        let mut attempt: u32 = 0;
         loop {
-            let resp = factory()
+            let sent = factory()
                 .map_err(|message| ApiError {
                     // A request we could not even build is a local problem
                     // (no token yet), not something a retry fixes.
@@ -666,11 +705,29 @@ impl SyncHttpClient {
                     message,
                 })?
                 .send()
-                .await
-                .map_err(|e| ApiError {
-                    status: None,
-                    message: format!("{tag}: {e}"),
-                })?;
+                .await;
+            let resp = match sent {
+                Ok(resp) => resp,
+                // Nothing came back at all.  A host that spins down when idle
+                // drops the first request that wakes it and answers the next
+                // one, so give it exactly one more try before giving up - the
+                // alternative is a skipped entry the user has to heal by hand.
+                Err(e)
+                    if transport_tries < TRANSPORT_RETRY_DELAYS.len()
+                        && (e.is_timeout() || e.is_connect()) =>
+                {
+                    let wait = TRANSPORT_RETRY_DELAYS[transport_tries];
+                    transport_tries += 1;
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    continue;
+                }
+                Err(e) => {
+                    return Err(ApiError {
+                        status: None,
+                        message: format!("{tag}: {}", transport_detail(&e)),
+                    })
+                }
+            };
             let code = resp.status().as_u16();
             if code == 401 && !refreshed {
                 self.refresh_access_token().await.map_err(|message| ApiError {
@@ -683,11 +740,20 @@ impl SyncHttpClient {
             if allow_404 && code == 404 {
                 return Ok(None);
             }
+            // The server is up but could not serve this request right now.
+            // Back off and try again: the alternative is a skipped entry that
+            // never heals on its own.
+            if matches!(code, 429 | 502 | 503 | 504) && attempt < SERVER_RETRY_ATTEMPTS {
+                let wait = retry_after_secs(&resp).unwrap_or(1u64 << attempt);
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                continue;
+            }
             if !resp.status().is_success() {
                 let body = resp.text().await.unwrap_or_default();
                 return Err(ApiError {
                     status: Some(code),
-                    message: format!("{tag} {code}: {body}"),
+                    message: format!("{tag} {code}: {}", error_detail(code, &body)),
                 });
             }
             return Ok(Some(resp));
@@ -719,9 +785,15 @@ impl SyncHttpClient {
             .expect("404 not allowed here");
         // The call succeeded; only the body was unreadable, so leave the status
         // off rather than let it read as a verdict on our credentials.
-        resp.json::<T>().await.map_err(|e| ApiError {
-            status: None,
-            message: format!("{tag} parse: {e}"),
+        // A 2xx whose body we cannot read is almost always a proxy that
+        // truncated the reply under load, so say that rather than quoting a
+        // decoder error at the user.
+        resp.json::<T>().await.map_err(|e| {
+            eprintln!("[sync] {tag} parse: {e}");
+            ApiError {
+                status: None,
+                message: format!("{tag}: the server's reply was incomplete, try again"),
+            }
         })
     }
 
@@ -858,128 +930,69 @@ impl SyncHttpClient {
         }
     }
 
-    // ── Pool groups ───────────────────────────────────────────────
+    // ── Spaces ────────────────────────────────────────────────────
 
-    pub async fn list_groups(&self) -> Result<Vec<GroupOut>, String> {
-        self.get_json("list groups", || self.authed(Method::GET, "/api/v1/groups"))
+    pub async fn list_spaces(&self) -> Result<Vec<SpaceOut>, String> {
+        self.get_json("list spaces", || self.authed(Method::GET, "/api/v1/spaces"))
             .await
     }
 
-    pub async fn get_group(&self, group_id: &str) -> Result<GroupOut, String> {
-        self.get_json("get group", || {
-            self.authed(Method::GET, &format!("/api/v1/groups/{group_id}"))
+    pub async fn get_space(&self, space_id: &str) -> Result<SpaceOut, String> {
+        self.get_json("get space", || {
+            self.authed(Method::GET, &format!("/api/v1/spaces/{space_id}"))
         })
         .await
     }
 
-    pub async fn create_group(
+    pub async fn create_space(
         &self,
-        req: CreateGroupRequest,
-    ) -> Result<CreateGroupResponse, String> {
-        self.get_json("create group", || {
-            Ok(self.authed(Method::POST, "/api/v1/groups")?.json(&req))
+        req: CreateSpaceRequest,
+    ) -> Result<CreateSpaceResponse, String> {
+        self.get_json("create space", || {
+            Ok(self.authed(Method::POST, "/api/v1/spaces")?.json(&req))
         })
         .await
     }
 
-    pub async fn join_group(&self, req: JoinGroupRequest) -> Result<JoinGroupResponse, String> {
-        self.get_json("join group", || {
-            Ok(self.authed(Method::POST, "/api/v1/groups/join")?.json(&req))
+    pub async fn join_space(&self, req: JoinSpaceRequest) -> Result<JoinSpaceResponse, String> {
+        self.get_json("join space", || {
+            Ok(self.authed(Method::POST, "/api/v1/spaces/join")?.json(&req))
         })
         .await
     }
 
-    /// Distribute per-member wrapped Group Keys (owner action, §7.4).
-    pub async fn distribute_group_keys(
+    /// Distribute per-member wrapped Space keyrings (owner action).
+    pub async fn distribute_space_keys(
         &self,
-        group_id: &str,
+        space_id: &str,
         req: DistributeKeysRequest,
     ) -> Result<(), String> {
         self.get_ok("distribute keys", false, || {
             Ok(self
-                .authed(Method::POST, &format!("/api/v1/groups/{group_id}/keys"))?
+                .authed(Method::POST, &format!("/api/v1/spaces/{space_id}/keys"))?
                 .json(&req))
         })
         .await
     }
 
-    /// Delete a group the caller owns.
-    pub async fn delete_group(&self, group_id: &str) -> Result<(), String> {
-        self.get_ok("delete group", true, || {
-            self.authed(Method::DELETE, &format!("/api/v1/groups/{group_id}"))
+    /// Delete a space the caller owns.
+    pub async fn delete_space(&self, space_id: &str) -> Result<(), String> {
+        self.get_ok("delete space", true, || {
+            self.authed(Method::DELETE, &format!("/api/v1/spaces/{space_id}"))
         })
         .await
     }
 
-    /// Leave a pool group (self-removal) — the owner may also remove others.
-    pub async fn remove_group_member(
+    /// Leave a space (self-removal) — the owner may also remove others.
+    pub async fn remove_space_member(
         &self,
-        group_id: &str,
+        space_id: &str,
         member_user_id: &str,
     ) -> Result<(), String> {
         self.get_ok("remove member", true, || {
             self.authed(
                 Method::DELETE,
-                &format!("/api/v1/groups/{group_id}/members/{member_user_id}"),
-            )
-        })
-        .await
-    }
-
-    // ── Live Share ────────────────────────────────────────────────
-
-    /// Create a live_share group and email an invite in one call.
-    pub async fn create_sharing_invite(
-        &self,
-        req: SharingInviteRequest,
-    ) -> Result<SharingInviteResponse, String> {
-        self.get_json("sharing invite", || {
-            Ok(self.authed(Method::POST, "/api/v1/sharing/invite")?.json(&req))
-        })
-        .await
-    }
-
-    pub async fn list_sharing_sessions(&self) -> Result<Vec<SessionOut>, String> {
-        self.get_json("list sessions", || {
-            self.authed(Method::GET, "/api/v1/sharing/sessions")
-        })
-        .await
-    }
-
-    pub async fn update_sharing_scope(
-        &self,
-        share_group_id: &str,
-        share_scope: &str,
-    ) -> Result<(), String> {
-        let body = UpdateScopeRequest {
-            share_scope: share_scope.to_string(),
-        };
-        self.get_ok("update scope", false, || {
-            Ok(self
-                .authed(
-                    Method::PATCH,
-                    &format!("/api/v1/sharing/sessions/{share_group_id}/scope"),
-                )?
-                .json(&body))
-        })
-        .await
-    }
-
-    pub async fn end_sharing_session(&self, share_group_id: &str) -> Result<(), String> {
-        self.get_ok("end sharing", true, || {
-            self.authed(
-                Method::DELETE,
-                &format!("/api/v1/sharing/sessions/{share_group_id}"),
-            )
-        })
-        .await
-    }
-
-    pub async fn leave_sharing_session(&self, share_group_id: &str) -> Result<(), String> {
-        self.get_ok("leave sharing", true, || {
-            self.authed(
-                Method::DELETE,
-                &format!("/api/v1/sharing/sessions/{share_group_id}/leave"),
+                &format!("/api/v1/spaces/{space_id}/members/{member_user_id}"),
             )
         })
         .await
@@ -987,11 +1000,14 @@ impl SyncHttpClient {
 
     // ── Blob storage ──────────────────────────────────────────────
 
+    /// Returns [`ApiError`] rather than a string: a 402 here means the account
+    /// is out of storage, which the caller latches so it stops asking once per
+    /// image for the rest of a bulk upload.
     pub async fn request_blob_upload(
         &self,
         req: BlobUploadRequest,
-    ) -> Result<BlobUploadResponse, String> {
-        self.get_json("blob request-upload", || {
+    ) -> Result<BlobUploadResponse, ApiError> {
+        self.get_json_classified("blob request-upload", || {
             Ok(self
                 .authed(Method::POST, "/api/v1/blobs/request-upload")?
                 .json(&req))
@@ -999,15 +1015,26 @@ impl SyncHttpClient {
         .await
     }
 
-    pub async fn upload_blob_bytes(&self, upload_url: &str, data: Vec<u8>) -> Result<(), String> {
+    /// `mime` must be the same value the upload was requested with: the
+    /// backend signs `ContentType` into the presigned PUT, so S3 recomputes
+    /// the signature over a `content-type` header we have to send back
+    /// verbatim. Omitting it is a signature mismatch, which S3 answers 403.
+    pub async fn upload_blob_bytes(
+        &self,
+        upload_url: &str,
+        data: Vec<u8>,
+        mime: &str,
+    ) -> Result<(), String> {
         // Presigned URL upload — no auth header, no retry (not our origin).
         let resp = self
             .inner
             .put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, mime)
+            .timeout(std::time::Duration::from_secs(BLOB_TRANSFER_TIMEOUT_SECS))
             .body(data)
             .send()
             .await
-            .map_err(|e| format!("blob upload: {e}"))?;
+            .map_err(|e| format!("blob upload: {}", transport_detail(&e)))?;
         if !resp.status().is_success() {
             return Err(format!("blob upload {}", resp.status().as_u16()));
         }
@@ -1045,16 +1072,17 @@ impl SyncHttpClient {
         let resp = self
             .inner
             .get(get_url)
+            .timeout(std::time::Duration::from_secs(BLOB_TRANSFER_TIMEOUT_SECS))
             .send()
             .await
-            .map_err(|e| format!("blob download: {e}"))?;
+            .map_err(|e| format!("blob download: {}", transport_detail(&e)))?;
         if !resp.status().is_success() {
             return Err(format!("blob download {}", resp.status().as_u16()));
         }
         resp.bytes()
             .await
             .map(|b| b.to_vec())
-            .map_err(|e| format!("blob download body: {e}"))
+            .map_err(|e| format!("blob download body: {}", transport_detail(&e)))
     }
 
     pub async fn blob_quota(&self) -> Result<QuotaResponse, String> {
@@ -1122,19 +1150,19 @@ impl SyncHttpClient {
             .await
     }
 
-    /// Send an addressed invite for a group we own (also emails the code).
-    pub async fn send_group_invite(&self, group_id: &str, email: &str) -> Result<InviteOut, String> {
+    /// Send an addressed invite for a space we own (also emails the code).
+    pub async fn send_space_invite(&self, space_id: &str, email: &str) -> Result<InviteOut, String> {
         let body = SendInviteRequest { email: email.to_string() };
         self.get_json("send invite", || {
             Ok(self
-                .authed(Method::POST, &format!("/api/v1/groups/{group_id}/invites"))?
+                .authed(Method::POST, &format!("/api/v1/spaces/{space_id}/invites"))?
                 .json(&body))
         })
         .await
     }
 
-    /// Accept an invite addressed to us; joins its group server-side.
-    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinGroupResponse, String> {
+    /// Accept an invite addressed to us; joins its space server-side.
+    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinSpaceResponse, String> {
         self.get_json("accept invite", || {
             Ok(self
                 .authed(Method::POST, &format!("/api/v1/invites/{invite_id}/accept"))?

@@ -187,20 +187,14 @@ impl WsListener {
         };
 
         match msg.event.as_str() {
-            // Entry fan-out: only Rust holds the UMK, so decrypt + merge here
+            // Entry fan-out: only Rust holds the keys, so decrypt + merge here
             // (tombstones — deleted_at set — are handled inside merge_pulled).
+            // `live = true`: this is the WS path, where passive mode and
+            // auto-copy apply.
             "sync:entry" => {
                 if let Ok(entry) = serde_json::from_value::<PulledEntry>(msg.payload.clone()) {
                     if let Some(sync) = self.sync_client() {
-                        sync.merge_pulled(std::slice::from_ref(&entry));
-                    }
-                }
-            }
-            // Best-effort delete keyed only by server_id.
-            "sync:delete" => {
-                if let Some(server_id) = msg.payload.get("server_id").and_then(|v| v.as_str()) {
-                    if let Some(sync) = self.sync_client() {
-                        sync.apply_remote_delete(server_id);
+                        sync.merge_pulled(std::slice::from_ref(&entry), true);
                     }
                 }
             }
@@ -214,8 +208,8 @@ impl WsListener {
                     &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": true }),
                 );
             }
-            // A member of one of our shared groups came online or went fully
-            // offline. Update the cached session members so the presence dots
+            // A member of one of our spaces came online or went fully
+            // offline. Update the cached members so the presence dots
             // stop waiting on a manual refresh.
             "user:presence" => {
                 let user_id = msg.payload.get("user_id").and_then(|v| v.as_str());
@@ -232,28 +226,29 @@ impl WsListener {
                     &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": false }),
                 );
             }
-            // Owner distributed a Group Key to us — unwrap + cache it (Rust owns
-            // the identity key), then let the UI know.
-            "group:rekey" => {
+            // The owner persisted a fresh wrapped keyring for us — reconcile
+            // recovers it (Rust owns the identity key), then tells the UI.
+            "space:rekey" => {
                 if let Some(sync) = self.sync_client() {
-                    sync.handle_group_rekey_arc(&msg.payload);
+                    sync.handle_space_rekey();
                 }
             }
-            "group:membership_changed" => {
-                let _ = self.app.emit("sync:group-membership", &msg.payload);
+            // Someone joined, left, was removed, or the space was deleted.
+            "space:membership_changed" => {
+                let _ = self.app.emit("space:membership-changed", &msg.payload);
                 // Our own membership may have changed (we joined, or were
                 // removed): ask the server to re-resolve this socket's channel
-                // set so group fan-out starts/stops without a reconnect.
+                // set so space fan-out starts/stops without a reconnect.
                 let _ = write
                     .send(Message::Text(r#"{"event":"resubscribe"}"#.into()))
                     .await;
-                // Someone joined or left: the owner (re)wraps Group Keys for
-                // the current member list (pools and sessions); members no-op.
+                // The owner's reconcile (re)wraps keyrings for the current
+                // member list — including the rekey a removal leaves behind;
+                // members just refresh their cached space list.
                 if let Some(sync) = self.sync_client() {
                     let handle = tokio::runtime::Handle::current();
                     handle.spawn(async move {
-                        sync.reconcile_group_keys().await;
-                        sync.refresh_sharing_sessions().await;
+                        sync.reconcile_spaces().await;
                     });
                 }
             }
@@ -263,23 +258,6 @@ impl WsListener {
             }
             "invite:updated" => {
                 let _ = self.app.emit("sync:invite-updated", &msg.payload);
-            }
-            "sharing:invite" => {
-                let _ = self.app.emit("sharing:invite-received", &msg.payload);
-            }
-            // A member accepted our invite — wrap the Group Key for them and
-            // distribute it (owner-side handshake).
-            "sharing:accepted" => {
-                if let Some(sync) = self.sync_client() {
-                    sync.handle_sharing_accepted(&msg.payload);
-                }
-                let _ = self.app.emit("sharing:accepted", &msg.payload);
-            }
-            "sharing:ended" => {
-                let _ = self.app.emit("sharing:ended", &msg.payload);
-            }
-            "sharing:scope_changed" => {
-                let _ = self.app.emit("sharing:scope-changed", &msg.payload);
             }
             // Application-level keepalive — reply so the server refreshes our
             // presence TTL (otherwise we're marked offline after ~5 min).

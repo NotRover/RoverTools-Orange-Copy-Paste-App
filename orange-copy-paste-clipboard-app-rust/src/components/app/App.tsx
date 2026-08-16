@@ -11,7 +11,7 @@ import {
 } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
-import SyncScreen from "./sync-screen/SyncScreen";
+import SpacesScreen from "./spaces-screen/SpacesScreen";
 import AccountScreen from "./account-screen/AccountScreen";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
@@ -135,7 +135,7 @@ const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [screen, setScreen] = useState<AppScreen>(() => {
     const saved = localStorage.getItem("sc-last-screen") as AppScreen | null;
-    return saved === "notes" || saved === "clipboard" || saved === "sync" ? saved : "clipboard";
+    return saved === "notes" || saved === "clipboard" || saved === "spaces" ? saved : "clipboard";
   });
   const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
     null,
@@ -470,6 +470,17 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    // Seed from the current status: the socket usually comes up during
+    // startup, so waiting for the next event left every indicator reading
+    // "inactive" on a device that was signed in and online the whole time.
+    invoke<{ user_id: string } | null>("sync_get_user")
+      .then((user) => {
+        if (!user) return;
+        return invoke<{ connected: boolean }>("sync_get_status").then((s) => {
+          if (!cancelled) setSyncConnected(s.connected);
+        });
+      })
+      .catch(() => {});
     listen<{ connected: boolean }>("sync:status-changed", (event) => {
       if (!cancelled) setSyncConnected(event.payload.connected);
     }).then((fn) => {
@@ -611,8 +622,15 @@ const App: React.FC = () => {
 
   // An entry sync refused to send. The reason comes from Rust so the toast can
   // say what actually happened instead of guessing at the file-size case.
-  const [syncSkipReason, setSyncSkipReason] = useState<string | null>(null);
+  const [syncSkip, setSyncSkip] = useState<{
+    label: string;
+    reason: string;
+  } | null>(null);
   const fileSyncSkippedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Skips arrive one per entry. A bulk upload can refuse hundreds, and naming
+  // each one in its own toast buries the screen in near-identical messages, so
+  // a burst collapses into a single count.
+  const skipBurstRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -621,10 +639,22 @@ const App: React.FC = () => {
       if (cancelled) return;
       if (fileSyncSkippedTimerRef.current !== null)
         clearTimeout(fileSyncSkippedTimerRef.current);
-      setSyncSkipReason(event.payload.reason || "Item could not be synced");
+      skipBurstRef.current += 1;
+      setSyncSkip(
+        skipBurstRef.current === 1
+          ? {
+              label: event.payload.label || "Item",
+              reason: event.payload.reason || "could not be synced",
+            }
+          : {
+              label: `${skipBurstRef.current} items`,
+              reason: "See the Account screen for what failed and why.",
+            },
+      );
       fileSyncSkippedTimerRef.current = setTimeout(() => {
         fileSyncSkippedTimerRef.current = null;
-        setSyncSkipReason(null);
+        skipBurstRef.current = 0;
+        setSyncSkip(null);
       }, 5000);
     }).then((fn) => {
       if (cancelled) fn();
@@ -1181,7 +1211,7 @@ const App: React.FC = () => {
         pendingInvites={pendingInviteCount}
         onNavigate={(s) => {
           setScreen(s);
-          if (s === "clipboard" || s === "notes" || s === "sync") {
+          if (s === "clipboard" || s === "notes" || s === "spaces") {
             localStorage.setItem("sc-last-screen", s);
           }
         }}
@@ -1249,11 +1279,12 @@ const App: React.FC = () => {
           <AccountScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
-        ) : screen === "sync" ? (
-          <SyncScreen
+        ) : screen === "spaces" ? (
+          <SpacesScreen
             entries={entries}
             notes={notes}
             syncConnected={syncConnected}
+            availableGroups={availableGroups}
             onCopyEntry={handleCopy}
           />
         ) : screen === "notes" ? (
@@ -1309,7 +1340,7 @@ const App: React.FC = () => {
               total={entries.length}
             />
           )}
-          {screen !== "sync" && screen !== "account" && (
+          {screen !== "spaces" && screen !== "account" && (
             <div
               className={syncPillClass}
               data-tooltip={syncPillLabel}
@@ -1423,12 +1454,12 @@ const App: React.FC = () => {
           />
         )}
 
-        {syncSkipReason && (
+        {syncSkip && (
           <ToastNotification
-            message={`Not synced. ${syncSkipReason}`}
+            message={`Not synced: ${syncSkip.label}. ${syncSkip.reason}`}
             icon={<CloudSyncIcon size={13} />}
             duration={5000}
-            onDismiss={() => setSyncSkipReason(null)}
+            onDismiss={() => setSyncSkip(null)}
           />
         )}
       </div>
