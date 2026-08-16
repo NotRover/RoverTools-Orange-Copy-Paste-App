@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { groupColor } from "../../../types";
+import type { Space } from "../../../types";
+import { ShareNetwork, Check } from "@phosphor-icons/react";
 import {
   CheckIcon,
   CopyIcon,
@@ -42,6 +44,12 @@ export interface CardMenuProps {
   showCopy?: boolean;
   /** Show save action (default true). */
   showSave?: boolean;
+  /** Spaces this account belongs to. Empty or absent hides the share row. */
+  spaces?: Space[];
+  /** Space ids this item is already shared into. */
+  itemSpaceIds?: string[];
+  /** Share this item into a space, or stop sharing it there. */
+  onToggleSpace?: (spaceId: string) => void;
 }
 
 const CardMenu: React.FC<CardMenuProps> = ({
@@ -64,11 +72,15 @@ const CardMenu: React.FC<CardMenuProps> = ({
   onToggleExpand,
   showCopy = true,
   showSave = true,
+  spaces = [],
+  itemSpaceIds = [],
+  onToggleSpace,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const groupsRowRef = useRef<HTMLButtonElement>(null);
   const flyoutRef = useRef<HTMLDivElement>(null);
-  const [groupsOpen, setGroupsOpen] = useState(false);
+  // One flyout slot: groups and spaces share the placement logic, and only one
+  // of them can be open at a time.
+  const [flyoutOpen, setFlyoutOpen] = useState<"groups" | "spaces" | null>(null);
   const closeAfter = (fn: () => void) => () => {
     fn();
     onClose();
@@ -97,12 +109,12 @@ const CardMenu: React.FC<CardMenuProps> = ({
   }, [open, anchorX, anchorY]);
 
   useEffect(() => {
-    if (!open) setGroupsOpen(false);
+    if (!open) setFlyoutOpen(null);
   }, [open]);
 
-  // Position the groups flyout so it doesn't overflow the viewport.
+  // Position the open flyout so it doesn't overflow the viewport.
   useLayoutEffect(() => {
-    if (!groupsOpen || !flyoutRef.current || !dropdownRef.current) return;
+    if (!flyoutOpen || !flyoutRef.current || !dropdownRef.current) return;
     const flyout = flyoutRef.current;
     const menu = dropdownRef.current;
     const menuRect = menu.getBoundingClientRect();
@@ -122,7 +134,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
       flyout.style.left = `calc(100% + ${gap}px)`;
       flyout.style.right = "auto";
     }
-  }, [groupsOpen]);
+  }, [flyoutOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -148,6 +160,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
   if (!open) return null;
 
   const hasGroups = availableGroups.length > 0;
+  const canShare = spaces.length > 0 && !!onToggleSpace;
 
   return createPortal(
     <div
@@ -184,23 +197,69 @@ const CardMenu: React.FC<CardMenuProps> = ({
         </button>
       )}
 
+      {/* Share to space submenu */}
+      {canShare && (
+        <div className="card-menu-groups-wrapper">
+          <button
+            className={`card-menu-item card-menu-item--groups-toggle${flyoutOpen === "spaces" ? " card-menu-item--groups-toggle-active" : ""}`}
+            onClick={() =>
+              setFlyoutOpen((v) => (v === "spaces" ? null : "spaces"))
+            }
+          >
+            <ShareNetwork size={13} />
+            <span style={{ flex: 1 }}>
+              Share to space
+              {itemSpaceIds.length > 0 ? ` (${itemSpaceIds.length})` : ""}
+            </span>
+            <ChevronRightIcon
+              className={`card-menu-chevron${flyoutOpen === "spaces" ? " card-menu-chevron--open" : ""}`}
+            />
+          </button>
+          {flyoutOpen === "spaces" && (
+            <div ref={flyoutRef} className="card-menu-groups-flyout">
+              <div className="card-menu-groups-flyout-header">
+                <span>Spaces</span>
+              </div>
+              <div className="card-menu-groups-flyout-body">
+                {spaces.map((space) => {
+                  const active = itemSpaceIds.includes(space.id);
+                  return (
+                    <button
+                      key={space.id}
+                      className={`card-menu-space-row${active ? " card-menu-space-row--active" : ""}`}
+                      onClick={() => onToggleSpace?.(space.id)}
+                    >
+                      <span className="card-menu-space-check">
+                        {active && <Check size={10} weight="bold" />}
+                      </span>
+                      <span className="card-menu-space-name">{space.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Groups submenu */}
       {hasGroups && (
         <>
           {/* <div className="card-menu-separator" /> */}
           <div className="card-menu-groups-wrapper">
             <button
-              ref={groupsRowRef}
-              className={`card-menu-item card-menu-item--groups-toggle${groupsOpen ? " card-menu-item--groups-toggle-active" : ""}`}
-              onClick={() => setGroupsOpen((v) => !v)}
+              className={`card-menu-item card-menu-item--groups-toggle${flyoutOpen === "groups" ? " card-menu-item--groups-toggle-active" : ""}`}
+              onClick={() =>
+                setFlyoutOpen((v) => (v === "groups" ? null : "groups"))
+              }
             >
               <TagIcon />
               <span style={{ flex: 1 }}>Groups</span>
               <ChevronRightIcon
-                className={`card-menu-chevron${groupsOpen ? " card-menu-chevron--open" : ""}`}
+                className={`card-menu-chevron${flyoutOpen === "groups" ? " card-menu-chevron--open" : ""}`}
               />
             </button>
-            {groupsOpen && (
+            {flyoutOpen === "groups" && (
               <div ref={flyoutRef} className="card-menu-groups-flyout">
                 <div className="card-menu-groups-flyout-header">
                   <span>Groups</span>

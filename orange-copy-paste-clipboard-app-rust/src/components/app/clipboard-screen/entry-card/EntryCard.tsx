@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { ClipboardEntry } from "../../../../types";
+import type { ClipboardEntry, Space } from "../../../../types";
 import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
 import {
   fileNameFromPath,
@@ -221,6 +221,14 @@ interface EntryCardProps {
   isInClipboard?: boolean;
   /** Cloud badge state for this entry, if sync is on. */
   syncState?: EntrySyncState;
+  /** Spaces this account belongs to, for the share menu. */
+  spaces?: Space[];
+  /** Space ids this entry is shared into. */
+  itemSpaceIds?: string[];
+  /** Names of those spaces, for the shared indicator's tooltip. */
+  sharedSpaceNames?: string[];
+  /** Share this entry into a space, or stop sharing it there. */
+  onToggleSpace?: (entryId: string, spaceId: string) => void;
 }
 
 const EntryCardImpl: React.FC<EntryCardProps> = ({
@@ -236,6 +244,10 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   onRangeSelect,
   isInClipboard = false,
   syncState,
+  spaces,
+  itemSpaceIds,
+  sharedSpaceNames,
+  onToggleSpace,
 }) => {
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
@@ -644,6 +656,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
           justPinned={justPinned}
           copied={copied}
           relTime={relTime}
+          sharedSpaceNames={sharedSpaceNames}
         />
       </div>
 
@@ -677,6 +690,11 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
             : [...current, group];
           onSetGroups(entry.id, newGroups);
         }}
+        spaces={spaces}
+        itemSpaceIds={itemSpaceIds}
+        onToggleSpace={
+          onToggleSpace ? (spaceId) => onToggleSpace(entry.id, spaceId) : undefined
+        }
         isExpandable={isExpandable}
         isExpanded={isMultiFileExpandable ? showFileList : contentExpanded}
         onToggleExpand={() =>

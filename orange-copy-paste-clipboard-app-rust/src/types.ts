@@ -33,7 +33,7 @@ export interface Note {
   groups: string[];
 }
 
-export type AppScreen = "clipboard" | "notes" | "sync" | "shortcuts" | "account" | "settings";
+export type AppScreen = "clipboard" | "notes" | "spaces" | "shortcuts" | "account" | "settings";
 export type AppTheme = "dark" | "light";
 
 /** Sync connection state surfaced by the sidebar status indicator. */
@@ -49,33 +49,51 @@ export interface SyncUser {
   avatar_url: string | null;
 }
 
-export interface SyncGroupMember {
+export interface SpaceMember {
   user_id: string;
   display_name: string;
   /** Provider avatar URL (Google), or null — the UI falls back to initials. */
   avatar_url: string | null;
   role: string;
-  /** False until the owner has wrapped the Group Key for this member. */
-  has_group_key: boolean;
+  /** False until the owner has wrapped the Space Key for this member. */
+  has_space_key: boolean;
+  /** Presence snapshot; WS events keep it fresh. */
+  online: boolean;
 }
 
-export interface SyncGroup {
+/** One shared space — the only sharing primitive. */
+export interface Space {
   id: string;
   name: string;
   owner_id: string;
   is_owner: boolean;
+  /** Whether members who join later can read entries shared before they joined. */
   share_history: boolean;
   member_count: number;
-  members: SyncGroupMember[];
+  members: SpaceMember[];
   invite_code?: string;
   invite_expires_at?: number;
 }
 
+/** Per-space send filter: which of my entries auto-flow into the space.
+ *  Absent or disabled = explicit shares only (the default). */
+export interface SendFilter {
+  enabled: boolean;
+  /** Entry kinds that flow; empty = all kinds. */
+  kinds: string[];
+  /** Local group names that flow; empty = all groups. */
+  groups: string[];
+  /** Which content flows automatically. */
+  content: "clipboard" | "notes" | "both";
+}
+
+/** How personal entries from other devices are applied on this device. */
+export type SyncMode = "realtime" | "passive";
+
 export interface SyncInvite {
   id: string;
-  group_id: string;
-  group_name: string;
-  group_type: "pool" | "live_share";
+  space_id: string;
+  space_name: string;
   inviter_id: string;
   inviter_name: string;
   invitee_email: string;
@@ -92,23 +110,6 @@ export interface SyncQuota {
 export interface SyncInviteList {
   sent: SyncInvite[];
   received: SyncInvite[];
-}
-
-export interface SharingMember {
-  user_id: string;
-  display_name: string;
-  /** Provider avatar URL (Google), or null — the UI falls back to initials. */
-  avatar_url: string | null;
-  email: string;
-  scope: "clipboard" | "notes" | "both";
-  online: boolean;
-}
-
-export interface SharingSession {
-  share_group_id: string;
-  name: string;
-  my_scope: "clipboard" | "notes" | "both";
-  members: SharingMember[];
 }
 
 /** One entry sync refused to send, with the reason to show the user. */

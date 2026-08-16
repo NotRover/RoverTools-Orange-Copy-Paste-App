@@ -3,6 +3,7 @@ import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
 import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
+import { useSpaceShares } from "../../../hooks/useSpaceShares";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
@@ -178,6 +179,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   // Cloud badge state, keyed "clipboard:{id}". Kept out of the entry model.
   const entrySyncStates = useEntrySyncStates();
+  const spaceShares = useSpaceShares();
 
   // Day groups: entries sorted within each day, and the day buckets themselves
   // ordered by date — oldest-first only for the "oldest" sort, newest-first for
@@ -299,6 +301,19 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     multiSelect.selectedIds,
   );
 
+  // Spaces every selected entry is already in, so one click can share the
+  // whole selection or take it back out.
+  const commonSpaceIds = useMemo(() => {
+    const ids = [...multiSelect.selectedIds];
+    if (ids.length === 0) return [];
+    const first = spaceShares.shares[`clipboard:${ids[0]}`] ?? [];
+    return first.filter((spaceId) =>
+      ids.every((id) =>
+        (spaceShares.shares[`clipboard:${id}`] ?? []).includes(spaceId),
+      ),
+    );
+  }, [multiSelect.selectedIds, spaceShares.shares]);
+
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -415,6 +430,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   }}
                   availableGroups={availableGroups}
                   commonGroups={commonGroups}
+                  spaces={spaceShares.spaces}
+                  commonSpaceIds={commonSpaceIds}
+                  onBulkToggleSpace={(spaceId, share) =>
+                    spaceShares.bulkToggle(
+                      "clipboard",
+                      [...multiSelect.selectedIds],
+                      spaceId,
+                      share,
+                    )
+                  }
                 />
               )}
             </div>
@@ -517,6 +542,12 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onRangeSelect={handleRangeSelect}
                           isInClipboard={entry.id === activeClipboardId}
                           syncState={entrySyncStates[`clipboard:${entry.id}`]}
+                          spaces={spaceShares.spaces}
+                          itemSpaceIds={spaceShares.shares[`clipboard:${entry.id}`]}
+                          sharedSpaceNames={spaceShares.namesFor("clipboard", entry.id)}
+                          onToggleSpace={(entryId, spaceId) =>
+                            spaceShares.toggle("clipboard", entryId, spaceId)
+                          }
                         />
                       ))}
                     </div>

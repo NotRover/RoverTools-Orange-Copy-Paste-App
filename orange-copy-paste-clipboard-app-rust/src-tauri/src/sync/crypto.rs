@@ -228,7 +228,7 @@ pub fn derive_identity_keypair(umk: &[u8; 32]) -> (Zeroizing<[u8; 32]>, [u8; 32]
 }
 
 /// Compute the X25519 shared secret for ECDH key exchange.  Used for
-/// wrapping Group Keys during sharing session setup.
+/// wrapping space keys when distributing them to members.
 pub fn x25519_shared_secret(
     privkey_bytes: &[u8; 32],
     peer_pubkey_bytes: &[u8; 32],

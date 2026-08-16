@@ -62,7 +62,7 @@ A user copies text/images/files (or writes notes) on one device and sees them on
 
 **Core sync flow:** client authenticates with Supabase → `POST /api/v1/auth/bootstrap` (gets `kdf_salt`) → derives the User Master Key → registers a device → pushes/pulls encrypted entries (last-write-wins) → receives live updates over `/ws`. Deletes are **tombstones** (a push with `deleted_at`), not a DELETE route.
 
-**Sharing:** persistent **pool groups** and ephemeral **Live Share** sessions, both built on a random per-group **Group Key** distributed via X25519 key wrapping.
+**Sharing:** one primitive, the **Space** - persistent, live, any number of members, and a user can be in several at once. Each space has a random **Space Key** (kept as a keyring, newest first) distributed to members via X25519 key wrapping.
 
 Specifics (models, quotas, exact payloads) change — **treat the code as source of truth.**
 
@@ -78,8 +78,8 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `components/app/clipboard-screen/ClipboardScreen.tsx` — history UI: grouping, sorting, filtering, bulk ops.
 - `components/app/clipboard-screen/entry-card/EntryCard.tsx` — per-entry rendering/interactions.
 - `components/app/notes-screen/NotesScreen.tsx` — notes CRUD/editor, grouping, bulk actions.
-- `components/app/sync-screen/SyncScreen.tsx` — sync feed UI (groups/sessions; still partly demo-scaffolded).
-- `components/app/account-screen/AccountScreen.tsx` — sync auth (login/signup/Google), devices/presence, groups, sharing.
+- `components/app/spaces-screen/SpacesScreen.tsx` — Spaces: shared feed, create/join, invites, members, per-space auto-copy and send filters.
+- `components/app/account-screen/AccountScreen.tsx` — sync auth (login/signup/Google), cloud sync mode (realtime/passive), devices/presence, storage. No sharing UI - that lives on the Spaces screen.
 - `components/app/settings-screen/SettingsScreen.tsx` — app preferences (slots, storage folder, history behavior); owns the shared `scr-*`/`set-section-*` styles other screens reuse.
 - `components/app/shortcuts-screen/ShortcutsScreen.tsx` — hotkey reference.
 - `components/paste-popup/PastePopup.tsx`, `components/copy-popup/CopyPopup.tsx` — quick-paste + capture popups.
@@ -106,22 +106,22 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `realtime.py` — WebSocket endpoint, in-process hub, Redis pub/sub fan-out, presence.
 - `auth/` — profiles, devices, public-key registration, bootstrap; Supabase token verification (`tokens.py`).
 - `sync/` — push/pull/cursor, last-write-wins service. `settings/` — encrypted settings blob.
-- `groups/` — pool groups + `sharing.py` (Live Share) + group-key distribution.
+- `spaces/` — spaces, invites, and space-key distribution.
 - `blobs/` — presigned upload/download (`s3.py`), quota. `admin/` — internal stats/ops.
-- `migrations/versions/` — Alembic (`0001`…`0006`). `tests/` — pytest (`test_auth`, `test_sync`, `test_blobs`).
+- `migrations/versions/` — Alembic (`0001`…`0011`; `0011_spaces` is written but **not applied** and is destructive). `tests/` — pytest (`test_auth`, `test_sync`, `test_blobs`, `test_spaces_invites`).
 
 ## Cross-System Contract & Invariants
 
 These bind the client and backend. Changing one side usually means changing the other — document the contract (payloads, event names, behavior) when you do.
 
 **Auth & identity**
-- Supabase Auth owns identity (signup/login/refresh/reset). The backend **verifies** JWTs (PyJWT HS256, `aud="authenticated"`, `sub`=user id) and **never signs**.
+- Supabase Auth owns identity (signup/login/refresh/reset). The backend **verifies** JWTs (PyJWT: ES256/RS256 via the project JWKS, legacy HS256 shared secret; `aud="authenticated"`, `sub`=user id) and **never signs**.
 - Device-scoped routes require `Authorization: Bearer <jwt>` **and** `X-Device-Id`. WebSocket: `/ws?token=<jwt>&device_id=<id>`.
 
 **End-to-end encryption (client-only)**
 - UMK is a **random 32-byte key** (envelope model). The password derives only a wrapping key `KEK = Argon2id(password, kdf_salt)`; the UMK is stored server-side wrapped (`pw_wrapped_umk`, AES-GCM) and unwrapped on login. Both live **in-memory only** (`Zeroizing`), never written to disk or logs. A wrong password → GCM unwrap failure. OAuth (Google) users set an account password that serves as this secret.
 - Content: AES-256-GCM with **AAD = `client_id`** (binds ciphertext to its entry). The per-user **identity keypair is derived deterministically from the UMK** (same on every device, never stored server-side; only the public half is registered).
-- Group Keys are random 32-byte keys, X25519-wrapped per member; shared entries encrypt under the Group Key, personal entries under the UMK.
+- Content is encrypted once under a random per-entry **CEK**; the CEK is wrapped under the UMK (`"personal"`) and under each target space's key, so one entry can be in several spaces. `wrapped_keys` is opaque to the server; `space_ids` is what it fans out on. Removing a member rekeys the space; revocation is best-effort for entries already pulled.
 - The server stores only ciphertext, public keys, and opaque wrapped keys — never plaintext.
 
 **Sync semantics**
@@ -150,7 +150,7 @@ These bind the client and backend. Changing one side usually means changing the 
 
 **Client — the Rust/React boundary**
 - Rust owns state, persistence, and **all** crypto; React is UI. Never reimplement encryption, key handling, or merge logic in TypeScript.
-- Frontend → Rust: `invoke<T>("command_name", { camelCaseArgs })` from `@tauri-apps/api/core`. Commands are snake_case and domain-prefixed (`sync_get_groups`, `sharing_get_sessions`, `get_setting`); register new ones in `lib.rs`.
+- Frontend → Rust: `invoke<T>("command_name", { camelCaseArgs })` from `@tauri-apps/api/core`. Commands are snake_case and domain-prefixed (`spaces_list`, `space_set_send_filter`, `get_setting`); register new ones in `lib.rs`.
 - Tauri commands return `Result<T, String>` — surface errors as strings, don't panic in command paths.
 - Rust → Frontend: events are namespaced `domain:event` in kebab-case (`clipboard:new-entry`, `sync:history-merged`, `sync:status-changed`). Match that shape for new events and update both sides together.
 - Shared TS shapes live in `src/types.ts`; keep them in sync with the serde structs they mirror.

@@ -258,3 +258,57 @@
   white-space: nowrap;
   line-height: 1;
 }
+
+/* ── Share to space rows ── */
+/* The space flyout is a checklist, not a chip cloud: a space is a place an
+   item goes, so the row shows whether it is in it. */
+
+.card-menu-space-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.card-menu-space-row:hover {
+  background: var(--surface-hover);
+}
+
+.card-menu-space-row--active {
+  color: var(--accent);
+}
+
+.card-menu-space-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.card-menu-space-row--active .card-menu-space-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.card-menu-space-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

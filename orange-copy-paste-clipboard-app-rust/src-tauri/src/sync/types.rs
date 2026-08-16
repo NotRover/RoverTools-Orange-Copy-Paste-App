@@ -32,37 +32,103 @@ pub struct SyncUser {
     pub avatar_url: Option<String>,
 }
 
-// ── Groups (pool) ───────────────────────────────────────────────────
+// ── Cloud sync mode ─────────────────────────────────────────────────
+
+/// How personal entries from other devices are applied on this device.
+/// Spaces are realtime regardless — this only governs the user's own backup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncMode {
+    /// Apply WebSocket-delivered personal entries the moment they arrive.
+    #[default]
+    Realtime,
+    /// Skip live application; a periodic pull (and Sync now) picks them up.
+    /// Pushes still happen immediately — passive never risks the backup.
+    Passive,
+}
+
+impl SyncMode {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "realtime" => Some(Self::Realtime),
+            "passive" => Some(Self::Passive),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Realtime => "realtime",
+            Self::Passive => "passive",
+        }
+    }
+}
+
+// ── Spaces (the one shared primitive) ───────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncGroupMember {
+pub struct SpaceMember {
     pub user_id: String,
     pub display_name: String,
     /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
-    /// Defaulted so a payload written before this field existed still loads.
     #[serde(default)]
     pub avatar_url: Option<String>,
     pub role: String,
-    /// False until the owner has wrapped the Group Key for this member —
+    /// False until the owner has wrapped the Space Key for this member —
     /// the UI shows "waiting for key" instead of silent decrypt failures.
-    pub has_group_key: bool,
+    pub has_space_key: bool,
+    /// Presence snapshot from the server; the UI keeps it fresh via WS events.
+    pub online: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncGroup {
+pub struct Space {
     pub id: String,
     pub name: String,
     pub owner_id: String,
-    /// True when the current user owns this group (may invite/remove/delete).
+    /// True when the current user owns this space (may invite/remove/delete).
     pub is_owner: bool,
     pub share_history: bool,
     pub member_count: u32,
-    pub members: Vec<SyncGroupMember>,
-    /// Present after create / for owners; used to share the group.
+    pub members: Vec<SpaceMember>,
+    /// Present after create / for owners; used to share the space.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invite_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invite_expires_at: Option<u64>,
+}
+
+/// Per-space send filter: which of the user's entries auto-flow into the
+/// space. Lives in the encrypted settings blob (roams across devices; the
+/// server never sees it — it names plaintext local groups). Disabled means
+/// explicit shares only, the default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SendFilter {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Entry kinds that flow ("text", "image", "file", "html"...); empty = all.
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    /// Local group names that flow; empty = all.
+    #[serde(default)]
+    pub groups: Vec<String>,
+    /// "clipboard" | "notes" | "both" — which content types flow.
+    #[serde(default = "SendFilter::default_content")]
+    pub content: String,
+}
+
+impl SendFilter {
+    fn default_content() -> String {
+        "both".to_string()
+    }
+
+    pub fn includes_clipboard(&self) -> bool {
+        self.content == "clipboard" || self.content == "both"
+    }
+
+    pub fn includes_notes(&self) -> bool {
+        self.content == "notes" || self.content == "both"
+    }
 }
 
 // ── Blob quota ──────────────────────────────────────────────────────
@@ -115,80 +181,6 @@ pub struct SyncStatusInfo {
     pub skipped: Vec<SkippedEntry>,
 }
 
-
-// ── Live Share (real-time cross-user sharing) ────────────────────────
-
-/// What a user contributes to a Live Share group.
-/// The sender's scope determines which entries flow through the group —
-/// the receiver gets whatever the sender contributes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ShareScope {
-    Clipboard,
-    Notes,
-    Both,
-}
-
-impl ShareScope {
-    /// Parse the wire string ("clipboard" | "notes" | "both").
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "clipboard" => Some(Self::Clipboard),
-            "notes" => Some(Self::Notes),
-            "both" => Some(Self::Both),
-            _ => None,
-        }
-    }
-
-    pub fn includes_clipboard(self) -> bool {
-        matches!(self, Self::Clipboard | Self::Both)
-    }
-
-    pub fn includes_notes(self) -> bool {
-        matches!(self, Self::Notes | Self::Both)
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Clipboard => "clipboard",
-            Self::Notes => "notes",
-            Self::Both => "both",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionMember {
-    pub user_id: String,
-    pub display_name: String,
-    /// Provider avatar URL (Google), or `None` — the UI falls back to initials.
-    /// Defaulted so a payload written before this field existed still loads.
-    #[serde(default)]
-    pub avatar_url: Option<String>,
-    pub email: String,
-    pub scope: ShareScope,
-    pub online: bool,
-}
-
-/// An active Live Share session (group_type = 'live_share', max 5 members).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SharingSession {
-    pub share_group_id: String,
-    pub name: String,
-    pub my_scope: ShareScope,
-    pub members: Vec<SessionMember>,
-    /// 32-byte Group Key for this session. Never serialized to disk.
-    #[serde(skip)]
-    pub group_key: Option<[u8; 32]>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SharingInvite {
-    pub invite_code: String,
-    pub share_group_id: String,
-    /// Unix ms when this invite expires.
-    pub expires_at: u64,
-}
 
 // ── Entry type discriminator ─────────────────────────────────────────
 

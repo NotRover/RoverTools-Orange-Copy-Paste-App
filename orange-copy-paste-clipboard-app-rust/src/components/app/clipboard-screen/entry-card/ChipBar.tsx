@@ -12,6 +12,7 @@ import {
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
 import { ChevronDownIcon, CheckIcon, ClipboardIcon, CloudSyncIcon } from "../../../icons";
+import { ShareNetwork } from "@phosphor-icons/react";
 
 const CHIP_GAP_PX = 4;
 
@@ -34,6 +35,8 @@ interface ChipBarProps {
   justPinned: boolean;
   copied: boolean;
   relTime: string;
+  /** Spaces this entry is shared into, by name. Empty means personal only. */
+  sharedSpaceNames?: string[];
 }
 
 const ChipBar: React.FC<ChipBarProps> = ({
@@ -54,6 +57,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
   justPinned,
   copied,
   relTime,
+  sharedSpaceNames = [],
 }) => {
   const [showHiddenChips, setShowHiddenChips] = useState(false);
   const [visibleBaseCount, setVisibleBaseCount] = useState(0);
@@ -368,6 +372,17 @@ const ChipBar: React.FC<ChipBarProps> = ({
             </button>
           </div>
         </div>
+        {sharedSpaceNames.length > 0 && (
+          <span
+            className="card-share-icon"
+            data-tooltip={`Shared to ${sharedSpaceNames.join(", ")}`}
+          >
+            <ShareNetwork size={11} />
+            {sharedSpaceNames.length > 1 && (
+              <span className="card-share-count">{sharedSpaceNames.length}</span>
+            )}
+          </span>
+        )}
         {syncState === "synced" && (
           <span
             className="card-sync-icon card-sync-icon--synced"

@@ -236,7 +236,6 @@ pub fn set_setting(
         "notif_copy",
         "notif_paste",
         "autosave",
-        "sharing_notify",
     ];
     if written && SYNCED_KEYS.contains(&key.as_str()) {
         let sync = state.sync_client.lock().clone();
@@ -488,15 +487,37 @@ pub(crate) fn auto_save_history(app: &tauri::AppHandle) {
     }
 }
 
+/// Write an entry to the clipboard on the app's own behalf (a manual copy, or
+/// sync auto-copy from a space).  Sets the watcher suppress flag *before* the
+/// write so the change is not re-captured as a duplicate (and reverts it on
+/// failure so the next legit copy is not swallowed), then keeps the
+/// active-clipboard-id consistent with a manual copy.  Safe from any thread.
+pub(crate) fn copy_entry_suppressed(
+    app: &tauri::AppHandle,
+    entry: &crate::clipboard::history::ClipboardEntry,
+) -> bool {
+    let state: tauri::State<'_, AppState> = app.state();
+    state.suppress_next_capture.store(true, Ordering::Relaxed);
+    match write_entry_to_clipboard(entry) {
+        Ok(()) => {
+            set_active_clipboard_id(app, &entry.id);
+            true
+        }
+        Err(e) => {
+            eprintln!("[clipboard] suppressed write failed: {e}");
+            state.suppress_next_capture.store(false, Ordering::Relaxed);
+            false
+        }
+    }
+}
+
 #[tauri::command]
 pub fn copy_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     let Some(entry) = find_entry_by_id(&state, &id) else {
         return false;
     };
-    let ok = write_entry_to_clipboard(&entry).is_ok();
+    let ok = copy_entry_suppressed(&app, &entry);
     if ok {
-        state.suppress_next_capture.store(true, Ordering::Relaxed);
-        set_active_clipboard_id(&app, &id);
         crate::runtime::notifications::notify_if_enabled(&app, &entry);
     }
     ok
