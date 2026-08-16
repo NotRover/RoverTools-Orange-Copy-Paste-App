@@ -39,7 +39,7 @@ use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
 use crate::sync::client::{
     BlobUploadRequest, DistributeKeysRequest, PushEntryRequest, RegisterDeviceRequest,
-    SyncHttpClient, WrappedKeyEntry,
+    SyncHttpClient, WrappedKeyringEntry,
 };
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
@@ -47,29 +47,29 @@ use crate::sync::pending_queue::{PendingOp, PendingQueue};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
-    EntryType, ShareScope, SharingSession, SkippedEntry, SyncStatusInfo, SyncUser,
+    EntryType, SendFilter, SkippedEntry, Space, SpaceMember, SyncMode, SyncStatusInfo, SyncUser,
 };
 use crate::sync::ws_listener::WsListener;
 
 /// How long after the last `schedule_settings_push()` call before the push fires.
 const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
 
-/// Display name for a Live Share session, built from the other members.
-/// Sessions have no user-chosen name, so two running at once would otherwise be
-/// two identical "Live Share" rows with no way to tell which is which.
-pub(crate) fn live_share_name(other_members: &[String]) -> String {
-    let names: Vec<&str> = other_members
-        .iter()
-        .map(|n| n.trim())
-        .filter(|n| !n.is_empty())
-        .collect();
-    match names.len() {
-        0 => "Live Share".into(),
-        1 => format!("Live Share with {}", names[0]),
-        2 => format!("Live Share with {} and {}", names[0], names[1]),
-        n => format!("Live Share with {} and {} others", names[0], n - 1),
-    }
-}
+/// How often the passive-mode pull loop wakes up.  Pushes are always immediate
+/// (the backup must not lose data); passive only batches what gets *applied*.
+const PASSIVE_PULL_INTERVAL_SECS: u64 = 300;
+
+/// Settings key holding the per-space send filters (JSON map keyed by space
+/// id).  Lives in settings.json and rides in the encrypted settings blob so
+/// filters roam across devices without the server ever seeing them.
+pub(crate) const SEND_FILTERS_KEY: &str = "space_send_filters";
+
+/// Settings key for the cloud-sync mode ("realtime" | "passive").  Device-local
+/// on purpose — it is a per-device ergonomic choice, like sync_enabled.
+pub(crate) const SYNC_MODE_KEY: &str = "sync_mode";
+
+/// Ordered keyring for one space: `[0]` is the current key, the rest are
+/// previous keys kept so entries written before a rekey stay readable.
+type SpaceKeyring = Vec<[u8; 32]>;
 
 /// Shared handles cloned out of `SyncClient` for a spawned push/delete task.
 struct PushCtx {
@@ -91,7 +91,10 @@ struct PushJob {
     created_at: u64,
     updated_at: u64,
     pinned: bool,
-    group_ids: Vec<String>,
+    /// Spaces this entry fans out to (may be empty = personal only).
+    space_ids: Vec<String>,
+    /// CEK envelope map (`"personal"` + one wrap per space id), JSON.
+    wrapped_keys: String,
     /// Blob storage key + ciphertext size for image entries; `None` for text.
     blob_key: Option<String>,
     blob_size: Option<u64>,
@@ -110,11 +113,32 @@ struct ImageMergeMeta {
     mime: String,
     label: Option<String>,
     groups: Vec<String>,
-    /// Server groups this entry was shared into, recorded alongside its server
-    /// id so an image lands under the right space like every other entry.
-    group_ids: Vec<String>,
+    /// Spaces this entry was shared into, recorded alongside its server id so
+    /// an image lands under the right space like every other entry.
+    space_ids: Vec<String>,
     created_at: u64,
     pinned: bool,
+    /// Write the materialized image to the clipboard once merged (auto-copy).
+    autocopy: bool,
+}
+
+/// Read the send-filter map and sync mode from `settings.json` (both default
+/// to "off"/Realtime when absent or unreadable — the safe interpretations).
+fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFilter>, SyncMode) {
+    let map = std::fs::read_to_string(app_data.join("settings.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&s).ok())
+        .unwrap_or_default();
+    let filters = map
+        .get(SEND_FILTERS_KEY)
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let mode = map
+        .get(SYNC_MODE_KEY)
+        .and_then(|v| v.as_str())
+        .and_then(SyncMode::parse)
+        .unwrap_or_default();
+    (filters, mode)
 }
 
 /// Current Unix time in milliseconds.
@@ -129,7 +153,15 @@ fn now_ms() -> u64 {
 /// the server keys entries by `(client_id, entry_type)`, so a push with
 /// `deleted_at` set marks the row deleted and always wins LWW.  The content is
 /// an encrypted empty string because the server requires a non-null ciphertext.
-fn tombstone_req(umk: &[u8; 32], client_id: &str, entry_type: &str) -> Option<PushEntryRequest> {
+/// `space_ids` carries the spaces the entry was shared into so the tombstone
+/// fans out to the same members; nobody decrypts a tombstone, so the envelope
+/// stays empty.
+fn tombstone_req(
+    umk: &[u8; 32],
+    client_id: &str,
+    entry_type: &str,
+    space_ids: Vec<String>,
+) -> Option<PushEntryRequest> {
     let ts = now_ms();
     Some(PushEntryRequest {
         client_id: client_id.to_string(),
@@ -143,7 +175,8 @@ fn tombstone_req(umk: &[u8; 32], client_id: &str, entry_type: &str) -> Option<Pu
         deleted_at: Some(ts),
         blob_key: None,
         blob_size: None,
-        group_ids: Vec::new(),
+        space_ids,
+        wrapped_keys: "{}".into(),
     })
 }
 
@@ -258,11 +291,17 @@ pub struct SyncClient {
     sync_state: Arc<Mutex<SyncStateStore>>,
     /// Aggregate sync status for UI display.
     status: Arc<Mutex<SyncStatusInfo>>,
-    /// Active Live Share sessions (includes cached group keys).
-    sharing_sessions: Arc<Mutex<Vec<SharingSession>>>,
-    /// Pool-group Group Keys by server group id. In memory only, like the UMK
-    /// and session keys — recovered from `my_wrapped_group_key` on next sync.
-    group_keys: Arc<Mutex<HashMap<String, [u8; 32]>>>,
+    /// Cached space list (membership, members, presence) for the UI.
+    spaces: Arc<Mutex<Vec<Space>>>,
+    /// Space keyrings by space id, newest key first. In memory only, like the
+    /// UMK — recovered from the server-side wrapped keyring on reconcile, and
+    /// zeroized on logout.
+    space_keys: Arc<Mutex<HashMap<String, SpaceKeyring>>>,
+    /// Per-space send filters (what of mine auto-flows in), keyed by space id.
+    /// Cache of the `space_send_filters` settings key; absent = explicit only.
+    send_filters: Arc<Mutex<HashMap<String, SendFilter>>>,
+    /// Cloud-sync mode for personal entries. Spaces are realtime regardless.
+    sync_mode: Arc<Mutex<SyncMode>>,
 
     /// WebSocket listener — replaced on reconnect.
     ws_listener: Mutex<Option<Arc<WsListener>>>,
@@ -365,6 +404,10 @@ impl SyncClient {
             &config.supabase_anon_key,
         ));
 
+        // Seed the send-filter and sync-mode caches from settings.json so a
+        // restart applies them without waiting for a settings pull.
+        let (send_filters, sync_mode) = load_local_sync_prefs(&app_data);
+
         Ok(Self {
             server_url: config.server_url,
             app,
@@ -378,8 +421,10 @@ impl SyncClient {
             id_map,
             sync_state,
             status,
-            sharing_sessions: Arc::new(Mutex::new(Vec::new())),
-            group_keys: Arc::new(Mutex::new(HashMap::new())),
+            spaces: Arc::new(Mutex::new(Vec::new())),
+            space_keys: Arc::new(Mutex::new(HashMap::new())),
+            send_filters: Arc::new(Mutex::new(send_filters)),
+            sync_mode: Arc::new(Mutex::new(sync_mode)),
             ws_listener: Mutex::new(None),
             restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             settings_push_at,
@@ -605,9 +650,9 @@ impl SyncClient {
         };
         http.set_device_id(device_id.clone());
 
-        // 6. Register public keys for E2E group-key exchange.  The identity key
+        // 6. Register public keys for E2E space-key exchange.  The identity key
         //    is derived from the UMK (identical on every device).  Best-effort:
-        //    a failure here only disables group sharing, not core sync.
+        //    a failure here only disables space sharing, not core sync.
         if let Err(e) = http
             .register_keys(client::RegisterKeysRequest {
                 identity_pubkey: identity_pub_b64,
@@ -615,7 +660,7 @@ impl SyncClient {
             })
             .await
         {
-            eprintln!("[sync] register_keys failed (group sharing disabled): {e}");
+            eprintln!("[sync] register_keys failed (space sharing disabled): {e}");
         }
 
         // 7. Persist secrets to the OS keychain.
@@ -816,6 +861,19 @@ impl SyncClient {
         // UMK is zeroed by Zeroizing::drop
         *self.umk.lock() = None;
 
+        // Space keyrings are key material like the UMK — scrub, then drop.
+        {
+            use zeroize::Zeroize;
+            let mut keyrings = self.space_keys.lock();
+            for ring in keyrings.values_mut() {
+                for key in ring.iter_mut() {
+                    key.zeroize();
+                }
+            }
+            keyrings.clear();
+        }
+        self.spaces.lock().clear();
+
         let user_id = self
             .user
             .lock()
@@ -948,10 +1006,22 @@ impl SyncClient {
         is_update: bool,
     ) {
         let ctx = self.push_ctx();
-        // Shared entries encrypt under the session Group Key (§15.2); personal
-        // ones under the UMK.
-        let (enc_key, group_ids) =
-            self.share_target(umk, &entry.groups, |s| s.my_scope.includes_clipboard());
+        // CEK envelope: content encrypts once under a per-entry key, which is
+        // wrapped for "personal" (UMK) plus every target space.
+        let targets = self.share_targets(
+            "clipboard",
+            &entry.id,
+            &entry.groups,
+            entry.kind.label(),
+            |f| f.includes_clipboard(),
+        );
+        let (enc_key, wrapped_keys, space_ids) = match self.build_envelope(&umk, &targets) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[sync] clipboard envelope: {e}");
+                return;
+            }
+        };
 
         self.handle.spawn(async move {
             let skip_label = skip_label_for(&entry);
@@ -1022,7 +1092,8 @@ impl SyncClient {
                 created_at: entry.timestamp,
                 updated_at: now_ms(),
                 pinned: entry.pinned,
-                group_ids,
+                space_ids,
+                wrapped_keys,
                 blob_key,
                 blob_size,
             };
@@ -1032,8 +1103,15 @@ impl SyncClient {
 
     fn spawn_push_note(&self, note: Note, umk: Zeroizing<[u8; 32]>, is_update: bool) {
         let ctx = self.push_ctx();
-        let (enc_key, group_ids) =
-            self.share_target(umk, &note.groups, |s| s.my_scope.includes_notes());
+        let targets =
+            self.share_targets("note", &note.id, &note.groups, "note", |f| f.includes_notes());
+        let (enc_key, wrapped_keys, space_ids) = match self.build_envelope(&umk, &targets) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[sync] note envelope: {e}");
+                return;
+            }
+        };
 
         self.handle.spawn(async move {
             let metadata_json = serde_json::json!({
@@ -1051,7 +1129,8 @@ impl SyncClient {
                 created_at: note.created_at,
                 updated_at: note.updated_at,
                 pinned: note.pinned,
-                group_ids,
+                space_ids,
+                wrapped_keys,
                 blob_key: None,
                 blob_size: None,
             };
@@ -1067,6 +1146,14 @@ impl SyncClient {
         let status = Arc::clone(&self.status);
         let type_str = entry_type.as_str().to_string();
         let map_key = format!("{type_str}:{client_id}");
+        // The tombstone must reach the same spaces the entry did, so members
+        // remove it too. Captured before the id_map row is dropped below.
+        let space_ids = self
+            .id_map
+            .lock()
+            .entry_shares()
+            .remove(&map_key)
+            .unwrap_or_default();
 
         self.handle.spawn(async move {
             // Always tombstone — even if offline (invariant #5).  A tombstone is
@@ -1074,7 +1161,7 @@ impl SyncClient {
             if let (Some(http), Some(umk)) =
                 (http.as_ref().filter(|h| h.is_authenticated()), umk.as_ref())
             {
-                if let Some(req) = tombstone_req(umk, &client_id, &type_str) {
+                if let Some(req) = tombstone_req(umk, &client_id, &type_str, space_ids) {
                     match http.push_entries(vec![req]).await {
                         Ok(_) => {
                             id_map.lock().remove_entry(&map_key);
@@ -1101,15 +1188,20 @@ impl SyncClient {
     /// Writes **directly** to the history / notes stores (never through the
     /// command hooks) so a merge never echoes back as a new push.  Tombstones
     /// remove the local entry; live entries upsert by id (which is the shared
-    /// `client_id`).  Image/file clipboard bodies live in blobs and are skipped
-    /// until blob download is wired (Phase 5).
-    pub(crate) fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry]) {
+    /// `client_id`).
+    ///
+    /// `live` marks WebSocket-delivered entries (vs. pull pages). It gates two
+    /// behaviors: passive mode skips live *personal* entries (the cursor only
+    /// advances on pull, so the next interval/manual pull picks them up), and
+    /// auto-copy fires only for live space entries — never for backfill.
+    pub(crate) fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry], live: bool) {
         use std::sync::atomic::Ordering;
         let Some(umk) = self.umk_clone() else {
             return;
         };
         let state = self.app.state::<crate::state::AppState>();
         let my_device = self.sync_state.lock().data.device_id.clone();
+        let passive = *self.sync_mode.lock() == SyncMode::Passive;
 
         let mut clip_changed = false;
         let mut notes_changed = false;
@@ -1118,6 +1210,11 @@ impl SyncClient {
             // Skip entries this device originated (echoed back over the user
             // channel); they are already present locally.
             if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
+                continue;
+            }
+            // Passive mode: personal entries are not applied live. Space
+            // entries always are — spaces are realtime by definition.
+            if live && passive && e.space_ids.is_empty() {
                 continue;
             }
             let is_note = e.entry_type == "note";
@@ -1137,9 +1234,12 @@ impl SyncClient {
                 continue;
             }
 
-            // Shared entries are encrypted under the session Group Key; personal
-            // ones under the UMK.  Choose per entry by its group tags.
-            let content_key = self.decryption_key_for(&umk, &e.group_ids);
+            // Unwrap the per-entry CEK: "personal" under the UMK for our own
+            // entries, else through a carried space's keyring.
+            let Some(content_key) = self.unwrap_cek(&umk, e) else {
+                eprintln!("[sync] merge: no usable key for {}", e.client_id);
+                continue;
+            };
             let Ok(content) = crypto::decrypt(&content_key, &e.encrypted_content, &e.client_id)
             else {
                 eprintln!("[sync] merge: decrypt content failed for {}", e.client_id);
@@ -1198,9 +1298,10 @@ impl SyncClient {
                                     mime,
                                     label,
                                     groups,
-                                    group_ids: e.group_ids.clone(),
+                                    space_ids: e.space_ids.clone(),
                                     created_at: e.created_at,
                                     pinned: e.pinned,
+                                    autocopy: live && self.autocopy_enabled(&e.space_ids),
                                 },
                             );
                         }
@@ -1212,7 +1313,7 @@ impl SyncClient {
                 if kind == EntryKind::File {
                     continue;
                 }
-                state.history.lock().upsert_synced(ClipboardEntry {
+                let merged = ClipboardEntry {
                     id: e.client_id.clone(),
                     kind,
                     content,
@@ -1223,7 +1324,15 @@ impl SyncClient {
                     content_hash: None,
                     server_id: Some(e.server_id.clone()),
                     sync_status: crate::sync::types::SyncStatus::Synced,
-                });
+                };
+                // Auto-copy: only live space entries, per the receiving
+                // device's per-space toggle. Backfill never touches the
+                // clipboard.
+                let autocopy = live && self.autocopy_enabled(&e.space_ids);
+                if autocopy {
+                    crate::clipboard::commands::copy_entry_suppressed(&self.app, &merged);
+                }
+                state.history.lock().upsert_synced(merged);
                 clip_changed = true;
             }
 
@@ -1236,9 +1345,9 @@ impl SyncClient {
             id_map.set_entry(&key, &e.server_id);
             // The sender's metadata carries *their* local group names, which say
             // nothing about the space the entry travelled through. Recording the
-            // server ids is what lets the Sync screen place a received entry
-            // under the group or session it actually came from.
-            id_map.set_entry_shares(&key, &e.group_ids);
+            // server ids is what lets the Spaces screen place a received entry
+            // under the space it actually came from.
+            id_map.set_entry_shares(&key, &e.space_ids);
         }
 
         if clip_changed {
@@ -1250,42 +1359,6 @@ impl SyncClient {
             state.notes.lock().sort_recent();
             state.notes_dirty.store(true, Ordering::Relaxed);
             let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
-        }
-    }
-
-    /// Apply a `sync:delete` event (keyed only by `server_id`) by removing the
-    /// matching local entry from whichever store holds it.  Best-effort — the
-    /// primary delete path is a tombstone `sync:entry` (keyed by client_id).
-    pub(crate) fn apply_remote_delete(&self, server_id: &str) {
-        use std::sync::atomic::Ordering;
-        let state = self.app.state::<crate::state::AppState>();
-
-        let clip_id = state
-            .history
-            .lock()
-            .all()
-            .iter()
-            .find(|e| e.server_id.as_deref() == Some(server_id))
-            .map(|e| e.id.clone());
-        if let Some(id) = clip_id {
-            if state.history.lock().remove(&id) {
-                state.history_dirty.store(true, Ordering::Relaxed);
-                let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
-            }
-        }
-
-        let note_id = state
-            .notes
-            .lock()
-            .all()
-            .iter()
-            .find(|n| n.server_id.as_deref() == Some(server_id))
-            .map(|n| n.id.clone());
-        if let Some(id) = note_id {
-            if state.notes.lock().delete(&id) {
-                state.notes_dirty.store(true, Ordering::Relaxed);
-                let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
-            }
         }
     }
 
@@ -1304,8 +1377,11 @@ impl SyncClient {
             match op {
                 PendingOp::Push { entry_json, entry_type }
                 | PendingOp::Update { entry_json, entry_type } => {
+                    // Old-format queue entries (pre-CEK, no wrapped_keys) fail
+                    // to parse and are dropped here — their ciphertext could
+                    // not be decrypted under the new envelope anyway.
                     if let Ok(req) = serde_json::from_str::<PushEntryRequest>(&entry_json) {
-                        let group_ids = req.group_ids.clone();
+                        let space_ids = req.space_ids.clone();
                         if let Ok(result) = http.push_entries(vec![req]).await {
                             for r in result.accepted {
                                 // Key by the op's own type. Hardcoding
@@ -1314,18 +1390,24 @@ impl SyncClient {
                                 let key = format!("{entry_type}:{}", r.client_id);
                                 let mut id_map = self.id_map.lock();
                                 id_map.set_entry(&key, &r.server_id);
-                                id_map.set_entry_shares(&key, &group_ids);
+                                id_map.set_entry_shares(&key, &space_ids);
                             }
                         }
                     }
                 }
                 PendingOp::Delete { client_id, entry_type } => {
                     if let Some(umk) = self.umk_clone() {
-                        if let Some(req) = tombstone_req(&umk, &client_id, &entry_type) {
+                        let map_key = format!("{entry_type}:{client_id}");
+                        let space_ids = self
+                            .id_map
+                            .lock()
+                            .entry_shares()
+                            .remove(&map_key)
+                            .unwrap_or_default();
+                        if let Some(req) = tombstone_req(&umk, &client_id, &entry_type, space_ids)
+                        {
                             let _ = http.push_entries(vec![req]).await;
-                            self.id_map
-                                .lock()
-                                .remove_entry(&format!("{entry_type}:{client_id}"));
+                            self.id_map.lock().remove_entry(&map_key);
                         }
                     }
                 }
@@ -1338,7 +1420,7 @@ impl SyncClient {
         loop {
             match http.pull_entries(cursor, 200).await {
                 Ok(pull) => {
-                    self.merge_pulled(&pull.entries);
+                    self.merge_pulled(&pull.entries, false);
                     if let Some(last) = pull.entries.last() {
                         let ts = last.server_ts;
                         self.sync_state.lock().set_last_server_ts(ts);
@@ -1411,30 +1493,19 @@ impl SyncClient {
         status.skipped.clear();
     }
 
-    pub fn sharing_sessions(&self) -> Vec<SharingSession> {
-        self.sharing_sessions.lock().clone()
+    /// The cached space list (refreshed by [`Self::reconcile_spaces`]).
+    pub fn spaces(&self) -> Vec<Space> {
+        self.spaces.lock().clone()
     }
 
-    pub fn set_sharing_session(&self, session: SharingSession) {
-        let mut guard = self.sharing_sessions.lock();
-        if let Some(existing) = guard
-            .iter_mut()
-            .find(|s| s.share_group_id == session.share_group_id)
-        {
-            *existing = session;
-        } else {
-            guard.push(session);
-        }
-    }
-
-    /// Flip a member's presence across every cached session they appear in,
+    /// Flip a member's presence across every cached space they appear in,
     /// then tell the UI.  Driven by the `user:presence` WS event.
     pub(crate) fn apply_member_presence(&self, user_id: &str, online: bool) {
         let mut changed = false;
         {
-            let mut sessions = self.sharing_sessions.lock();
-            for session in sessions.iter_mut() {
-                for member in session.members.iter_mut() {
+            let mut spaces = self.spaces.lock();
+            for space in spaces.iter_mut() {
+                for member in space.members.iter_mut() {
                     if member.user_id == user_id && member.online != online {
                         member.online = online;
                         changed = true;
@@ -1444,32 +1515,10 @@ impl SyncClient {
         }
         if changed {
             let _ = self.app.emit(
-                "sharing:presence-changed",
+                "space:presence-changed",
                 serde_json::json!({ "user_id": user_id, "online": online }),
             );
         }
-    }
-
-    pub fn remove_sharing_session(&self, share_group_id: &str) {
-        self.sharing_sessions
-            .lock()
-            .retain(|s| s.share_group_id != share_group_id);
-        self.id_map.lock().remove_sharing_session(share_group_id);
-    }
-
-    pub fn update_session_scope(&self, share_group_id: &str, scope: ShareScope) {
-        if let Some(session) = self
-            .sharing_sessions
-            .lock()
-            .iter_mut()
-            .find(|s| s.share_group_id == share_group_id)
-        {
-            session.my_scope = scope;
-        }
-    }
-
-    pub fn register_group_mapping(&self, name: &str, server_id: &str) {
-        self.id_map.lock().set_group(name, server_id);
     }
 
     /// Spawn a background flush + delta pull on the sync runtime.  Called right
@@ -1478,18 +1527,89 @@ impl SyncClient {
     pub fn trigger_initial_sync(self: Arc<Self>) {
         let handle = self.handle.clone();
         handle.spawn(async move {
-            // Recover pool-group and session keys *before* pulling: both are
-            // memory-only, so without this the first pull after a restart would
-            // fail to decrypt every shared entry and fall back to the UMK.
-            self.reconcile_group_keys().await;
-            self.refresh_sharing_sessions().await;
+            // Recover space keyrings *before* pulling: they are memory-only, so
+            // without this the first pull after a restart could not decrypt any
+            // shared entry.
+            self.reconcile_spaces().await;
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
             }
         });
     }
 
-    // ── Group key exchange (§7.4) ─────────────────────────────────
+    /// Start the passive-mode pull loop: every 5 minutes, if the mode is
+    /// Passive and a session exists, run a flush + delta pull.  Holds only a
+    /// `Weak` so the loop cannot keep a logged-out client (and its runtime)
+    /// alive; it ends when the client is dropped.
+    pub fn spawn_passive_pull_loop(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        self.handle.spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(PASSIVE_PULL_INTERVAL_SECS)).await;
+                let Some(sync) = weak.upgrade() else { break };
+                let due = *sync.sync_mode.lock() == SyncMode::Passive
+                    && sync.user.lock().is_some();
+                if due {
+                    if let Err(e) = sync.flush_and_pull().await {
+                        eprintln!("[sync] passive pull: {e}");
+                    }
+                }
+            }
+        });
+    }
+
+    // ── Sync mode & send filters ──────────────────────────────────
+
+    pub fn sync_mode(&self) -> SyncMode {
+        *self.sync_mode.lock()
+    }
+
+    /// Update the in-memory mode (the command persists it to settings.json).
+    pub fn set_sync_mode(&self, mode: SyncMode) {
+        *self.sync_mode.lock() = mode;
+    }
+
+    pub fn send_filters(&self) -> HashMap<String, SendFilter> {
+        self.send_filters.lock().clone()
+    }
+
+    /// Update one space's send filter in memory (the command persists the map).
+    pub fn set_send_filter(&self, space_id: &str, filter: SendFilter) {
+        self.send_filters
+            .lock()
+            .insert(space_id.to_string(), filter);
+    }
+
+    /// Re-read the filter map and mode from settings.json — called after a
+    /// settings pull lands roamed filter values on disk.
+    pub fn reload_local_sync_prefs(&self) {
+        let (filters, mode) = load_local_sync_prefs(&self.app_data);
+        *self.send_filters.lock() = filters;
+        *self.sync_mode.lock() = mode;
+    }
+
+    /// Whether any of `space_ids` has this device's auto-copy toggle on.
+    /// Read from settings.json each time — merges are rare and the toggle can
+    /// be flipped from the UI at any moment.
+    fn autocopy_enabled(&self, space_ids: &[String]) -> bool {
+        if space_ids.is_empty() {
+            return false;
+        }
+        let Ok(data) = std::fs::read_to_string(self.app_data.join("settings.json")) else {
+            return false;
+        };
+        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data)
+        else {
+            return false;
+        };
+        space_ids.iter().any(|sid| {
+            map.get(&format!("space_autocopy:{sid}"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+    }
+
+    // ── Space key exchange ────────────────────────────────────────
 
     /// Derive this user's identity keypair `(private, public)` from the
     /// in-memory UMK.  Identical on every device; `None` when logged out.
@@ -1498,238 +1618,168 @@ impl SyncClient {
         Some(crypto::derive_identity_keypair(&umk))
     }
 
-    /// The cached Group Key for a session, if we currently hold one.
-    fn session_group_key(&self, share_group_id: &str) -> Option<[u8; 32]> {
-        self.sharing_sessions
+    /// The current (newest) key for a space, if we hold its keyring.
+    fn space_current_key(&self, space_id: &str) -> Option<[u8; 32]> {
+        self.space_keys
             .lock()
-            .iter()
-            .find(|s| s.share_group_id == share_group_id)
-            .and_then(|s| s.group_key)
+            .get(space_id)
+            .and_then(|ring| ring.first().copied())
     }
 
-    /// Store the Group Key for a session, preserving an existing session's
-    /// scope/members or creating a placeholder if we don't know it yet.  Kept
-    /// in memory only (never persisted); Live Share keys are ephemeral.
-    pub(crate) fn set_session_group_key(&self, share_group_id: &str, key: [u8; 32]) {
-        let mut guard = self.sharing_sessions.lock();
-        if let Some(s) = guard.iter_mut().find(|s| s.share_group_id == share_group_id) {
-            s.group_key = Some(key);
-        } else {
-            guard.push(SharingSession {
-                share_group_id: share_group_id.to_string(),
-                name: String::new(),
-                my_scope: ShareScope::Both,
-                members: Vec::new(),
-                group_key: Some(key),
-            });
-        }
-    }
-
-    /// The cached Group Key for a pool group, if we hold one.
-    fn pool_group_key(&self, group_id: &str) -> Option<[u8; 32]> {
-        self.group_keys.lock().get(group_id).copied()
-    }
-
-    fn set_pool_group_key(&self, group_id: &str, key: [u8; 32]) {
-        self.group_keys.lock().insert(group_id.to_string(), key);
-    }
-
-    /// Resolve an entry's local group *names* to the server pool-group ids we
-    /// hold a Group Key for. Names without a mapping, or groups we have no key
-    /// for, are skipped — encrypting under a key no member holds would produce
-    /// entries nobody (including us, on another device) could read.
-    fn keyed_pool_groups(&self, group_names: &[String]) -> Vec<(String, [u8; 32])> {
-        let id_map = self.id_map.lock();
-        group_names
-            .iter()
-            .filter_map(|name| id_map.get_group_server_id(name).map(str::to_string))
-            .filter_map(|gid| self.pool_group_key(&gid).map(|k| (gid, k)))
+    /// The spaces an outgoing entry fans out to.
+    ///
+    /// An entry that has been pushed before keeps its recorded shares — edits
+    /// (pin, label) never silently change where something already went, and an
+    /// explicit share/un-share via `set_entry_shares` is authoritative.  A
+    /// *new* entry flows into every space whose send filter matches (default:
+    /// none — explicit only).  Spaces we hold no key for are skipped:
+    /// encrypting under a key nobody holds would produce entries nobody could
+    /// read.
+    fn share_targets(
+        &self,
+        entry_type: &str,
+        client_id: &str,
+        group_names: &[String],
+        kind: &str,
+        want: impl Fn(&SendFilter) -> bool,
+    ) -> Vec<String> {
+        let entry_key = format!("{entry_type}:{client_id}");
+        let recorded = self.id_map.lock().entry_shares().remove(&entry_key);
+        let targets = match recorded {
+            Some(ids) => ids,
+            None => self
+                .send_filters
+                .lock()
+                .iter()
+                .filter(|(_, f)| {
+                    f.enabled
+                        && want(f)
+                        && (f.kinds.is_empty() || f.kinds.iter().any(|k| k == kind))
+                        && (f.groups.is_empty()
+                            || f.groups.iter().any(|g| group_names.contains(g)))
+                })
+                .map(|(sid, _)| sid.clone())
+                .collect(),
+        };
+        targets
+            .into_iter()
+            .filter(|sid| {
+                let keyed = self.space_current_key(sid).is_some();
+                if !keyed {
+                    eprintln!("[sync] no key for space {sid}; entry {client_id} not shared there");
+                }
+                keyed
+            })
             .collect()
     }
 
-    /// Pick the content-encryption key + fan-out target for an outgoing entry.
-    ///
-    /// Precedence: an entry explicitly tagged into a pool group we hold a key for
-    /// is shared with that group — that's a deliberate user action, so it wins
-    /// over an ambient Live Share session. Otherwise fall back to a matching
-    /// Live Share session, and failing that it's personal (UMK, no group_ids).
-    fn share_target(
-        &self,
-        umk: Zeroizing<[u8; 32]>,
-        group_names: &[String],
-        want: impl Fn(&SharingSession) -> bool,
-    ) -> (Zeroizing<[u8; 32]>, Vec<String>) {
-        let pools = self.keyed_pool_groups(group_names);
-        if let Some((gid, key)) = pools.first() {
-            // One key per entry: AES-GCM encrypts under a single key, so an entry
-            // in several groups is shared into the first we hold a key for.
-            return (Zeroizing::new(*key), vec![gid.clone()]);
-        }
-
-        let guard = self.sharing_sessions.lock();
-        match guard.iter().find(|s| want(s) && s.group_key.is_some()) {
-            Some(s) => (
-                Zeroizing::new(s.group_key.expect("checked is_some")),
-                vec![s.share_group_id.clone()],
-            ),
-            None => (umk, Vec::new()),
-        }
-    }
-
-    /// The key to decrypt a pulled entry: a Live Share session key or a pool
-    /// Group Key when the entry is tagged with one we hold, else the personal UMK.
-    fn decryption_key_for(
+    /// Mint the per-entry content key (CEK) and its wrapped-copies envelope:
+    /// one wrap under the UMK (`"personal"`) and one per target space's current
+    /// key.  Returns `(cek, wrapped_keys_json, space_ids)` — the content is
+    /// then encrypted exactly once under the CEK, which is what lets a single
+    /// ciphertext fan out to several spaces.
+    fn build_envelope(
         &self,
         umk: &Zeroizing<[u8; 32]>,
-        group_ids: &[String],
-    ) -> Zeroizing<[u8; 32]> {
-        group_ids
-            .iter()
-            .find_map(|gid| {
-                self.session_group_key(gid)
-                    .or_else(|| self.pool_group_key(gid))
-                    .map(Zeroizing::new)
-            })
-            .unwrap_or_else(|| umk.clone())
+        targets: &[String],
+    ) -> Result<(Zeroizing<[u8; 32]>, String, Vec<String>), String> {
+        let cek = crypto::random_key();
+        let mut wraps = serde_json::Map::new();
+        wraps.insert("personal".into(), crypto::wrap_key(umk, &cek)?.into());
+        let mut space_ids = Vec::new();
+        for sid in targets {
+            let Some(space_key) = self.space_current_key(sid) else {
+                continue; // filtered upstream; belt and suspenders
+            };
+            wraps.insert(sid.clone(), crypto::wrap_key(&space_key, &cek)?.into());
+            space_ids.push(sid.clone());
+        }
+        let json = serde_json::to_string(&serde_json::Value::Object(wraps))
+            .map_err(|e| format!("envelope json: {e}"))?;
+        Ok((cek, json, space_ids))
     }
 
-    /// Reconcile pool-group Group Keys with the server.
-    ///
-    /// For each pool group we belong to: recover our key by unwrapping
-    /// `my_wrapped_group_key` against the owner's identity key; and if we *are*
-    /// the owner, mint a key when the group has none yet and (re)wrap it for every
-    /// member who has published an identity key. Members without one are skipped
-    /// and picked up the next time this runs.
-    ///
-    /// Idempotent, and safe to call on login, on `group:rekey`, and whenever
-    /// membership changes.
-    pub(crate) async fn reconcile_group_keys(self: &Arc<Self>) {
-        let Some(http) = self.http.lock().clone() else {
-            return;
-        };
-        let Some((id_priv, id_pub)) = self.identity_keypair() else {
-            return;
-        };
-        let me = match self.current_user() {
-            Some(u) => u.user_id,
-            None => return,
-        };
-
-        let groups = match http.list_groups().await {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!("[sync] reconcile group keys: {e}");
-                return;
-            }
-        };
-
-        for g in groups {
-            let owner_pub = g
-                .members
-                .iter()
-                .find(|m| m.user_id == g.owner_id)
-                .and_then(|m| m.identity_pubkey.as_deref())
-                .and_then(decode_pubkey);
-
-            // ── Recover our own key ──────────────────────────────────────
-            if self.pool_group_key(&g.id).is_none() {
-                if let (Some(wrapped), Some(owner_pub)) = (&g.my_wrapped_group_key, owner_pub) {
-                    let shared = crypto::x25519_shared_secret(&id_priv, &owner_pub);
-                    match crypto::unwrap_key(&shared, wrapped) {
-                        Ok(key) => self.set_pool_group_key(&g.id, *key),
-                        Err(e) => eprintln!("[sync] unwrap group key {}: {e}", g.id),
-                    }
-                }
-            }
-
-            if g.owner_id != me {
-                continue;
-            }
-
-            // ── Owner: mint on first use, then wrap for whoever needs it ──
-            // `minted` matters: a fresh key invalidates every previously
-            // distributed one, so it must go to all members. An existing key only
-            // goes to members who don't have one yet — re-sending to everybody
-            // would echo back as `group:rekey` and loop forever.
-            let (group_key, minted) = match self.pool_group_key(&g.id) {
-                Some(k) => (k, false),
-                None => {
-                    let fresh = *crypto::random_key();
-                    self.set_pool_group_key(&g.id, fresh);
-                    (fresh, true)
-                }
-            };
-
-            let mut wrapped_keys = Vec::new();
-            for m in &g.members {
-                if m.has_group_key && !minted {
-                    continue; // already holds the current key
-                }
-                let Some(member_pub) = m.identity_pubkey.as_deref().and_then(decode_pubkey) else {
-                    continue; // hasn't registered keys yet — retried next run
-                };
-                // Wrapping for ourselves works too: X25519(priv, own_pub) is a
-                // valid shared secret, so the owner can recover after a restart.
-                let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
-                match crypto::wrap_key(&shared, &group_key) {
-                    Ok(w) => wrapped_keys.push(WrappedKeyEntry {
-                        user_id: m.user_id.clone(),
-                        wrapped_group_key: w,
-                    }),
-                    Err(e) => eprintln!("[sync] wrap group key for {}: {e}", m.user_id),
-                }
-            }
-            let _ = id_pub; // own public half comes from the member list
-
-            if wrapped_keys.is_empty() {
-                continue;
-            }
-            if let Err(e) = http
-                .distribute_group_keys(&g.id, DistributeKeysRequest { wrapped_keys })
-                .await
-            {
-                eprintln!("[sync] distribute group keys for {}: {e}", g.id);
+    /// Unwrap a pulled entry's CEK.  Our own entries carry a `"personal"` wrap
+    /// under the UMK; space entries are tried against each carried space's
+    /// keyring, newest key first (an AES-GCM auth failure just means "wrong
+    /// key", so trial decryption is safe and epoch-free).
+    fn unwrap_cek(
+        &self,
+        umk: &Zeroizing<[u8; 32]>,
+        e: &crate::sync::client::PulledEntry,
+    ) -> Option<Zeroizing<[u8; 32]>> {
+        let wraps: HashMap<String, String> = serde_json::from_str(&e.wrapped_keys).ok()?;
+        if let Some(w) = wraps.get("personal") {
+            if let Ok(cek) = crypto::unwrap_key(umk, w) {
+                return Some(cek);
             }
         }
+        let keyrings = self.space_keys.lock();
+        for sid in &e.space_ids {
+            let (Some(w), Some(ring)) = (wraps.get(sid), keyrings.get(sid)) else {
+                continue;
+            };
+            for key in ring {
+                if let Ok(cek) = crypto::unwrap_key(key, w) {
+                    return Some(cek);
+                }
+            }
+        }
+        None
     }
 
-    /// Fetch Live Share sessions from the server, recover or mint session keys,
-    /// and refresh the in-memory session list.
+    /// Reconcile space keyrings with the server; refreshes the cached space
+    /// list and returns it.
     ///
-    /// Sessions previously lived only in client memory, so an app restart lost
-    /// them (and their keys) even though they persisted server-side. This is the
-    /// session analogue of [`Self::reconcile_group_keys`]: members recover their
-    /// key from `my_wrapped_group_key`; the owner mints one when none is held and
-    /// (re)wraps it for every member who has published an identity key —
-    /// including themselves, which is what makes the next restart recoverable.
-    pub(crate) async fn refresh_sharing_sessions(self: &Arc<Self>) -> Vec<SharingSession> {
+    /// For every space we belong to: recover our keyring by unwrapping the
+    /// server-side `my_wrapped_space_keys` against the owner's identity key.
+    /// If we *are* the owner: mint a key when the space has none yet, mint a
+    /// **new** key on top of the ring when the server cleared the wrapped
+    /// keyrings (that is the rekey signal after a member was removed), and
+    /// (re)wrap the full keyring for every member who needs it.  Members
+    /// without a registered identity key are skipped and picked up next run.
+    ///
+    /// Idempotent, and safe to call on login, on `space:rekey`, and whenever
+    /// membership changes: distribution only happens while someone lacks keys,
+    /// so the rekey events it echoes back cannot loop.
+    pub(crate) async fn reconcile_spaces(self: &Arc<Self>) -> Vec<Space> {
         let Some(http) = self.http.lock().clone() else {
-            return self.sharing_sessions();
+            return self.spaces();
         };
-        let Some((id_priv, _)) = self.identity_keypair() else {
-            return self.sharing_sessions();
+        let Some((id_priv, _id_pub)) = self.identity_keypair() else {
+            return self.spaces();
         };
         let me = match self.current_user() {
             Some(u) => u.user_id,
-            None => return self.sharing_sessions(),
+            None => return self.spaces(),
         };
 
-        let sessions = match http.list_sharing_sessions().await {
+        let server_spaces = match http.list_spaces().await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[sync] refresh sessions: {e}");
-                return self.sharing_sessions();
+                eprintln!("[sync] reconcile spaces: {e}");
+                return self.spaces();
             }
         };
 
-        let server_ids: Vec<String> = sessions.iter().map(|s| s.share_group_id.clone()).collect();
-        // Drop sessions that no longer exist server-side (dissolved elsewhere).
-        self.sharing_sessions
-            .lock()
-            .retain(|s| server_ids.contains(&s.share_group_id));
+        // Prune keyrings of spaces that no longer exist (deleted / we left),
+        // scrubbing the key bytes on the way out.
+        {
+            use zeroize::Zeroize;
+            let server_ids: Vec<&str> = server_spaces.iter().map(|s| s.id.as_str()).collect();
+            self.space_keys.lock().retain(|id, ring| {
+                let keep = server_ids.contains(&id.as_str());
+                if !keep {
+                    for key in ring.iter_mut() {
+                        key.zeroize();
+                    }
+                }
+                keep
+            });
+        }
 
         let mut out = Vec::new();
-        for s in sessions {
+        for s in server_spaces {
             let owner_pub = s
                 .members
                 .iter()
@@ -1737,220 +1787,155 @@ impl SyncClient {
                 .and_then(|m| m.identity_pubkey.as_deref())
                 .and_then(decode_pubkey);
 
-            // ── Recover our own key ──────────────────────────────────
-            if self.session_group_key(&s.share_group_id).is_none() {
-                if let (Some(wrapped), Some(owner_pub)) = (&s.my_wrapped_group_key, owner_pub) {
+            // ── Recover our keyring from the server-side wrapped copy ────
+            // An empty wrap does NOT clear in-memory keys: the server clears
+            // keyrings to signal a pending rekey, and the owner needs the old
+            // ring to keep history readable under the new distribution.
+            let server_keyring: Vec<String> = s
+                .my_wrapped_space_keys
+                .as_deref()
+                .and_then(|j| serde_json::from_str(j).ok())
+                .unwrap_or_default();
+            if !server_keyring.is_empty() {
+                if let Some(owner_pub) = owner_pub {
                     let shared = crypto::x25519_shared_secret(&id_priv, &owner_pub);
-                    match crypto::unwrap_key(&shared, wrapped) {
-                        Ok(key) => self.set_session_group_key(&s.share_group_id, *key),
-                        Err(e) => eprintln!("[sync] unwrap session key {}: {e}", s.share_group_id),
+                    let mut ring: SpaceKeyring = Vec::with_capacity(server_keyring.len());
+                    for wrapped in &server_keyring {
+                        match crypto::unwrap_key(&shared, wrapped) {
+                            Ok(key) => ring.push(*key),
+                            Err(e) => eprintln!("[sync] unwrap space key {}: {e}", s.id),
+                        }
+                    }
+                    if !ring.is_empty() {
+                        let mut guard = self.space_keys.lock();
+                        let had = guard.get(&s.id).is_some_and(|r| !r.is_empty());
+                        let changed = guard.get(&s.id) != Some(&ring);
+                        if changed {
+                            guard.insert(s.id.clone(), ring);
+                        }
+                        drop(guard);
+                        if changed && !had {
+                            // Newly able to read this space — tell the UI so
+                            // the feed refreshes without a manual reload.
+                            let _ = self.app.emit(
+                                "space:key-received",
+                                serde_json::json!({ "space_id": s.id }),
+                            );
+                        }
                     }
                 }
             }
 
-            // ── Owner: mint on first use, wrap for whoever needs it ──
+            // ── Owner: mint / rekey, then wrap for whoever needs it ──────
             if s.owner_id == me {
-                let (group_key, minted) = match self.session_group_key(&s.share_group_id) {
-                    Some(k) => (k, false),
-                    None => {
-                        let fresh = *crypto::random_key();
-                        self.set_session_group_key(&s.share_group_id, fresh);
-                        (fresh, true)
-                    }
-                };
-                let mut wrapped_keys = Vec::new();
+                // The server clearing every wrapped keyring (ours included) is
+                // the rekey signal left behind by a member removal.
+                let needs_rekey = server_keyring.is_empty();
+                let mut ring = self
+                    .space_keys
+                    .lock()
+                    .get(&s.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut redistribute_all = false;
+                if ring.is_empty() {
+                    // Brand-new space — or a rekey after a restart, where the
+                    // previous keys are unrecoverable (they lived only in
+                    // memory once the server cleared the wraps).
+                    ring.push(*crypto::random_key());
+                    redistribute_all = true;
+                } else if needs_rekey {
+                    // New key on top; older keys stay so history remains
+                    // readable. The removed member never sees the new one.
+                    ring.insert(0, *crypto::random_key());
+                    redistribute_all = true;
+                }
+                self.space_keys.lock().insert(s.id.clone(), ring.clone());
+
+                let mut wrapped_keyrings = Vec::new();
                 for m in &s.members {
-                    if m.has_group_key && !minted {
-                        continue;
+                    if m.has_space_key && !redistribute_all {
+                        continue; // already holds the current ring
                     }
                     let Some(member_pub) = m.identity_pubkey.as_deref().and_then(decode_pubkey)
                     else {
-                        continue;
+                        continue; // hasn't registered keys yet — retried next run
                     };
+                    // Wrapping for ourselves works too: X25519(priv, own_pub)
+                    // is a valid shared secret, which is how the owner recovers
+                    // after a restart.
                     let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
-                    match crypto::wrap_key(&shared, &group_key) {
-                        Ok(w) => wrapped_keys.push(WrappedKeyEntry {
+                    let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
+                    let mut failed = false;
+                    for key in &ring {
+                        match crypto::wrap_key(&shared, key) {
+                            Ok(w) => wrapped.push(w),
+                            Err(e) => {
+                                eprintln!("[sync] wrap space key for {}: {e}", m.user_id);
+                                failed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if failed {
+                        continue;
+                    }
+                    match serde_json::to_string(&wrapped) {
+                        Ok(json) => wrapped_keyrings.push(WrappedKeyringEntry {
                             user_id: m.user_id.clone(),
-                            wrapped_group_key: w,
+                            wrapped_space_keys: json,
                         }),
-                        Err(e) => eprintln!("[sync] wrap session key for {}: {e}", m.user_id),
+                        Err(e) => eprintln!("[sync] keyring json for {}: {e}", m.user_id),
                     }
                 }
-                if !wrapped_keys.is_empty() {
+
+                if !wrapped_keyrings.is_empty() {
                     if let Err(e) = http
-                        .distribute_group_keys(
-                            &s.share_group_id,
-                            DistributeKeysRequest { wrapped_keys },
-                        )
+                        .distribute_space_keys(&s.id, DistributeKeysRequest { wrapped_keyrings })
                         .await
                     {
-                        eprintln!("[sync] distribute session keys for {}: {e}", s.share_group_id);
+                        eprintln!("[sync] distribute space keys for {}: {e}", s.id);
                     }
                 }
             }
 
-            let other_names: Vec<String> = s
-                .members
-                .iter()
-                .filter(|m| m.user_id != me)
-                .map(|m| m.display_name.clone())
-                .collect();
-            let session = SharingSession {
-                share_group_id: s.share_group_id.clone(),
-                name: live_share_name(&other_names),
-                my_scope: ShareScope::parse(&s.my_scope).unwrap_or(ShareScope::Clipboard),
+            out.push(Space {
+                is_owner: s.owner_id == me,
+                member_count: s.members.len() as u32,
                 members: s
                     .members
                     .into_iter()
-                    .map(|m| crate::sync::types::SessionMember {
+                    .map(|m| SpaceMember {
                         user_id: m.user_id,
                         display_name: m.display_name,
                         avatar_url: m.avatar_url,
-                        email: String::new(),
-                        scope: ShareScope::parse(&m.scope).unwrap_or(ShareScope::Clipboard),
+                        role: m.role,
+                        has_space_key: m.has_space_key,
                         online: m.online,
                     })
                     .collect(),
-                group_key: self.session_group_key(&s.share_group_id),
-            };
-            self.id_map.lock().set_sharing_session(&s.share_group_id);
-            self.set_sharing_session(session.clone());
-            out.push(session);
+                id: s.id,
+                name: s.name,
+                owner_id: s.owner_id,
+                share_history: s.share_history,
+                invite_code: s.invite_code,
+                invite_expires_at: s.invite_expires_at,
+            });
         }
+
+        *self.spaces.lock() = out.clone();
         out
     }
 
-    /// Owner side (`sharing:accepted`): a member joined our Live Share.  Wrap
-    /// our cached Group Key against their identity key and distribute it via
-    /// `POST /groups/{id}/keys` (fans back out to them as `group:rekey`).
-    pub(crate) fn handle_sharing_accepted(self: &Arc<Self>, payload: &serde_json::Value) {
-        let share_group_id = payload
-            .get("share_group_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let member = payload.get("new_member");
-        let member_id = member
-            .and_then(|m| m.get("id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let member_pub_b64 = member
-            .and_then(|m| m.get("identity_pubkey"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-
-        let Some(group_key) = self.session_group_key(&share_group_id) else {
-            eprintln!("[sync] sharing:accepted for unknown/keyless session {share_group_id}");
-            return;
-        };
-        let (Some((id_priv, _)), Some(member_pub_b64)) =
-            (self.identity_keypair(), member_pub_b64)
-        else {
-            eprintln!("[sync] sharing:accepted: member {member_id} has no identity key yet");
-            return;
-        };
-        let Some(http) = self.http.lock().clone() else {
-            return;
-        };
-
+    /// `space:rekey` arrived: the server persisted a fresh wrapped keyring for
+    /// us (or someone else, echoed back).  A plain reconcile recovers whatever
+    /// changed; it cannot loop because reconcile only distributes while a
+    /// member still lacks keys.
+    pub(crate) fn handle_space_rekey(self: &Arc<Self>) {
         let this = Arc::clone(self);
         self.handle.spawn(async move {
-            let Some(member_pub) = decode_pubkey(&member_pub_b64) else {
-                return;
-            };
-            let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
-            let wrapped = match crypto::wrap_key(&shared, &group_key) {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!("[sync] wrap group key: {e}");
-                    return;
-                }
-            };
-            let req = DistributeKeysRequest {
-                wrapped_keys: vec![WrappedKeyEntry {
-                    user_id: member_id.clone(),
-                    wrapped_group_key: wrapped,
-                }],
-            };
-            match http.distribute_group_keys(&share_group_id, req).await {
-                Ok(()) => {
-                    let _ = this.app.emit(
-                        "sharing:member-joined",
-                        serde_json::json!({ "share_group_id": share_group_id, "user_id": member_id }),
-                    );
-                }
-                Err(e) => eprintln!("[sync] distribute group key failed: {e}"),
-            }
+            this.reconcile_spaces().await;
         });
-    }
-
-    /// Member side (`group:rekey`): the owner sent us a Group Key wrapped
-    /// against our identity key.  Unwrap with `X25519(my_priv, sender_pubkey)`
-    /// and cache it so matching entries encrypt/decrypt under it.
-    /// A rekey arrived but the payload carries no `sender_pubkey` — the pool-group
-    /// path. Re-reading `GET /groups` fetches the same wrapped key from the server
-    /// (it is persisted, not just broadcast) plus the owner's public key needed to
-    /// unwrap it, so a plain reconcile covers it.
-    pub(crate) fn handle_group_rekey_arc(self: &Arc<Self>, payload: &serde_json::Value) {
-        if payload.get("sender_pubkey").and_then(|v| v.as_str()).is_some() {
-            self.handle_group_rekey(payload);
-            return;
-        }
-        // Distributing keys makes the server echo `group:rekey` back to every
-        // recipient — including ourselves. Reconciling on an event for a group we
-        // already hold a key for would re-distribute and loop indefinitely, so
-        // only a group we have no key for is worth acting on.
-        let group_id = payload
-            .get("group_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if group_id.is_empty() || self.pool_group_key(&group_id).is_some() {
-            return;
-        }
-        let this = Arc::clone(self);
-        self.handle.spawn(async move {
-            this.reconcile_group_keys().await;
-        });
-    }
-
-    pub(crate) fn handle_group_rekey(&self, payload: &serde_json::Value) {
-        let group_id = payload
-            .get("group_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let wrapped = payload
-            .get("wrapped_group_key")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let sender_pub_b64 = payload
-            .get("sender_pubkey")
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-
-        let (Some((id_priv, _)), Some(sender_pub_b64)) =
-            (self.identity_keypair(), sender_pub_b64)
-        else {
-            eprintln!("[sync] group:rekey for {group_id} missing keys");
-            return;
-        };
-        let Some(sender_pub) = decode_pubkey(&sender_pub_b64) else {
-            return;
-        };
-        let shared = crypto::x25519_shared_secret(&id_priv, &sender_pub);
-        match crypto::unwrap_key(&shared, &wrapped) {
-            Ok(key) => {
-                self.set_session_group_key(&group_id, *key);
-                let _ = self.app.emit(
-                    "sharing:key-received",
-                    serde_json::json!({ "share_group_id": group_id }),
-                );
-            }
-            Err(e) => eprintln!("[sync] unwrap group key for {group_id} failed: {e}"),
-        }
     }
 
     /// Download, decrypt, and materialize an image blob to the images dir, then
@@ -1995,7 +1980,7 @@ impl SyncClient {
             }
 
             let state = app.state::<crate::state::AppState>();
-            state.history.lock().upsert_synced(ClipboardEntry {
+            let merged = ClipboardEntry {
                 id: meta.client_id.clone(),
                 kind: EntryKind::Image,
                 content: path.to_string_lossy().to_string(),
@@ -2006,13 +1991,17 @@ impl SyncClient {
                 content_hash: None,
                 server_id: Some(meta.server_id.clone()),
                 sync_status: crate::sync::types::SyncStatus::Synced,
-            });
+            };
+            if meta.autocopy {
+                crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
+            }
+            state.history.lock().upsert_synced(merged);
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
             let key = format!("clipboard:{}", meta.client_id);
             let mut id_map = id_map.lock();
             id_map.set_entry(&key, &meta.server_id);
-            id_map.set_entry_shares(&key, &meta.group_ids);
+            id_map.set_entry_shares(&key, &meta.space_ids);
             drop(id_map);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
@@ -2160,7 +2149,7 @@ async fn upload_image_blob(
 
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
 /// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.  `enc_key`
-/// is the session Group Key for shared entries or the UMK for personal ones.
+/// is the entry's freshly minted CEK; `job.wrapped_keys` carries its envelope.
 async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
     let PushJob {
         client_id,
@@ -2171,7 +2160,8 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
         created_at,
         updated_at,
         pinned,
-        group_ids,
+        space_ids,
+        wrapped_keys,
         blob_key,
         blob_size,
     } = job;
@@ -2192,10 +2182,10 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
     };
 
     // Record the spaces this entry went into before the push is attempted, so
-    // the sender's own Sync screen shows their contribution whether or not the
-    // request succeeds (a queued push carries the same group_ids).
+    // the sender's own Spaces screen shows their contribution whether or not
+    // the request succeeds (a queued push carries the same space_ids).
     let entry_key = format!("{entry_type}:{client_id}");
-    ctx.id_map.lock().set_entry_shares(&entry_key, &group_ids);
+    ctx.id_map.lock().set_entry_shares(&entry_key, &space_ids);
 
     let push_req = PushEntryRequest {
         client_id: client_id.clone(),
@@ -2209,7 +2199,8 @@ async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: 
         deleted_at: None,
         blob_key,
         blob_size,
-        group_ids,
+        space_ids,
+        wrapped_keys,
     };
 
     if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {

@@ -11,7 +11,7 @@ import {
 } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
-import SyncScreen from "./sync-screen/SyncScreen";
+import SpacesScreen from "./spaces-screen/SpacesScreen";
 import AccountScreen from "./account-screen/AccountScreen";
 import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
@@ -135,7 +135,7 @@ const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [screen, setScreen] = useState<AppScreen>(() => {
     const saved = localStorage.getItem("sc-last-screen") as AppScreen | null;
-    return saved === "notes" || saved === "clipboard" || saved === "sync" ? saved : "clipboard";
+    return saved === "notes" || saved === "clipboard" || saved === "spaces" ? saved : "clipboard";
   });
   const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
     null,
@@ -1181,7 +1181,7 @@ const App: React.FC = () => {
         pendingInvites={pendingInviteCount}
         onNavigate={(s) => {
           setScreen(s);
-          if (s === "clipboard" || s === "notes" || s === "sync") {
+          if (s === "clipboard" || s === "notes" || s === "spaces") {
             localStorage.setItem("sc-last-screen", s);
           }
         }}
@@ -1249,11 +1249,12 @@ const App: React.FC = () => {
           <AccountScreen />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
-        ) : screen === "sync" ? (
-          <SyncScreen
+        ) : screen === "spaces" ? (
+          <SpacesScreen
             entries={entries}
             notes={notes}
             syncConnected={syncConnected}
+            availableGroups={availableGroups}
             onCopyEntry={handleCopy}
           />
         ) : screen === "notes" ? (
@@ -1309,7 +1310,7 @@ const App: React.FC = () => {
               total={entries.length}
             />
           )}
-          {screen !== "sync" && screen !== "account" && (
+          {screen !== "spaces" && screen !== "account" && (
             <div
               className={syncPillClass}
               data-tooltip={syncPillLabel}

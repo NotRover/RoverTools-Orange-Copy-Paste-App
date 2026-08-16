@@ -319,3 +319,55 @@
 .entry-card--selected .entry-card-checkbox svg {
   opacity: 1;
 }
+
+/* ── Share to space rows ── */
+/* A checklist, not chips: a space is somewhere the items go, and with several
+   items selected the check means "all of them are in it". */
+
+.bulk-popup-flyout-spaces {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bulk-popup-space-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bulk-popup-space-row:hover {
+  background: var(--surface-hover);
+}
+
+.bulk-popup-space-row--active {
+  color: var(--accent);
+}
+
+.bulk-popup-space-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.bulk-popup-space-row--active .bulk-popup-space-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}

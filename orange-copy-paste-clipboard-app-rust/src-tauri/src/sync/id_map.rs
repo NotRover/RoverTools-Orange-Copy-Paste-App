@@ -14,12 +14,7 @@ use std::path::{Path, PathBuf};
 struct IdMapData {
     #[serde(default)]
     entries: HashMap<String, String>,
-    #[serde(default)]
-    groups: HashMap<String, String>,
-    /// Sharing session group UUIDs by share_group_id.
-    #[serde(default)]
-    sharing_sessions: HashMap<String, String>,
-    /// Server group ids each entry is shared into, keyed like `entries`.
+    /// Space ids each entry is shared into, keyed like `entries`.
     /// Which space an entry belongs to is sync bookkeeping, not a user tag, so
     /// it lives here next to the server ids rather than in the entry model —
     /// history.bin is a compact (positional) MessagePack array, and it also
@@ -77,22 +72,22 @@ impl IdMap {
 
     // ── Share membership ──────────────────────────────────────────
 
-    /// Record which server groups an entry is shared into. An empty list drops
-    /// the key, so an entry that stops being shared leaves nothing behind.
-    pub fn set_entry_shares(&mut self, client_id: &str, group_ids: &[String]) {
+    /// Record which spaces an entry is shared into. An empty list drops the
+    /// key, so an entry that stops being shared leaves nothing behind.
+    pub fn set_entry_shares(&mut self, client_id: &str, space_ids: &[String]) {
         let changed = match self.data.entry_shares.get(client_id) {
-            Some(existing) => existing.as_slice() != group_ids,
-            None => !group_ids.is_empty(),
+            Some(existing) => existing.as_slice() != space_ids,
+            None => !space_ids.is_empty(),
         };
         if !changed {
             return; // every push would otherwise rewrite the file for nothing
         }
-        if group_ids.is_empty() {
+        if space_ids.is_empty() {
             self.data.entry_shares.remove(client_id);
         } else {
             self.data
                 .entry_shares
-                .insert(client_id.to_string(), group_ids.to_vec());
+                .insert(client_id.to_string(), space_ids.to_vec());
         }
         self.persist();
     }
@@ -113,42 +108,6 @@ impl IdMap {
         self.data.entry_shares.remove(&key);
         self.persist();
         Some(key)
-    }
-
-    // ── Pool groups ───────────────────────────────────────────────
-
-    pub fn set_group(&mut self, name: &str, server_id: &str) {
-        self.data
-            .groups
-            .insert(name.to_string(), server_id.to_string());
-        self.persist();
-    }
-
-    pub fn get_group_server_id(&self, name: &str) -> Option<&str> {
-        self.data.groups.get(name).map(String::as_str)
-    }
-
-    pub fn remove_group_by_name(&mut self, name: &str) {
-        self.data.groups.remove(name);
-        self.persist();
-    }
-
-    // ── Live Share sessions ───────────────────────────────────────
-
-    pub fn set_sharing_session(&mut self, share_group_id: &str) {
-        self.data
-            .sharing_sessions
-            .insert(share_group_id.to_string(), share_group_id.to_string());
-        self.persist();
-    }
-
-    pub fn remove_sharing_session(&mut self, share_group_id: &str) {
-        self.data.sharing_sessions.remove(share_group_id);
-        self.persist();
-    }
-
-    pub fn sharing_session_ids(&self) -> Vec<String> {
-        self.data.sharing_sessions.keys().cloned().collect()
     }
 }
 

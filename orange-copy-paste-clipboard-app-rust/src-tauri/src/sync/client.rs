@@ -160,9 +160,16 @@ pub struct PushEntryRequest {
     pub blob_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_size: Option<u64>,
-    /// Live Share / pool group UUIDs this entry should fan out to.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub group_ids: Vec<String>,
+    /// Space UUIDs this entry fans out to.  `default` matters: queued pushes
+    /// round-trip through sync_pending.json, and a personal entry serializes
+    /// without this field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub space_ids: Vec<String>,
+    /// CEK envelope: JSON map of wrapped content-key copies — `"personal"`
+    /// (under the UMK) plus one per space id. Opaque to the server.  No serde
+    /// default on purpose: pre-CEK queue files fail to parse and are dropped
+    /// instead of pushing ciphertext nobody could unwrap.
+    pub wrapped_keys: String,
 }
 
 /// Request body for `POST /sync/push` — the backend expects `{ "entries": [...] }`.
@@ -212,7 +219,10 @@ pub struct PulledEntry {
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]
-    pub group_ids: Vec<String>,
+    pub space_ids: Vec<String>,
+    /// CEK envelope map (see `PushEntryRequest::wrapped_keys`).
+    #[serde(default)]
+    pub wrapped_keys: String,
     #[serde(default)]
     pub blob_key: Option<String>,
     #[serde(default)]
@@ -249,26 +259,25 @@ pub struct SettingsPullResponse {
     pub updated_at: u64,
 }
 
-// ── Pool groups ───────────────────────────────────────────────────────
+// ── Spaces ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-pub struct CreateGroupRequest {
+pub struct CreateSpaceRequest {
     pub name: String,
-    pub group_type: String, // "pool"
     /// Owner's choice: may members who join later read entries pushed before
     /// they joined? Resolved server-side into each member's history floor.
     pub share_history: bool,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateGroupResponse {
-    pub group_id: String,
+pub struct CreateSpaceResponse {
+    pub space_id: String,
     pub invite_code: String,
 }
 
-/// One member of a pool group; `identity_pubkey` is null until they register keys.
+/// One member of a space; `identity_pubkey` is null until they register keys.
 #[derive(Debug, Deserialize)]
-pub struct GroupMemberOut {
+pub struct SpaceMemberOut {
     pub user_id: String,
     #[serde(default)]
     pub display_name: String,
@@ -279,28 +288,32 @@ pub struct GroupMemberOut {
     pub joined_at: u64,
     #[serde(default)]
     pub identity_pubkey: Option<String>,
-    /// Whether this member already holds a wrapped Group Key.
+    /// Whether this member already holds a wrapped keyring.
     #[serde(default)]
-    pub has_group_key: bool,
+    pub has_space_key: bool,
+    /// Presence snapshot from the server: true when any of this member's
+    /// devices is connected.
+    #[serde(default)]
+    pub online: bool,
 }
 
-/// Full group record (`GET /groups` / `GET /groups/{id}`).
+/// Full space record (`GET /spaces` / `GET /spaces/{id}`).
 #[derive(Debug, Deserialize)]
-pub struct GroupOut {
+pub struct SpaceOut {
     pub id: String,
     pub owner_id: String,
     pub name: String,
-    pub group_type: String,
     #[serde(default)]
     pub invite_code: Option<String>,
     #[serde(default)]
     pub invite_expires_at: Option<u64>,
     #[serde(default)]
-    pub members: Vec<GroupMemberOut>,
-    /// Our *own* Group Key, wrapped against our identity key. Group keys are
-    /// held in memory only, so this is how a client recovers one after restart.
+    pub members: Vec<SpaceMemberOut>,
+    /// Our *own* wrapped keyring (JSON array of wrapped Space Keys, newest
+    /// first) against our identity key. Space Keys are held in memory only,
+    /// so this is how a client recovers them after restart.
     #[serde(default)]
-    pub my_wrapped_group_key: Option<String>,
+    pub my_wrapped_space_keys: Option<String>,
     #[serde(default = "default_true")]
     pub share_history: bool,
 }
@@ -310,79 +323,28 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Serialize)]
-pub struct JoinGroupRequest {
+pub struct JoinSpaceRequest {
     pub invite_code: String,
-    /// A member's own wrapped Group Key, when re-joining a group they already
-    /// hold a key for; `None` on a fresh join (the owner distributes the key).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wrapped_group_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct JoinGroupResponse {
-    pub group_id: String,
+pub struct JoinSpaceResponse {
+    pub space_id: String,
     pub name: String,
-    pub group_type: String,
 }
 
-// ── Group key distribution (§7.4) ───────────────────────────────────────
+// ── Space key distribution ──────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
-pub struct WrappedKeyEntry {
+pub struct WrappedKeyringEntry {
     pub user_id: String,
-    pub wrapped_group_key: String,
+    /// JSON array of wrapped Space Keys, newest first — opaque to the server.
+    pub wrapped_space_keys: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DistributeKeysRequest {
-    pub wrapped_keys: Vec<WrappedKeyEntry>,
-}
-
-// ── Live Share ──────────────────────────────────────────────────────────
-
-/// `POST /sharing/invite` — creates a live_share group *and* emails the invite.
-#[derive(Debug, Serialize)]
-pub struct SharingInviteRequest {
-    pub email: String,
-    pub share_scope: String, // "clipboard" | "notes" | "both"
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SharingInviteResponse {
-    pub share_group_id: String,
-    pub invite_code: String,
-    pub expires_at: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SessionMemberOut {
-    pub user_id: String,
-    pub display_name: String,
-    /// Identity-provider avatar URL; `None` for accounts without one.
-    #[serde(default)]
-    pub avatar_url: Option<String>,
-    pub scope: String,
-    #[serde(default)]
-    pub identity_pubkey: Option<String>,
-    #[serde(default)]
-    pub has_group_key: bool,
-    /// Presence snapshot from the server: true when any of this member's
-    /// devices is connected. Defaulted for backends predating the field.
-    #[serde(default)]
-    pub online: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SessionOut {
-    pub share_group_id: String,
-    pub owner_id: String,
-    pub members: Vec<SessionMemberOut>,
-    pub my_scope: String,
-    pub active_since: u64,
-    /// Our own session Group Key wrapped against our identity key — the
-    /// restart-recovery path (session keys are memory-only on clients).
-    #[serde(default)]
-    pub my_wrapped_group_key: Option<String>,
+    pub wrapped_keyrings: Vec<WrappedKeyringEntry>,
 }
 
 // ── Addressed invites ───────────────────────────────────────────────────
@@ -390,9 +352,8 @@ pub struct SessionOut {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteOut {
     pub id: String,
-    pub group_id: String,
-    pub group_name: String,
-    pub group_type: String,
+    pub space_id: String,
+    pub space_name: String,
     pub inviter_id: String,
     pub inviter_name: String,
     pub invitee_email: String,
@@ -410,11 +371,6 @@ pub struct InviteListResponse {
 #[derive(Debug, Serialize)]
 pub struct SendInviteRequest {
     pub email: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct UpdateScopeRequest {
-    pub share_scope: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -858,128 +814,69 @@ impl SyncHttpClient {
         }
     }
 
-    // ── Pool groups ───────────────────────────────────────────────
+    // ── Spaces ────────────────────────────────────────────────────
 
-    pub async fn list_groups(&self) -> Result<Vec<GroupOut>, String> {
-        self.get_json("list groups", || self.authed(Method::GET, "/api/v1/groups"))
+    pub async fn list_spaces(&self) -> Result<Vec<SpaceOut>, String> {
+        self.get_json("list spaces", || self.authed(Method::GET, "/api/v1/spaces"))
             .await
     }
 
-    pub async fn get_group(&self, group_id: &str) -> Result<GroupOut, String> {
-        self.get_json("get group", || {
-            self.authed(Method::GET, &format!("/api/v1/groups/{group_id}"))
+    pub async fn get_space(&self, space_id: &str) -> Result<SpaceOut, String> {
+        self.get_json("get space", || {
+            self.authed(Method::GET, &format!("/api/v1/spaces/{space_id}"))
         })
         .await
     }
 
-    pub async fn create_group(
+    pub async fn create_space(
         &self,
-        req: CreateGroupRequest,
-    ) -> Result<CreateGroupResponse, String> {
-        self.get_json("create group", || {
-            Ok(self.authed(Method::POST, "/api/v1/groups")?.json(&req))
+        req: CreateSpaceRequest,
+    ) -> Result<CreateSpaceResponse, String> {
+        self.get_json("create space", || {
+            Ok(self.authed(Method::POST, "/api/v1/spaces")?.json(&req))
         })
         .await
     }
 
-    pub async fn join_group(&self, req: JoinGroupRequest) -> Result<JoinGroupResponse, String> {
-        self.get_json("join group", || {
-            Ok(self.authed(Method::POST, "/api/v1/groups/join")?.json(&req))
+    pub async fn join_space(&self, req: JoinSpaceRequest) -> Result<JoinSpaceResponse, String> {
+        self.get_json("join space", || {
+            Ok(self.authed(Method::POST, "/api/v1/spaces/join")?.json(&req))
         })
         .await
     }
 
-    /// Distribute per-member wrapped Group Keys (owner action, §7.4).
-    pub async fn distribute_group_keys(
+    /// Distribute per-member wrapped Space keyrings (owner action).
+    pub async fn distribute_space_keys(
         &self,
-        group_id: &str,
+        space_id: &str,
         req: DistributeKeysRequest,
     ) -> Result<(), String> {
         self.get_ok("distribute keys", false, || {
             Ok(self
-                .authed(Method::POST, &format!("/api/v1/groups/{group_id}/keys"))?
+                .authed(Method::POST, &format!("/api/v1/spaces/{space_id}/keys"))?
                 .json(&req))
         })
         .await
     }
 
-    /// Delete a group the caller owns.
-    pub async fn delete_group(&self, group_id: &str) -> Result<(), String> {
-        self.get_ok("delete group", true, || {
-            self.authed(Method::DELETE, &format!("/api/v1/groups/{group_id}"))
+    /// Delete a space the caller owns.
+    pub async fn delete_space(&self, space_id: &str) -> Result<(), String> {
+        self.get_ok("delete space", true, || {
+            self.authed(Method::DELETE, &format!("/api/v1/spaces/{space_id}"))
         })
         .await
     }
 
-    /// Leave a pool group (self-removal) — the owner may also remove others.
-    pub async fn remove_group_member(
+    /// Leave a space (self-removal) — the owner may also remove others.
+    pub async fn remove_space_member(
         &self,
-        group_id: &str,
+        space_id: &str,
         member_user_id: &str,
     ) -> Result<(), String> {
         self.get_ok("remove member", true, || {
             self.authed(
                 Method::DELETE,
-                &format!("/api/v1/groups/{group_id}/members/{member_user_id}"),
-            )
-        })
-        .await
-    }
-
-    // ── Live Share ────────────────────────────────────────────────
-
-    /// Create a live_share group and email an invite in one call.
-    pub async fn create_sharing_invite(
-        &self,
-        req: SharingInviteRequest,
-    ) -> Result<SharingInviteResponse, String> {
-        self.get_json("sharing invite", || {
-            Ok(self.authed(Method::POST, "/api/v1/sharing/invite")?.json(&req))
-        })
-        .await
-    }
-
-    pub async fn list_sharing_sessions(&self) -> Result<Vec<SessionOut>, String> {
-        self.get_json("list sessions", || {
-            self.authed(Method::GET, "/api/v1/sharing/sessions")
-        })
-        .await
-    }
-
-    pub async fn update_sharing_scope(
-        &self,
-        share_group_id: &str,
-        share_scope: &str,
-    ) -> Result<(), String> {
-        let body = UpdateScopeRequest {
-            share_scope: share_scope.to_string(),
-        };
-        self.get_ok("update scope", false, || {
-            Ok(self
-                .authed(
-                    Method::PATCH,
-                    &format!("/api/v1/sharing/sessions/{share_group_id}/scope"),
-                )?
-                .json(&body))
-        })
-        .await
-    }
-
-    pub async fn end_sharing_session(&self, share_group_id: &str) -> Result<(), String> {
-        self.get_ok("end sharing", true, || {
-            self.authed(
-                Method::DELETE,
-                &format!("/api/v1/sharing/sessions/{share_group_id}"),
-            )
-        })
-        .await
-    }
-
-    pub async fn leave_sharing_session(&self, share_group_id: &str) -> Result<(), String> {
-        self.get_ok("leave sharing", true, || {
-            self.authed(
-                Method::DELETE,
-                &format!("/api/v1/sharing/sessions/{share_group_id}/leave"),
+                &format!("/api/v1/spaces/{space_id}/members/{member_user_id}"),
             )
         })
         .await
@@ -1122,19 +1019,19 @@ impl SyncHttpClient {
             .await
     }
 
-    /// Send an addressed invite for a group we own (also emails the code).
-    pub async fn send_group_invite(&self, group_id: &str, email: &str) -> Result<InviteOut, String> {
+    /// Send an addressed invite for a space we own (also emails the code).
+    pub async fn send_space_invite(&self, space_id: &str, email: &str) -> Result<InviteOut, String> {
         let body = SendInviteRequest { email: email.to_string() };
         self.get_json("send invite", || {
             Ok(self
-                .authed(Method::POST, &format!("/api/v1/groups/{group_id}/invites"))?
+                .authed(Method::POST, &format!("/api/v1/spaces/{space_id}/invites"))?
                 .json(&body))
         })
         .await
     }
 
-    /// Accept an invite addressed to us; joins its group server-side.
-    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinGroupResponse, String> {
+    /// Accept an invite addressed to us; joins its space server-side.
+    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinSpaceResponse, String> {
         self.get_json("accept invite", || {
             Ok(self
                 .authed(Method::POST, &format!("/api/v1/invites/{invite_id}/accept"))?
