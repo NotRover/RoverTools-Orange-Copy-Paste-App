@@ -7,7 +7,7 @@
 //! next push, so nothing is lost permanently.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -21,6 +21,12 @@ struct IdMapData {
     /// keeps machine ids out of the group chips the user sees.
     #[serde(default)]
     entry_shares: HashMap<String, Vec<String>>,
+    /// Entries another member wrote, keyed like `entries`. Set when the entry's
+    /// content key could only be unwrapped through a space keyring — our own
+    /// entries always carry a "personal" wrap, so they never land here. This is
+    /// what lets a space row say whether an item came in or went out.
+    #[serde(default)]
+    remote_entries: HashSet<String>,
 }
 
 pub struct IdMap {
@@ -67,7 +73,23 @@ impl IdMap {
     pub fn remove_entry(&mut self, client_id: &str) {
         self.data.entries.remove(client_id);
         self.data.entry_shares.remove(client_id);
+        self.data.remote_entries.remove(client_id);
         self.persist();
+    }
+
+    // ── Direction ─────────────────────────────────────────────────
+
+    /// Record that `client_id` arrived from another member. Idempotent: only a
+    /// first mark writes the file, so re-merging the same entry costs nothing.
+    pub fn mark_entry_remote(&mut self, client_id: &str) {
+        if self.data.remote_entries.insert(client_id.to_string()) {
+            self.persist();
+        }
+    }
+
+    /// Keys of every entry that came from another member.
+    pub fn remote_entries(&self) -> Vec<String> {
+        self.data.remote_entries.iter().cloned().collect()
     }
 
     // ── Share membership ──────────────────────────────────────────
@@ -106,6 +128,7 @@ impl IdMap {
             .map(|(k, _)| k.clone())?;
         self.data.entries.remove(&key);
         self.data.entry_shares.remove(&key);
+        self.data.remote_entries.remove(&key);
         self.persist();
         Some(key)
     }

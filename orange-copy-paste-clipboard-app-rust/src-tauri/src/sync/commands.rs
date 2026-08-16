@@ -280,6 +280,18 @@ pub fn sync_get_entry_shares(
         .unwrap_or_default()
 }
 
+/// Entry keys (`"clipboard:{id}"` / `"note:{id}"`) another member wrote.  The
+/// Spaces screen marks these as coming in and everything else as going out.
+#[tauri::command]
+pub fn sync_get_remote_entries(state: State<'_, AppState>) -> Vec<String> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.remote_entries())
+        .unwrap_or_default()
+}
+
 /// Dismiss the list of skipped entries once the user has read it.  Skips are a
 /// report on past pushes, not a queue — nothing is retried or lost by clearing.
 #[tauri::command]

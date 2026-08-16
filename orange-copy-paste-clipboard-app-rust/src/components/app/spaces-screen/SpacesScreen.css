@@ -170,6 +170,30 @@
   height: 46px;
 }
 
+/* Direction: accent is reserved for what this account sent, which is the
+   smaller half of a busy space - if a row is orange, you put it there. */
+.sp-list-dir {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+
+.sp-list-dir--in {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.sp-list-dir--out {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
 .sp-list-type-wrap {
   flex-shrink: 0;
   display: flex;
@@ -770,10 +794,17 @@
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
 
-.sp-action-btn:hover {
+.sp-action-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-dim);
+}
+
+/* Signed out: the buttons stay visible so the screen still explains itself,
+   but they do not lead anywhere until there is an account behind them. */
+.sp-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .sp-action-btn--primary {
@@ -782,7 +813,7 @@
   color: #fff;
 }
 
-.sp-action-btn--primary:hover {
+.sp-action-btn--primary:hover:not(:disabled) {
   border-color: transparent;
   background: var(--cta-hover, var(--accent-hover));
   color: #fff;
