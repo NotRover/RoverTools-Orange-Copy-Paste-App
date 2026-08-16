@@ -23,8 +23,29 @@ const REFRESH_ON = [
  * marks `#[serde(skip)]` — so it was always undefined and the badge never
  * rendered at all.
  */
+/** Fired on the document when the Settings screen flips the badge preference,
+ *  so open screens drop or restore their badges without a remount. */
+export const SYNC_BADGE_SETTING_EVENT = "settings:sync-badges-changed";
+
 export function useEntrySyncStates(): Record<string, EntrySyncState> {
   const [states, setStates] = useState<Record<string, EntrySyncState>>({});
+  // Device-local display choice: the entries are still synced, the card just
+  // stops saying so.
+  const [show, setShow] = useState(true);
+
+  useEffect(() => {
+    invoke<boolean | null>("get_setting", { key: "show_sync_badges" })
+      .then((v) => setShow(v !== false))
+      .catch(() => setShow(true));
+    // Settings hands us the new value on the event, so a toggle takes effect
+    // without waiting on the write it just started.
+    const onChange = (e: Event) => {
+      const next = (e as CustomEvent<boolean>).detail;
+      if (typeof next === "boolean") setShow(next);
+    };
+    document.addEventListener(SYNC_BADGE_SETTING_EVENT, onChange);
+    return () => document.removeEventListener(SYNC_BADGE_SETTING_EVENT, onChange);
+  }, []);
 
   const refresh = useCallback(() => {
     invoke<Record<string, EntrySyncState>>("sync_get_entry_states")
@@ -51,5 +72,9 @@ export function useEntrySyncStates(): Record<string, EntrySyncState> {
     };
   }, [refresh]);
 
-  return states;
+  return show ? states : EMPTY_STATES;
 }
+
+/** Stable identity, so hiding the badges does not rerender every card on each
+ *  sync event. */
+const EMPTY_STATES: Record<string, EntrySyncState> = {};
