@@ -1164,59 +1164,61 @@ const SpaceSettings: React.FC<{
           )}
         </div>
 
-        {space.invite_code && (
+        {/* Two rows of the same width, both ending in an action, so the
+            column reads as one block instead of four loose controls. */}
+        <div className="sp-invite-box">
+          {space.invite_code && (
+            <div className="sp-invite-row">
+              <code className="sp-invite-code">
+                {formatInviteCode(space.invite_code)}
+              </code>
+              <button
+                type="button"
+                className="sp-btn sp-btn--icon"
+                onClick={() => copy("code", space.invite_code!)}
+                data-tooltip="Copy code"
+                data-tooltip-pos="left"
+              >
+                {copied === "code" ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+              <button
+                type="button"
+                className="sp-btn sp-btn--icon"
+                onClick={() =>
+                  copy("link", `orange://join?code=${space.invite_code}`)
+                }
+                data-tooltip="Copy invite link"
+                data-tooltip-pos="left"
+              >
+                {copied === "link" ? (
+                  <Check size={12} />
+                ) : (
+                  <ShareNetwork size={12} />
+                )}
+              </button>
+            </div>
+          )}
           <div className="sp-invite-row">
-            <code className="sp-invite-code">
-              {formatInviteCode(space.invite_code)}
-            </code>
+            <input
+              className="sp-inline-input"
+              type="email"
+              placeholder="Invite by email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") sendInvite();
+              }}
+            />
             <button
               type="button"
               className="sp-btn"
-              onClick={() => copy("code", space.invite_code!)}
+              onClick={sendInvite}
+              disabled={inviting || !email.trim()}
             >
-              {copied === "code" ? (
-                <><Check size={11} /> Copied</>
-              ) : (
-                <><Copy size={11} /> Copy code</>
-              )}
+              {inviting ? "..." : "Send"}
             </button>
           </div>
-        )}
-        <div className="sp-invite-row">
-          <input
-            className="sp-inline-input"
-            type="email"
-            placeholder="Invite by email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") sendInvite();
-            }}
-          />
-          <button
-            type="button"
-            className="sp-btn"
-            onClick={sendInvite}
-            disabled={inviting || !email.trim()}
-          >
-            {inviting ? "Sending..." : "Send"}
-          </button>
         </div>
-        {space.invite_code && (
-          <button
-            type="button"
-            className="sp-btn sp-btn--wide"
-            onClick={() =>
-              copy("link", `orange://join?code=${space.invite_code}`)
-            }
-          >
-            {copied === "link" ? (
-              <><Check size={11} /> Copied</>
-            ) : (
-              <><ShareNetwork size={11} /> Copy invite link</>
-            )}
-          </button>
-        )}
       </div>
       </div>
 

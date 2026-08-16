@@ -133,17 +133,38 @@
   color: var(--text-muted);
 }
 
-/* Rows that used to have a full window's width now wrap instead of squeezing
-   the invite code or clipping a member's Remove button. */
-.sp-rules .sp-invite-row,
+/* A member row has no width to spare at 272px, so it wraps rather than
+   clipping the Remove button. */
 .sp-rules .sp-member-row {
   flex-wrap: wrap;
 }
 
-/* Full-width action, for the invite link under the code and email rows. */
-.sp-btn--wide {
-  width: 100%;
-  justify-content: center;
+/* Invite: two rows of equal width, each one field plus its actions. They must
+   not wrap - a full-width input that pushes Send onto its own line is what
+   made this read as four loose controls. */
+.sp-invite-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sp-invite-box .sp-invite-row {
+  flex-wrap: nowrap;
+}
+
+.sp-invite-box .sp-invite-code,
+.sp-invite-box .sp-inline-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.sp-btn--icon {
+  flex-shrink: 0;
+  padding: 5px 7px;
 }
 
 /* ── Topbar filter tabs (left slot) ── */
