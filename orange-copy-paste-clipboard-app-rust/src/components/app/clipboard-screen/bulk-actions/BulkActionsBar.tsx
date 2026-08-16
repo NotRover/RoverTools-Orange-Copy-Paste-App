@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { groupColor } from "../../../../types";
+import type { Space } from "../../../../types";
+import { ShareNetwork, Check } from "@phosphor-icons/react";
 import {
   TrashIcon,
   PinIcon,
@@ -25,6 +27,12 @@ interface BulkActionsBarProps {
   onBulkRemoveGroup: (group: string) => void;
   availableGroups: string[];
   commonGroups: string[];
+  /** Spaces this account belongs to. Empty hides the share chip. */
+  spaces?: Space[];
+  /** Spaces every selected item is already in. */
+  commonSpaceIds?: string[];
+  /** Share (or stop sharing) every selected item with one space. */
+  onBulkToggleSpace?: (spaceId: string, share: boolean) => void;
 }
 
 const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
@@ -42,9 +50,14 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   onBulkRemoveGroup,
   availableGroups,
   commonGroups,
+  spaces = [],
+  commonSpaceIds = [],
+  onBulkToggleSpace,
 }) => {
   const [groupsOpen, setGroupsOpen] = useState(false);
+  const [spacesOpen, setSpacesOpen] = useState(false);
   const groupsWrapRef = useRef<HTMLDivElement>(null);
+  const spacesWrapRef = useRef<HTMLDivElement>(null);
 
   // Close groups flyout on outside click
   useEffect(() => {
@@ -70,8 +83,31 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
     return () => document.removeEventListener("keydown", handler);
   }, [groupsOpen]);
 
+  // Same dismiss behaviour as the groups flyout, on the other wrapper.
+  useEffect(() => {
+    if (!spacesOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (
+        spacesWrapRef.current &&
+        !spacesWrapRef.current.contains(e.target as Node)
+      ) {
+        setSpacesOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSpacesOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [spacesOpen]);
+
   const allSelected = selectedCount === totalCount && totalCount > 0;
   const hasGroups = availableGroups.length > 0;
+  const canShare = spaces.length > 0 && !!onBulkToggleSpace;
 
   return (
     <div className="bulk-popup">
@@ -158,6 +194,51 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                         style={{ background: gc.fg }}
                       />
                       <span className="bulk-popup-flyout-name">{group}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Share to space chip + flyout */}
+      {canShare && (
+        <div className="bulk-popup-groups-wrap" ref={spacesWrapRef}>
+          <button
+            className={`bulk-popup-chip${spacesOpen ? " bulk-popup-chip--groups-active" : ""}`}
+            onClick={() => setSpacesOpen((v) => !v)}
+            data-tooltip="Share with a space"
+            data-tooltip-pos="below"
+          >
+            <ShareNetwork size={10} />
+            <span>Share</span>
+            <ChevronDownIcon
+              size={8}
+              className={`bulk-popup-chevron${spacesOpen ? " bulk-popup-chevron--open" : ""}`}
+            />
+          </button>
+
+          {spacesOpen && (
+            <div className="bulk-popup-groups-flyout">
+              <div className="bulk-popup-flyout-header">
+                <ShareNetwork size={9} />
+                <span>Share to space</span>
+              </div>
+              <div className="bulk-popup-flyout-spaces">
+                {spaces.map((space) => {
+                  const active = commonSpaceIds.includes(space.id);
+                  return (
+                    <button
+                      key={space.id}
+                      className={`bulk-popup-space-row${active ? " bulk-popup-space-row--active" : ""}`}
+                      onClick={() => onBulkToggleSpace?.(space.id, !active)}
+                    >
+                      <span className="bulk-popup-space-check">
+                        {active && <Check size={9} weight="bold" />}
+                      </span>
+                      <span className="bulk-popup-flyout-name">{space.name}</span>
                     </button>
                   );
                 })}

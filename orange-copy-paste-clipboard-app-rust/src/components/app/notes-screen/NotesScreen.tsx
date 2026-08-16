@@ -22,6 +22,7 @@ import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
+import { useSpaceShares } from "../../../hooks/useSpaceShares";
 import NoteEditor from "./note-editor/NoteEditor";
 import NoteCard from "./note-card/NoteCard";
 import NotesFilterDropdown, {
@@ -301,6 +302,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const nf = useNotesFilter();
 
   const multiSelect = useMultiSelect();
+  const spaceShares = useSpaceShares();
 
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
@@ -787,6 +789,11 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 return next;
               });
             }}
+            spaces={spaceShares.spaces}
+            itemSpaceIds={spaceShares.shares[`note:${menuNote.id}`]}
+            onToggleSpace={(spaceId) =>
+              spaceShares.toggle("note", menuNote.id, spaceId)
+            }
             showCopy={false}
             showSave={false}
           />

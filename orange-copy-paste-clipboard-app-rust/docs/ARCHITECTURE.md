@@ -98,7 +98,7 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | tokio-tungstenite            | 0.24    | Async WebSocket client for realtime events — **Phase 6, sync module only**                  |
 | argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **Phase 6, sync module only**           |
 | aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **Phase 6, sync module only**                   |
-| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and group key wrapping — **Phase 6, sync module only** |
+| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and space key wrapping — **Phase 6, sync module only** |
 | keyring                      | 2       | OS credential store for the device private key and cached Supabase session — **Phase 6, sync module only** |
 
 > **Auth is delegated to Supabase.** The backend moved to **Supabase Auth (GoTrue) +
@@ -191,8 +191,8 @@ src/
 │   │   │   └── entry-card/     # Entry cards (EntryCard, ChipBar, VideoPlayer)
 │   │   ├── topbar/             # Sort/layout/filter/group controls (shared)
 │   │   ├── notes-screen/       # Notes UI (editor-engine, list, filters, groups)
-│   │   ├── sync-screen/        # Cloud sync + Live Share content browser
-│   │   ├── account-screen/     # Sync auth, devices/presence, groups, sharing
+│   │   ├── spaces-screen/      # Spaces: shared feed + space management/settings
+│   │   ├── account-screen/     # Sync auth, cloud sync mode, devices/presence, storage
 │   │   ├── settings-screen/    # User preferences + Cloud Sync controls
 │   │   ├── shortcuts-screen/   # Keyboard shortcut reference
 │   │   ├── card-menu/          # Right-click context menu (portal)
@@ -439,7 +439,7 @@ Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sy
 > **Status:** Implemented against the current Supabase-based backend contract,
 > Rust module and React UI both.
 > **Location:** `src-tauri/src/sync/` (UI in `src/components/app/account-screen/`
-> and `sync-screen/`)
+> and `spaces-screen/`)
 > **Principle:** Additive only — no existing capture, storage, or popup logic changes.
 >
 > **Auth path as built:** identity comes from **Supabase Auth** (`sync/supabase.rs`
@@ -449,9 +449,11 @@ Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sy
 > `POST /api/v1/auth/devices` for a `device_id`. Every device-scoped request carries
 > `Authorization: Bearer <supabase jwt>` plus `X-Device-Id`, and the WebSocket opens
 > as `/ws?token=<jwt>&device_id=…`. Deletes are tombstones pushed through
-> `POST /api/v1/sync/push`; there is no delete route. Sharing uses
-> `POST /api/v1/sharing/invite` to create-and-invite and `POST /api/v1/groups/join`
-> to accept. See `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
+> `POST /api/v1/sync/push`; there is no delete route. Sharing is one primitive, the
+> **Space**: `POST /api/v1/spaces` to create, `POST /api/v1/spaces/join` with an
+> invite code, `POST /api/v1/spaces/{id}/invites` to invite by email, and
+> `POST /api/v1/spaces/{id}/keys` to hand out wrapped space keys. See
+> `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
 
 #### Overview
 
@@ -467,7 +469,8 @@ Clipboard capture (existing, unchanged)
          │
          └──► SyncClient.on_new_entry(entry)   ← new side-effect
                     │
-                    ├─ encrypt(UMK, content) → encrypted_entry
+                    ├─ mint CEK → encrypt(CEK, content) → wrap CEK under UMK
+                    │  (+ under each target space key) → encrypted_entry
                     ├─ online? → POST /sync/push immediately
                     └─ offline? → append to sync_pending.json
 ```
@@ -507,10 +510,10 @@ On each received message, dispatches to:
 
 | Event                              | Action                                                                                                                                                        |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync:entry`                       | Decrypt → check if `client_id` already local → insert or update in history/notes → emit `clipboard:new-entry` or `notes:updated` Tauri event → advance cursor |
-| `sync:delete`                      | Find entry by `server_id` → remove from local store → emit `clipboard:entry-deleted`                                                                          |
+| `sync:entry`                       | Unwrap the CEK (`personal` under UMK, else a carried space id through that space's keyring) → decrypt → insert or update in history/notes → emit `clipboard:new-entry` or `notes:updated`. Personal entries are skipped in passive mode; space entries always apply, and may auto-copy. Deletes arrive as tombstones on this event. |
 | `device:online` / `device:offline` | Update sync status indicator via Tauri event                                                                                                                  |
-| `group:rekey`                      | Replace cached Group Key → decrypt future entries with new key                                                                                                |
+| `space:membership_changed`         | Refresh spaces, emit `space:membership-changed`; an owner whose members lost their keys mints a new space key and redistributes                                |
+| `space:rekey`                      | Prepend the new space key to that space's keyring → future entries decrypt under it, older ones still decrypt under the older keys                             |
 | `ping`                             | Respond with `pong`; this refreshes the device's presence TTL server-side                                                                                     |
 
 Connection drop → automatic reconnect after 5s backoff, then exponential up to 60s.
@@ -540,7 +543,9 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `encrypt(key, plaintext, aad) → String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
 | `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
 | `generate_x25519_keypair() → (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |
-| `x25519_shared_secret(privkey, peer_pubkey) → [u8; 32]` | ECDH for device key handshake and group key wrapping    |
+| `x25519_shared_secret(privkey, peer_pubkey) → [u8; 32]` | ECDH for device key handshake and space key wrapping     |
+| `random_key() → [u8; 32]`                               | Random key: the UMK, a space key, or a per-entry CEK     |
+| `wrap_key(wrapping_key, key) → String` / `unwrap_key(…)` | Wrap/unwrap a CEK or space key; failure means wrong key  |
 | `wrap_key(wrapping_key, key_to_wrap) → String`          | AES-256-GCM encrypt key material                        |
 | `unwrap_key(wrapping_key, wrapped_b64) → [u8; 32]`      | Reverse of wrap_key                                     |
 
@@ -559,19 +564,29 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
 | `sync_set_enabled`     | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                                 |
 | `sync_set_server_url`  | `(url: String) → ()`                                | Override default server URL (self-hosted)                                                |
-| `sync_get_groups`      | `() → Vec<SyncGroup>`                               | List joined shared groups                                                                |
-| `sync_create_group`    | `(name: String) → SyncGroup`                        | Create group; generates Group Key; posts to server                                       |
-| `sync_join_group`      | `(invite_code: String) → ()`                        | Join via invite code                                                                     |
-| `sync_leave_group`     | `(group_id: String) → ()`                           | Leave group; removes local GK                                                            |
+| `sync_set_mode`        | `(mode: String) → ()`                               | Cloud sync mode for this device, `realtime` or `passive`; persists to `settings.json`     |
+| `sync_get_mode`        | `() → String`                                       | Current cloud sync mode                                                                  |
 | `sync_push_settings`   | `() → ()`                                           | Encrypt current settings blob and `PUT /settings`; internally debounced (2s)             |
 | `sync_pull_settings`          | `() → ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
 | `sync_receive_local_settings` | `(json: String) → ()`                                  | Receives `localStorage` settings from React in response to `sync:collect-settings` event; merged into the next `sync_push_settings` call |
-| `sharing_invite`              | `(email: String, scope: String) → SharingInvite`       | Create or invite to Live Share group (max 5 members); `scope` = `clipboard\|notes\|both`            |
-| `sharing_accept`       | `(invite_code: String, scope: String) → ()`         | Accept sharing invite; exchange Group Key via X25519                                     |
-| `sharing_get_sessions` | `() → Vec<SharingSession>`                          | List active sharing sessions with peer info and scope                                    |
-| `sharing_update_scope` | `(share_group_id: String, scope: String) → ()`      | Update what this user contributes to the share                                           |
-| `sharing_end_session`   | `(share_group_id: String) → ()`                    | Owner dissolves the Live Share group entirely; removes group UUID from `id_map.json`     |
-| `sharing_leave_session` | `(share_group_id: String) → ()`                    | Non-owner leaves the group; `DELETE /sharing/sessions/{id}/leave`; removes from local session list |
+
+**Space commands** (all sharing goes through these):
+
+| Command                   | Signature                                                       | Description                                                                                                              |
+| ------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `spaces_list`             | `() → Result<Vec<Space>>`                                        | Reconcile with the server: fetch spaces, recover or mint keys, prune spaces we were removed from. Does network + key work |
+| `spaces_cached`           | `() → Vec<Space>`                                                | The cached list, no network. What presence ticks and the share menu read                                                  |
+| `space_create`            | `(name: String, share_history: Option<bool>) → Result<Space>`     | Create a space, mint its first key, register the wrapped key for yourself                                                 |
+| `space_join`              | `(invite_code: String) → Result<()>`                             | Join by code (pasted links and casing are tolerated); the owner wraps a key for you on its next reconcile                 |
+| `space_leave`             | `(space_id: String) → Result<()>`                                | Leave; the server clears the remaining members' wrapped keys so the owner rekeys                                          |
+| `space_delete`            | `(space_id: String) → Result<()>`                                | Owner only; deletes the space for everyone                                                                               |
+| `space_remove_member`     | `(space_id: String, member_user_id: String) → Result<()>`         | Owner only; removal triggers the rekey path                                                                              |
+| `space_set_entry_shares`  | `(entry_id: String, entry_type: String, space_ids: Vec<String>) → Result<()>` | The explicit share gesture. Re-pushes the entry with the CEK wrapped for exactly these spaces                |
+| `sync_get_entry_shares`   | `() → HashMap<String, Vec<String>>`                              | Space ids per item, keyed `"clipboard:{id}"` / `"note:{id}"` — feeds the card indicators and share checklists             |
+| `sync_get_remote_entries` | `() → Vec<String>`                                               | Same keys, for items another member wrote (their CEK unwrapped through a space keyring, never `"personal"`) — the direction glyph on space rows |
+| `space_set_autocopy`      | `(space_id: String, enabled: bool) → Result<()>`                 | Per-space, per-device: write incoming space entries to the clipboard                                                      |
+| `space_set_send_filter`   | `(space_id: String, filter: SendFilter) → Result<()>`            | What of yours flows into that space automatically; stored in the synced settings blob                                    |
+| `space_get_send_filters`  | `() → HashMap<String, SendFilter>`                               | All send filters, by space id                                                                                            |
 
 #### File and Video Sync (5 MB Limit)
 
@@ -587,17 +602,59 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 The same flow applies to video files (CF_HDROP paths to `.mp4`, `.mov`, etc.). The 5 MB check is per-clipboard-entry (sum of all files in that single clipboard event), not per file.
 
-#### Live Share — Sync Module Integration
+#### Spaces — Sync Module Integration
 
-When an active sharing session exists, `on_new_entry` and `on_update_entry` check whether to fan out to the pair:
+A **Space** is the only sharing primitive: persistent, live, many members, and a user can
+be in several at once. One entry can land in all of them, which is what the per-entry
+content key exists for.
 
-1. For each active sharing session in `SyncClient.sharing_sessions`:
-   - If `session.my_scope` includes the `entry.entry_type`, append `session.share_group_id` to `entry.group_ids`.
-   - Encrypt `encrypted_content` with the session's Group Key (GK), not UMK.
-2. Push the entry with the extended `group_ids`. The server fans it out to the paired user via the group channel automatically.
+**Encryption envelope.** For every push the client mints a random 32-byte **CEK**,
+encrypts content and metadata once under it (AAD = `client_id`), then wraps the CEK:
 
-On receiving `sharing:invite` via WebSocket: emit `sharing:invite-received` Tauri event → React shows invite notification in Settings.
-On receiving `sharing:ended`: remove the Live Share group UUID from `id_map.json` and `sharing_sessions` in-memory.
+- once under the **UMK**, stored in `wrapped_keys` as `"personal"` — so your own devices
+  can always read your own entry without holding any space key;
+- once under `keyring[0]` of each target space, keyed by space id.
+
+`space_ids` is the routing array the server fans out on; `wrapped_keys` is opaque to it.
+Receiving a shared entry means unwrapping the CEK with the first carried space id we hold
+a key for, trying that space's keyring in order (AES-GCM authentication failure is the
+signal to try the next key, so no epoch tracking is needed).
+
+**Where an entry goes** is the union of two sources, evaluated on push:
+
+1. **Explicit shares** — the spaces the user picked from the card menu or bulk bar,
+   recorded in `id_map.json` under `entry_shares`. Authoritative for entries already
+   pushed.
+2. **Send-filter matches** — every space whose `SendFilter { enabled, kinds, groups,
+   content }` matches, each evaluated independently. Default is `enabled: false`, so
+   nothing flows automatically until the user turns it on. Filters live in the encrypted
+   settings blob, so they roam between devices and the server never sees them. Editing a
+   filter affects future entries only; history is never mass-shared retroactively.
+
+No matches means personal-only: one wrap, no `space_ids`. Local group tags no longer imply
+sharing — they are only filter inputs.
+
+**Space keys.** Each space has a keyring (`Vec<[u8; 32]>`, newest first) recovered from the
+server-side wrapped keyring, which is X25519-wrapped to each member's identity public key.
+New entries encrypt under `keyring[0]`. Removing a member (or a member leaving) makes the
+server clear every remaining member's wrapped keys; the owner's next reconcile sees members
+without keys, mints a new key, prepends it, and redistributes through
+`POST /spaces/{id}/keys`. Old entries stay readable because the older keys stay in the
+keyring. Revocation is best-effort: the removed member keeps whatever it already pulled and
+simply never receives the new key.
+
+**Auto-copy.** Per space and per device (`space_autocopy:{space_id}` in `settings.json`,
+deliberately not synced). Only WebSocket-delivered space entries can trigger it — never
+personal cloud-sync entries and never a pull page, so a backfill cannot flood the
+clipboard. The write goes through the shared suppress-then-write helper so the watcher
+dedupe invariant holds and the active-clipboard id stays correct.
+
+**Passive cloud sync.** `sync_mode` is device-local. In `passive` the WebSocket stays
+connected (spaces, presence, invites and rekeys are always live), but personal entries
+arriving over WS are not applied; a 5-minute loop plus manual `Sync now` pulls them.
+Pushes are always immediate, so nothing is at risk of being lost. This is safe because
+`last_server_ts` only advances in the pull path, never on a WS-applied entry, so anything
+skipped live is guaranteed to arrive on the next pull.
 
 #### Settings Sync — What Gets Synced
 
@@ -605,10 +662,13 @@ The sync module builds a plaintext settings JSON from two sources and encrypts t
 
 **Synced (user preferences):**
 - From `localStorage`: `theme`, `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
-- From `settings.json`: `notifications_enabled`, `notif_copy`, `notif_paste`, `persist_history`, `close_to_tray`, `start_minimized`, `autosave`, `sharing_notify`
+- From `settings.json`: `notifications_enabled`, `notif_copy`, `notif_paste`, `persist_history`, `close_to_tray`, `start_minimized`, `autosave`, `space_send_filters`
+
+Send filters ride in the blob so they roam between a user's devices; the server never sees
+the plaintext group names they reference.
 
 **Not synced (device-specific — never included in blob):**
-- `sync_enabled`, `sync_server_url`, `sharing_enabled` — each device decides independently
+- `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:{space_id}` — each device decides independently
 - Window geometry, autostart, recent searches
 
 Push is debounced: after any synced setting changes, a 2-second timer starts. If another change arrives within that window, the timer resets. This prevents a push per keystroke in fields like the server URL.
@@ -618,7 +678,7 @@ On pull: emit `sync:settings` Tauri event with decrypted JSON → React applies 
 
 #### `config.rs` — Sync Settings
 
-Four settings are added to the existing `settings.json` store:
+Sync adds these keys to the existing `settings.json` store:
 
 | Key               | Type   | Default                             | Description                                                                |
 | ----------------- | ------ | ----------------------------------- | -------------------------------------------------------------------------- |
@@ -626,8 +686,9 @@ Four settings are added to the existing `settings.json` store:
 | `sync_server_url`   | string | `"https://api.orangeclipboard.app"` | Backend API base URL (self-hosted override)                                |
 | `supabase_url`      | string | `""`                                | Supabase project URL — used for auth (GoTrue)                              |
 | `supabase_anon_key` | string | `""`                                | Supabase anon (publishable) key — client-side auth only                    |
-| `sharing_enabled`   | bool   | true                                | Whether Live Share is active (false = ignore all Live Share group fan-out) |
-| `sharing_notify`    | bool   | true                                | Show notification when a peer copies something                             |
+| `sync_mode`         | string | `"realtime"`                        | `realtime` or `passive` — how personal cloud-sync entries arrive on this device |
+| `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
+| `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
 
 ### Runtime Module
 
@@ -847,8 +908,7 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Login / Logout** form → calls `sync_login` / `sync_logout`
 - **Connected devices** list → fetched via `GET /api/v1/auth/devices`; shows current device highlighted
 - **Sync status indicator**: Synced ✓ / Syncing… / Offline / Re-login required → driven by `sync_get_status`
-- **Shared Groups** panel: list, create, invite link, leave → calls `sync_create_group`, `sync_join_group`, `sync_leave_group`
-- **Live Share** panel (Phase 8): create a Live Share session (up to 5 members), invite by email, view member list with individual scopes, change own scope, leave session, end session (owner only). Driven by `sharing_invite`, `sharing_accept`, `sharing_get_sessions`, `sharing_update_scope`, `sharing_end_session`
+- **Cloud sync** section: Realtime / Passive segmented control → `sync_set_mode` / `sync_get_mode`, next to the existing `Sync now` button. Spaces are not managed here — they live on the Spaces screen.
 
 #### Notes Screen (`NotesScreen.tsx`)
 
@@ -859,14 +919,31 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Filtering**: Search and filter notes by query, groups, date range, and pin state.
 - **Bulk actions**: Multi-select delete/pin/group operations.
 
-#### Sync Screen (`SyncScreen.tsx`)
+#### Spaces Screen (`spaces-screen/SpacesScreen.tsx`)
 
-A dedicated sidebar screen (`screen === "sync"`) for **browsing synced & shared
-content**: joined shared groups and active Live Share sessions, with the clipboard/
-note entries in each rendered using the same preview components as the clipboard
-screen (its own search, sort, and tiles/list layout). Account-level sync management —
-login/logout, enable toggle, server URL, connected devices, create/join group, and
-Live Share invite/scope/leave/end — lives in the Settings screen's Cloud Sync section.
+A dedicated sidebar screen (`screen === "spaces"`) and the single home for sharing. Left
+pane is the feed of what is in the selected space, rendered with the same preview
+components as the clipboard screen (its own search, sort, and tiles/list layout); feed
+membership is server truth only, `entryShares["clipboard:{id}"].includes(space.id)`. Right
+rail lists the user's spaces with create and join forms, the received-invite strip
+(accept/decline), and sent invites with revoke.
+
+The selected space's header opens **Space settings**:
+
+- **Incoming** — auto-copy switch (`space_set_autocopy`).
+- **Outgoing** — auto-share master switch plus Content (clipboard / notes / both), Kinds,
+  and Groups selectors that build the `SendFilter` (`space_set_send_filter`). Off by
+  default, so nothing flows without an explicit choice; the header badge shows how many
+  rules are active.
+- **Members** — owner badge, `waiting for key` for members the owner has not wrapped a key
+  for yet, online dot, remove (owner only, which triggers the rekey).
+- **Invite** — invite code with copy code / copy link, and invite by email.
+- **Leave** or **Delete** (armed two-click).
+
+It owns the live subscriptions `space:presence-changed` (re-reads `spaces_cached`, no
+network), `space:membership-changed`, `space:key-received`, and the invite events.
+Account-level sync management — login/logout, enable toggle, server URL, devices, storage,
+and the cloud sync mode — stays on the Account screen.
 
 #### Shortcuts Screen (`ShortcutsScreen.tsx`)
 
@@ -1030,8 +1107,12 @@ capture_clipboard_change() → history.push(entry)
          │
          └──► SyncClient.on_new_entry(entry)   [background runtime]
                     │
-                    ├─ crypto::encrypt(UMK, content, aad=client_id)
-                    ├─ crypto::encrypt(UMK, metadata_json, aad=client_id)
+                    ├─ cek = crypto::random_key()
+                    ├─ crypto::encrypt(cek, content, aad=client_id)
+                    ├─ crypto::encrypt(cek, metadata_json, aad=client_id)
+                    ├─ wrapped_keys = { "personal": wrap_key(UMK, cek),
+                    │                  <space_id>: wrap_key(space_key, cek), … }
+                    ├─ space_ids = explicit shares ∪ matching send filters
                     │
                     ├─ online? ──► POST /api/v1/sync/push [entry]
                     │              Server assigns server_ts
@@ -1050,8 +1131,10 @@ On startup / reconnect:
   GET /api/v1/sync/pull?after_ts={last_cursor}&limit=200
          │
          ▼ (for each entry in response)
-  crypto::decrypt(UMK, encrypted_content, aad=client_id) → plaintext
-  crypto::decrypt(UMK, encrypted_metadata) → { groups, label, pinned }
+  cek = unwrap_key(UMK, wrapped_keys["personal"])       ← own entry
+        or unwrap_key(space keyring, wrapped_keys[space_id])  ← shared entry
+  crypto::decrypt(cek, encrypted_content, aad=client_id) → plaintext
+  crypto::decrypt(cek, encrypted_metadata) → { groups, label, pinned }
          │
          ├─ client_id already in local store?
          │     └─ Yes → compare server_ts; apply if newer (LWW)
@@ -1072,13 +1155,13 @@ WebSocket message received:
          │
          ▼
   Same as Pull path above for the single entry
-  (skip if entry originated from this device_id)
+  (skip if entry originated from this device_id;
+   skip personal entries in passive mode — the next pull will bring them)
 
-  { "event": "sync:delete", "payload": { "server_id": "...", "deleted_at": T } }
+  A delete arrives as the same event with deleted_at set (a tombstone):
          │
          ▼
-  Find entry by server_id in id_map.json → local id
-  history.remove(local_id)
+  Find entry by client_id → history.remove(local_id)
   emit clipboard:entry-deleted → React removes from state
 ```
 
@@ -1115,7 +1198,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Recent searches    | `localStorage.sc-recent-searches`      | JSON string array (max 8)                                        | On search                | On mount           |
 | Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, settings_updated_at }`    | After each pull/settings push | On sync init  |
 | Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update ops (encrypted content) | On mutation when offline | On reconnect       |
-| ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", "note:7": "..." }`             | After each push          | On sync init       |
+| ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", … }` plus `entry_shares`        | After each push          | On sync init       |
 
 **Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.bin` every 2 seconds.
 
@@ -1168,12 +1251,14 @@ The following constraints span both this app and the backend. Violating any of t
 | 8   | **Sync runtime never blocks the main runtime** | All `SyncClient` methods are `async` and run in the dedicated background Tokio runtime. Use `Handle::current().spawn()` — never `block_on` from the Tauri runtime.    |
 | 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                  |
 | 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable — the server deduplicates by `client_id`.   |
-| 11  | **Sharing is always opt-in**                   | No entry gets a sharing Live Share group UUID unless the user has an active session and the entry type matches their `share_scope`. Never auto-tag on sync re-enroll. |
+| 11  | **Sharing is always opt-in**                   | An entry gets a `space_id` only from an explicit share or an enabled send filter that matches it. Send filters default to off, and local group tags never share by themselves. |
 | 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:file-skipped` to the UI; do not silently drop.                                           |
-| 13  | **Ending a sharing session is clean**          | `sharing_end_session` must remove the Live Share group UUID from `id_map.json` and in-memory `sharing_sessions` before returning. Future captures must not be tagged. |
+| 13  | **A space key is never lost while entries reference it** | Space keyrings keep every key we have held, newest first, and are recovered from the server-side wrapped keyring on reconnect. A rekey prepends; it never replaces. |
 | 14  | **Settings blob is encrypted**                 | `crypto::encrypt(UMK, settings_json)` must be called before `PUT /settings`. Never send plaintext preferences over the network.                                       |
-| 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sharing_enabled`, autostart, and window geometry must be excluded from the settings blob at the call site in `sync_push_settings()`. |
+| 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:*`, autostart, and window geometry must be excluded from the settings blob at the call site in `sync_push_settings()`. |
 | 16  | **Settings push is debounced**                 | `schedule_settings_push()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation — always go through the debounce path.                        |
+| 17  | **Auto-copy cannot flood the clipboard**       | Only WebSocket-delivered space entries may auto-copy — never a pull page, never a personal entry — and the write sets the suppress flag before touching the clipboard. |
+| 18  | **Passive mode never loses an entry**          | `last_server_ts` advances only in the pull path. An entry skipped live in passive mode must still arrive on the next interval or manual pull.                          |
 
 ---
 
@@ -1201,13 +1286,16 @@ gone because they had drifted — verify anything load-bearing in the source.
 - **Blob sync** — files and videos upload through `request-upload` → presigned PUT →
   `confirm-upload`, and download through `{key}/download-url`. Entries over the 5 MB
   gate emit `sync:file-skipped`, surfaced in the UI.
-- **Group and Live Share encryption** — pool group keys and per-session Group Keys are
-  held in `SyncClient`, recovered from the wrapped copy on reconnect, and chosen as the
-  content-encryption key for tagged entries (`keyed_pool_groups`, `session_group_key`).
-  A group whose key we don't hold is skipped rather than encrypted unreadably.
-- **Sharing UI** — create, invite by email with scope, accept/decline, per-member scope,
-  leave, and end-session, driven by the `sharing:*` WebSocket events. Device list with
-  revoke lives in the account screen.
+- **Spaces** — one sharing primitive with a per-space keyring held in `SyncClient` and
+  recovered from the server-side wrapped keyring on reconnect. Entries carry a per-entry
+  CEK wrapped under the UMK plus each target space key, so one entry can be in several
+  spaces at once. A space whose key we don't hold is skipped rather than encrypted
+  unreadably.
+- **Spaces UI** — create, join by code, invite by email, accept/decline, member list with
+  presence, remove (rekeys), leave, delete, per-space auto-copy and send filters, driven by
+  the `space:*` WebSocket events. Device list with revoke lives in the account screen.
+- **Cloud sync modes** — realtime or passive per device, with a 5-minute pull loop backing
+  passive mode.
 
 **Known gaps**
 

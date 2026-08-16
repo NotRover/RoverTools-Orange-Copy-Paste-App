@@ -10,14 +10,13 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 
 use crate::state::AppState;
-use crate::sync::client::{CreateGroupRequest, GroupOut, JoinGroupRequest, SharingInviteRequest};
+use crate::sync::client::{CreateSpaceRequest, JoinSpaceRequest};
 use crate::sync::config::SyncConfig;
 use crate::sync::crypto;
 use crate::sync::types::{
-    ShareScope, SharingInvite, SharingSession, SyncDevice, SyncGroup, SyncQuota, SyncStatusInfo,
-    SyncUser,
+    SendFilter, Space, SyncDevice, SyncMode, SyncQuota, SyncStatusInfo, SyncUser,
 };
-use crate::sync::{live_share_name, SyncClient};
+use crate::sync::SyncClient;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -47,6 +46,9 @@ fn get_or_create_client(
         return Ok(existing);
     }
     let client = Arc::new(SyncClient::new(app.clone(), SyncConfig::load(app))?);
+    // The passive-mode pull loop needs the Arc (it holds a Weak), so it starts
+    // here rather than inside `new`.
+    client.spawn_passive_pull_loop();
     *guard = Some(Arc::clone(&client));
     Ok(client)
 }
@@ -86,30 +88,6 @@ fn write_setting(app: &tauri::AppHandle, key: &str, value: serde_json::Value) {
     update_settings(app, |map| {
         map.insert(key.to_string(), value);
     });
-}
-
-fn to_sync_group(g: GroupOut, me: &str) -> SyncGroup {
-    SyncGroup {
-        member_count: g.members.len() as u32,
-        is_owner: g.owner_id == me,
-        members: g
-            .members
-            .into_iter()
-            .map(|m| crate::sync::types::SyncGroupMember {
-                user_id: m.user_id,
-                display_name: m.display_name,
-                avatar_url: m.avatar_url,
-                role: m.role,
-                has_group_key: m.has_group_key,
-            })
-            .collect(),
-        id: g.id,
-        name: g.name,
-        owner_id: g.owner_id,
-        share_history: g.share_history,
-        invite_code: g.invite_code,
-        invite_expires_at: g.invite_expires_at,
-    }
 }
 
 // ── Auth commands ─────────────────────────────────────────────────────
@@ -302,6 +280,18 @@ pub fn sync_get_entry_shares(
         .unwrap_or_default()
 }
 
+/// Entry keys (`"clipboard:{id}"` / `"note:{id}"`) another member wrote.  The
+/// Spaces screen marks these as coming in and everything else as going out.
+#[tauri::command]
+pub fn sync_get_remote_entries(state: State<'_, AppState>) -> Vec<String> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.remote_entries())
+        .unwrap_or_default()
+}
+
 /// Dismiss the list of skipped entries once the user has read it.  Skips are a
 /// report on past pushes, not a queue — nothing is retried or lost by clearing.
 #[tauri::command]
@@ -374,46 +364,55 @@ pub fn sync_receive_local_settings(
     Ok(())
 }
 
-// ── Pool groups ───────────────────────────────────────────────────────
+// ── Spaces ────────────────────────────────────────────────────────────
 
+/// Fetch the user's spaces from the server, recovering (or, for owners,
+/// minting and distributing) space keyrings on the way.  Use on screen mount;
+/// this is the source of truth the cached list mirrors.
 #[tauri::command]
-pub async fn sync_get_groups(state: State<'_, AppState>) -> Result<Vec<SyncGroup>, String> {
-    let (sync, http) = sync_http(&state)?;
-    let me = sync.current_user().map(|u| u.user_id).unwrap_or_default();
-    let groups = http.list_groups().await?;
-    Ok(groups.into_iter().map(|g| to_sync_group(g, &me)).collect())
+pub async fn spaces_list(state: State<'_, AppState>) -> Result<Vec<Space>, String> {
+    let sync = sync_client(&state)?;
+    Ok(sync.reconcile_spaces().await)
+}
+
+/// The cached space list — no network, no key work.  Presence events only move
+/// a dot, so the UI re-reads this instead of paying for a reconcile.
+#[tauri::command]
+pub fn spaces_cached(state: State<'_, AppState>) -> Vec<Space> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.spaces())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-pub async fn sync_create_group(
+pub async fn space_create(
     name: String,
     share_history: Option<bool>,
     state: State<'_, AppState>,
-) -> Result<SyncGroup, String> {
+) -> Result<Space, String> {
     let (sync, http) = sync_http(&state)?;
+    let share_history = share_history.unwrap_or(true);
     let created = http
-        .create_group(CreateGroupRequest {
+        .create_space(CreateSpaceRequest {
             name: name.clone(),
-            group_type: "pool".into(),
-            // Default to sharing history — matches the server default and the
-            // previous behaviour for callers that don't pass a choice.
-            share_history: share_history.unwrap_or(true),
+            share_history,
         })
         .await?;
-    sync.register_group_mapping(&name, &created.group_id);
-    // Mint and upload the Group Key now, so the first entry tagged into this
-    // group can be encrypted for the group rather than silently falling back to
-    // the personal UMK (which no other member could ever read).
-    sync.reconcile_group_keys().await;
+    // Mint and distribute the Space Key now, so the first entry shared into
+    // this space encrypts under it instead of silently staying personal.
+    sync.reconcile_spaces().await;
     // Creator is the sole member at this point; surface the invite code so the
     // UI can share it.
     let me = sync.current_user().map(|u| u.user_id).unwrap_or_default();
-    Ok(SyncGroup {
-        id: created.group_id,
+    Ok(Space {
+        id: created.space_id,
         name,
-        owner_id: me.clone(),
+        owner_id: me,
         is_owner: true,
-        share_history: share_history.unwrap_or(true),
+        share_history,
         member_count: 1,
         members: Vec::new(),
         invite_code: Some(created.invite_code),
@@ -422,24 +421,19 @@ pub async fn sync_create_group(
 }
 
 #[tauri::command]
-pub async fn sync_join_group(
-    invite_code: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn space_join(invite_code: String, state: State<'_, AppState>) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
-    let g = http
-        .join_group(JoinGroupRequest {
-            // Tolerate pasted links and sloppy casing: the server normalizes
-            // short codes, but strip an obvious `?code=`/path prefix here.
-            invite_code: extract_invite_code(&invite_code),
-            wrapped_group_key: None,
-        })
-        .await?;
-    sync.register_group_mapping(&g.name, &g.group_id);
-    // Catch up on the group's shared history in the background.
+    http.join_space(JoinSpaceRequest {
+        // Tolerate pasted links and sloppy casing: the server normalizes
+        // short codes, but strip an obvious `?code=`/path prefix here.
+        invite_code: extract_invite_code(&invite_code),
+    })
+    .await?;
+    // Catch up on the space's shared history in the background (the keyring
+    // arrives once the owner's reconcile wraps it for us).
     let sync2 = Arc::clone(&sync);
     tauri::async_runtime::spawn(async move {
-        sync2.reconcile_group_keys().await;
+        sync2.reconcile_spaces().await;
         let _ = sync2.flush_and_pull().await;
     });
     Ok(())
@@ -457,18 +451,139 @@ fn extract_invite_code(input: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn sync_leave_group(
-    group_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn space_leave(space_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
     let user_id = sync
         .current_user()
         .map(|u| u.user_id)
         .ok_or("not authenticated")?;
-    // Self-removal (the owner may dissolve the group with delete instead).
-    http.remove_group_member(&group_id, &user_id).await?;
+    // Self-removal (the owner dissolves the space with space_delete instead).
+    http.remove_space_member(&space_id, &user_id).await?;
     Ok(())
+}
+
+/// Set which spaces an entry is shared into — the explicit share gesture.
+/// The recorded list is authoritative from here on (filters no longer apply
+/// to this entry), and the entry is re-pushed so the new envelope reaches the
+/// server: added spaces gain a wrapped key, removed ones lose theirs.
+/// Un-sharing is best-effort like all revocation — members who already pulled
+/// the entry keep what they saw.
+#[tauri::command]
+pub fn space_set_entry_shares(
+    entry_id: String,
+    entry_type: String,
+    space_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if entry_type != "clipboard" && entry_type != "note" {
+        return Err(format!("unknown entry type: {entry_type}"));
+    }
+    let sync = sync_client(&state)?;
+    let key = format!("{entry_type}:{entry_id}");
+    sync.id_map.lock().set_entry_shares(&key, &space_ids);
+
+    // Re-push with the new share set (the push path reads the record above).
+    if entry_type == "note" {
+        let note = state
+            .notes
+            .lock()
+            .all()
+            .iter()
+            .find(|n| n.id == entry_id)
+            .cloned()
+            .ok_or("note not found")?;
+        sync.on_update_note(note);
+    } else {
+        let entry = state
+            .history
+            .lock()
+            .all()
+            .iter()
+            .find(|e| e.id == entry_id)
+            .cloned()
+            .ok_or("entry not found")?;
+        sync.on_update_clipboard_entry(entry);
+    }
+    Ok(())
+}
+
+/// Per-device toggle: write incoming entries from this space straight to the
+/// clipboard.  Stored in settings.json (device-local by design).
+#[tauri::command]
+pub fn space_set_autocopy(
+    space_id: String,
+    enabled: bool,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    write_setting(
+        &app,
+        &format!("space_autocopy:{space_id}"),
+        serde_json::Value::Bool(enabled),
+    );
+    Ok(())
+}
+
+/// Update one space's send filter.  Persisted under `space_send_filters` in
+/// settings.json and scheduled into the encrypted settings blob so it roams.
+#[tauri::command]
+pub fn space_set_send_filter(
+    space_id: String,
+    filter: SendFilter,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let sync = sync_client(&state)?;
+    sync.set_send_filter(&space_id, filter);
+    let filters = sync.send_filters();
+    let value = serde_json::to_value(&filters).map_err(|e| format!("filters json: {e}"))?;
+    write_setting(&app, crate::sync::SEND_FILTERS_KEY, value);
+    sync.schedule_settings_push();
+    Ok(())
+}
+
+/// The full send-filter map, keyed by space id (absent = explicit only).
+#[tauri::command]
+pub fn space_get_send_filters(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, SendFilter> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.send_filters())
+        .unwrap_or_default()
+}
+
+/// Cloud-sync mode for personal entries ("realtime" | "passive").
+/// Device-local; spaces stay realtime regardless.
+#[tauri::command]
+pub fn sync_set_mode(
+    mode: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let parsed = SyncMode::parse(&mode).ok_or_else(|| format!("unknown sync mode: {mode}"))?;
+    write_setting(
+        &app,
+        crate::sync::SYNC_MODE_KEY,
+        serde_json::Value::String(parsed.as_str().into()),
+    );
+    if let Some(sync) = state.sync_client.lock().as_ref() {
+        sync.set_sync_mode(parsed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn sync_get_mode(state: State<'_, AppState>) -> String {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.sync_mode())
+        .unwrap_or_default()
+        .as_str()
+        .to_string()
 }
 
 // ── Blobs & devices ─────────────────────────────────────────────────────
@@ -502,25 +617,24 @@ pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDev
         .collect())
 }
 
-/// Remove a member from a group we own (self-removal uses sync_leave_group).
+/// Remove a member from a space we own (self-removal uses space_leave).
+/// The server clears every remaining member's wrapped keyring; our next
+/// reconcile mints a new key the removed member never receives.
 #[tauri::command]
-pub async fn sync_remove_member(
-    group_id: String,
+pub async fn space_remove_member(
+    space_id: String,
     member_user_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
-    http.remove_group_member(&group_id, &member_user_id).await
+    http.remove_space_member(&space_id, &member_user_id).await
 }
 
-/// Delete a group we own (dissolves it for every member).
+/// Delete a space we own (dissolves it for every member).
 #[tauri::command]
-pub async fn sync_delete_group(
-    group_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn space_delete(space_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
-    http.delete_group(&group_id).await
+    http.delete_space(&space_id).await
 }
 
 #[tauri::command]
@@ -548,12 +662,12 @@ pub async fn sync_list_invites(
 
 #[tauri::command]
 pub async fn sync_send_invite(
-    group_id: String,
+    space_id: String,
     email: String,
     state: State<'_, AppState>,
 ) -> Result<crate::sync::client::InviteOut, String> {
     let (_sync, http) = sync_http(&state)?;
-    http.send_group_invite(&group_id, &email).await
+    http.send_space_invite(&space_id, &email).await
 }
 
 #[tauri::command]
@@ -562,14 +676,12 @@ pub async fn sync_accept_invite(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
-    let g = http.accept_invite(&invite_id).await?;
-    sync.register_group_mapping(&g.name, &g.group_id);
-    // Catch up in the background: recover/receive keys, then pull the group's
-    // history (subject to its share_history policy).
+    http.accept_invite(&invite_id).await?;
+    // Catch up in the background: receive the keyring once the owner wraps it,
+    // then pull the space's history (subject to its share_history policy).
     let sync2 = Arc::clone(&sync);
     tauri::async_runtime::spawn(async move {
-        sync2.reconcile_group_keys().await;
-        sync2.refresh_sharing_sessions().await;
+        sync2.reconcile_spaces().await;
         let _ = sync2.flush_and_pull().await;
     });
     Ok(())
@@ -593,143 +705,13 @@ pub async fn sync_revoke_invite(
     http.revoke_invite(&invite_id).await
 }
 
-// ── Live Share ────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub async fn sharing_invite(
-    email: String,
-    scope: String,
-    state: State<'_, AppState>,
-) -> Result<SharingInvite, String> {
-    let (sync, http) = sync_http(&state)?;
-    let parsed_scope = parse_scope(&scope)?;
-
-    // Owner generates the Group Key up front and caches it; it is wrapped for
-    // each member as they accept (see `handle_sharing_accepted`).
-    let group_key = crypto::random_key();
-
-    // One call creates the live_share group and emails the invite.
-    let invite_resp = http
-        .create_sharing_invite(SharingInviteRequest {
-            email,
-            share_scope: scope.clone(),
-        })
-        .await?;
-
-    sync.id_map
-        .lock()
-        .set_sharing_session(&invite_resp.share_group_id);
-    sync.set_sharing_session(SharingSession {
-        share_group_id: invite_resp.share_group_id.clone(),
-        name: live_share_name(&[]),
-        my_scope: parsed_scope,
-        members: Vec::new(),
-        group_key: Some(*group_key),
-    });
-
-    Ok(SharingInvite {
-        invite_code: invite_resp.invite_code,
-        share_group_id: invite_resp.share_group_id,
-        expires_at: invite_resp.expires_at,
-    })
-}
-
-#[tauri::command]
-pub async fn sharing_accept(
-    invite_code: String,
-    scope: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    let parsed_scope = parse_scope(&scope)?;
-
-    // Live Share sessions are joined via the shared group-join route.  The
-    // Group Key is delivered afterwards over WS (`group:rekey`) once the owner
-    // wraps it against our identity key — so no key material is exchanged here.
-    let join_resp = http
-        .join_group(JoinGroupRequest {
-            invite_code: extract_invite_code(&invite_code),
-            wrapped_group_key: None,
-        })
-        .await?;
-
-    sync.id_map
-        .lock()
-        .set_sharing_session(&join_resp.group_id);
-    sync.set_sharing_session(SharingSession {
-        share_group_id: join_resp.group_id,
-        // Members arrive with the next refresh; until then there is nobody to
-        // name the session after.
-        name: live_share_name(&[]),
-        my_scope: parsed_scope,
-        members: Vec::new(),
-        group_key: None, // arrives via `group:rekey`
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn sharing_get_sessions(state: State<'_, AppState>) -> Vec<SharingSession> {
-    state
-        .sync_client
-        .lock()
-        .as_ref()
-        .map(|s| s.sharing_sessions())
-        .unwrap_or_default()
-}
-
-/// Fetch sessions from the server (recovering keys as needed) and return the
-/// refreshed list. Use this on screen mount; `sharing_get_sessions` only reads
-/// the in-memory cache, which is empty right after an app restart.
-#[tauri::command]
-pub async fn sharing_refresh_sessions(
-    state: State<'_, AppState>,
-) -> Result<Vec<SharingSession>, String> {
-    let sync = sync_client(&state)?;
-    Ok(sync.refresh_sharing_sessions().await)
-}
-
-#[tauri::command]
-pub async fn sharing_update_scope(
-    share_group_id: String,
-    scope: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    http.update_sharing_scope(&share_group_id, &scope).await?;
-
-    // Update local session
-    let parsed_scope = parse_scope(&scope)?;
-    sync.update_session_scope(&share_group_id, parsed_scope);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn sharing_end_session(
-    share_group_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    http.end_sharing_session(&share_group_id).await?;
-    sync.remove_sharing_session(&share_group_id);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn sharing_leave_session(
-    share_group_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    http.leave_sharing_session(&share_group_id).await?;
-    sync.remove_sharing_session(&share_group_id);
-    Ok(())
-}
-
 // ── Settings sync commands ────────────────────────────────────────────
 
 /// Settings keys sourced from settings.json that participate in cloud sync.
+/// `space_send_filters` rides here so filters roam across a user's devices
+/// inside the encrypted blob — the server never sees the plaintext group names
+/// they reference.  The auto-copy toggles and `sync_mode` are deliberately
+/// absent: those are per-device choices.
 const SYNCED_JSON_KEYS: &[&str] = &[
     "keep_history",
     "close_to_tray",
@@ -738,7 +720,7 @@ const SYNCED_JSON_KEYS: &[&str] = &[
     "notif_copy",
     "notif_paste",
     "autosave",
-    "sharing_notify",
+    crate::sync::SEND_FILTERS_KEY,
 ];
 
 /// Encrypt and push merged settings (settings.json + localStorage) to the server.
@@ -837,13 +819,9 @@ pub async fn sync_pull_settings(
                 }
             }
         });
+        // Roamed send filters just landed on disk — refresh the push-path cache.
+        sync.reload_local_sync_prefs();
     }
 
     Ok(())
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────
-
-fn parse_scope(scope: &str) -> Result<ShareScope, String> {
-    ShareScope::parse(scope).ok_or_else(|| format!("unknown scope: {scope}"))
 }
