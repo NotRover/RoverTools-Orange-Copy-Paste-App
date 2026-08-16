@@ -31,6 +31,7 @@ import { UserAvatar } from "../../UserAvatar";
 import { EntryTypePill } from "../../entry-types/EntryTypePill";
 import { TYPE_ICONS, TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import Topbar, { SortDropdown, LayoutSegment } from "../topbar/Topbar";
+import { RowsIcon } from "../../icons";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
 import "../clipboard-screen/search-filter/SearchFilter.css";
@@ -1482,6 +1483,31 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [spaces, selectedId],
   );
 
+  // How much is in each space, counted from the share map rather than the feed
+  // so a space that is not selected still has a number.
+  const itemCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const ids of Object.values(entryShares))
+      for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [entryShares]);
+
+  // Sections only appear when they split something: a solo account has nobody
+  // else online anywhere, and one "Quiet" header over the whole list says
+  // nothing. Your own presence does not count - it is true everywhere.
+  const spaceGroups = useMemo(() => {
+    const live = (s: Space) =>
+      s.members.some((m) => m.online && m.user_id !== selfUserId);
+    const active = spaces.filter(live);
+    const quiet = spaces.filter((s) => !live(s));
+    if (active.length === 0 || quiet.length === 0)
+      return [{ title: "All", spaces }];
+    return [
+      { title: "Active now", spaces: active },
+      { title: "Quiet", spaces: quiet },
+    ];
+  }, [spaces, selfUserId]);
+
   // Panel drag. Widths are measured off the screen box rather than the panel
   // so a fast drag that outruns the pointer still tracks it.
   useEffect(() => {
@@ -2071,6 +2097,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         setLayout(l);
         localStorage.setItem("spaces-layout", l);
       }}
+      tilesLabel="Cards"
+      listLabel="Rows"
+      listIcon={<RowsIcon size={12} />}
     />
   );
 
@@ -2416,7 +2445,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             </div>
           ) : (
             <div className="sp-space-section">
-              {spaces.map((space) => {
+              {spaceGroups.map((group) => (
+                <React.Fragment key={group.title}>
+                  {spaceGroups.length > 1 && (
+                    <div className="sp-space-group">
+                      {group.title}
+                      <span className="sp-space-group-n">
+                        {group.spaces.length}
+                      </span>
+                      <span className="sp-space-group-rule" />
+                    </div>
+                  )}
+                  {group.spaces.map((space) => {
                 const isActive = space.id === selectedId;
                 const online = space.members.filter((m) => m.online).length;
                 const rules = filterRuleCount(sendFilters[space.id]);
@@ -2434,10 +2474,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                     </span>
                     <span className="sp-space-card-body">
                       <span className="sp-space-card-name">{space.name}</span>
+                      {/* Two numbers that change, rather than one that does
+                          not: who is around, and how much is in here. */}
                       <span className="sp-space-card-meta">
-                        {space.member_count} member
-                        {space.member_count === 1 ? "" : "s"}
-                        {space.members.length > 0 ? ` - ${online} online` : ""}
+                        {space.members.length > 0
+                          ? `${online}/${space.member_count} online`
+                          : `${space.member_count} member${space.member_count === 1 ? "" : "s"}`}
+                        {" - "}
+                        {itemCounts[space.id] ?? 0} item
+                        {(itemCounts[space.id] ?? 0) === 1 ? "" : "s"}
                       </span>
                     </span>
                     <span className="sp-space-card-flags">
@@ -2465,7 +2510,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                     </span>
                   </button>
                 );
-              })}
+                  })}
+                </React.Fragment>
+              ))}
 
               {sentPending.length > 0 && (
                 <div className="sp-sent-list">

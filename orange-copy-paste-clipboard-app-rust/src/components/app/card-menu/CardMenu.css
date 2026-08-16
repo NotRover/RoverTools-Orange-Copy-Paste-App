@@ -151,6 +151,18 @@
   color: var(--text-secondary);
 }
 
+/* Present but not usable: still hoverable, so it can say why. */
+.card-menu-item--off,
+.card-menu-item--off:hover {
+  color: var(--text-muted);
+  background: transparent;
+  cursor: default;
+}
+
+.card-menu-item--off .card-menu-chevron {
+  opacity: 0.4;
+}
+
 .card-menu-item--groups-toggle:hover,
 .card-menu-item--groups-toggle-active {
   background: var(--surface-hover);

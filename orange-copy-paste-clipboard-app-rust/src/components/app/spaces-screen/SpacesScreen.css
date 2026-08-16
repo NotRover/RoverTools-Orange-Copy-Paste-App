@@ -817,26 +817,52 @@
 
 /* ── Group cards ── */
 
+/* Section header, shown only when the list actually splits. */
+.sp-space-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sp-space-group-n {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.sp-space-group-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .sp-space-card {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid transparent;
+  /* A resting surface, so a row reads as a card sitting on the panel rather
+     than text floating on it. */
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: transparent;
+  background: var(--surface);
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
   text-align: left;
   position: relative;
-  margin-bottom: 2px;
+  margin-bottom: 5px;
   user-select: none;
 }
 
 .sp-space-card:hover {
-  background: var(--surface);
-  border-color: var(--border);
+  background: var(--surface-hover);
+  border-color: var(--border-light);
 }
 
 .sp-space-card.active {

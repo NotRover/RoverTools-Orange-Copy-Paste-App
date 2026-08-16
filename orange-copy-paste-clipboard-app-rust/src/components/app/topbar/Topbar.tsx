@@ -128,7 +128,20 @@ export const LayoutSegment: React.FC<{
   onLayoutChange: (l: ClipboardLayout) => void;
   /** Show the single-column option (clipboard screen only). */
   showSingle?: boolean;
-}> = ({ layout, onLayoutChange, showSingle }) => {
+  /** Tooltips for the two shared options. The Spaces feed calls the same two
+   *  layouts cards and rows, so it names them itself. */
+  tilesLabel?: string;
+  listLabel?: string;
+  /** Same slot, different shape: columns on the clipboard, rows on Spaces. */
+  listIcon?: React.ReactNode;
+}> = ({
+  layout,
+  onLayoutChange,
+  showSingle,
+  tilesLabel = "Tiles view",
+  listLabel = "Grid view",
+  listIcon = <GridIcon size={12} />,
+}) => {
   const sliderTransform = showSingle
     ? layout === "single"
       ? "translateX(200%)"
@@ -145,7 +158,7 @@ export const LayoutSegment: React.FC<{
       <button
         className={`cs-layout-seg-btn${layout === "tiles" ? " cs-layout-seg-btn--active" : ""}`}
         onClick={() => onLayoutChange("tiles")}
-        data-tooltip="Tiles view"
+        data-tooltip={tilesLabel}
         data-tooltip-pos="below"
       >
         <TilesIcon size={12} />
@@ -153,10 +166,10 @@ export const LayoutSegment: React.FC<{
       <button
         className={`cs-layout-seg-btn${layout === "list" ? " cs-layout-seg-btn--active" : ""}`}
         onClick={() => onLayoutChange("list")}
-        data-tooltip="Grid view"
+        data-tooltip={listLabel}
         data-tooltip-pos="below"
       >
-        <GridIcon size={12} />
+        {listIcon}
       </button>
       {showSingle && (
         <button

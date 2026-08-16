@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../types";
 
 import type { SortMode } from "../sort-options";
@@ -598,6 +599,18 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                     if (onBulkRemoveGroup)
                       onBulkRemoveGroup([...multiSelect.selectedIds], group);
                   }}
+                  onBulkSync={() =>
+                    invoke("sync_push_entries", {
+                      clientIds: [...multiSelect.selectedIds],
+                      entryType: "note",
+                    }).catch(() => {})
+                  }
+                  onBulkUnsync={() =>
+                    invoke("sync_unpush_entries", {
+                      clientIds: [...multiSelect.selectedIds],
+                      entryType: "note",
+                    }).catch(() => {})
+                  }
                   availableGroups={availableGroups}
                   commonGroups={commonGroups}
                 />
@@ -790,6 +803,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
               });
             }}
             spaces={spaceShares.spaces}
+            signedIn={spaceShares.signedIn}
             itemSpaceIds={spaceShares.shares[`note:${menuNote.id}`]}
             onToggleSpace={(spaceId) =>
               spaceShares.toggle("note", menuNote.id, spaceId)

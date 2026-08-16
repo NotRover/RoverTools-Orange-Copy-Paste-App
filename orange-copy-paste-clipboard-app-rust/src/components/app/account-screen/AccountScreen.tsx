@@ -420,6 +420,74 @@ const AccountScreen: React.FC = () => {
     setShowSkipped(false);
   };
 
+  const [pushingOld, setPushingOld] = useState(false);
+  const [pushResult, setPushResult] = useState<string | null>(null);
+  const handlePushUnsynced = async () => {
+    setPushingOld(true);
+    setPushResult(null);
+    try {
+      const n = await invoke<number>("sync_push_unsynced");
+      setPushResult(
+        n === 0
+          ? "Everything on this device is already synced."
+          : `Uploading ${n} item${n === 1 ? "" : "s"}. Large images take a moment.`,
+      );
+      await new Promise((r) => setTimeout(r, 1200));
+      const s = await invoke<SyncStatusInfo>("sync_get_status");
+      setSyncStatus(s);
+    } catch (e) {
+      setPushResult(typeof e === "string" ? e : "Could not start the upload.");
+    }
+    setPushingOld(false);
+  };
+
+  // Two clicks: this is a delete on the server, so the other devices lose
+  // their copies too. Arming beats a dialog for something this small.
+  const [unpushing, setUnpushing] = useState(false);
+  const [unpushArmed, setUnpushArmed] = useState(false);
+  const handleUnpushAll = async () => {
+    if (!unpushArmed) {
+      setUnpushArmed(true);
+      setTimeout(() => setUnpushArmed(false), 3000);
+      return;
+    }
+    setUnpushArmed(false);
+    setUnpushing(true);
+    setPushResult(null);
+    try {
+      const n = await invoke<number>("sync_unpush_all");
+      setPushResult(
+        n === 0
+          ? "Nothing on this device is synced right now."
+          : `Removing ${n} item${n === 1 ? "" : "s"} from the server. They stay on this device.`,
+      );
+      await new Promise((r) => setTimeout(r, 1200));
+      const s = await invoke<SyncStatusInfo>("sync_get_status");
+      setSyncStatus(s);
+    } catch (e) {
+      setPushResult(typeof e === "string" ? e : "Could not remove them.");
+    }
+    setUnpushing(false);
+  };
+
+  // A skip is never queued, so these items only ever reach the server if the
+  // user asks again. Retrying clears the list; anything that fails records a
+  // fresh skip, which lands back here a moment later.
+  const [retrying, setRetrying] = useState(false);
+  const handleRetrySkipped = async () => {
+    setRetrying(true);
+    try {
+      await invoke<number>("sync_retry_skipped");
+      // The pushes run in the background, so read the status after a beat.
+      await new Promise((r) => setTimeout(r, 1200));
+      const s = await invoke<SyncStatusInfo>("sync_get_status");
+      setSyncStatus(s);
+    } catch {
+      /* the retried pushes report their own failures back into this list */
+    }
+    setRetrying(false);
+  };
+
   // Short states (enable hero / signed-out auth) get centered vertically and
   // rely on the card's own heading, so the page header is hidden there.
   const centered = !syncEnabled || !syncUser;
@@ -781,13 +849,23 @@ const AccountScreen: React.FC = () => {
                     </div>
                   ))
                 )}
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--sm acct-skipped-dismiss"
-                  onClick={handleDismissSkipped}
-                >
-                  Dismiss
-                </button>
+                <div className="acct-skipped-actions">
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--sm"
+                    onClick={handleRetrySkipped}
+                    disabled={retrying}
+                  >
+                    {retrying ? "Retrying..." : "Try again"}
+                  </button>
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--sm"
+                    onClick={handleDismissSkipped}
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             )}
 
@@ -824,6 +902,42 @@ const AccountScreen: React.FC = () => {
                 <p className="acct-mode-note">
                   This is only about your own devices. Spaces you share with
                   other people stay live either way.
+                </p>
+              </div>
+
+              {/* Items are only pushed as they are captured, so anything from
+                  before this account signed in never leaves the device. */}
+              <div className="acct-card acct-mode">
+                <div className="acct-mode-head">
+                  <span className="acct-row-name">
+                    Everything else on this device
+                  </span>
+                  <div className="acct-id-actions">
+                    <button
+                      type="button"
+                      className="acct-btn acct-btn--sm"
+                      onClick={handlePushUnsynced}
+                      disabled={pushingOld || unpushing}
+                    >
+                      {pushingOld ? "Uploading..." : "Upload"}
+                    </button>
+                    <button
+                      type="button"
+                      className="acct-btn acct-btn--sm acct-btn--quiet"
+                      onClick={handleUnpushAll}
+                      disabled={pushingOld || unpushing}
+                    >
+                      {unpushing
+                        ? "Removing..."
+                        : unpushArmed
+                          ? "Confirm?"
+                          : "Remove from cloud"}
+                    </button>
+                  </div>
+                </div>
+                <p className="acct-card-desc">
+                  {pushResult ??
+                    "Items you saved before signing in are still local only. Upload sends them, encrypted, and leaves what is already synced alone. Remove takes your synced items back off the server - and off your other devices - while this device keeps them."}
                 </p>
               </div>
             </section>

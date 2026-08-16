@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { groupColor } from "../../../../types";
 import type { Space } from "../../../../types";
-import { ShareNetwork, Check } from "@phosphor-icons/react";
+import { ShareNetwork, Check, CloudArrowUp } from "@phosphor-icons/react";
 import {
   TrashIcon,
   PinIcon,
@@ -33,6 +33,10 @@ interface BulkActionsBarProps {
   commonSpaceIds?: string[];
   /** Share (or stop sharing) every selected item with one space. */
   onBulkToggleSpace?: (spaceId: string, share: boolean) => void;
+  /** Upload the selected items to the account's cloud copy. */
+  onBulkSync?: () => void;
+  /** Take the selected items off the server, keeping them on this device. */
+  onBulkUnsync?: () => void;
 }
 
 const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
@@ -53,11 +57,29 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   spaces = [],
   commonSpaceIds = [],
   onBulkToggleSpace,
+  onBulkSync,
+  onBulkUnsync,
 }) => {
   const [groupsOpen, setGroupsOpen] = useState(false);
   const [spacesOpen, setSpacesOpen] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
   const groupsWrapRef = useRef<HTMLDivElement>(null);
   const spacesWrapRef = useRef<HTMLDivElement>(null);
+  const cloudWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!cloudOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        cloudWrapRef.current &&
+        !cloudWrapRef.current.contains(e.target as Node)
+      ) {
+        setCloudOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler, true);
+    return () => document.removeEventListener("mousedown", handler, true);
+  }, [cloudOpen]);
 
   // Close groups flyout on outside click
   useEffect(() => {
@@ -243,6 +265,60 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                   );
                 })}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Cloud chip: upload the selection, or take it back off the server. */}
+      {(onBulkSync || onBulkUnsync) && (
+        <div className="bulk-popup-groups-wrap" ref={cloudWrapRef}>
+          <button
+            className={`bulk-popup-chip${cloudOpen ? " bulk-popup-chip--groups-active" : ""}`}
+            onClick={() => setCloudOpen((v) => !v)}
+            data-tooltip="Upload or remove from your account"
+            data-tooltip-pos="below"
+          >
+            <CloudArrowUp size={11} />
+            <span>Cloud</span>
+            <ChevronDownIcon
+              size={8}
+              className={`bulk-popup-chevron${cloudOpen ? " bulk-popup-chevron--open" : ""}`}
+            />
+          </button>
+
+          {cloudOpen && (
+            <div className="bulk-popup-groups-flyout">
+              <div className="bulk-popup-flyout-header">
+                <CloudArrowUp size={9} />
+                <span>Cloud copy</span>
+              </div>
+              <div className="bulk-popup-flyout-spaces">
+                <button
+                  className="bulk-popup-space-row"
+                  onClick={() => {
+                    onBulkSync?.();
+                    setCloudOpen(false);
+                  }}
+                >
+                  <span className="bulk-popup-flyout-name">Upload to cloud</span>
+                </button>
+                <button
+                  className="bulk-popup-space-row"
+                  onClick={() => {
+                    onBulkUnsync?.();
+                    setCloudOpen(false);
+                  }}
+                >
+                  <span className="bulk-popup-flyout-name">
+                    Remove from cloud
+                  </span>
+                </button>
+              </div>
+              <p className="bulk-popup-flyout-note">
+                Removing takes these off your other devices too. The copies here
+                stay.
+              </p>
             </div>
           )}
         </div>

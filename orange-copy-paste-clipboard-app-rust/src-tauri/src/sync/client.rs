@@ -896,11 +896,21 @@ impl SyncHttpClient {
         .await
     }
 
-    pub async fn upload_blob_bytes(&self, upload_url: &str, data: Vec<u8>) -> Result<(), String> {
+    /// `mime` must be the same value the upload was requested with: the
+    /// backend signs `ContentType` into the presigned PUT, so S3 recomputes
+    /// the signature over a `content-type` header we have to send back
+    /// verbatim. Omitting it is a signature mismatch, which S3 answers 403.
+    pub async fn upload_blob_bytes(
+        &self,
+        upload_url: &str,
+        data: Vec<u8>,
+        mime: &str,
+    ) -> Result<(), String> {
         // Presigned URL upload — no auth header, no retry (not our origin).
         let resp = self
             .inner
             .put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, mime)
             .body(data)
             .send()
             .await

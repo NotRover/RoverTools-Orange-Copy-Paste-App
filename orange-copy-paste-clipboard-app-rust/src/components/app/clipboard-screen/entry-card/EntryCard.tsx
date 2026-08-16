@@ -223,6 +223,8 @@ interface EntryCardProps {
   syncState?: EntrySyncState;
   /** Spaces this account belongs to, for the share menu. */
   spaces?: Space[];
+  /** Whether a sync account is signed in (share row reason). */
+  signedIn?: boolean;
   /** Space ids this entry is shared into. */
   itemSpaceIds?: string[];
   /** Names of those spaces, for the shared indicator's tooltip. */
@@ -245,6 +247,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   isInClipboard = false,
   syncState,
   spaces,
+  signedIn,
   itemSpaceIds,
   sharedSpaceNames,
   onToggleSpace,
@@ -691,6 +694,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
           onSetGroups(entry.id, newGroups);
         }}
         spaces={spaces}
+        signedIn={signedIn}
         itemSpaceIds={itemSpaceIds}
         onToggleSpace={
           onToggleSpace ? (spaceId) => onToggleSpace(entry.id, spaceId) : undefined

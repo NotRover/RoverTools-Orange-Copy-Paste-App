@@ -609,7 +609,12 @@
   color: var(--text-muted, #909090);
 }
 
-.acct-skipped-dismiss { align-self: flex-start; }
+.acct-skipped-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+}
 
 .acct-id-actions {
   display: flex;

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
@@ -440,6 +441,18 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                       share,
                     )
                   }
+                  onBulkSync={() =>
+                    invoke("sync_push_entries", {
+                      clientIds: [...multiSelect.selectedIds],
+                      entryType: "clipboard",
+                    }).catch(() => {})
+                  }
+                  onBulkUnsync={() =>
+                    invoke("sync_unpush_entries", {
+                      clientIds: [...multiSelect.selectedIds],
+                      entryType: "clipboard",
+                    }).catch(() => {})
+                  }
                 />
               )}
             </div>
@@ -543,6 +556,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           isInClipboard={entry.id === activeClipboardId}
                           syncState={entrySyncStates[`clipboard:${entry.id}`]}
                           spaces={spaceShares.spaces}
+                          signedIn={spaceShares.signedIn}
                           itemSpaceIds={spaceShares.shares[`clipboard:${entry.id}`]}
                           sharedSpaceNames={spaceShares.namesFor("clipboard", entry.id)}
                           onToggleSpace={(entryId, spaceId) =>
