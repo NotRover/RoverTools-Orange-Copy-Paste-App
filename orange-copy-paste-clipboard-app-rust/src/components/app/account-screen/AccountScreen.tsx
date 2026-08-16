@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -27,6 +27,9 @@ import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
 import "./AccountScreen.css";
+
+/** A bulk upload or removal in flight, and how far through it is. */
+type BulkProgress = { mode: "upload" | "remove"; done: number; total: number };
 
 const MODE_OPTIONS: { value: SyncMode; label: string }[] = [
   { value: "realtime", label: "Realtime" },
@@ -422,19 +425,80 @@ const AccountScreen: React.FC = () => {
 
   const [pushingOld, setPushingOld] = useState(false);
   const [pushResult, setPushResult] = useState<string | null>(null);
+  const [progress, setProgress] = useState<BulkProgress | null>(null);
+  // Bumped to abandon a run: leaving the screen, or starting the other action.
+  const progressRun = useRef(0);
+  useEffect(() => () => void (progressRun.current += 1), []);
+
+  // Both bulk actions fan out into one background task per item and return
+  // immediately, so there is no completion to await. Progress is read back
+  // from how many items the server has acknowledged: an upload counts up to
+  // the total, a removal counts the same number down. Stops on its own once
+  // nothing has moved for a while, since anything sync refuses to send never
+  // arrives at all and would otherwise spin here forever.
+  const trackBulk = useCallback(
+    async (keys: string[], mode: "upload" | "remove") => {
+      const run = (progressRun.current += 1);
+      const total = keys.length;
+      setProgress({ mode, done: 0, total });
+      let last = -1;
+      let stalledTicks = 0;
+      let done = 0;
+      while (progressRun.current === run) {
+        await new Promise((r) => setTimeout(r, 700));
+        if (progressRun.current !== run) return;
+        let settled: number;
+        try {
+          settled = await invoke<number>("sync_settled_count", { keys });
+        } catch {
+          break;
+        }
+        done = mode === "upload" ? settled : total - settled;
+        setProgress({ mode, done, total });
+        if (done >= total) break;
+        stalledTicks = done === last ? stalledTicks + 1 : 0;
+        last = done;
+        if (stalledTicks >= 28) break; // ~20s with nothing moving
+      }
+      if (progressRun.current !== run) return;
+      setProgress(null);
+      const left = total - done;
+      if (mode === "upload") {
+        setPushResult(
+          left <= 0
+            ? `Uploaded ${total} item${total === 1 ? "" : "s"}.`
+            : `Uploaded ${done} of ${total}. ${left} did not go through - check the skipped list above.`,
+        );
+      } else {
+        setPushResult(
+          left <= 0
+            ? `Removed ${total} item${total === 1 ? "" : "s"} from the server. They stay on this device.`
+            : `Removed ${done} of ${total}. ${left} are still on the server; try again.`,
+        );
+      }
+      try {
+        setSyncStatus(await invoke<SyncStatusInfo>("sync_get_status"));
+      } catch {
+        /* the status refresh is cosmetic here */
+      }
+    },
+    [],
+  );
+
+  const pct = progress
+    ? Math.min(100, Math.round((progress.done / Math.max(1, progress.total)) * 100))
+    : 0;
+
   const handlePushUnsynced = async () => {
     setPushingOld(true);
     setPushResult(null);
     try {
-      const n = await invoke<number>("sync_push_unsynced");
-      setPushResult(
-        n === 0
-          ? "Everything on this device is already synced."
-          : `Uploading ${n} item${n === 1 ? "" : "s"}. Large images take a moment.`,
-      );
-      await new Promise((r) => setTimeout(r, 1200));
-      const s = await invoke<SyncStatusInfo>("sync_get_status");
-      setSyncStatus(s);
+      const keys = await invoke<string[]>("sync_push_unsynced");
+      if (keys.length === 0) {
+        setPushResult("Everything on this device is already synced.");
+      } else {
+        void trackBulk(keys, "upload");
+      }
     } catch (e) {
       setPushResult(typeof e === "string" ? e : "Could not start the upload.");
     }
@@ -455,15 +519,12 @@ const AccountScreen: React.FC = () => {
     setUnpushing(true);
     setPushResult(null);
     try {
-      const n = await invoke<number>("sync_unpush_all");
-      setPushResult(
-        n === 0
-          ? "Nothing on this device is synced right now."
-          : `Removing ${n} item${n === 1 ? "" : "s"} from the server. They stay on this device.`,
-      );
-      await new Promise((r) => setTimeout(r, 1200));
-      const s = await invoke<SyncStatusInfo>("sync_get_status");
-      setSyncStatus(s);
+      const keys = await invoke<string[]>("sync_unpush_all");
+      if (keys.length === 0) {
+        setPushResult("Nothing on this device is synced right now.");
+      } else {
+        void trackBulk(keys, "remove");
+      }
     } catch (e) {
       setPushResult(typeof e === "string" ? e : "Could not remove them.");
     }
@@ -824,7 +885,11 @@ const AccountScreen: React.FC = () => {
                 >
                   {syncNowLoading ? "Syncing..." : "Sync now"}
                 </button>
-                <button type="button" className="acct-btn acct-btn--quiet" onClick={handleLogout}>
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--quiet acct-btn--danger"
+                  onClick={handleLogout}
+                >
                   Sign out
                 </button>
               </div>
@@ -896,12 +961,12 @@ const AccountScreen: React.FC = () => {
                 </div>
                 <p className="acct-card-desc">
                   {syncMode === "realtime"
-                    ? "New items from your other devices show up here the moment they arrive."
-                    : "Your changes still upload right away. Items from your other devices arrive every 5 minutes, or when you press Sync now."}
+                    ? "Items from your other devices arrive the moment they are copied."
+                    : "Items from your other devices arrive every 5 minutes, or when you press Sync now. What you copy here still uploads right away."}
                 </p>
                 <p className="acct-mode-note">
-                  This is only about your own devices. Spaces you share with
-                  other people stay live either way.
+                  Spaces are not affected. What other people share with you
+                  always arrives live.
                 </p>
               </div>
 
@@ -910,24 +975,26 @@ const AccountScreen: React.FC = () => {
               <div className="acct-card acct-mode">
                 <div className="acct-mode-head">
                   <span className="acct-row-name">
-                    Everything else on this device
+                    Items this account has never seen
                   </span>
                   <div className="acct-id-actions">
                     <button
                       type="button"
                       className="acct-btn acct-btn--sm"
                       onClick={handlePushUnsynced}
-                      disabled={pushingOld || unpushing}
+                      disabled={pushingOld || unpushing || progress !== null}
                     >
-                      {pushingOld ? "Uploading..." : "Upload"}
+                      {progress?.mode === "upload" || pushingOld
+                        ? "Uploading..."
+                        : "Upload"}
                     </button>
                     <button
                       type="button"
-                      className="acct-btn acct-btn--sm acct-btn--quiet"
+                      className="acct-btn acct-btn--sm acct-btn--quiet acct-btn--danger"
                       onClick={handleUnpushAll}
-                      disabled={pushingOld || unpushing}
+                      disabled={pushingOld || unpushing || progress !== null}
                     >
-                      {unpushing
+                      {progress?.mode === "remove" || unpushing
                         ? "Removing..."
                         : unpushArmed
                           ? "Confirm?"
@@ -935,10 +1002,45 @@ const AccountScreen: React.FC = () => {
                     </button>
                   </div>
                 </div>
-                <p className="acct-card-desc">
-                  {pushResult ??
-                    "Items you saved before signing in are still local only. Upload sends them, encrypted, and leaves what is already synced alone. Remove takes your synced items back off the server - and off your other devices - while this device keeps them."}
-                </p>
+                {progress ? (
+                  <div
+                    className="acct-progress"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={progress.total}
+                    aria-valuenow={progress.done}
+                  >
+                    <div className="acct-progress-track">
+                      <span
+                        className="acct-progress-fill"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="acct-progress-label">
+                      {progress.mode === "upload"
+                        ? `Uploaded ${progress.done} of ${progress.total}`
+                        : `Removed ${progress.done} of ${progress.total}`}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="acct-card-desc">
+                    {pushResult ??
+                      "Sync picks up items as you copy them, so anything from before you signed in stays here. Upload sends those, encrypted."}
+                  </p>
+                )}
+                {!pushResult && !progress && (
+                  <p className="acct-mode-note">
+                    Remove from cloud does the opposite for everything: your
+                    items leave the server and your other devices, and only this
+                    device keeps them.
+                  </p>
+                )}
+                {progress?.mode === "upload" && (
+                  <p className="acct-mode-note">
+                    Large images take a moment. You can leave this screen; the
+                    upload keeps going.
+                  </p>
+                )}
               </div>
             </section>
 

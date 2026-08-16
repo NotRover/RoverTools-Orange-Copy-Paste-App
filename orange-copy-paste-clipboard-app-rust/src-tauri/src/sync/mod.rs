@@ -44,6 +44,7 @@ use crate::sync::client::{
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
+use tokio::sync::Semaphore;
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
@@ -78,7 +79,19 @@ struct PushCtx {
     id_map: Arc<Mutex<IdMap>>,
     status: Arc<Mutex<SyncStatusInfo>>,
     app: tauri::AppHandle,
+    /// Caps how many pushes are in flight at once. See [`PUSH_CONCURRENCY`].
+    gate: Arc<Semaphore>,
 }
+
+/// How many pushes may talk to the server at the same time.
+///
+/// Every entry gets its own task, so a bulk upload of a few thousand items
+/// used to open a few thousand requests at once: the backend answered 502 and
+/// the blob presign timed out, and each failure became a skip the user had to
+/// heal by hand. A small window is both faster and far more reliable here -
+/// nothing is queued behind a stalled connection pool, and the server is never
+/// the thing that breaks.
+const PUSH_CONCURRENCY: usize = 6;
 
 /// Everything that differs between a clipboard push and a note push.
 struct PushJob {
@@ -287,6 +300,8 @@ pub struct SyncClient {
 
     /// Pending offline operation queue.
     pending_queue: Arc<Mutex<PendingQueue>>,
+    /// Shared permit pool bounding concurrent pushes to [`PUSH_CONCURRENCY`].
+    push_gate: Arc<Semaphore>,
     /// Client-to-server ID mapping.
     id_map: Arc<Mutex<IdMap>>,
     /// Sync state (cursor, device_id, user_id).
@@ -420,6 +435,7 @@ impl SyncClient {
             http: Mutex::new(None),
             pending_oauth: Mutex::new(None),
             pending_queue,
+            push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
             id_map,
             sync_state,
             status,
@@ -998,6 +1014,7 @@ impl SyncClient {
             id_map: Arc::clone(&self.id_map),
             status: Arc::clone(&self.status),
             app: self.app.clone(),
+            gate: Arc::clone(&self.push_gate),
         }
     }
 
@@ -1146,6 +1163,7 @@ impl SyncClient {
         let queue = Arc::clone(&self.pending_queue);
         let id_map = Arc::clone(&self.id_map);
         let status = Arc::clone(&self.status);
+        let gate = Arc::clone(&self.push_gate);
         let type_str = entry_type.as_str().to_string();
         let map_key = format!("{type_str}:{client_id}");
         // The tombstone must reach the same spaces the entry did, so members
@@ -1158,6 +1176,9 @@ impl SyncClient {
             .unwrap_or_default();
 
         self.handle.spawn(async move {
+            // "Remove from cloud" fans out one of these per entry, so they
+            // share the push window rather than flooding the server.
+            let _permit = gate.acquire_owned().await;
             // Always tombstone — even if offline (invariant #5).  A tombstone is
             // a push with deleted_at set, keyed by client_id (no server_id).
             if let (Some(http), Some(umk)) =
@@ -2175,6 +2196,9 @@ async fn upload_image_blob(
 /// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.  `enc_key`
 /// is the entry's freshly minted CEK; `job.wrapped_keys` carries its envelope.
 async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
+    // Held for the whole task, so the blob upload counts against the window
+    // too - that is the slow half of an image push.
+    let _permit = ctx.gate.clone().acquire_owned().await;
     let PushJob {
         client_id,
         content,

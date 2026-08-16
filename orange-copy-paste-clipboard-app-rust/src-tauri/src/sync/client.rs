@@ -27,6 +27,21 @@ use crate::sync::supabase::SupabaseAuth;
 
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
+/// Blob transfers move up to 5 MB over a presigned S3/R2 URL, which the
+/// 10-second default cuts off on a slow link.
+const BLOB_TRANSFER_TIMEOUT_SECS: u64 = 90;
+
+/// How long to wait before the single retry of a request that never reached
+/// the backend.  Long enough for a host that spun down while idle to finish
+/// waking, short enough that a genuinely offline machine fails quickly.
+const TRANSPORT_RETRY_DELAY_SECS: u64 = 3;
+
+/// How many times to retry a request the server itself failed (502/503/504 from
+/// an overloaded or restarting backend, 429 from the rate limiter).  Without
+/// this a momentary backend hiccup permanently skips the entry, because a skip
+/// is never queued.
+const SERVER_RETRY_ATTEMPTS: u32 = 3;
+
 /// Refresh the access token this many seconds before it actually expires, so a
 /// request (or a WebSocket handshake) never goes out holding a JWT that dies
 /// mid-flight.
@@ -436,6 +451,48 @@ pub struct SyncHttpClient {
     access_token_expires_at: AtomicU64,
 }
 
+/// Seconds the server asked us to wait, from a `Retry-After` header.  Only the
+/// delta-seconds form is honoured; the HTTP-date form is rare and not worth a
+/// date parser here.
+fn retry_after_secs(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|s| s.min(30))
+}
+
+/// Flatten a reqwest transport failure into something a user can act on.
+///
+/// `reqwest::Error`'s own `Display` stops at "error sending request for url
+/// (...)" and hides the cause in `source()`, so every network problem - DNS,
+/// TLS, refused connection, timeout - reaches the UI looking identical.
+fn transport_detail(e: &reqwest::Error) -> String {
+    let head = if e.is_timeout() {
+        "timed out"
+    } else if e.is_connect() {
+        "could not reach the server"
+    } else if e.is_body() || e.is_decode() {
+        "the response was cut short"
+    } else {
+        "request failed"
+    };
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    let mut deepest = String::new();
+    while let Some(c) = cause {
+        deepest = c.to_string();
+        cause = c.source();
+    }
+    if deepest.is_empty() {
+        head.to_string()
+    } else {
+        format!("{head} ({deepest})")
+    }
+}
+
 impl SyncHttpClient {
     pub fn new(base_url: String, supabase: Arc<SupabaseAuth>) -> Arc<Self> {
         Self::with_timeout(base_url, supabase, REQUEST_TIMEOUT_SECS)
@@ -613,8 +670,10 @@ impl SyncHttpClient {
     {
         self.ensure_fresh_access_token().await;
         let mut refreshed = false;
+        let mut retried = false;
+        let mut attempt: u32 = 0;
         loop {
-            let resp = factory()
+            let sent = factory()
                 .map_err(|message| ApiError {
                     // A request we could not even build is a local problem
                     // (no token yet), not something a retry fixes.
@@ -622,11 +681,28 @@ impl SyncHttpClient {
                     message,
                 })?
                 .send()
-                .await
-                .map_err(|e| ApiError {
-                    status: None,
-                    message: format!("{tag}: {e}"),
-                })?;
+                .await;
+            let resp = match sent {
+                Ok(resp) => resp,
+                // Nothing came back at all.  A host that spins down when idle
+                // drops the first request that wakes it and answers the next
+                // one, so give it exactly one more try before giving up - the
+                // alternative is a skipped entry the user has to heal by hand.
+                Err(e) if !retried && (e.is_timeout() || e.is_connect()) => {
+                    retried = true;
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        TRANSPORT_RETRY_DELAY_SECS,
+                    ))
+                    .await;
+                    continue;
+                }
+                Err(e) => {
+                    return Err(ApiError {
+                        status: None,
+                        message: format!("{tag}: {}", transport_detail(&e)),
+                    })
+                }
+            };
             let code = resp.status().as_u16();
             if code == 401 && !refreshed {
                 self.refresh_access_token().await.map_err(|message| ApiError {
@@ -639,11 +715,28 @@ impl SyncHttpClient {
             if allow_404 && code == 404 {
                 return Ok(None);
             }
+            // The server is up but could not serve this request right now.
+            // Back off and try again: the alternative is a skipped entry that
+            // never heals on its own.
+            if matches!(code, 429 | 502 | 503 | 504) && attempt < SERVER_RETRY_ATTEMPTS {
+                let wait = retry_after_secs(&resp).unwrap_or(1u64 << attempt);
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                continue;
+            }
             if !resp.status().is_success() {
                 let body = resp.text().await.unwrap_or_default();
+                let body = body.trim();
+                let detail = if body.is_empty() {
+                    // A bare 502 from a proxy has no body, and "blob
+                    // request-upload 502:" told the user nothing at all.
+                    "the server did not respond in time; try again"
+                } else {
+                    body
+                };
                 return Err(ApiError {
                     status: Some(code),
-                    message: format!("{tag} {code}: {body}"),
+                    message: format!("{tag} {code}: {detail}"),
                 });
             }
             return Ok(Some(resp));
@@ -911,10 +1004,11 @@ impl SyncHttpClient {
             .inner
             .put(upload_url)
             .header(reqwest::header::CONTENT_TYPE, mime)
+            .timeout(std::time::Duration::from_secs(BLOB_TRANSFER_TIMEOUT_SECS))
             .body(data)
             .send()
             .await
-            .map_err(|e| format!("blob upload: {e}"))?;
+            .map_err(|e| format!("blob upload: {}", transport_detail(&e)))?;
         if !resp.status().is_success() {
             return Err(format!("blob upload {}", resp.status().as_u16()));
         }
@@ -952,16 +1046,17 @@ impl SyncHttpClient {
         let resp = self
             .inner
             .get(get_url)
+            .timeout(std::time::Duration::from_secs(BLOB_TRANSFER_TIMEOUT_SECS))
             .send()
             .await
-            .map_err(|e| format!("blob download: {e}"))?;
+            .map_err(|e| format!("blob download: {}", transport_detail(&e)))?;
         if !resp.status().is_success() {
             return Err(format!("blob download {}", resp.status().as_u16()));
         }
         resp.bytes()
             .await
             .map(|b| b.to_vec())
-            .map_err(|e| format!("blob download body: {e}"))
+            .map_err(|e| format!("blob download body: {}", transport_detail(&e)))
     }
 
     pub async fn blob_quota(&self) -> Result<QuotaResponse, String> {

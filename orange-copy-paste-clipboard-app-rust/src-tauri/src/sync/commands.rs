@@ -345,9 +345,13 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
 /// Push every local item the server has never seen. Sync only ever picks up
 /// items as they are created, so anything captured before signing in (or while
 /// sync was off) stays local forever without this. Already-synced items are
-/// left alone. Returns how many pushes were started.
+/// left alone.
+///
+/// Returns the id_map keys it started a push for, not a count: each push is an
+/// independent background task, so the only way the UI can show progress is to
+/// watch these keys land in [`sync_settled_count`].
 #[tauri::command]
-pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<usize, String> {
+pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
     let known = sync.entry_states();
 
@@ -368,14 +372,16 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<usize, String> {
         .cloned()
         .collect();
 
-    let count = entries.len() + notes.len();
+    let mut keys = Vec::with_capacity(entries.len() + notes.len());
     for entry in entries {
+        keys.push(format!("clipboard:{}", entry.id));
         sync.on_new_clipboard_entry(entry);
     }
     for note in notes {
+        keys.push(format!("note:{}", note.id));
         sync.on_new_note(note);
     }
-    Ok(count)
+    Ok(keys)
 }
 
 /// Push the named local items, whether or not they have been pushed before.
@@ -436,12 +442,14 @@ pub fn sync_unpush_entries(
 
 /// Take everything this device has synced off the server, keeping the local
 /// copies. Same tombstone semantics as [`sync_unpush_entries`].
+///
+/// Returns the keys it tombstoned, so the UI can follow them out of
+/// [`sync_settled_count`] the same way an upload follows keys in.
 #[tauri::command]
-pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<usize, String> {
+pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
-    let keys = sync.entry_states();
-    let mut count = 0;
-    for key in keys.keys() {
+    let keys: Vec<String> = sync.entry_states().into_keys().collect();
+    for key in &keys {
         let Some((kind, id)) = key.split_once(':') else {
             continue;
         };
@@ -450,9 +458,26 @@ pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<usize, String> {
         } else {
             sync.on_delete_clipboard_entry(id.to_string());
         }
-        count += 1;
     }
-    Ok(count)
+    Ok(keys)
+}
+
+/// How many of `keys` the server has acknowledged, i.e. are recorded as fully
+/// synced right now. Bulk uploads and removals are fan-outs of independent
+/// background tasks with no completion signal of their own, so the UI polls
+/// this: an upload counts the number rising to the total, a removal counts it
+/// falling to zero. Cheap on purpose - one number, no per-entry payload.
+#[tauri::command]
+pub fn sync_settled_count(keys: Vec<String>, state: State<'_, AppState>) -> usize {
+    let states = state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.entry_states())
+        .unwrap_or_default();
+    keys.iter()
+        .filter(|k| states.get(*k).is_some_and(|s| *s == "synced"))
+        .count()
 }
 
 #[tauri::command]
