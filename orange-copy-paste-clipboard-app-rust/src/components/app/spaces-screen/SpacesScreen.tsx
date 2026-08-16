@@ -29,10 +29,7 @@ import {
 } from "../../../types";
 import { UserAvatar } from "../../UserAvatar";
 import { EntryTypePill } from "../../entry-types/EntryTypePill";
-import {
-  TYPE_ICONS,
-  TYPE_LABELS,
-} from "../../entry-types/EntryTypePill";
+import { TYPE_ICONS, TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import Topbar, { SortDropdown, LayoutSegment } from "../topbar/Topbar";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
@@ -93,8 +90,14 @@ const CONTENT_OPTIONS: { value: SendFilter["content"]; label: string }[] = [
 ];
 
 const AVATAR_PALETTE = [
-  "#ff3e1c", "#f59e0b", "#22c55e", "#3b82f6",
-  "#8b5cf6", "#ec4899", "#14b8a6", "#f97316",
+  "#ff3e1c",
+  "#f59e0b",
+  "#22c55e",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#14b8a6",
+  "#f97316",
 ];
 
 export function spaceAvatarColor(seed: string): string {
@@ -180,7 +183,10 @@ function matchesSearch(item: FeedItem, q: string): boolean {
 
 // ── Feed context menu ─────────────────────────────────────────────────
 
-interface MenuPos { x: number; y: number }
+interface MenuPos {
+  x: number;
+  y: number;
+}
 
 const FeedCardMenu: React.FC<{
   pos: MenuPos | null;
@@ -196,7 +202,9 @@ const FeedCardMenu: React.FC<{
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
     document.addEventListener("mousedown", onDown, true);
     document.addEventListener("keydown", onEsc);
     return () => {
@@ -211,7 +219,8 @@ const FeedCardMenu: React.FC<{
     el.style.left = `${pos.x}px`;
     el.style.top = `${pos.y}px`;
     const r = el.getBoundingClientRect();
-    let x = pos.x, y = pos.y;
+    let x = pos.x,
+      y = pos.y;
     if (r.right > window.innerWidth) x = Math.max(0, pos.x - r.width);
     if (r.bottom > window.innerHeight) y = Math.max(0, pos.y - r.height);
     el.style.left = `${x}px`;
@@ -220,7 +229,10 @@ const FeedCardMenu: React.FC<{
 
   if (!pos) return null;
 
-  const closeAfter = (fn: () => void) => () => { fn(); onClose(); };
+  const closeAfter = (fn: () => void) => () => {
+    fn();
+    onClose();
+  };
 
   return createPortal(
     <div
@@ -315,9 +327,7 @@ const FeedFilterDropdown: React.FC<{
                       onChange={() => sf.toggleKind(k)}
                       className="cs-type-cb"
                     />
-                    <span
-                      className={`cs-type-icon type-pill type-pill--${k}`}
-                    >
+                    <span className={`cs-type-icon type-pill type-pill--${k}`}>
                       {TYPE_ICONS[k]}
                     </span>
                     <span className="cs-type-name">{TYPE_LABELS[k]}</span>
@@ -473,7 +483,11 @@ const DirectionBadge: React.FC<{ incoming: boolean }> = ({ incoming }) => (
     data-tooltip={incoming ? "Shared by a member" : "Shared from this account"}
     data-tooltip-pos="right"
   >
-    {incoming ? <ArrowDownLeft size={11} weight="bold" /> : <ArrowUpRight size={11} weight="bold" />}
+    {incoming ? (
+      <ArrowDownLeft size={11} weight="bold" />
+    ) : (
+      <ArrowUpRight size={11} weight="bold" />
+    )}
   </span>
 );
 
@@ -526,7 +540,11 @@ const ClipFeedCard: React.FC<{
       <div
         className="sp-list-card"
         onClick={() => onView(entry)}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPos({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenuPos({ x: e.clientX, y: e.clientY });
+        }}
       >
         <DirectionBadge incoming={incoming} />
         {showSourceBadge && (
@@ -543,11 +561,7 @@ const ClipFeedCard: React.FC<{
           className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
           onClick={handleCopy}
         >
-          {copied ? (
-            <Check size={10} weight="bold" />
-          ) : (
-            <Copy size={10} />
-          )}
+          {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
         </button>
       </div>
     );
@@ -577,7 +591,9 @@ const ClipFeedCard: React.FC<{
       </div>
     );
     preview = (
-      <p className="card-text card-text--image-name">{entry.label ?? "Image"}</p>
+      <p className="card-text card-text--image-name">
+        {entry.label ?? "Image"}
+      </p>
     );
   } else if (entry.type === "file") {
     const paths = filePaths(entry.content);
@@ -603,7 +619,11 @@ const ClipFeedCard: React.FC<{
       <div
         className="entry-card sp-feed-entry-card"
         onClick={() => onView(entry)}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPos({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setMenuPos({ x: e.clientX, y: e.clientY });
+        }}
       >
         {mediaSection}
         <div className="card-body">
@@ -989,237 +1009,260 @@ const SpaceSettings: React.FC<{
       </header>
 
       <div className="sp-rules-body">
-      {error && <span className="sp-settings-error">{error}</span>}
+        {error && <span className="sp-settings-error">{error}</span>}
 
-      {/* Rules: what the space does with items, in and out. */}
-      <div className="sp-settings-block">
-        <div className="sp-settings-label">
-          Rules
-          {filter.enabled && <span className="sp-settings-count">auto</span>}
-        </div>
-        <label className="sp-toggle-row">
-          <span className="sp-toggle-text">
-            <span className="sp-toggle-title">Copy new items in</span>
-            <span className="sp-toggle-desc">
-              {autocopy
-                ? "Anything shared here lands on your clipboard as it arrives."
-                : "Items still appear in this space, they just do not touch your clipboard."}
+        {/* Rules: what the space does with items, in and out. */}
+        <div className="sp-settings-block">
+          <div className="sp-settings-label">
+            Rules
+            {filter.enabled && <span className="sp-settings-count">auto</span>}
+          </div>
+          <label className="sp-toggle-row">
+            <span className="sp-toggle-text">
+              <span className="sp-toggle-title">Copy new items in</span>
+              <span className="sp-toggle-desc">
+                {autocopy
+                  ? "Anything shared here lands on your clipboard as it arrives."
+                  : "Items still appear in this space, they just do not touch your clipboard."}
+              </span>
             </span>
-          </span>
-          <input
-            type="checkbox"
-            className="sp-switch"
-            checked={autocopy}
-            onChange={(e) => onAutocopy(e.target.checked)}
-          />
-        </label>
-        <label className="sp-toggle-row">
-          <span className="sp-toggle-text">
-            <span className="sp-toggle-title">Share new items out</span>
-            <span className="sp-toggle-desc">
-              {filter.enabled
-                ? "New items that match the rules below are shared here. Older items are untouched."
-                : "Off. Only items you share by hand go into this space."}
+            <input
+              type="checkbox"
+              className="sp-switch"
+              checked={autocopy}
+              onChange={(e) => onAutocopy(e.target.checked)}
+            />
+          </label>
+          <label className="sp-toggle-row">
+            <span className="sp-toggle-text">
+              <span className="sp-toggle-title">Share new items out</span>
+              <span className="sp-toggle-desc">
+                {filter.enabled
+                  ? "New items that match the rules below are shared here. Older items are untouched."
+                  : "Off. Only items you share by hand go into this space."}
+              </span>
             </span>
-          </span>
-          <input
-            type="checkbox"
-            className="sp-switch"
-            checked={filter.enabled}
-            onChange={(e) => onFilter({ ...filter, enabled: e.target.checked })}
-          />
-        </label>
+            <input
+              type="checkbox"
+              className="sp-switch"
+              checked={filter.enabled}
+              onChange={(e) =>
+                onFilter({ ...filter, enabled: e.target.checked })
+              }
+            />
+          </label>
 
-        {filter.enabled && (
-          <div className="sp-filter-body">
-            <div className="sp-filter-section">
-              <div className="sp-filter-label">Content</div>
-              <div className="sp-pill-row">
-                {CONTENT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`sp-pill${filter.content === opt.value ? " sp-pill--on" : ""}`}
-                    onClick={() => onFilter({ ...filter, content: opt.value })}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {filter.content !== "notes" && (
+          {filter.enabled && (
+            <div className="sp-filter-body">
               <div className="sp-filter-section">
-                <div className="sp-filter-label">
-                  Clipboard types
-                  {filter.kinds.length > 0 ? (
-                    <span className="sp-settings-count">{filter.kinds.length}</span>
-                  ) : (
-                    <span className="sp-filter-hint">all types</span>
-                  )}
-                </div>
-                <div className="cs-type-grid">
-                  {ALL_DISPLAY_KINDS.map((k) => (
-                    <label
-                      key={k}
-                      className={`cs-type-option${filter.kinds.includes(k) ? " cs-type-option--on" : ""}`}
+                <div className="sp-filter-label">Content</div>
+                <div className="sp-pill-row">
+                  {CONTENT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`sp-pill${filter.content === opt.value ? " sp-pill--on" : ""}`}
+                      onClick={() =>
+                        onFilter({ ...filter, content: opt.value })
+                      }
                     >
-                      <input
-                        type="checkbox"
-                        checked={filter.kinds.includes(k)}
-                        onChange={() => toggleKind(k)}
-                        className="cs-type-cb"
-                      />
-                      <span className={`cs-type-icon type-pill type-pill--${k}`}>
-                        {TYPE_ICONS[k]}
-                      </span>
-                      <span className="cs-type-name">{TYPE_LABELS[k]}</span>
-                    </label>
+                      {opt.label}
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
 
-            <div className="sp-filter-section">
-              <div className="sp-filter-label">
-                Groups
-                {filter.groups.length > 0 ? (
-                  <span className="sp-settings-count">{filter.groups.length}</span>
-                ) : (
-                  <span className="sp-filter-hint">any group</span>
-                )}
-              </div>
-              {availableGroups.length === 0 ? (
-                <p className="sp-filter-empty">
-                  You have no groups yet. Tag items with a group to filter by it.
-                </p>
-              ) : (
-                <div className="sp-chip-row">
-                  {availableGroups.map((g) => {
-                    const on = filter.groups.includes(g);
-                    const c = groupColor(g);
-                    return (
-                      <button
-                        key={g}
-                        type="button"
-                        className={`sp-group-chip${on ? " sp-group-chip--on" : ""}`}
-                        style={on ? { background: c.bg, color: c.fg } : undefined}
-                        onClick={() => toggleGroup(g)}
+              {filter.content !== "notes" && (
+                <div className="sp-filter-section">
+                  <div className="sp-filter-label">
+                    Clipboard types
+                    {filter.kinds.length > 0 ? (
+                      <span className="sp-settings-count">
+                        {filter.kinds.length}
+                      </span>
+                    ) : (
+                      <span className="sp-filter-hint">all types</span>
+                    )}
+                  </div>
+                  <div className="cs-type-grid">
+                    {ALL_DISPLAY_KINDS.map((k) => (
+                      <label
+                        key={k}
+                        className={`cs-type-option${filter.kinds.includes(k) ? " cs-type-option--on" : ""}`}
                       >
-                        <span className="sp-group-chip-dot" />
-                        {g}
-                      </button>
-                    );
-                  })}
+                        <input
+                          type="checkbox"
+                          checked={filter.kinds.includes(k)}
+                          onChange={() => toggleKind(k)}
+                          className="cs-type-cb"
+                        />
+                        <span
+                          className={`cs-type-icon type-pill type-pill--${k}`}
+                        >
+                          {TYPE_ICONS[k]}
+                        </span>
+                        <span className="cs-type-name">{TYPE_LABELS[k]}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
-        )}
-      </div>
 
-      {/* People: who is here, and how to add more. */}
-      <div className="sp-settings-block">
-        <div className="sp-settings-label">
-          People
-          <span className="sp-settings-count">{space.member_count}</span>
-        </div>
-        <div className="sp-member-list">
-          {space.members.length === 0 ? (
-            <p className="sp-filter-empty">Just you so far.</p>
-          ) : (
-            space.members.map((m) => (
-              <div key={m.user_id} className="sp-member-row">
-                <UserAvatar
-                  className="sp-member-pic"
-                  url={m.avatar_url}
-                  label={m.display_name || ""}
-                  glyphSize={10}
-                />
-                <span className="sp-member-name">
-                  {m.user_id === selfUserId ? "You" : m.display_name || "Member"}
-                </span>
-                {m.role === "owner" && (
-                  <span className="sp-badge sp-badge--owner">owner</span>
-                )}
-                {!m.has_space_key && (
-                  <span className="sp-badge sp-badge--warn">waiting for key</span>
-                )}
-                <Circle
-                  size={6}
-                  weight="fill"
-                  color={m.online ? "#22c55e" : "#6b7280"}
-                />
-                {space.is_owner && m.user_id !== selfUserId && (
-                  <button
-                    type="button"
-                    className="sp-btn sp-btn--danger"
-                    onClick={() => onRemoveMember(m.user_id)}
-                  >
-                    Remove
-                  </button>
+              <div className="sp-filter-section">
+                <div className="sp-filter-label">
+                  Groups
+                  {filter.groups.length > 0 ? (
+                    <span className="sp-settings-count">
+                      {filter.groups.length}
+                    </span>
+                  ) : (
+                    <span className="sp-filter-hint">any group</span>
+                  )}
+                </div>
+                {availableGroups.length === 0 ? (
+                  <p className="sp-filter-empty">
+                    You have no groups yet. Tag items with a group to filter by
+                    it.
+                  </p>
+                ) : (
+                  <div className="sp-chip-row">
+                    {availableGroups.map((g) => {
+                      const on = filter.groups.includes(g);
+                      const c = groupColor(g);
+                      return (
+                        <button
+                          key={g}
+                          type="button"
+                          className={`sp-group-chip${on ? " sp-group-chip--on" : ""}`}
+                          style={
+                            on ? { background: c.bg, color: c.fg } : undefined
+                          }
+                          onClick={() => toggleGroup(g)}
+                        >
+                          <span className="sp-group-chip-dot" />
+                          {g}
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            ))
+            </div>
           )}
         </div>
 
-        {/* Two rows of the same width, both ending in an action, so the
+        {/* People: who is here, and how to add more. */}
+        <div className="sp-settings-block">
+          <div className="sp-settings-label">
+            People
+            <span className="sp-settings-count">{space.member_count}</span>
+          </div>
+          <div className="sp-member-list">
+            {space.members.length === 0 ? (
+              <p className="sp-filter-empty">Just you so far.</p>
+            ) : (
+              space.members.map((m) => (
+                <div key={m.user_id} className="sp-member-row">
+                  <UserAvatar
+                    className="sp-member-pic"
+                    url={m.avatar_url}
+                    label={m.display_name || ""}
+                    glyphSize={10}
+                  />
+                  <span className="sp-member-name">
+                    {m.user_id === selfUserId
+                      ? "You"
+                      : m.display_name || "Member"}
+                  </span>
+                  {m.role === "owner" && (
+                    <span className="sp-badge sp-badge--owner">owner</span>
+                  )}
+                  {!m.has_space_key && (
+                    <span className="sp-badge sp-badge--warn">
+                      waiting for key
+                    </span>
+                  )}
+                  <Circle
+                    size={6}
+                    weight="fill"
+                    color={m.online ? "#22c55e" : "#6b7280"}
+                  />
+                  {space.is_owner && m.user_id !== selfUserId && (
+                    <button
+                      type="button"
+                      className="sp-btn sp-btn--danger"
+                      onClick={() => onRemoveMember(m.user_id)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Two rows of the same width, both ending in an action, so the
             column reads as one block instead of four loose controls. */}
-        <div className="sp-invite-box">
-          {space.invite_code && (
+          <div className="sp-invite-box">
+            {space.invite_code && (
+              <div className="sp-invite-row">
+                <code className="sp-invite-code">
+                  {formatInviteCode(space.invite_code)}
+                </code>
+                <button
+                  type="button"
+                  className="sp-btn sp-btn--icon"
+                  onClick={() => copy("code", space.invite_code!)}
+                  data-tooltip="Copy code"
+                  data-tooltip-pos="top"
+                >
+                  {copied === "code" ? <Check size={12} /> : <Copy size={12} />}
+                  <span className="sp-btn-label">
+                    {copied === "code" ? "Copied" : "Copy code"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="sp-btn sp-btn--icon"
+                  onClick={() =>
+                    copy("link", `orange://join?code=${space.invite_code}`)
+                  }
+                  data-tooltip="Copy invite link"
+                  data-tooltip-pos="top"
+                >
+                  {copied === "link" ? (
+                    <Check size={12} />
+                  ) : (
+                    <ShareNetwork size={12} />
+                  )}
+                  <span className="sp-btn-label">
+                    {copied === "link" ? "Copied" : "Copy link"}
+                  </span>
+                </button>
+              </div>
+            )}
             <div className="sp-invite-row">
-              <code className="sp-invite-code">
-                {formatInviteCode(space.invite_code)}
-              </code>
+              <input
+                className="sp-inline-input"
+                type="email"
+                placeholder="Invite by email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") sendInvite();
+                }}
+              />
               <button
                 type="button"
-                className="sp-btn sp-btn--icon"
-                onClick={() => copy("code", space.invite_code!)}
-                data-tooltip="Copy code"
-                data-tooltip-pos="left"
+                className="sp-btn"
+                onClick={sendInvite}
+                disabled={inviting || !email.trim()}
               >
-                {copied === "code" ? <Check size={12} /> : <Copy size={12} />}
-              </button>
-              <button
-                type="button"
-                className="sp-btn sp-btn--icon"
-                onClick={() =>
-                  copy("link", `orange://join?code=${space.invite_code}`)
-                }
-                data-tooltip="Copy invite link"
-                data-tooltip-pos="left"
-              >
-                {copied === "link" ? (
-                  <Check size={12} />
-                ) : (
-                  <ShareNetwork size={12} />
-                )}
+                {inviting ? "..." : "Send"}
               </button>
             </div>
-          )}
-          <div className="sp-invite-row">
-            <input
-              className="sp-inline-input"
-              type="email"
-              placeholder="Invite by email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") sendInvite();
-              }}
-            />
-            <button
-              type="button"
-              className="sp-btn"
-              onClick={sendInvite}
-              disabled={inviting || !email.trim()}
-            >
-              {inviting ? "..." : "Send"}
-            </button>
           </div>
         </div>
-      </div>
       </div>
 
       {/* Pinned, so the one destructive control sits on the column edge instead
@@ -1235,7 +1278,11 @@ const SpaceSettings: React.FC<{
             {armed ? "Confirm delete?" : "Delete space"}
           </button>
         ) : (
-          <button type="button" className="sp-btn sp-btn--danger" onClick={onLeave}>
+          <button
+            type="button"
+            className="sp-btn sp-btn--danger"
+            onClick={onLeave}
+          >
             Leave space
           </button>
         )}
@@ -1287,6 +1334,72 @@ const RulesPlaceholder: React.FC<{ hasSpaces: boolean }> = ({ hasSpaces }) => (
   </div>
 );
 
+// ── Cross-visit cache ─────────────────────────────────────────────────
+
+/** The screen unmounts when you switch away, so every visit used to start
+ *  from empty and paint "No spaces yet" until the first round trip came back.
+ *  This keeps the last answer so a return visit renders it immediately and
+ *  the fetch only corrects it. */
+const cache: {
+  loaded: boolean;
+  spaces: Space[];
+  selfUserId: string | null;
+  shares: Record<string, string[]>;
+  remote: string[];
+  invites: SyncInviteList;
+  filters: Record<string, SendFilter>;
+  autocopy: Record<string, boolean>;
+} = {
+  loaded: false,
+  spaces: [],
+  selfUserId: null,
+  shares: {},
+  remote: [],
+  invites: { sent: [], received: [] },
+  filters: {},
+  autocopy: {},
+};
+
+const SELECTED_KEY = "spaces-selected";
+
+// ── Resizable side panels ─────────────────────────────────────────────
+
+/** Both panels resize within a range rather than freely: the feed in the
+ *  middle is the point of the screen, and a space card stops being readable
+ *  under ~190px. */
+interface PaneSize {
+  key: string;
+  min: number;
+  max: number;
+  def: number;
+}
+
+const LIST_PANE: PaneSize = {
+  key: "spaces-list-width",
+  // The floor is where "1 member - 1 online" still fits beside the avatar and
+  // the owner badge. Below it the meta line wraps and cards go double height.
+  min: 244,
+  max: 380,
+  def: 252,
+};
+const RULES_PANE: PaneSize = {
+  key: "spaces-rules-width",
+  min: 240,
+  max: 420,
+  def: 272,
+};
+
+/** Below this the invite code needs the whole row, so its actions are icons. */
+const RULES_LABEL_WIDTH = 336;
+
+const clampWidth = (pane: PaneSize, px: number) =>
+  Math.min(pane.max, Math.max(pane.min, Math.round(px)));
+
+const readWidth = (pane: PaneSize) => {
+  const raw = Number(localStorage.getItem(pane.key));
+  return Number.isFinite(raw) && raw > 0 ? clampWidth(pane, raw) : pane.def;
+};
+
 // ── Props ─────────────────────────────────────────────────────────────
 
 interface SpacesScreenProps {
@@ -1306,20 +1419,36 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   availableGroups,
   onCopyEntry,
 }) => {
-  const [spaces, setSpaces] = useState<Space[]>([]);
-  const [selfUserId, setSelfUserId] = useState<string | null>(null);
+  const [spaces, setSpaces] = useState<Space[]>(cache.spaces);
+  const [loaded, setLoaded] = useState(cache.loaded);
+  const screenRef = useRef<HTMLDivElement>(null);
+  const [listWidth, setListWidth] = useState(() => readWidth(LIST_PANE));
+  const [rulesWidth, setRulesWidth] = useState(() => readWidth(RULES_PANE));
+  const [dragging, setDragging] = useState<"list" | "rules" | null>(null);
+  const [selfUserId, setSelfUserId] = useState<string | null>(cache.selfUserId);
   // Auth, not connectivity: a signed-in device that is offline can still be
   // shown its spaces, but nothing that needs the server should be offered.
   const signedIn = selfUserId !== null;
   // "clipboard:{id}" / "note:{id}" -> space ids the item is shared into.
-  const [entryShares, setEntryShares] = useState<Record<string, string[]>>({});
+  const [entryShares, setEntryShares] = useState<Record<string, string[]>>(
+    cache.shares,
+  );
   // Same keys, for the items another member wrote. Anything absent went out
   // from this account, which is also the right answer while sync is off.
-  const [remoteKeys, setRemoteKeys] = useState<Set<string>>(() => new Set());
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [invites, setInvites] = useState<SyncInviteList>({ sent: [], received: [] });
-  const [sendFilters, setSendFilters] = useState<Record<string, SendFilter>>({});
-  const [autocopy, setAutocopy] = useState<Record<string, boolean>>({});
+  const [remoteKeys, setRemoteKeys] = useState<Set<string>>(
+    () => new Set(cache.remote),
+  );
+  // Reopens on the space you left, which is usually the one you want again.
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    localStorage.getItem(SELECTED_KEY),
+  );
+  const [invites, setInvites] = useState<SyncInviteList>(cache.invites);
+  const [sendFilters, setSendFilters] = useState<Record<string, SendFilter>>(
+    cache.filters,
+  );
+  const [autocopy, setAutocopy] = useState<Record<string, boolean>>(
+    cache.autocopy,
+  );
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
   const [search, setSearch] = useState("");
@@ -1337,7 +1466,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Feed filter state
-  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(new Set());
+  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
+    new Set(),
+  );
   const [dateAfter, setDateAfter] = useState("");
   const [dateBefore, setDateBefore] = useState(() => {
     const d = new Date();
@@ -1351,6 +1482,42 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [spaces, selectedId],
   );
 
+  // Panel drag. Widths are measured off the screen box rather than the panel
+  // so a fast drag that outruns the pointer still tracks it.
+  useEffect(() => {
+    if (!dragging) return;
+
+    const onMove = (e: MouseEvent) => {
+      const rect = screenRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return;
+      if (dragging === "list") {
+        setListWidth(clampWidth(LIST_PANE, e.clientX - rect.left));
+      } else {
+        setRulesWidth(clampWidth(RULES_PANE, rect.right - e.clientX));
+      }
+    };
+    const onUp = () => setDragging(null);
+
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging]);
+
+  useEffect(() => {
+    localStorage.setItem(LIST_PANE.key, String(listWidth));
+  }, [listWidth]);
+
+  useEffect(() => {
+    localStorage.setItem(RULES_PANE.key, String(rulesWidth));
+  }, [rulesWidth]);
+
   // Tauri commands reject with the Rust error string, which reads like
   // `create space 401: {...}`. Translate the cases a user can act on and let
   // the caller's fallback cover the rest - never show the raw string.
@@ -1360,7 +1527,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       return "Sign in on the Account screen first.";
     if (/\b401\b/.test(raw))
       return "Your session expired. Sign in again on the Account screen.";
-    if (/\b403\b/.test(raw)) return "This account does not have access to that.";
+    if (/\b403\b/.test(raw))
+      return "This account does not have access to that.";
     return fallback;
   };
 
@@ -1436,16 +1604,33 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   }, []);
 
   const refreshInvites = useCallback(() => {
-    invoke<SyncInviteList>("sync_list_invites").then(setInvites).catch(() => {});
+    invoke<SyncInviteList>("sync_list_invites")
+      .then(setInvites)
+      .catch(() => {});
   }, []);
 
   // Reads the server and recovers keyrings on the way, so it is the mount
   // path and the answer to a real membership change - not to presence ticks.
   const reloadSpaces = useCallback(() => {
-    invoke<Space[]>("spaces_list").then(setSpaces).catch(() => {});
+    invoke<Space[]>("spaces_list")
+      .then((list) => {
+        setSpaces(list);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
   }, []);
 
   useEffect(() => {
+    // First visit of the launch: the local list lands in one call, while
+    // spaces_list goes to the server and recovers keyrings on the way.
+    if (!cache.loaded) {
+      invoke<Space[]>("spaces_cached")
+        .then((list) => {
+          if (list.length > 0)
+            setSpaces((cur) => (cur.length > 0 ? cur : list));
+        })
+        .catch(() => {});
+    }
     reloadSpaces();
     refreshShares();
     refreshInvites();
@@ -1509,7 +1694,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     };
     track(
       listen("space:presence-changed", () => {
-        invoke<Space[]>("spaces_cached").then(setSpaces).catch(() => {});
+        invoke<Space[]>("spaces_cached")
+          .then(setSpaces)
+          .catch(() => {});
       }),
     );
     track(listen("space:membership-changed", reloadSpaces));
@@ -1541,6 +1728,31 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     setDetailItem(null);
     setSpaceError(null);
   }, [selectedId]);
+
+  // Keep the next visit's starting point current. Assignments only, so it can
+  // run every render without a dependency list to keep in sync.
+  useEffect(() => {
+    cache.loaded = loaded;
+    cache.spaces = spaces;
+    cache.selfUserId = selfUserId;
+    cache.shares = entryShares;
+    cache.remote = [...remoteKeys];
+    cache.invites = invites;
+    cache.filters = sendFilters;
+    cache.autocopy = autocopy;
+  });
+
+  useEffect(() => {
+    if (selectedId) localStorage.setItem(SELECTED_KEY, selectedId);
+    else localStorage.removeItem(SELECTED_KEY);
+  }, [selectedId]);
+
+  // The remembered space may have been deleted or left from another device.
+  // Only judge that once the list is real, or a restore would drop itself.
+  useEffect(() => {
+    if (!loaded || !selectedId) return;
+    if (!spaces.some((s) => s.id === selectedId)) setSelectedId(null);
+  }, [loaded, spaces, selectedId]);
 
   // Membership is server truth: an item is in a space when the share record
   // says so. Local group names are tags, and tagging shares nothing.
@@ -1607,8 +1819,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         break;
       case "type":
         sorted.sort((a, b) => {
-          const ka = a.kind === "note" ? "zzz-note" : deriveDisplayKind(a.entry);
-          const kb = b.kind === "note" ? "zzz-note" : deriveDisplayKind(b.entry);
+          const ka =
+            a.kind === "note" ? "zzz-note" : deriveDisplayKind(a.entry);
+          const kb =
+            b.kind === "note" ? "zzz-note" : deriveDisplayKind(b.entry);
           return ka.localeCompare(kb);
         });
         break;
@@ -1641,7 +1855,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       setFormLoading(true);
       setSpaceError(null);
       try {
-        const space = await invoke<Space>("space_create", { name, shareHistory });
+        const space = await invoke<Space>("space_create", {
+          name,
+          shareHistory,
+        });
         setSpaces((prev) => [...prev, space]);
         setSelectedId(space.id);
         setShowCreate(false);
@@ -1789,7 +2006,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [refreshInvites],
   );
 
-  const receivedPending = invites.received.filter((i) => i.status === "pending");
+  const receivedPending = invites.received.filter(
+    (i) => i.status === "pending",
+  );
   const sentPending = invites.sent.filter((i) => i.status === "pending");
 
   const isFiltering = search.trim().length > 0 || activeFilterCount > 0;
@@ -1856,7 +2075,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
 
   return (
-    <div className="sp-screen">
+    <div
+      className={`sp-screen${dragging ? " sp-screen--dragging" : ""}`}
+      ref={screenRef}
+    >
       <div className="sp-feed-panel">
         <Topbar
           leftSlot={leftSlot}
@@ -1961,7 +2183,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                             onClick={() => toggleDay(label)}
                           >
                             <div className="sp-timeline-day-dot" />
-                            <span className="sp-timeline-day-label">{label}</span>
+                            <span className="sp-timeline-day-label">
+                              {label}
+                            </span>
                             {collapsedDays.has(label) && (
                               <span className="sp-timeline-day-count">
                                 {items.length}
@@ -1990,7 +2214,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       entry={item.entry}
                                       onCopy={onCopyEntry}
                                       onView={(e) =>
-                                        setDetailItem({ kind: "clipboard", entry: e })
+                                        setDetailItem({
+                                          kind: "clipboard",
+                                          entry: e,
+                                        })
                                       }
                                       layout={layout}
                                       showSourceBadge={feedFilter === "all"}
@@ -2050,7 +2277,26 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       {/* Rules column: what this space does with items, in and out. Pinned
           rather than collapsible - these are the settings a member checks
           while reading the feed, not a dialog they open once. */}
-      <aside className="sp-rules">
+      {/* Past this width the invite actions have room to say what they do, so
+          they stop being icon-only. */}
+      <aside
+        className={`sp-rules${rulesWidth >= RULES_LABEL_WIDTH ? " sp-rules--wide" : ""}`}
+        style={{ width: rulesWidth }}
+      >
+        <button
+          type="button"
+          className={`sp-resizer sp-resizer--left${
+            dragging === "rules" ? " sp-resizer--active" : ""
+          }`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setDragging("rules");
+          }}
+          onDoubleClick={() => setRulesWidth(RULES_PANE.def)}
+          aria-label="Resize the rules panel"
+          data-tooltip="Drag to resize"
+          data-tooltip-pos="left"
+        />
         {selected ? (
           <SpaceSettings
             space={selected}
@@ -2072,7 +2318,21 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       </aside>
 
       {/* Space list */}
-      <aside className="sp-panel-right">
+      <aside className="sp-panel-right" style={{ width: listWidth }}>
+        <button
+          type="button"
+          className={`sp-resizer sp-resizer--right${
+            dragging === "list" ? " sp-resizer--active" : ""
+          }`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setDragging("list");
+          }}
+          onDoubleClick={() => setListWidth(LIST_PANE.def)}
+          aria-label="Resize the space list"
+          data-tooltip="Drag to resize"
+          data-tooltip-pos="right"
+        />
         <div className="sp-panel-header">
           <span className="sp-panel-title">Spaces</span>
           <span
@@ -2128,9 +2388,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             </div>
           )}
 
-          {spaceError && <span className="sp-settings-error">{spaceError}</span>}
+          {spaceError && (
+            <span className="sp-settings-error">{spaceError}</span>
+          )}
 
-          {spaces.length === 0 ? (
+          {/* Nothing until the first read answers: "No spaces yet" is a claim,
+              and flashing it at someone who has spaces reads as data loss. */}
+          {spaces.length === 0 && !loaded ? null : spaces.length === 0 ? (
             <div className="sp-panel-empty">
               <span className="sp-panel-empty-icon">
                 <Users size={22} />
