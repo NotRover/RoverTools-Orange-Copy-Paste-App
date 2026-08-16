@@ -49,7 +49,6 @@ import {
   CaretDown,
   Circle,
   Envelope,
-  Gear,
   Note as NoteIcon,
   File,
   MagnifyingGlass,
@@ -1262,7 +1261,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   // from this account, which is also the right answer while sync is off.
   const [remoteKeys, setRemoteKeys] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [invites, setInvites] = useState<SyncInviteList>({ sent: [], received: [] });
   const [sendFilters, setSendFilters] = useState<Record<string, SendFilter>>({});
   const [autocopy, setAutocopy] = useState<Record<string, boolean>>({});
@@ -1485,7 +1483,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
   useEffect(() => {
     setDetailItem(null);
-    setSettingsOpen(false);
     setSpaceError(null);
   }, [selectedId]);
 
@@ -1591,7 +1588,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         const space = await invoke<Space>("space_create", { name, shareHistory });
         setSpaces((prev) => [...prev, space]);
         setSelectedId(space.id);
-        setSettingsOpen(true);
         setShowCreate(false);
       } catch (e) {
         setSpaceError(errMsg(e, "Could not create the space."));
@@ -1847,59 +1843,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                   </span>
                 )}
               </div>
-              <div className="sp-feed-header-right">
-                <button
-                  className={`sp-feed-action-btn${settingsOpen ? " sp-feed-action-btn--on" : ""}`}
-                  onClick={() => setSettingsOpen((v) => !v)}
-                  aria-expanded={settingsOpen}
-                >
-                  <Gear size={11} />
-                  Space settings
-                </button>
-              </div>
             </div>
-
-            {settingsOpen && (
-              <SpaceSettings
-                space={selected}
-                selfUserId={selfUserId}
-                autocopy={autocopy[selected.id] === true}
-                onAutocopy={(enabled) => handleSetAutocopy(selected.id, enabled)}
-                filter={selectedFilter}
-                onFilter={(next) => handleSetFilter(selected.id, next)}
-                availableGroups={availableGroups}
-                onInvite={(email) => handleInvite(selected.id, email)}
-                onRemoveMember={(uid) => handleRemoveMember(selected.id, uid)}
-                onLeave={() => handleLeave(selected.id)}
-                onDelete={() => handleDelete(selected.id)}
-                error={spaceError}
-              />
-            )}
-
-            {selected.members.length > 0 && (
-              <div className="sp-members-bar">
-                {selected.members.map((m) => (
-                  <div key={m.user_id} className="sp-member-chip">
-                    <UserAvatar
-                      className="sp-member-pic sp-member-pic--chip"
-                      url={m.avatar_url}
-                      label={m.display_name || ""}
-                      glyphSize={9}
-                    />
-                    <Circle
-                      size={6}
-                      weight="fill"
-                      color={m.online ? "#22c55e" : "#6b7280"}
-                    />
-                    <span>
-                      {m.user_id === selfUserId
-                        ? "You"
-                        : m.display_name || "Member"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {detailItem ? (
               detailItem.kind === "note" ? (
@@ -2047,7 +1991,29 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         )}
       </div>
 
-      {/* Right rail */}
+      {/* Rules column: what this space does with items, in and out. Pinned
+          rather than collapsible - these are the settings a member checks
+          while reading the feed, not a dialog they open once. */}
+      {selected && (
+        <aside className="sp-rules">
+          <SpaceSettings
+            space={selected}
+            selfUserId={selfUserId}
+            autocopy={autocopy[selected.id] === true}
+            onAutocopy={(enabled) => handleSetAutocopy(selected.id, enabled)}
+            filter={selectedFilter}
+            onFilter={(next) => handleSetFilter(selected.id, next)}
+            availableGroups={availableGroups}
+            onInvite={(email) => handleInvite(selected.id, email)}
+            onRemoveMember={(uid) => handleRemoveMember(selected.id, uid)}
+            onLeave={() => handleLeave(selected.id)}
+            onDelete={() => handleDelete(selected.id)}
+            error={spaceError}
+          />
+        </aside>
+      )}
+
+      {/* Space list */}
       <aside className="sp-panel-right">
         <div className="sp-panel-header">
           <span className="sp-panel-title">Spaces</span>
