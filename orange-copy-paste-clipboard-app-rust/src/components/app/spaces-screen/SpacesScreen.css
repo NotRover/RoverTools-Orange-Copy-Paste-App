@@ -30,6 +30,7 @@
 /* ── Rules column (right) ── */
 
 .sp-rules {
+  position: relative;
   width: 272px;
   flex-shrink: 0;
   display: flex;
@@ -39,24 +40,148 @@
   border-left: 1px solid var(--border);
 }
 
+/* ── Panel resizers ── */
+
+/* A grab strip on the panel's inner edge. It sits inside the panel rather than
+   in a gutter of its own, so dragging does not shift the layout by a column. */
+.sp-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 7px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.sp-resizer--left {
+  left: 0;
+}
+
+.sp-resizer--right {
+  right: 0;
+}
+
+/* The cursor carries the affordance. The only mark is the panel's own border
+   brightening while you drag - no element that was not already there. */
+.sp-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-light);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.sp-resizer--left::after {
+  left: -1px;
+}
+
+.sp-resizer--right::after {
+  right: -1px;
+}
+
+.sp-resizer--active::after {
+  opacity: 1;
+}
+
+/* Held down: the pointer owns the drag, so nothing else should react to it. */
+.sp-screen--dragging * {
+  pointer-events: none;
+}
+
+.sp-screen--dragging .sp-resizer {
+  pointer-events: auto;
+}
+
 /* The settings block is the whole column now: no panel chrome of its own, and
-   it scrolls to the full height instead of the old 52vh drawer cap. */
+   it splits into a fixed header, a scrolling middle, and a pinned footer
+   instead of the old 52vh drawer. */
 .sp-rules .sp-settings {
   flex: 1;
+  min-height: 0;
   max-height: none;
-  padding: 14px 12px;
+  gap: 0;
+  padding: 0;
   border-bottom: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.sp-rules-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sp-rules-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #fff;
+}
+
+.sp-rules-avatar--ghost {
+  border: 1px dashed var(--border-light);
   background: transparent;
 }
 
-/* No space selected: same column, same section labels, nothing to operate. */
-.sp-rules-hint {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--text-secondary);
+.sp-rules-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
+.sp-rules-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-rules-sub {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.sp-rules-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow: hidden auto;
+  scrollbar-width: thin;
+}
+
+.sp-rules-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* No space selected: same column shape, nothing to operate. */
 .sp-rules-ghost-row {
   margin: 0;
   padding: 9px 11px;
@@ -67,17 +192,51 @@
   color: var(--text-muted);
 }
 
-/* Rows that used to have a full window's width now wrap instead of squeezing
-   the invite code or clipping a member's Remove button. */
-.sp-rules .sp-invite-row,
+/* A member row has no width to spare at 272px, so it wraps rather than
+   clipping the Remove button. */
 .sp-rules .sp-member-row {
   flex-wrap: wrap;
 }
 
-.sp-rules .sp-invite-row--danger {
+/* Invite: two rows of equal width, each one field plus its actions. They must
+   not wrap - a full-width input that pushes Send onto its own line is what
+   made this read as four loose controls. */
+.sp-invite-box {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sp-invite-box .sp-invite-row {
+  flex-wrap: nowrap;
+}
+
+.sp-invite-box .sp-invite-code,
+.sp-invite-box .sp-inline-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.sp-btn--icon {
+  flex-shrink: 0;
+  padding: 5px 7px;
+}
+
+/* Icon-only until the panel is dragged wide enough to spell the action out. */
+.sp-btn-label {
+  display: none;
+}
+
+.sp-rules--wide .sp-btn--icon {
+  padding: 5px 9px;
+}
+
+.sp-rules--wide .sp-btn-label {
+  display: inline;
 }
 
 /* ── Topbar filter tabs (left slot) ── */
@@ -516,7 +675,9 @@
   /* Ordered ahead of the feed so the list of spaces reads first, the way the
      app sidebar does. It stays last in the DOM to keep the diff small. */
   order: -1;
-  width: 224px;
+  position: relative;
+  /* Overridden by the dragged width; kept in step with LIST_PANE.def. */
+  width: 252px;
   flex-shrink: 0;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
@@ -1630,12 +1791,6 @@
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.sp-invite-row--danger {
-  margin-top: 2px;
-  padding-top: 9px;
-  border-top: 1px dashed var(--border);
 }
 
 .sp-invite-code {
