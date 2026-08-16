@@ -1483,6 +1483,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [spaces, selectedId],
   );
 
+  // How much is in each space, counted from the share map rather than the feed
+  // so a space that is not selected still has a number.
+  const itemCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const ids of Object.values(entryShares))
+      for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [entryShares]);
+
   // Sections only appear when they split something: a solo account has nobody
   // else online anywhere, and one "Quiet" header over the whole list says
   // nothing. Your own presence does not count - it is true everywhere.
@@ -2465,10 +2474,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                     </span>
                     <span className="sp-space-card-body">
                       <span className="sp-space-card-name">{space.name}</span>
+                      {/* Two numbers that change, rather than one that does
+                          not: who is around, and how much is in here. */}
                       <span className="sp-space-card-meta">
-                        {space.member_count} member
-                        {space.member_count === 1 ? "" : "s"}
-                        {space.members.length > 0 ? ` - ${online} online` : ""}
+                        {space.members.length > 0
+                          ? `${online}/${space.member_count} online`
+                          : `${space.member_count} member${space.member_count === 1 ? "" : "s"}`}
+                        {" - "}
+                        {itemCounts[space.id] ?? 0} item
+                        {(itemCounts[space.id] ?? 0) === 1 ? "" : "s"}
                       </span>
                     </span>
                     <span className="sp-space-card-flags">

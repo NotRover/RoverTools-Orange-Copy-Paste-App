@@ -44,8 +44,10 @@ export interface CardMenuProps {
   showCopy?: boolean;
   /** Show save action (default true). */
   showSave?: boolean;
-  /** Spaces this account belongs to. Empty or absent hides the share row. */
+  /** Spaces this account belongs to. Empty leaves the share row disabled. */
   spaces?: Space[];
+  /** Whether a sync account is signed in, for the disabled row's reason. */
+  signedIn?: boolean;
   /** Space ids this item is already shared into. */
   itemSpaceIds?: string[];
   /** Share this item into a space, or stop sharing it there. */
@@ -73,6 +75,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
   showCopy = true,
   showSave = true,
   spaces = [],
+  signedIn = false,
   itemSpaceIds = [],
   onToggleSpace,
 }) => {
@@ -160,7 +163,14 @@ const CardMenu: React.FC<CardMenuProps> = ({
   if (!open) return null;
 
   const hasGroups = availableGroups.length > 0;
-  const canShare = spaces.length > 0 && !!onToggleSpace;
+  // The row stays on the menu when sharing is unavailable: hiding it made the
+  // feature look absent rather than switched off, so it shows the reason.
+  const showShare = !!onToggleSpace;
+  const shareBlocked = !signedIn
+    ? "Sign in on the Account screen to share"
+    : spaces.length === 0
+      ? "Create a space on the Spaces screen first"
+      : null;
 
   return createPortal(
     <div
@@ -198,13 +208,19 @@ const CardMenu: React.FC<CardMenuProps> = ({
       )}
 
       {/* Share to space submenu */}
-      {canShare && (
+      {showShare && (
         <div className="card-menu-groups-wrapper">
           <button
-            className={`card-menu-item card-menu-item--groups-toggle${flyoutOpen === "spaces" ? " card-menu-item--groups-toggle-active" : ""}`}
-            onClick={() =>
-              setFlyoutOpen((v) => (v === "spaces" ? null : "spaces"))
-            }
+            /* aria-disabled, not disabled: a disabled button fires no mouse
+               events, so the tooltip explaining why would never show. */
+            className={`card-menu-item card-menu-item--groups-toggle${flyoutOpen === "spaces" ? " card-menu-item--groups-toggle-active" : ""}${shareBlocked ? " card-menu-item--off" : ""}`}
+            aria-disabled={!!shareBlocked}
+            data-tooltip={shareBlocked ?? undefined}
+            data-tooltip-pos="left"
+            onClick={() => {
+              if (shareBlocked) return;
+              setFlyoutOpen((v) => (v === "spaces" ? null : "spaces"));
+            }}
           >
             <ShareNetwork size={13} />
             <span style={{ flex: 1 }}>

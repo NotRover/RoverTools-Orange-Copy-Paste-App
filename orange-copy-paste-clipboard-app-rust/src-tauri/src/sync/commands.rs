@@ -301,6 +301,160 @@ pub fn sync_clear_skipped(state: State<'_, AppState>) {
     }
 }
 
+/// Push the skipped entries again. A skip is a dead end - nothing queues it -
+/// so an entry that failed for a reason since fixed (an expired session, a
+/// rejected blob upload) needs this to ever reach the server. Returns how many
+/// entries were found and re-pushed; the ones that fail again record a fresh
+/// skip, which is why the old list is dropped first.
+#[tauri::command]
+pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
+    let sync = sync_client(&state)?;
+    let skipped = sync.skipped();
+    sync.clear_skipped();
+
+    let mut retried = 0;
+    for skip in skipped {
+        let entry = state
+            .history
+            .lock()
+            .all()
+            .iter()
+            .find(|e| e.id == skip.client_id)
+            .cloned();
+        if let Some(entry) = entry {
+            sync.on_update_clipboard_entry(entry);
+            retried += 1;
+            continue;
+        }
+        let note = state
+            .notes
+            .lock()
+            .all()
+            .iter()
+            .find(|n| n.id == skip.client_id)
+            .cloned();
+        if let Some(note) = note {
+            sync.on_update_note(note);
+            retried += 1;
+        }
+        // Neither: the entry was deleted after it was skipped. Nothing to do.
+    }
+    Ok(retried)
+}
+
+/// Push every local item the server has never seen. Sync only ever picks up
+/// items as they are created, so anything captured before signing in (or while
+/// sync was off) stays local forever without this. Already-synced items are
+/// left alone. Returns how many pushes were started.
+#[tauri::command]
+pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<usize, String> {
+    let sync = sync_client(&state)?;
+    let known = sync.entry_states();
+
+    let entries: Vec<_> = state
+        .history
+        .lock()
+        .all()
+        .iter()
+        .filter(|e| !known.contains_key(&format!("clipboard:{}", e.id)))
+        .cloned()
+        .collect();
+    let notes: Vec<_> = state
+        .notes
+        .lock()
+        .all()
+        .iter()
+        .filter(|n| !known.contains_key(&format!("note:{}", n.id)))
+        .cloned()
+        .collect();
+
+    let count = entries.len() + notes.len();
+    for entry in entries {
+        sync.on_new_clipboard_entry(entry);
+    }
+    for note in notes {
+        sync.on_new_note(note);
+    }
+    Ok(count)
+}
+
+/// Push the named local items, whether or not they have been pushed before.
+/// The bulk bar's "Upload" action - `sync_push_unsynced` for a chosen set.
+#[tauri::command]
+pub fn sync_push_entries(
+    client_ids: Vec<String>,
+    entry_type: String,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let sync = sync_client(&state)?;
+    let mut pushed = 0;
+    for id in client_ids {
+        if entry_type == "note" {
+            let note = state.notes.lock().all().iter().find(|n| n.id == id).cloned();
+            if let Some(note) = note {
+                sync.on_new_note(note);
+                pushed += 1;
+            }
+        } else {
+            let entry = state
+                .history
+                .lock()
+                .all()
+                .iter()
+                .find(|e| e.id == id)
+                .cloned();
+            if let Some(entry) = entry {
+                sync.on_new_clipboard_entry(entry);
+                pushed += 1;
+            }
+        }
+    }
+    Ok(pushed)
+}
+
+/// Take the named items off the server, keeping the local copies. This is the
+/// delete path, so it is a tombstone: the items also disappear from your other
+/// devices and from any space they were shared into. Only this device keeps
+/// them, which is the whole point of the action.
+#[tauri::command]
+pub fn sync_unpush_entries(
+    client_ids: Vec<String>,
+    entry_type: String,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let sync = sync_client(&state)?;
+    let count = client_ids.len();
+    for id in client_ids {
+        if entry_type == "note" {
+            sync.on_delete_note(id);
+        } else {
+            sync.on_delete_clipboard_entry(id);
+        }
+    }
+    Ok(count)
+}
+
+/// Take everything this device has synced off the server, keeping the local
+/// copies. Same tombstone semantics as [`sync_unpush_entries`].
+#[tauri::command]
+pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<usize, String> {
+    let sync = sync_client(&state)?;
+    let keys = sync.entry_states();
+    let mut count = 0;
+    for key in keys.keys() {
+        let Some((kind, id)) = key.split_once(':') else {
+            continue;
+        };
+        if kind == "note" {
+            sync.on_delete_note(id.to_string());
+        } else {
+            sync.on_delete_clipboard_entry(id.to_string());
+        }
+        count += 1;
+    }
+    Ok(count)
+}
+
 #[tauri::command]
 pub async fn sync_now(state: State<'_, AppState>) -> Result<(), String> {
     let sync = sync_client(&state)?;

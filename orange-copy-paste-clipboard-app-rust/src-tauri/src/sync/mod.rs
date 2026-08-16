@@ -1497,6 +1497,11 @@ impl SyncClient {
         self.id_map.lock().remote_entries()
     }
 
+    /// The recorded skips, for a retry pass that needs their client ids.
+    pub fn skipped(&self) -> Vec<SkippedEntry> {
+        self.status.lock().skipped.clone()
+    }
+
     /// Drop the recorded skips (and their count) after the user has seen them.
     pub fn clear_skipped(&self) {
         let mut status = self.status.lock();
@@ -2159,7 +2164,8 @@ async fn upload_image_blob(
             checksum,
         })
         .await?;
-    http.upload_blob_bytes(&up.presigned_put_url, ciphertext).await?;
+    http.upload_blob_bytes(&up.presigned_put_url, ciphertext, &mime)
+        .await?;
     http.confirm_blob_upload(&up.blob_key).await?;
     let descriptor = serde_json::json!({ "mime": mime }).to_string();
     Ok((up.blob_key, size, descriptor))

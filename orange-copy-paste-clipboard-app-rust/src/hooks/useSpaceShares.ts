@@ -8,6 +8,8 @@ export type ShareKind = "clipboard" | "note";
 export interface SpaceShares {
   /** Spaces this account belongs to (cached list, no network). */
   spaces: Space[];
+  /** Whether a sync account is signed in, so sharing can say why it is off. */
+  signedIn: boolean;
   /** Space ids per item, keyed `"clipboard:{id}"` / `"note:{id}"`. */
   shares: Record<string, string[]>;
   /** Space names for one item, for the card indicator's tooltip. */
@@ -31,6 +33,7 @@ const REFRESH_ON = [
   "sync:history-merged",
   "sync:notes-merged",
   "space:membership-changed",
+  "sync:status-changed",
 ];
 
 /**
@@ -42,6 +45,7 @@ const REFRESH_ON = [
 export function useSpaceShares(): SpaceShares {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [shares, setShares] = useState<Record<string, string[]>>({});
+  const [signedIn, setSignedIn] = useState(false);
 
   const refresh = useCallback(() => {
     invoke<Record<string, string[]>>("sync_get_entry_shares")
@@ -50,6 +54,9 @@ export function useSpaceShares(): SpaceShares {
     invoke<Space[]>("spaces_cached")
       .then(setSpaces)
       .catch(() => setSpaces([]));
+    invoke<{ user_id: string } | null>("sync_get_user")
+      .then((u) => setSignedIn(!!u))
+      .catch(() => setSignedIn(false));
   }, []);
 
   useEffect(() => {
@@ -138,5 +145,5 @@ export function useSpaceShares(): SpaceShares {
     [shares, spaces],
   );
 
-  return { spaces, shares, namesFor, toggle, bulkToggle };
+  return { spaces, signedIn, shares, namesFor, toggle, bulkToggle };
 }
