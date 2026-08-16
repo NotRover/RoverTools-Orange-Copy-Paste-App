@@ -2523,7 +2523,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                         {inv.invitee_email} invited to {inv.space_name}
                       </span>
                       <button
-                        className="sp-linkbtn"
+                        className="sp-linkbtn sp-linkbtn--danger"
                         onClick={() => handleRevokeInvite(inv.id)}
                       >
                         Revoke

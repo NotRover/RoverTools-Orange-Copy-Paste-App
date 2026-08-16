@@ -304,7 +304,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                   <span className="bulk-popup-flyout-name">Upload to cloud</span>
                 </button>
                 <button
-                  className="bulk-popup-space-row"
+                  className="bulk-popup-space-row bulk-popup-space-row--danger"
                   onClick={() => {
                     onBulkUnsync?.();
                     setCloudOpen(false);

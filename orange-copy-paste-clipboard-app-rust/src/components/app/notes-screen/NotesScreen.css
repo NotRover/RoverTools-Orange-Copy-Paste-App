@@ -526,7 +526,7 @@
 .ns-card-delete:hover {
   color: var(--danger);
   border-color: var(--danger);
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-dim);
 }
 
 /* Selection styles */

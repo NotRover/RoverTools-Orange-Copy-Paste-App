@@ -1807,10 +1807,15 @@
   color: #fff;
 }
 
+.sp-btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
 .sp-btn--danger:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--danger-dim);
 }
 
 .sp-invite-row {
@@ -1931,6 +1936,10 @@
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
+}
+
+.sp-linkbtn--danger {
+  color: var(--danger);
 }
 
 /* Create form: history checkbox */
