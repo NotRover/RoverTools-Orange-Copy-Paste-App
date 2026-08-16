@@ -970,14 +970,36 @@ const SpaceSettings: React.FC<{
 
   return (
     <div className="sp-settings">
+      {/* The column used to open on a bare "Incoming" label, so nothing said
+          which space you were editing once the list scrolled. */}
+      <header className="sp-rules-head">
+        <span
+          className="sp-rules-avatar"
+          style={{ background: spaceAvatarColor(space.id) }}
+        >
+          {space.name.slice(0, 2).toUpperCase()}
+        </span>
+        <span className="sp-rules-head-text">
+          <span className="sp-rules-name">{space.name}</span>
+          <span className="sp-rules-sub">
+            {space.member_count} member{space.member_count === 1 ? "" : "s"}
+            {space.is_owner ? " - you own it" : ""}
+          </span>
+        </span>
+      </header>
+
+      <div className="sp-rules-body">
       {error && <span className="sp-settings-error">{error}</span>}
 
-      {/* Incoming */}
+      {/* Rules: what the space does with items, in and out. */}
       <div className="sp-settings-block">
-        <div className="sp-settings-label">Incoming</div>
+        <div className="sp-settings-label">
+          Rules
+          {filter.enabled && <span className="sp-settings-count">auto</span>}
+        </div>
         <label className="sp-toggle-row">
           <span className="sp-toggle-text">
-            <span className="sp-toggle-title">Copy new items to my clipboard</span>
+            <span className="sp-toggle-title">Copy new items in</span>
             <span className="sp-toggle-desc">
               {autocopy
                 ? "Anything shared here lands on your clipboard as it arrives."
@@ -991,17 +1013,9 @@ const SpaceSettings: React.FC<{
             onChange={(e) => onAutocopy(e.target.checked)}
           />
         </label>
-      </div>
-
-      {/* Outgoing */}
-      <div className="sp-settings-block">
-        <div className="sp-settings-label">
-          Outgoing
-          {filter.enabled && <span className="sp-settings-count">auto</span>}
-        </div>
         <label className="sp-toggle-row">
           <span className="sp-toggle-text">
-            <span className="sp-toggle-title">Share new items automatically</span>
+            <span className="sp-toggle-title">Share new items out</span>
             <span className="sp-toggle-desc">
               {filter.enabled
                 ? "New items that match the rules below are shared here. Older items are untouched."
@@ -1104,10 +1118,10 @@ const SpaceSettings: React.FC<{
         )}
       </div>
 
-      {/* Members */}
+      {/* People: who is here, and how to add more. */}
       <div className="sp-settings-block">
         <div className="sp-settings-label">
-          Members
+          People
           <span className="sp-settings-count">{space.member_count}</span>
         </div>
         <div className="sp-member-list">
@@ -1149,11 +1163,7 @@ const SpaceSettings: React.FC<{
             ))
           )}
         </div>
-      </div>
 
-      {/* Invite + danger */}
-      <div className="sp-settings-block">
-        <div className="sp-settings-label">Invite</div>
         {space.invite_code && (
           <div className="sp-invite-row">
             <code className="sp-invite-code">
@@ -1168,19 +1178,6 @@ const SpaceSettings: React.FC<{
                 <><Check size={11} /> Copied</>
               ) : (
                 <><Copy size={11} /> Copy code</>
-              )}
-            </button>
-            <button
-              type="button"
-              className="sp-btn"
-              onClick={() =>
-                copy("link", `orange://join?code=${space.invite_code}`)
-              }
-            >
-              {copied === "link" ? (
-                <><Check size={11} /> Copied</>
-              ) : (
-                <><ShareNetwork size={11} /> Copy link</>
               )}
             </button>
           </div>
@@ -1205,28 +1202,47 @@ const SpaceSettings: React.FC<{
             {inviting ? "Sending..." : "Send"}
           </button>
         </div>
-        <div className="sp-invite-row sp-invite-row--danger">
-          {space.is_owner ? (
-            <button
-              type="button"
-              className="sp-btn sp-btn--danger"
-              onClick={armDelete}
-              onBlur={() => setArmed(false)}
-            >
-              {armed ? "Confirm delete?" : "Delete space"}
-            </button>
-          ) : (
-            <button type="button" className="sp-btn sp-btn--danger" onClick={onLeave}>
-              Leave space
-            </button>
-          )}
-          <span className="sp-danger-note">
-            {space.is_owner
-              ? "Deleting stops sharing for everyone. Items already on their devices stay there."
-              : "Leaving stops new items reaching you. What you already have stays."}
-          </span>
-        </div>
+        {space.invite_code && (
+          <button
+            type="button"
+            className="sp-btn sp-btn--wide"
+            onClick={() =>
+              copy("link", `orange://join?code=${space.invite_code}`)
+            }
+          >
+            {copied === "link" ? (
+              <><Check size={11} /> Copied</>
+            ) : (
+              <><ShareNetwork size={11} /> Copy invite link</>
+            )}
+          </button>
+        )}
       </div>
+      </div>
+
+      {/* Pinned, so the one destructive control sits on the column edge instead
+          of trailing the scroll with empty space under it. */}
+      <footer className="sp-rules-foot">
+        {space.is_owner ? (
+          <button
+            type="button"
+            className="sp-btn sp-btn--danger"
+            onClick={armDelete}
+            onBlur={() => setArmed(false)}
+          >
+            {armed ? "Confirm delete?" : "Delete space"}
+          </button>
+        ) : (
+          <button type="button" className="sp-btn sp-btn--danger" onClick={onLeave}>
+            Leave space
+          </button>
+        )}
+        <span className="sp-danger-note">
+          {space.is_owner
+            ? "Stops sharing for everyone. Items already on their devices stay."
+            : "Stops new items reaching you. What you already have stays."}
+        </span>
+      </footer>
     </div>
   );
 };
@@ -1237,30 +1253,34 @@ const SpaceSettings: React.FC<{
  *  so there is nothing to set yet, but showing what lives here beats an empty
  *  gutter that reads as a missing feature. */
 const RulesPlaceholder: React.FC<{ hasSpaces: boolean }> = ({ hasSpaces }) => (
-  <div className="sp-settings sp-rules-ghost">
-    <p className="sp-rules-hint">
-      {hasSpaces
-        ? "Pick a space to set what it copies in and what it shares out."
-        : "Create a space to set what it copies in and what it shares out."}
-    </p>
-    <div className="sp-settings-block">
-      <div className="sp-settings-label">Incoming</div>
-      <p className="sp-rules-ghost-row">
-        Copy new items to your clipboard as they arrive, on this device only.
-      </p>
-    </div>
-    <div className="sp-settings-block">
-      <div className="sp-settings-label">Outgoing</div>
-      <p className="sp-rules-ghost-row">
-        Share new items automatically, narrowed by clipboard type and group. Off
-        by default, so only what you share by hand goes out.
-      </p>
-    </div>
-    <div className="sp-settings-block">
-      <div className="sp-settings-label">Members</div>
-      <p className="sp-rules-ghost-row">
-        Who is in the space, who is online, and the invite code.
-      </p>
+  <div className="sp-settings">
+    <header className="sp-rules-head">
+      <span className="sp-rules-avatar sp-rules-avatar--ghost" />
+      <span className="sp-rules-head-text">
+        <span className="sp-rules-name">No space selected</span>
+        <span className="sp-rules-sub">
+          {hasSpaces ? "Pick one from the list" : "Create or join one to start"}
+        </span>
+      </span>
+    </header>
+
+    <div className="sp-rules-body">
+      <div className="sp-settings-block">
+        <div className="sp-settings-label">Rules</div>
+        <p className="sp-rules-ghost-row">
+          Copy new items to your clipboard as they arrive, on this device only.
+        </p>
+        <p className="sp-rules-ghost-row">
+          Share new items out automatically, narrowed by clipboard type and
+          group. Off by default, so only what you share by hand goes out.
+        </p>
+      </div>
+      <div className="sp-settings-block">
+        <div className="sp-settings-label">People</div>
+        <p className="sp-rules-ghost-row">
+          Who is in the space, who is online, and the invite code.
+        </p>
+      </div>
     </div>
   </div>
 );
