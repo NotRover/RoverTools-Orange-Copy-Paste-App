@@ -35,6 +35,15 @@ import {
   type BulkState,
 } from "./bulkProgress";
 
+/** What a bulk upload would cost, measured before it starts. */
+type UnsyncedPreview = {
+  total: number;
+  images: number;
+  image_bytes: number;
+  free_bytes: number;
+  images_that_fit: number;
+};
+
 const MODE_OPTIONS: { value: SyncMode; label: string }[] = [
   { value: "realtime", label: "Realtime" },
   { value: "passive", label: "Passive" },
@@ -415,6 +424,18 @@ const AccountScreen: React.FC = () => {
   // items or why, so it opens a list carrying the reason for each.
   const skipped = syncStatus?.skipped ?? [];
   const skippedCount = syncStatus?.skipped_count ?? 0;
+  // One row per item turns a single cause - an account out of storage, say -
+  // into hundreds of identical lines. Group by reason and name the items
+  // inside each group instead.
+  const skippedGroups = React.useMemo(() => {
+    const byReason = new Map<string, typeof skipped>();
+    for (const item of skipped) {
+      const bucket = byReason.get(item.reason);
+      if (bucket) bucket.push(item);
+      else byReason.set(item.reason, [item]);
+    }
+    return [...byReason.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [skipped]);
 
   const handleDismissSkipped = async () => {
     try {
@@ -449,7 +470,12 @@ const AccountScreen: React.FC = () => {
     ? Math.min(100, Math.round((progress.done / Math.max(1, progress.total)) * 100))
     : 0;
 
-  const handlePushUnsynced = async () => {
+  // Measured before anything is sent, so an upload that cannot fit says so up
+  // front instead of failing one image at a time.
+  const [plan, setPlan] = useState<UnsyncedPreview | null>(null);
+
+  const startUpload = async () => {
+    setPlan(null);
     setPushingOld(true);
     setBulkResult(null);
     try {
@@ -463,6 +489,31 @@ const AccountScreen: React.FC = () => {
       setBulkResult(typeof e === "string" ? e : "Could not start the upload.");
     }
     setPushingOld(false);
+  };
+
+  const handlePushUnsynced = async () => {
+    setPushingOld(true);
+    setBulkResult(null);
+    let preview: UnsyncedPreview;
+    try {
+      preview = await invoke<UnsyncedPreview>("sync_preview_unsynced");
+    } catch {
+      // The check is a courtesy; if it fails, the upload itself still works.
+      setPushingOld(false);
+      void startUpload();
+      return;
+    }
+    setPushingOld(false);
+    if (preview.total === 0) {
+      setBulkResult("Everything on this device is already synced.");
+      return;
+    }
+    // Only worth interrupting for when some of it genuinely will not fit.
+    if (preview.images_that_fit < preview.images) {
+      setPlan(preview);
+      return;
+    }
+    void startUpload();
   };
 
   // Two clicks: this is a delete on the server, so the other devices lose
@@ -864,12 +915,27 @@ const AccountScreen: React.FC = () => {
                     this app was restarted. The details are gone.
                   </span>
                 ) : (
-                  skipped.map((item) => (
-                    <div key={`${item.client_id}-${item.at}`} className="acct-skipped-row">
+                  skippedGroups.map(([reason, items]) => (
+                    <div key={reason} className="acct-skipped-row">
                       <WarningCircle size={13} className="acct-skipped-icon" />
                       <span className="acct-skipped-text">
-                        <span className="acct-skipped-label">{item.label}</span>
-                        <span className="acct-skipped-reason">{item.reason}</span>
+                        <span className="acct-skipped-label">
+                          {items.length === 1
+                            ? items[0].label
+                            : `${items.length} items`}
+                        </span>
+                        <span className="acct-skipped-reason">{reason}</span>
+                        {items.length > 1 && (
+                          <span className="acct-skipped-names">
+                            {items
+                              .slice(0, 6)
+                              .map((i) => i.label)
+                              .join(", ")}
+                            {items.length > 6
+                              ? ` and ${items.length - 6} more`
+                              : ""}
+                          </span>
+                        )}
                       </span>
                     </div>
                   ))
@@ -962,7 +1028,36 @@ const AccountScreen: React.FC = () => {
                     </button>
                   </div>
                 </div>
-                {progress ? (
+                {plan ? (
+                  <div className="acct-plan">
+                    <p className="acct-card-desc">
+                      {plan.images - plan.images_that_fit} of {plan.images} image
+                      {plan.images === 1 ? "" : "s"} will not fit.{" "}
+                      {formatBytes(plan.image_bytes)} of images, but only{" "}
+                      {formatBytes(plan.free_bytes)} is free.
+                    </p>
+                    <p className="acct-mode-note">
+                      Text and notes still upload. Uploading anyway sends what
+                      fits and skips the rest.
+                    </p>
+                    <div className="acct-skipped-actions">
+                      <button
+                        type="button"
+                        className="acct-btn acct-btn--sm"
+                        onClick={startUpload}
+                      >
+                        Upload anyway
+                      </button>
+                      <button
+                        type="button"
+                        className="acct-btn acct-btn--sm acct-btn--quiet"
+                        onClick={() => setPlan(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : progress ? (
                   <div
                     className="acct-progress"
                     role="progressbar"
@@ -988,7 +1083,7 @@ const AccountScreen: React.FC = () => {
                       "Sync picks up items as you copy them, so anything from before you signed in stays here. Upload sends those, encrypted."}
                   </p>
                 )}
-                {!pushResult && !progress && (
+                {!pushResult && !progress && !plan && (
                   <p className="acct-mode-note">
                     Remove from cloud does the opposite for everything: your
                     items leave the server and your other devices, and only this

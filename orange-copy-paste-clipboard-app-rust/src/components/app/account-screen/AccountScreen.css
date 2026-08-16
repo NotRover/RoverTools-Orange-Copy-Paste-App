@@ -609,6 +609,14 @@
   color: var(--text-muted, #909090);
 }
 
+/* Which items fell into a group, when there is more than one. */
+.acct-skipped-names {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted, #909090);
+  opacity: 0.75;
+}
+
 .acct-skipped-actions {
   display: flex;
   align-items: center;
@@ -896,6 +904,18 @@
 }
 
 /* Sits a step below the description it follows, not a paragraph apart. */
+/* The "this will not fit" check, shown before an upload starts. */
+.acct-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.acct-plan .acct-card-desc,
+.acct-plan .acct-mode-note {
+  margin: 0;
+}
+
 /* Bulk upload / removal progress. A count alone reads as frozen on a large
    history, so the bar carries the movement and the label carries the number. */
 .acct-progress {
