@@ -17,7 +17,7 @@
   --cta-hover: var(--accent-hover);
 }
 
-/* ── Feed panel (left, flex-1) ── */
+/* ── Feed panel (middle, flex-1) ── */
 
 .sp-feed-panel {
   flex: 1;
@@ -25,7 +25,41 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--border);
+}
+
+/* ── Rules column (right) ── */
+
+.sp-rules {
+  width: 272px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  border-left: 1px solid var(--border);
+}
+
+/* The settings block is the whole column now: no panel chrome of its own, and
+   it scrolls to the full height instead of the old 52vh drawer cap. */
+.sp-rules .sp-settings {
+  flex: 1;
+  max-height: none;
+  padding: 14px 12px;
+  border-bottom: none;
+  background: transparent;
+}
+
+/* Rows that used to have a full window's width now wrap instead of squeezing
+   the invite code or clipping a member's Remove button. */
+.sp-rules .sp-invite-row,
+.sp-rules .sp-member-row {
+  flex-wrap: wrap;
+}
+
+.sp-rules .sp-invite-row--danger {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 /* ── Topbar filter tabs (left slot) ── */
@@ -168,6 +202,30 @@
 
 .sp-list-card--note {
   height: 46px;
+}
+
+/* Direction: accent is reserved for what this account sent, which is the
+   smaller half of a busy space - if a row is orange, you put it there. */
+.sp-list-dir {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+
+.sp-list-dir--in {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.sp-list-dir--out {
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .sp-list-type-wrap {
@@ -336,53 +394,6 @@
   white-space: nowrap;
 }
 
-.sp-feed-action-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
-  white-space: nowrap;
-}
-
-.sp-feed-action-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
-/* ── Members bar (Live Share) ── */
-
-.sp-members-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-
-.sp-member-chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  background: var(--surface);
-}
-
 /* ── Scrollable feed ── */
 
 .sp-feed-scroll {
@@ -481,12 +492,16 @@
   line-height: 1.6;
 }
 
-/* ── Right groups panel ── */
+/* ── Space list (left) ── */
 
 .sp-panel-right {
+  /* Ordered ahead of the feed so the list of spaces reads first, the way the
+     app sidebar does. It stays last in the DOM to keep the diff small. */
+  order: -1;
   width: 224px;
   flex-shrink: 0;
   background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -682,17 +697,6 @@
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-/* In a chip the picture sits inside the pill, so it loses its own left inset. */
-.sp-member-pic--chip {
-  width: 14px;
-  height: 14px;
-  font-size: 7px;
-}
-
-.sp-member-chip:has(.sp-member-pic--chip) {
-  padding-left: 3px;
-}
-
 /* Letter avatar */
 
 .sp-space-avatar {
@@ -770,10 +774,17 @@
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
 
-.sp-action-btn:hover {
+.sp-action-btn:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-dim);
+}
+
+/* Signed out: the buttons stay visible so the screen still explains itself,
+   but they do not lead anywhere until there is an account behind them. */
+.sp-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .sp-action-btn--primary {
@@ -782,7 +793,7 @@
   color: #fff;
 }
 
-.sp-action-btn--primary:hover {
+.sp-action-btn--primary:hover:not(:disabled) {
   border-color: transparent;
   background: var(--cta-hover, var(--accent-hover));
   color: #fff;
@@ -1630,12 +1641,6 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.2px;
-}
-
-.sp-feed-action-btn--on {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-dim);
 }
 
 /* Right rail: received invites, space flags, sent invites */

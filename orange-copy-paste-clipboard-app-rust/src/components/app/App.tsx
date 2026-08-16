@@ -470,6 +470,17 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    // Seed from the current status: the socket usually comes up during
+    // startup, so waiting for the next event left every indicator reading
+    // "inactive" on a device that was signed in and online the whole time.
+    invoke<{ user_id: string } | null>("sync_get_user")
+      .then((user) => {
+        if (!user) return;
+        return invoke<{ connected: boolean }>("sync_get_status").then((s) => {
+          if (!cancelled) setSyncConnected(s.connected);
+        });
+      })
+      .catch(() => {});
     listen<{ connected: boolean }>("sync:status-changed", (event) => {
       if (!cancelled) setSyncConnected(event.payload.connected);
     }).then((fn) => {

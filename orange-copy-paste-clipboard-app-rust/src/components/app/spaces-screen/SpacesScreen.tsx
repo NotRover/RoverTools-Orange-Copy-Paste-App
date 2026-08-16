@@ -49,7 +49,6 @@ import {
   CaretDown,
   Circle,
   Envelope,
-  Gear,
   Note as NoteIcon,
   File,
   MagnifyingGlass,
@@ -58,6 +57,8 @@ import {
   PushPin,
   ArrowsOutSimple,
   SquaresFour,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
@@ -461,6 +462,21 @@ const DetailPanel: React.FC<{
   );
 };
 
+// ── Direction badge ───────────────────────────────────────────────────
+
+/** Which way an item travelled, using the same arrows as the Incoming and
+ *  Outgoing blocks in space settings, so a row points back at the rule that
+ *  put it there. Rows only: a card already shows a preview and its chips. */
+const DirectionBadge: React.FC<{ incoming: boolean }> = ({ incoming }) => (
+  <span
+    className={`sp-list-dir sp-list-dir--${incoming ? "in" : "out"}`}
+    data-tooltip={incoming ? "Shared by a member" : "Shared from this account"}
+    data-tooltip-pos="right"
+  >
+    {incoming ? <ArrowDownLeft size={11} weight="bold" /> : <ArrowUpRight size={11} weight="bold" />}
+  </span>
+);
+
 // ── Clipboard feed card ───────────────────────────────────────────────
 
 const ClipFeedCard: React.FC<{
@@ -469,7 +485,8 @@ const ClipFeedCard: React.FC<{
   onView: (entry: ClipboardEntry) => void;
   layout: ClipboardLayout;
   showSourceBadge?: boolean;
-}> = ({ entry, onCopy, onView, layout, showSourceBadge }) => {
+  incoming: boolean;
+}> = ({ entry, onCopy, onView, layout, showSourceBadge, incoming }) => {
   const [copied, setCopied] = useState(false);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -511,6 +528,7 @@ const ClipFeedCard: React.FC<{
         onClick={() => onView(entry)}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPos({ x: e.clientX, y: e.clientY }); }}
       >
+        <DirectionBadge incoming={incoming} />
         {showSourceBadge && (
           <span className="sp-list-source-badge sp-list-source-badge--clip">
             <Clipboard size={10} />
@@ -638,7 +656,8 @@ const NoteFeedCard: React.FC<{
   onView: (note: Note) => void;
   layout: ClipboardLayout;
   showSourceBadge?: boolean;
-}> = ({ note, entries, onView, layout, showSourceBadge }) => {
+  incoming: boolean;
+}> = ({ note, entries, onView, layout, showSourceBadge, incoming }) => {
   const plain = extractNoteText(note.content);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const openMenu = useCallback((e: React.MouseEvent) => {
@@ -656,6 +675,7 @@ const NoteFeedCard: React.FC<{
           onClick={() => onView(note)}
           onContextMenu={openMenu}
         >
+          <DirectionBadge incoming={incoming} />
           <span className="sp-list-note-badge">
             <NoteIcon size={12} />
           </span>
@@ -1232,10 +1252,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 }) => {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [selfUserId, setSelfUserId] = useState<string | null>(null);
+  // Auth, not connectivity: a signed-in device that is offline can still be
+  // shown its spaces, but nothing that needs the server should be offered.
+  const signedIn = selfUserId !== null;
   // "clipboard:{id}" / "note:{id}" -> space ids the item is shared into.
   const [entryShares, setEntryShares] = useState<Record<string, string[]>>({});
+  // Same keys, for the items another member wrote. Anything absent went out
+  // from this account, which is also the right answer while sync is off.
+  const [remoteKeys, setRemoteKeys] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [invites, setInvites] = useState<SyncInviteList>({ sent: [], received: [] });
   const [sendFilters, setSendFilters] = useState<Record<string, SendFilter>>({});
   const [autocopy, setAutocopy] = useState<Record<string, boolean>>({});
@@ -1270,8 +1295,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [spaces, selectedId],
   );
 
-  const errMsg = (e: unknown, fallback: string) =>
-    typeof e === "string" ? e : fallback;
+  // Tauri commands reject with the Rust error string, which reads like
+  // `create space 401: {...}`. Translate the cases a user can act on and let
+  // the caller's fallback cover the rest - never show the raw string.
+  const errMsg = (e: unknown, fallback: string) => {
+    const raw = typeof e === "string" ? e : "";
+    if (raw.includes("not authenticated"))
+      return "Sign in on the Account screen first.";
+    if (/\b401\b/.test(raw))
+      return "Your session expired. Sign in again on the Account screen.";
+    if (/\b403\b/.test(raw)) return "This account does not have access to that.";
+    return fallback;
+  };
 
   const todayStr = useMemo(() => {
     const d = new Date();
@@ -1333,9 +1368,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [filtersOpen]);
 
+  // Both maps move together - a merge changes where an item is and where it
+  // came from - so they share one refresh and one set of listeners.
   const refreshShares = useCallback(() => {
     invoke<Record<string, string[]>>("sync_get_entry_shares")
       .then(setEntryShares)
+      .catch(() => {});
+    invoke<string[]>("sync_get_remote_entries")
+      .then((keys) => setRemoteKeys(new Set(keys)))
       .catch(() => {});
   }, []);
 
@@ -1358,7 +1398,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch(() => {});
     invoke<{ user_id: string } | null>("sync_get_user")
       .then((u) => setSelfUserId(u?.user_id ?? null))
-      .catch(() => {});
+      .catch(() => setSelfUserId(null));
   }, [syncConnected, reloadSpaces, refreshShares, refreshInvites]);
 
   // Auto-copy is per device, so it is read from local settings per space.
@@ -1443,7 +1483,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
   useEffect(() => {
     setDetailItem(null);
-    setSettingsOpen(false);
     setSpaceError(null);
   }, [selectedId]);
 
@@ -1549,7 +1588,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         const space = await invoke<Space>("space_create", { name, shareHistory });
         setSpaces((prev) => [...prev, space]);
         setSelectedId(space.id);
-        setSettingsOpen(true);
         setShowCreate(false);
       } catch (e) {
         setSpaceError(errMsg(e, "Could not create the space."));
@@ -1805,59 +1843,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                   </span>
                 )}
               </div>
-              <div className="sp-feed-header-right">
-                <button
-                  className={`sp-feed-action-btn${settingsOpen ? " sp-feed-action-btn--on" : ""}`}
-                  onClick={() => setSettingsOpen((v) => !v)}
-                  aria-expanded={settingsOpen}
-                >
-                  <Gear size={11} />
-                  Space settings
-                </button>
-              </div>
             </div>
-
-            {settingsOpen && (
-              <SpaceSettings
-                space={selected}
-                selfUserId={selfUserId}
-                autocopy={autocopy[selected.id] === true}
-                onAutocopy={(enabled) => handleSetAutocopy(selected.id, enabled)}
-                filter={selectedFilter}
-                onFilter={(next) => handleSetFilter(selected.id, next)}
-                availableGroups={availableGroups}
-                onInvite={(email) => handleInvite(selected.id, email)}
-                onRemoveMember={(uid) => handleRemoveMember(selected.id, uid)}
-                onLeave={() => handleLeave(selected.id)}
-                onDelete={() => handleDelete(selected.id)}
-                error={spaceError}
-              />
-            )}
-
-            {selected.members.length > 0 && (
-              <div className="sp-members-bar">
-                {selected.members.map((m) => (
-                  <div key={m.user_id} className="sp-member-chip">
-                    <UserAvatar
-                      className="sp-member-pic sp-member-pic--chip"
-                      url={m.avatar_url}
-                      label={m.display_name || ""}
-                      glyphSize={9}
-                    />
-                    <Circle
-                      size={6}
-                      weight="fill"
-                      color={m.online ? "#22c55e" : "#6b7280"}
-                    />
-                    <span>
-                      {m.user_id === selfUserId
-                        ? "You"
-                        : m.display_name || "Member"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {detailItem ? (
               detailItem.kind === "note" ? (
@@ -1952,6 +1938,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       }
                                       layout={layout}
                                       showSourceBadge={feedFilter === "all"}
+                                      incoming={remoteKeys.has(
+                                        `clipboard:${item.entry.id}`,
+                                      )}
                                     />
                                   ) : (
                                     <NoteFeedCard
@@ -1963,6 +1952,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       }
                                       layout={layout}
                                       showSourceBadge={feedFilter === "all"}
+                                      incoming={remoteKeys.has(
+                                        `note:${item.note.id}`,
+                                      )}
                                     />
                                   ),
                                 )}
@@ -1999,7 +1991,29 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         )}
       </div>
 
-      {/* Right rail */}
+      {/* Rules column: what this space does with items, in and out. Pinned
+          rather than collapsible - these are the settings a member checks
+          while reading the feed, not a dialog they open once. */}
+      {selected && (
+        <aside className="sp-rules">
+          <SpaceSettings
+            space={selected}
+            selfUserId={selfUserId}
+            autocopy={autocopy[selected.id] === true}
+            onAutocopy={(enabled) => handleSetAutocopy(selected.id, enabled)}
+            filter={selectedFilter}
+            onFilter={(next) => handleSetFilter(selected.id, next)}
+            availableGroups={availableGroups}
+            onInvite={(email) => handleInvite(selected.id, email)}
+            onRemoveMember={(uid) => handleRemoveMember(selected.id, uid)}
+            onLeave={() => handleLeave(selected.id)}
+            onDelete={() => handleDelete(selected.id)}
+            error={spaceError}
+          />
+        </aside>
+      )}
+
+      {/* Space list */}
       <aside className="sp-panel-right">
         <div className="sp-panel-header">
           <span className="sp-panel-title">Spaces</span>
@@ -2052,14 +2066,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 <Users size={22} />
               </span>
               <span className="sp-panel-empty-title">
-                {syncConnected === null
+                {!signedIn
                   ? "Not signed in"
                   : syncConnected === false
                     ? "Offline"
                     : "No spaces yet"}
               </span>
               <span className="sp-panel-empty-sub">
-                {syncConnected === null
+                {!signedIn
                   ? "Sign in on the Account screen to share."
                   : syncConnected === false
                     ? "Reconnecting..."
@@ -2160,12 +2174,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             <div className="sp-panel-btns">
               <button
                 className="sp-action-btn sp-action-btn--primary"
+                disabled={!signedIn}
                 onClick={() => {
                   setShowCreate(true);
                   setShowJoin(false);
                   setSpaceError(null);
                 }}
-                data-tooltip="Create a new space"
+                data-tooltip={
+                  signedIn
+                    ? "Create a new space"
+                    : "Sign in on the Account screen first"
+                }
                 data-tooltip-pos="top"
               >
                 <Plus size={11} />
@@ -2173,12 +2192,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
               </button>
               <button
                 className="sp-action-btn"
+                disabled={!signedIn}
                 onClick={() => {
                   setShowJoin(true);
                   setShowCreate(false);
                   setSpaceError(null);
                 }}
-                data-tooltip="Join with an invite code"
+                data-tooltip={
+                  signedIn
+                    ? "Join with an invite code"
+                    : "Sign in on the Account screen first"
+                }
                 data-tooltip-pos="top"
               >
                 <Key size={11} />

@@ -489,6 +489,7 @@ pub fn run() {
             crate::sync::commands::sync_get_status,
             crate::sync::commands::sync_clear_skipped,
             crate::sync::commands::sync_get_entry_shares,
+            crate::sync::commands::sync_get_remote_entries,
             crate::sync::commands::sync_get_entry_states,
             crate::sync::commands::sync_now,
             crate::sync::commands::sync_set_enabled,

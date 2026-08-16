@@ -120,6 +120,8 @@ struct ImageMergeMeta {
     pinned: bool,
     /// Write the materialized image to the clipboard once merged (auto-copy).
     autocopy: bool,
+    /// Another member wrote this one (its key came from a space keyring).
+    remote: bool,
 }
 
 /// Read the send-filter map and sync mode from `settings.json` (both default
@@ -1236,7 +1238,7 @@ impl SyncClient {
 
             // Unwrap the per-entry CEK: "personal" under the UMK for our own
             // entries, else through a carried space's keyring.
-            let Some(content_key) = self.unwrap_cek(&umk, e) else {
+            let Some((content_key, from_space)) = self.unwrap_cek(&umk, e) else {
                 eprintln!("[sync] merge: no usable key for {}", e.client_id);
                 continue;
             };
@@ -1302,6 +1304,7 @@ impl SyncClient {
                                     created_at: e.created_at,
                                     pinned: e.pinned,
                                     autocopy: live && self.autocopy_enabled(&e.space_ids),
+                                    remote: from_space,
                                 },
                             );
                         }
@@ -1348,6 +1351,9 @@ impl SyncClient {
             // server ids is what lets the Spaces screen place a received entry
             // under the space it actually came from.
             id_map.set_entry_shares(&key, &e.space_ids);
+            if from_space {
+                id_map.mark_entry_remote(&key);
+            }
         }
 
         if clip_changed {
@@ -1484,6 +1490,11 @@ impl SyncClient {
     /// Server group ids per entry, for the Sync screen's feed matching.
     pub fn entry_shares(&self) -> HashMap<String, Vec<String>> {
         self.id_map.lock().entry_shares()
+    }
+
+    /// Entry keys another member wrote, for the direction glyph on space rows.
+    pub fn remote_entries(&self) -> Vec<String> {
+        self.id_map.lock().remote_entries()
     }
 
     /// Drop the recorded skips (and their count) after the user has seen them.
@@ -1703,15 +1714,19 @@ impl SyncClient {
     /// under the UMK; space entries are tried against each carried space's
     /// keyring, newest key first (an AES-GCM auth failure just means "wrong
     /// key", so trial decryption is safe and epoch-free).
+    /// Returns the entry's content key and whether it had to come from a space
+    /// keyring. Our own entries always carry a "personal" wrap, so the space
+    /// path means another member wrote this one — that flag is the direction
+    /// the Spaces rows show.
     fn unwrap_cek(
         &self,
         umk: &Zeroizing<[u8; 32]>,
         e: &crate::sync::client::PulledEntry,
-    ) -> Option<Zeroizing<[u8; 32]>> {
+    ) -> Option<(Zeroizing<[u8; 32]>, bool)> {
         let wraps: HashMap<String, String> = serde_json::from_str(&e.wrapped_keys).ok()?;
         if let Some(w) = wraps.get("personal") {
             if let Ok(cek) = crypto::unwrap_key(umk, w) {
-                return Some(cek);
+                return Some((cek, false));
             }
         }
         let keyrings = self.space_keys.lock();
@@ -1721,7 +1736,7 @@ impl SyncClient {
             };
             for key in ring {
                 if let Ok(cek) = crypto::unwrap_key(key, w) {
-                    return Some(cek);
+                    return Some((cek, true));
                 }
             }
         }
@@ -2002,6 +2017,9 @@ impl SyncClient {
             let mut id_map = id_map.lock();
             id_map.set_entry(&key, &meta.server_id);
             id_map.set_entry_shares(&key, &meta.space_ids);
+            if meta.remote {
+                id_map.mark_entry_remote(&key);
+            }
             drop(id_map);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
