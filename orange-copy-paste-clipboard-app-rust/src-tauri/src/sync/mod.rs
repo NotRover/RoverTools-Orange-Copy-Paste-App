@@ -44,7 +44,7 @@ use crate::sync::client::{
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
@@ -92,6 +92,10 @@ struct PushCtx {
 /// nothing is queued behind a stalled connection pool, and the server is never
 /// the thing that breaks.
 const PUSH_CONCURRENCY: usize = 6;
+
+/// Largest blob the server accepts, matched here so an oversized image is
+/// caught before it is uploaded rather than rejected after.
+const BLOB_SIZE_LIMIT: u64 = 5 * 1024 * 1024;
 
 /// Everything that differs between a clipboard push and a note push.
 struct PushJob {
@@ -1043,6 +1047,10 @@ impl SyncClient {
         };
 
         self.handle.spawn(async move {
+            // Taken before anything touches the network, so a bulk upload of
+            // images opens PUSH_CONCURRENCY connections rather than one per
+            // entry.
+            let permit = ctx.gate.clone().acquire_owned().await.ok();
             let skip_label = skip_label_for(&entry);
 
             // Skip file entries larger than 5 MB (Phase 7 enforcement)
@@ -1091,7 +1099,7 @@ impl SyncClient {
                     Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
                     Err(e) => {
                         eprintln!("[sync] image blob upload failed: {e}");
-                        record_skip(&ctx, &entry.id, &skip_label, format!("Image upload failed: {e}"));
+                        record_skip(&ctx, &entry.id, &skip_label, e);
                         return;
                     }
                 }
@@ -1116,7 +1124,7 @@ impl SyncClient {
                 blob_key,
                 blob_size,
             };
-            push_entry_task(ctx, enc_key, is_update, job).await;
+            push_entry_task(ctx, enc_key, is_update, job, permit).await;
         });
     }
 
@@ -1133,6 +1141,7 @@ impl SyncClient {
         };
 
         self.handle.spawn(async move {
+            let permit = ctx.gate.clone().acquire_owned().await.ok();
             let metadata_json = serde_json::json!({
                 "title": note.title,
                 "groups": note.groups,
@@ -1153,7 +1162,7 @@ impl SyncClient {
                 blob_key: None,
                 blob_size: None,
             };
-            push_entry_task(ctx, enc_key, is_update, job).await;
+            push_entry_task(ctx, enc_key, is_update, job, permit).await;
         });
     }
 
@@ -1516,6 +1525,13 @@ impl SyncClient {
     /// Entry keys another member wrote, for the direction glyph on space rows.
     pub fn remote_entries(&self) -> Vec<String> {
         self.id_map.lock().remote_entries()
+    }
+
+    /// How many pushes are talking to the server right now.  A bulk upload
+    /// looks stalled from the outside during a long image transfer, so the UI
+    /// asks this before deciding nothing is happening.
+    pub fn pushes_in_flight(&self) -> usize {
+        PUSH_CONCURRENCY.saturating_sub(self.push_gate.available_permits())
     }
 
     /// The recorded skips, for a retry pass that needs their client ids.
@@ -2127,6 +2143,15 @@ fn skip_label_for(entry: &ClipboardEntry) -> String {
         return label.clone();
     }
     match entry.kind {
+        // Externalized images keep their file name in `content`; only an
+        // inline data URL has nothing to name it by. "Image" on its own left
+        // the user with no way to tell which one was skipped.
+        EntryKind::Image if !entry.content.starts_with("data:") => {
+            std::path::Path::new(&entry.content)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Image".into())
+        }
         EntryKind::Image => "Image".into(),
         EntryKind::File => entry
             .content
@@ -2177,6 +2202,14 @@ async fn upload_image_blob(
     let (bytes, mime) = read_image_bytes(content)?;
     let ciphertext = crypto::encrypt_bytes(enc_key, &bytes, client_id)?;
     let size = ciphertext.len() as u64;
+    // The server enforces this too, but finding out from a 413 means the user
+    // reads a raw error for something we could have measured before sending.
+    if size > BLOB_SIZE_LIMIT {
+        return Err(format!(
+            "{} is over the 5 MB limit for synced images",
+            format_bytes(size)
+        ));
+    }
     let checksum = crypto::sha256_hex(&ciphertext);
     let up = http
         .request_blob_upload(BlobUploadRequest {
@@ -2184,10 +2217,14 @@ async fn upload_image_blob(
             size_bytes: size,
             checksum,
         })
-        .await?;
+        .await
+        .map_err(|e| format!("Image upload failed: {e}"))?;
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, &mime)
-        .await?;
-    http.confirm_blob_upload(&up.blob_key).await?;
+        .await
+        .map_err(|e| format!("Image upload failed: {e}"))?;
+    http.confirm_blob_upload(&up.blob_key)
+        .await
+        .map_err(|e| format!("Image upload failed: {e}"))?;
     let descriptor = serde_json::json!({ "mime": mime }).to_string();
     Ok((up.blob_key, size, descriptor))
 }
@@ -2195,10 +2232,16 @@ async fn upload_image_blob(
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
 /// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.  `enc_key`
 /// is the entry's freshly minted CEK; `job.wrapped_keys` carries its envelope.
-async fn push_entry_task(ctx: PushCtx, enc_key: Zeroizing<[u8; 32]>, is_update: bool, job: PushJob) {
-    // Held for the whole task, so the blob upload counts against the window
-    // too - that is the slow half of an image push.
-    let _permit = ctx.gate.clone().acquire_owned().await;
+async fn push_entry_task(
+    ctx: PushCtx,
+    enc_key: Zeroizing<[u8; 32]>,
+    is_update: bool,
+    job: PushJob,
+    // Taken by the caller before it uploads any blob, and held here until the
+    // push finishes. Acquiring it inside this function instead would leave the
+    // image upload - the slow half - outside the window entirely.
+    _permit: Option<OwnedSemaphorePermit>,
+) {
     let PushJob {
         client_id,
         content,

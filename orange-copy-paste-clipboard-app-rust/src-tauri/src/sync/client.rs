@@ -31,10 +31,11 @@ const REQUEST_TIMEOUT_SECS: u64 = 10;
 /// 10-second default cuts off on a slow link.
 const BLOB_TRANSFER_TIMEOUT_SECS: u64 = 90;
 
-/// How long to wait before the single retry of a request that never reached
-/// the backend.  Long enough for a host that spun down while idle to finish
-/// waking, short enough that a genuinely offline machine fails quickly.
-const TRANSPORT_RETRY_DELAY_SECS: u64 = 3;
+/// How long to wait before each retry of a request that never reached the
+/// backend, in seconds.  The first is long enough for a host that spun down
+/// while idle to finish waking; the list ends so a genuinely offline machine
+/// still fails quickly.
+const TRANSPORT_RETRY_DELAYS: [u64; 2] = [3, 8];
 
 /// How many times to retry a request the server itself failed (502/503/504 from
 /// an overloaded or restarting backend, 429 from the rate limiter).  Without
@@ -451,6 +452,29 @@ pub struct SyncHttpClient {
     access_token_expires_at: AtomicU64,
 }
 
+/// The readable half of an error response.
+///
+/// FastAPI answers with `{"detail": "..."}`, which used to reach the user as
+/// raw JSON; a proxy 502 answers with nothing at all, which reached them as a
+/// bare colon.  Both are the same problem: the message is the body's, not the
+/// wire format's.
+fn error_detail(code: u16, body: &str) -> String {
+    let body = body.trim();
+    if let Some(detail) = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("detail").and_then(|d| d.as_str()).map(str::to_string))
+    {
+        return detail;
+    }
+    if !body.is_empty() && !body.starts_with('{') && !body.starts_with('<') {
+        return body.to_string();
+    }
+    match code {
+        502 | 503 | 504 => "the server is busy, try again in a moment".to_string(),
+        _ => format!("the server rejected the request ({code})"),
+    }
+}
+
 /// Seconds the server asked us to wait, from a `Retry-After` header.  Only the
 /// delta-seconds form is honoured; the HTTP-date form is rare and not worth a
 /// date parser here.
@@ -670,7 +694,7 @@ impl SyncHttpClient {
     {
         self.ensure_fresh_access_token().await;
         let mut refreshed = false;
-        let mut retried = false;
+        let mut transport_tries = 0usize;
         let mut attempt: u32 = 0;
         loop {
             let sent = factory()
@@ -688,12 +712,13 @@ impl SyncHttpClient {
                 // drops the first request that wakes it and answers the next
                 // one, so give it exactly one more try before giving up - the
                 // alternative is a skipped entry the user has to heal by hand.
-                Err(e) if !retried && (e.is_timeout() || e.is_connect()) => {
-                    retried = true;
-                    tokio::time::sleep(std::time::Duration::from_secs(
-                        TRANSPORT_RETRY_DELAY_SECS,
-                    ))
-                    .await;
+                Err(e)
+                    if transport_tries < TRANSPORT_RETRY_DELAYS.len()
+                        && (e.is_timeout() || e.is_connect()) =>
+                {
+                    let wait = TRANSPORT_RETRY_DELAYS[transport_tries];
+                    transport_tries += 1;
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                     continue;
                 }
                 Err(e) => {
@@ -726,17 +751,9 @@ impl SyncHttpClient {
             }
             if !resp.status().is_success() {
                 let body = resp.text().await.unwrap_or_default();
-                let body = body.trim();
-                let detail = if body.is_empty() {
-                    // A bare 502 from a proxy has no body, and "blob
-                    // request-upload 502:" told the user nothing at all.
-                    "the server did not respond in time; try again"
-                } else {
-                    body
-                };
                 return Err(ApiError {
                     status: Some(code),
-                    message: format!("{tag} {code}: {detail}"),
+                    message: format!("{tag} {code}: {}", error_detail(code, &body)),
                 });
             }
             return Ok(Some(resp));
@@ -768,9 +785,15 @@ impl SyncHttpClient {
             .expect("404 not allowed here");
         // The call succeeded; only the body was unreadable, so leave the status
         // off rather than let it read as a verdict on our credentials.
-        resp.json::<T>().await.map_err(|e| ApiError {
-            status: None,
-            message: format!("{tag} parse: {e}"),
+        // A 2xx whose body we cannot read is almost always a proxy that
+        // truncated the reply under load, so say that rather than quoting a
+        // decoder error at the user.
+        resp.json::<T>().await.map_err(|e| {
+            eprintln!("[sync] {tag} parse: {e}");
+            ApiError {
+                status: None,
+                message: format!("{tag}: the server's reply was incomplete, try again"),
+            }
         })
     }
 

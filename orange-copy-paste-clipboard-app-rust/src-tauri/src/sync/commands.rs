@@ -462,22 +462,51 @@ pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String
     Ok(keys)
 }
 
-/// How many of `keys` the server has acknowledged, i.e. are recorded as fully
-/// synced right now. Bulk uploads and removals are fan-outs of independent
+/// Where a bulk upload or removal has got to.
+#[derive(serde::Serialize)]
+pub struct BulkProgressOut {
+    /// How many of the asked-about keys the server has acknowledged.
+    pub settled: usize,
+    /// How many were refused and will never arrive without a manual retry.
+    pub failed: usize,
+    /// Pushes talking to the server right now, across the whole app.
+    pub in_flight: usize,
+}
+
+/// Progress of a bulk upload or removal. Both are fan-outs of independent
 /// background tasks with no completion signal of their own, so the UI polls
-/// this: an upload counts the number rising to the total, a removal counts it
-/// falling to zero. Cheap on purpose - one number, no per-entry payload.
+/// this: an upload watches `settled` rise to the total, a removal watches it
+/// fall to zero.
+///
+/// `in_flight` is what keeps the UI honest. A batch of large images can go a
+/// long time without a single one finishing, which looks identical to a stall
+/// from the outside - and calling that a failure while the upload is still
+/// running is worse than saying nothing.
 #[tauri::command]
-pub fn sync_settled_count(keys: Vec<String>, state: State<'_, AppState>) -> usize {
-    let states = state
-        .sync_client
-        .lock()
-        .as_ref()
-        .map(|s| s.entry_states())
-        .unwrap_or_default();
-    keys.iter()
+pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> BulkProgressOut {
+    let guard = state.sync_client.lock();
+    let Some(sync) = guard.as_ref() else {
+        return BulkProgressOut { settled: 0, failed: 0, in_flight: 0 };
+    };
+    let states = sync.entry_states();
+    let refused: std::collections::HashSet<String> =
+        sync.skipped().into_iter().map(|s| s.client_id).collect();
+    let settled = keys
+        .iter()
         .filter(|k| states.get(*k).is_some_and(|s| *s == "synced"))
-        .count()
+        .count();
+    let failed = keys
+        .iter()
+        .filter(|k| {
+            k.split_once(':')
+                .is_some_and(|(_, id)| refused.contains(id))
+        })
+        .count();
+    BulkProgressOut {
+        settled,
+        failed,
+        in_flight: sync.pushes_in_flight(),
+    }
 }
 
 #[tauri::command]

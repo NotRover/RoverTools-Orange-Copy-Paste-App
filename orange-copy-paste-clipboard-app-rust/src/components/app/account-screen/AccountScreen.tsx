@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -27,9 +27,13 @@ import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
 import "./AccountScreen.css";
-
-/** A bulk upload or removal in flight, and how far through it is. */
-type BulkProgress = { mode: "upload" | "remove"; done: number; total: number };
+import {
+  getBulkState,
+  setBulkResult,
+  subscribeBulk,
+  trackBulk,
+  type BulkState,
+} from "./bulkProgress";
 
 const MODE_OPTIONS: { value: SyncMode; label: string }[] = [
   { value: "realtime", label: "Realtime" },
@@ -424,66 +428,22 @@ const AccountScreen: React.FC = () => {
   };
 
   const [pushingOld, setPushingOld] = useState(false);
-  const [pushResult, setPushResult] = useState<string | null>(null);
-  const [progress, setProgress] = useState<BulkProgress | null>(null);
-  // Bumped to abandon a run: leaving the screen, or starting the other action.
-  const progressRun = useRef(0);
-  useEffect(() => () => void (progressRun.current += 1), []);
-
-  // Both bulk actions fan out into one background task per item and return
-  // immediately, so there is no completion to await. Progress is read back
-  // from how many items the server has acknowledged: an upload counts up to
-  // the total, a removal counts the same number down. Stops on its own once
-  // nothing has moved for a while, since anything sync refuses to send never
-  // arrives at all and would otherwise spin here forever.
-  const trackBulk = useCallback(
-    async (keys: string[], mode: "upload" | "remove") => {
-      const run = (progressRun.current += 1);
-      const total = keys.length;
-      setProgress({ mode, done: 0, total });
-      let last = -1;
-      let stalledTicks = 0;
-      let done = 0;
-      while (progressRun.current === run) {
-        await new Promise((r) => setTimeout(r, 700));
-        if (progressRun.current !== run) return;
-        let settled: number;
-        try {
-          settled = await invoke<number>("sync_settled_count", { keys });
-        } catch {
-          break;
+  // Lives outside the component: the upload keeps running after the screen
+  // unmounts, so its progress has to survive coming back to it.
+  const [bulk, setBulk] = useState<BulkState>(getBulkState);
+  useEffect(
+    () =>
+      subscribeBulk((next) => {
+        setBulk(next);
+        // A finished run changes the skipped list and the pending count.
+        if (next.progress === null) {
+          invoke<SyncStatusInfo>("sync_get_status").then(setSyncStatus).catch(() => {});
         }
-        done = mode === "upload" ? settled : total - settled;
-        setProgress({ mode, done, total });
-        if (done >= total) break;
-        stalledTicks = done === last ? stalledTicks + 1 : 0;
-        last = done;
-        if (stalledTicks >= 28) break; // ~20s with nothing moving
-      }
-      if (progressRun.current !== run) return;
-      setProgress(null);
-      const left = total - done;
-      if (mode === "upload") {
-        setPushResult(
-          left <= 0
-            ? `Uploaded ${total} item${total === 1 ? "" : "s"}.`
-            : `Uploaded ${done} of ${total}. ${left} did not go through - check the skipped list above.`,
-        );
-      } else {
-        setPushResult(
-          left <= 0
-            ? `Removed ${total} item${total === 1 ? "" : "s"} from the server. They stay on this device.`
-            : `Removed ${done} of ${total}. ${left} are still on the server; try again.`,
-        );
-      }
-      try {
-        setSyncStatus(await invoke<SyncStatusInfo>("sync_get_status"));
-      } catch {
-        /* the status refresh is cosmetic here */
-      }
-    },
+      }),
     [],
   );
+  const progress = bulk.progress;
+  const pushResult = bulk.result;
 
   const pct = progress
     ? Math.min(100, Math.round((progress.done / Math.max(1, progress.total)) * 100))
@@ -491,16 +451,16 @@ const AccountScreen: React.FC = () => {
 
   const handlePushUnsynced = async () => {
     setPushingOld(true);
-    setPushResult(null);
+    setBulkResult(null);
     try {
       const keys = await invoke<string[]>("sync_push_unsynced");
       if (keys.length === 0) {
-        setPushResult("Everything on this device is already synced.");
+        setBulkResult("Everything on this device is already synced.");
       } else {
         void trackBulk(keys, "upload");
       }
     } catch (e) {
-      setPushResult(typeof e === "string" ? e : "Could not start the upload.");
+      setBulkResult(typeof e === "string" ? e : "Could not start the upload.");
     }
     setPushingOld(false);
   };
@@ -517,16 +477,16 @@ const AccountScreen: React.FC = () => {
     }
     setUnpushArmed(false);
     setUnpushing(true);
-    setPushResult(null);
+    setBulkResult(null);
     try {
       const keys = await invoke<string[]>("sync_unpush_all");
       if (keys.length === 0) {
-        setPushResult("Nothing on this device is synced right now.");
+        setBulkResult("Nothing on this device is synced right now.");
       } else {
         void trackBulk(keys, "remove");
       }
     } catch (e) {
-      setPushResult(typeof e === "string" ? e : "Could not remove them.");
+      setBulkResult(typeof e === "string" ? e : "Could not remove them.");
     }
     setUnpushing(false);
   };
