@@ -383,6 +383,98 @@
 
 /* Direction: accent is reserved for what this account sent, which is the
    smaller half of a busy space - if a row is orange, you put it there. */
+/* What is left where a removed item used to be. Dashed and dim so it reads as
+   an absence rather than another row competing for attention, and it stays out
+   of the grid's card rhythm by spanning the full width. */
+.sp-removed-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px dashed var(--border-light);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.sp-removed-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--surface-hover);
+}
+
+.sp-removed-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.sp-removed-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Who shared an item. The direction arrow next to this says in or out; this
+   says which member, which is the part a space with several people needs. */
+.sp-owner {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 130px;
+  padding: 2px 7px 2px 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-owner-avatar {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.sp-owner-avatar--initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sp-owner-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Your own items get the word without a picture: the avatar would be the same
+   on every row and carry nothing. */
+.sp-owner--self {
+  padding: 2px 8px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
 .sp-list-dir {
   flex-shrink: 0;
   display: inline-flex;
@@ -1848,6 +1940,34 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.2px;
+}
+
+/* Same shape as a flag, but it does something, so it reads as neutral until
+   hovered rather than sitting in the accent like a live setting. */
+.sp-feed-clear-removed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition:
+    color 0.13s ease,
+    border-color 0.13s ease,
+    background 0.13s ease;
+}
+
+.sp-feed-clear-removed:hover {
+  color: var(--text);
+  border-color: var(--border-light);
+  background: var(--surface-hover);
 }
 
 /* Right rail: received invites, space flags, sent invites */

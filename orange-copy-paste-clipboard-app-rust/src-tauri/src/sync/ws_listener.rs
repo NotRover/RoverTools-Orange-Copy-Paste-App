@@ -233,6 +233,24 @@ impl WsListener {
                     sync.handle_space_rekey();
                 }
             }
+            // The space owner took an entry down. Pull only matches rows that
+            // still carry the space id, so this event is the only way a member
+            // holding a copy hears about it.
+            "space:entry_removed" => {
+                if let Some(sync) = self.sync_client() {
+                    let p = &msg.payload;
+                    if let (Some(space_id), Some(client_id)) = (
+                        p.get("space_id").and_then(|v| v.as_str()),
+                        p.get("client_id").and_then(|v| v.as_str()),
+                    ) {
+                        let entry_type = p
+                            .get("entry_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("clipboard");
+                        sync.drop_space_entry(space_id, client_id, entry_type);
+                    }
+                }
+            }
             // Someone joined, left, was removed, or the space was deleted.
             "space:membership_changed" => {
                 let _ = self.app.emit("space:membership-changed", &msg.payload);

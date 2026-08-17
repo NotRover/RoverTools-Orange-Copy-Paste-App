@@ -75,6 +75,17 @@ export interface Space {
   invite_expires_at?: number;
 }
 
+/** An item that was removed from a space. Mirrors `DeletedMarker` in
+ *  `src-tauri/src/sync/id_map.rs`. Kept after the content is gone so the feed
+ *  can show that something was taken down instead of a row just vanishing. */
+export interface DeletedMarker {
+  space_ids: string[];
+  owner_id: string | null;
+  deleted_at: number;
+  /** True when the author removed it, false when a space owner took it down. */
+  by_author: boolean;
+}
+
 /** Per-space send filter: which of my entries auto-flow into the space.
  *  Absent or disabled = explicit shares only (the default). */
 export interface SendFilter {
