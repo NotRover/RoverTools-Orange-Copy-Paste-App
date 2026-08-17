@@ -1023,14 +1023,35 @@ impl SyncClient {
         let Some(umk) = self.umk.lock().clone() else {
             return;
         };
-        self.spawn_push_note(note, umk, false);
+        self.spawn_push_note(note, umk, false, None);
     }
 
     pub fn on_update_note(&self, note: Note) {
         let Some(umk) = self.umk.lock().clone() else {
             return;
         };
-        self.spawn_push_note(note, umk, true);
+        self.spawn_push_note(note, umk, true, None);
+    }
+
+    /// "Upload to cloud" on a note the user picked, as opposed to a note that
+    /// has just been written.
+    ///
+    /// The push carries `now` as its `updated_at` instead of the note's own.
+    /// A note that has sat untouched for weeks is older than whatever the
+    /// server holds for it - in particular the tombstone that "Remove from
+    /// cloud" left behind, which is stamped at the moment of removal - and the
+    /// server drops any push that is not newer as a stale update.  That
+    /// rejection is silent, so the note simply never came back.
+    ///
+    /// Only the wire copy is stamped: the note keeps its own `updated_at`, so
+    /// nothing reorders, and the merge skips entries this device sent, so the
+    /// newer timestamp never lands back here.
+    pub fn on_manual_push_note(&self, note: Note) {
+        let Some(umk) = self.umk.lock().clone() else {
+            return;
+        };
+        let at = note.updated_at.max(now_ms());
+        self.spawn_push_note(note, umk, true, Some(at));
     }
 
     pub fn on_delete_note(&self, note_id: String) {
@@ -1161,7 +1182,15 @@ impl SyncClient {
         });
     }
 
-    fn spawn_push_note(&self, note: Note, umk: Zeroizing<[u8; 32]>, is_update: bool) {
+    /// `wire_updated_at` overrides the timestamp the push carries, for an
+    /// upload the user asked for. `None` sends the note's own.
+    fn spawn_push_note(
+        &self,
+        note: Note,
+        umk: Zeroizing<[u8; 32]>,
+        is_update: bool,
+        wire_updated_at: Option<u64>,
+    ) {
         let ctx = self.push_ctx();
         let targets =
             self.share_targets("note", &note.id, &note.groups, "note", |f| f.includes_notes());
@@ -1188,7 +1217,7 @@ impl SyncClient {
                 entry_type: "note",
                 kind: "note".into(),
                 created_at: note.created_at,
-                updated_at: note.updated_at,
+                updated_at: wire_updated_at.unwrap_or(note.updated_at),
                 pinned: note.pinned,
                 space_ids,
                 wrapped_keys,
@@ -2670,6 +2699,14 @@ async fn push_entry_task(
                             }),
                         );
                     }
+                }
+                // A rejected push used to look exactly like an accepted one
+                // from here: no row, no event, no word anywhere. Say so.
+                if let Some(c) = result.conflicts.iter().find(|c| c.client_id == client_id) {
+                    eprintln!(
+                        "[sync] {entry_type} {client_id} rejected by the server: {}",
+                        c.reason
+                    );
                 }
                 ctx.status.lock().pending_count = ctx.queue.lock().len();
                 return;
