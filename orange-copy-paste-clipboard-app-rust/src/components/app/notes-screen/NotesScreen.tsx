@@ -24,6 +24,7 @@ import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
 import { useSpaceShares } from "../../../hooks/useSpaceShares";
+import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
 import NoteEditor from "./note-editor/NoteEditor";
 import NoteCard from "./note-card/NoteCard";
 import NotesFilterDropdown, {
@@ -304,6 +305,9 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
   const multiSelect = useMultiSelect();
   const spaceShares = useSpaceShares();
+  // Only the menu needs these here, to say whether the note already has a
+  // server copy. Notes cards carry no badge of their own.
+  const noteSyncStates = useEntrySyncStates();
 
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
@@ -808,6 +812,13 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             onToggleSpace={(spaceId) =>
               spaceShares.toggle("note", menuNote.id, spaceId)
             }
+            inCloud={!!noteSyncStates[`note:${menuNote.id}`]}
+            onToggleCloud={(upload) => {
+              invoke(upload ? "sync_push_entries" : "sync_unpush_entries", {
+                clientIds: [menuNote.id],
+                entryType: "note",
+              }).catch(() => {});
+            }}
             showCopy={false}
             showSave={false}
           />

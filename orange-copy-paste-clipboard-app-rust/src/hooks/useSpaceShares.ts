@@ -37,6 +37,40 @@ const REFRESH_ON = [
 ];
 
 /**
+ * Entry keys another member wrote, as a set for membership tests.
+ *
+ * Same Rust-owned bookkeeping as the shares above; kept separate because most
+ * screens want one or the other, not both.
+ */
+export function useRemoteEntryKeys(): Set<string> {
+  const [keys, setKeys] = useState<Set<string>>(() => new Set());
+
+  const refresh = useCallback(() => {
+    invoke<string[]>("sync_get_remote_entries")
+      .then((list) => setKeys(new Set(list)))
+      .catch(() => setKeys(new Set()));
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const unlisteners: Array<() => void> = [];
+    let cancelled = false;
+    for (const event of REFRESH_ON) {
+      listen(event, refresh).then((fn) => {
+        if (cancelled) fn();
+        else unlisteners.push(fn);
+      });
+    }
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [refresh]);
+
+  return keys;
+}
+
+/**
  * Which spaces each item is shared into, plus the space list the share menu
  * offers. Like sync state, this is Rust-owned bookkeeping (id_map.json) rather
  * than part of the item, so it is read through commands and refreshed on the

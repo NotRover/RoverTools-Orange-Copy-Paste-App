@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { groupColor } from "../../../types";
 import type { Space } from "../../../types";
-import { ShareNetwork, Check } from "@phosphor-icons/react";
+import { ShareNetwork, Check, CloudArrowUp, CloudSlash } from "@phosphor-icons/react";
 import {
   CheckIcon,
   CopyIcon,
@@ -52,6 +52,10 @@ export interface CardMenuProps {
   itemSpaceIds?: string[];
   /** Share this item into a space, or stop sharing it there. */
   onToggleSpace?: (spaceId: string) => void;
+  /** Whether a copy of this item exists on the server. */
+  inCloud?: boolean;
+  /** Upload this item to the account, or take the server copy back off. */
+  onToggleCloud?: (upload: boolean) => void;
 }
 
 const CardMenu: React.FC<CardMenuProps> = ({
@@ -78,6 +82,8 @@ const CardMenu: React.FC<CardMenuProps> = ({
   signedIn = false,
   itemSpaceIds = [],
   onToggleSpace,
+  inCloud = false,
+  onToggleCloud,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const flyoutRef = useRef<HTMLDivElement>(null);
@@ -171,6 +177,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
     : spaces.length === 0
       ? "Create a space on the Spaces screen first"
       : null;
+  const cloudBlocked = signedIn ? null : "Sign in on the Account screen to sync";
 
   return createPortal(
     <div
@@ -207,6 +214,28 @@ const CardMenu: React.FC<CardMenuProps> = ({
         </button>
       )}
 
+      {/* Cloud copy. Sits above sharing because an item has to reach the
+          account before it can reach a space. */}
+      {onToggleCloud && (
+        <button
+          /* aria-disabled rather than disabled, for the same reason as the
+             share row: a disabled button fires no mouse events, so the tooltip
+             saying why would never appear. */
+          className={`card-menu-item${inCloud ? " card-menu-item--danger-soft" : ""}${cloudBlocked ? " card-menu-item--off" : ""}`}
+          aria-disabled={!!cloudBlocked}
+          data-tooltip={cloudBlocked ?? undefined}
+          data-tooltip-pos="left"
+          onClick={() => {
+            if (cloudBlocked) return;
+            onToggleCloud(!inCloud);
+            onClose();
+          }}
+        >
+          {inCloud ? <CloudSlash size={13} /> : <CloudArrowUp size={13} />}
+          <span>{inCloud ? "Remove from cloud" : "Upload to cloud"}</span>
+        </button>
+      )}
+
       {/* Share to space submenu */}
       {showShare && (
         <div className="card-menu-groups-wrapper">
@@ -223,10 +252,12 @@ const CardMenu: React.FC<CardMenuProps> = ({
             }}
           >
             <ShareNetwork size={13} />
-            <span style={{ flex: 1 }}>
-              Share to space
-              {itemSpaceIds.length > 0 ? ` (${itemSpaceIds.length})` : ""}
-            </span>
+            <span style={{ flex: 1 }}>Share to space</span>
+            {/* A count, not a parenthetical: the number says how many spaces this
+                item is already in, which is state rather than part of the label. */}
+            {itemSpaceIds.length > 0 && (
+              <span className="card-menu-count">{itemSpaceIds.length}</span>
+            )}
             <ChevronRightIcon
               className={`card-menu-chevron${flyoutOpen === "spaces" ? " card-menu-chevron--open" : ""}`}
             />

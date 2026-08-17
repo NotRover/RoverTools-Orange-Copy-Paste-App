@@ -231,6 +231,11 @@ interface EntryCardProps {
   sharedSpaceNames?: string[];
   /** Share this entry into a space, or stop sharing it there. */
   onToggleSpace?: (entryId: string, spaceId: string) => void;
+  /** Whether a copy of this entry exists on the server. Read separately from
+   *  `syncState`, which the badge preference can switch off. */
+  inCloud?: boolean;
+  /** Upload this entry, or take the server copy back off. */
+  onToggleCloud?: (entryId: string, upload: boolean) => void;
 }
 
 const EntryCardImpl: React.FC<EntryCardProps> = ({
@@ -251,6 +256,8 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   itemSpaceIds,
   sharedSpaceNames,
   onToggleSpace,
+  inCloud,
+  onToggleCloud,
 }) => {
   const [copied, setCopied] = useState(false);
   const [justPinned, setJustPinned] = useState(false);
@@ -695,6 +702,10 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
         }}
         spaces={spaces}
         signedIn={signedIn}
+        inCloud={inCloud}
+        onToggleCloud={
+          onToggleCloud ? (upload) => onToggleCloud(entry.id, upload) : undefined
+        }
         itemSpaceIds={itemSpaceIds}
         onToggleSpace={
           onToggleSpace ? (spaceId) => onToggleSpace(entry.id, spaceId) : undefined

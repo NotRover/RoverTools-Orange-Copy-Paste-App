@@ -110,6 +110,14 @@
   color: var(--danger);
 }
 
+/* Removing the cloud copy is undoable (the local item stays, and it can be
+   uploaded again), so it warns on hover rather than sitting permanently red
+   like Delete. */
+.card-menu-item--danger-soft:hover {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
 /* Expand / Collapse button */
 
 .card-menu-item--expand:hover {
@@ -167,6 +175,31 @@
 .card-menu-item--groups-toggle-active {
   background: var(--surface-hover);
   color: var(--text);
+}
+
+/* How many spaces the item is already in. Sits between the label and the
+   chevron as a quiet count, so the row reads "Share to space" with a state
+   marker rather than a label with a number bolted onto it. */
+.card-menu-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  margin-right: 1px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.card-menu-item--off .card-menu-count {
+  background: var(--surface-hover);
+  color: var(--text-muted);
 }
 
 .card-menu-chevron {
