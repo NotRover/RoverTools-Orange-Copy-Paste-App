@@ -144,6 +144,7 @@ These bind the client and backend. Changing one side usually means changing the 
 - Don't regress file-backed image behavior or large-image performance.
 - Keep group operations consistent across clipboard entries **and** notes.
 - Sync must never echo a merge back as a new push, and must skip self-device entries.
+- `id_map.json` (and `entry_states()` on top of it) is **this device's** record of what it pushed or pulled — never a view of the account. Anything account-wide (removing cloud copies, quota, reconciliation) must ask the server; a row another device pushed is invisible locally. See bug #7 in `docs/BUGFIX_HISTORY.md`.
 - Be careful with autostart while running `tauri dev` (dev-path startup entries can break launches without Vite).
 
 ## Code Conventions

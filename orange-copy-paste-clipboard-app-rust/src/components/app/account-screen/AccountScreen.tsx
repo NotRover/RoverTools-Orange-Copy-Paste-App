@@ -483,14 +483,18 @@ const AccountScreen: React.FC = () => {
     () =>
       subscribeBulk((next) => {
         setBulk(next);
-        // A finished run changes the skipped list and the pending count.
+        // A finished run changes the skipped list, the pending count, and how
+        // much storage the account is using - the bar read stale until the
+        // next sign-in or Sync now, which looked like the removal had not
+        // freed anything.
         if (next.progress === null) {
           invoke<SyncStatusInfo>("sync_get_status")
             .then(setSyncStatus)
             .catch(() => {});
+          refreshQuota();
         }
       }),
-    [],
+    [refreshQuota],
   );
   const progress = bulk.progress;
   const pushResult = bulk.result;
@@ -1260,7 +1264,7 @@ const AccountScreen: React.FC = () => {
                         <div className="acct-quota">
                           <div className="acct-quota-head">
                             <HardDrives size={13} />
-                            <span>Storage</span>
+                            <span>Image storage</span>
                             <span className="acct-quota-value">
                               {formatBytes(quota.used_bytes)} of{" "}
                               {formatBytes(quota.quota_bytes)}
@@ -1272,6 +1276,13 @@ const AccountScreen: React.FC = () => {
                               style={{ width: `${pct}%` }}
                             />
                           </div>
+                          {/* The number only ever moves for images, which is
+                              why clearing a few hundred text entries leaves it
+                              where it was. */}
+                          <p className="acct-quota-note">
+                            Only copied images count here. Text and notes take
+                            no storage.
+                          </p>
                         </div>
                       );
                     })()}

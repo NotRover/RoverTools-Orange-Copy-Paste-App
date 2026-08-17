@@ -157,3 +157,38 @@ Some Windows apps (Snipping Tool, browsers) write to the clipboard in multiple p
 On the first capture, `push()` externalised the image from an inline data-URL (`data:image/png;base64,…`) to a file path (`C:\…\images\42_Image.png`), replacing the entry's `content` field. On the second capture (triggered by the second sequence-number increment), the watcher read the same image from the clipboard as a fresh data-URL. The deduplication check (`is_duplicate_top`) compared this data-URL string against the stored file path string — they didn't match, so the image was pushed as a new entry.
 
 **Fix**: Added a `content_hash: Option<u64>` field to `ClipboardEntry`. When an image entry is created, a 64-bit hash of the data-URL string is computed (using Rust's `DefaultHasher`) and stored on the entry. This hash survives externalization — when `push()` replaces the data-URL with a file path, the hash remains unchanged. The `content_matches()` function and `is_duplicate_top()` now compare hashes for image entries instead of raw content strings. This is O(1) with zero I/O, zero base64 decoding, and zero file reads. The hash is session-only (`#[serde(skip)]`) since the dedup issue only occurs within a single 220ms window, not across restarts.
+
+---
+
+## #7 — "Remove from cloud" left rows behind, so storage stayed occupied after clearing the account
+
+**Date**: 2026-08-17
+**Severity**: High (unreclaimable storage, no way to reach it from the UI)
+**Symptoms**:
+
+- Account & Sync reported `1.1 MB of 50.0 MB` in use immediately after "Remove from cloud" said `Removed 10 items from the server`.
+- Repeating the removal, and pressing Sync now in between, changed nothing. The bytes could not be reclaimed by any action available in the app.
+- Only reproducible on an account with more than one device, which is why it survived earlier testing.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/sync/commands.rs` (`sync_unpush_all`), `src-tauri/src/sync/mod.rs` (`entry_states`)
+
+`sync_unpush_all` built its work list from `sync.entry_states()`, which is derived from this device's `id_map.json` — the local record of what *this* device pushed or pulled. It is not, and never was, a view of the account.
+
+So any row another device pushed and this device had never pulled (or had pulled and since forgotten, e.g. after a local clear wrote a deleted marker and dropped the id_map row) was invisible to the button. No tombstone was ever pushed for it, the row stayed live, and because the backend's quota sums *confirmed* blobs (`src/blobs/service.py:_used_bytes`), an image row went on charging the account forever. The client had no other route to those rows: pull is cursor-based and strictly `server_ts > after_ts`, so old entries never come back into view during normal sync.
+
+Two smaller faults made the leak invisible rather than obvious:
+
+- The storage bar only refetched on mount, session restore, sign-in and Sync now — never when a bulk Upload or Remove finished, so even a removal that *did* free bytes appeared to do nothing.
+- The result sentence was computed from the local tally, so a removal that missed rows still reported a clean sweep.
+
+**Fix**:
+
+- New `SyncClient::server_entry_keys()` pages `/api/v1/sync/pull` from `after_ts = 0` and returns every live entry key the account owns. Rows owned by other space members are skipped deliberately: entries are keyed `(user_id, client_id, entry_type)`, so a tombstone of ours would not remove theirs — it would insert one of our own carrying the same `space_ids` and take the item down for every member of the space.
+- `sync_unpush_all` is now async and tombstones the union of the local keys and the server keys, falling back to local-only when the server is unreachable.
+- `sync_server_entry_count` is called after every removal run, and the result sentence reports what the *server* still holds rather than what the local tally believed. A future regression of this class surfaces as `Removed N, but M are still on the server` instead of silently leaking.
+- Removal progress counts down `BulkProgressOut::present` (keys sync still knows about at all) instead of un-acknowledged keys. "Not acknowledged" also describes a tombstone that has not gone out yet, so a row with no local record read as already removed on the first poll. `spawn_delete_entry` now claims the key in `in_flight` before spawning its task and holds it through every exit path, so a removal is visible for its whole life.
+- The quota is refetched whenever a bulk run finishes, and the bar is labelled "Image storage" with a note that text and notes take no space — the number not moving after clearing hundreds of text entries is correct behaviour, and used to read as a bug.
+
+**Invariant to keep**: `entry_states()` / `id_map` answer "what does *this device* know about", never "what does the account have". Anything account-wide — removal, quota, reconciliation — must ask the server. The three remaining `entry_states()` callers (`sync_push_unsynced`, `sync_preview_unsynced`, `sync_bulk_progress`) are all correctly about local items; keep it that way.

@@ -1239,7 +1239,25 @@ impl SyncClient {
             return;
         }
 
+        // Claimed here, before the task starts, so a removal is visible for its
+        // whole life. Without it a tombstone for a row this device has no local
+        // record of - one another device pushed - would be indistinguishable
+        // from a finished removal from the very first poll, and the bulk bar
+        // would report a clean sweep while the pushes were still going out.
+        self.in_flight.lock().insert(map_key.clone());
+        let in_flight = Arc::clone(&self.in_flight);
+        let flight_key = map_key.clone();
+        let flight_type = entry_type.as_str();
+        let app = self.app.clone();
+
         self.handle.spawn(async move {
+            // Every exit path below releases the claim.
+            let _flight = InFlightGuard {
+                set: in_flight,
+                key: flight_key,
+                app,
+                entry_type: flight_type,
+            };
             // "Remove from cloud" fans out one of these per entry, so they
             // share the push window rather than flooding the server.
             let _permit = gate.acquire_owned().await;
@@ -1594,6 +1612,60 @@ impl SyncClient {
             info.connected = false;
         }
         info
+    }
+
+    /// Everything this account still has on the server, as entry keys.
+    ///
+    /// "Remove from cloud" worked off this device's id_map, which only knows
+    /// what this device pushed or pulled. A row another device wrote, or one
+    /// this device has since forgotten, stayed on the server with nothing in
+    /// the UI able to reach it — and an image row kept holding its storage,
+    /// which is what made a cleared account still report bytes in use.
+    ///
+    /// Rows belonging to other members are skipped: entries are keyed by owner,
+    /// so a tombstone of ours would not remove theirs, it would insert one
+    /// carrying the same spaces and take the item down for everybody.
+    pub async fn server_entry_keys(&self) -> Result<Vec<String>, String> {
+        let http = self
+            .http
+            .lock()
+            .clone()
+            .filter(|h| h.is_authenticated())
+            .ok_or("not signed in")?;
+        let me = self.current_user().map(|u| u.user_id);
+        let mut after: Option<u64> = None;
+        let mut keys: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        // Rows pushed in the same millisecond share a server_ts, and the cursor
+        // is exclusive, so a page that cannot advance it would loop forever.
+        for _ in 0..200 {
+            let page = http.pull_entries(after, 500).await?;
+            let next = page.next_cursor;
+            for e in page.entries {
+                if e.deleted_at.is_some() {
+                    continue;
+                }
+                if let (Some(me), Some(owner)) = (me.as_deref(), e.user_id.as_deref()) {
+                    if owner != me {
+                        continue;
+                    }
+                }
+                let kind = if e.entry_type == "note" {
+                    "note"
+                } else {
+                    "clipboard"
+                };
+                let key = format!("{kind}:{}", e.client_id);
+                if seen.insert(key.clone()) {
+                    keys.push(key);
+                }
+            }
+            match next {
+                Some(c) if Some(c) != after => after = Some(c),
+                _ => break,
+            }
+        }
+        Ok(keys)
     }
 
     /// Per-entry sync state keyed `"clipboard:{id}"` / `"note:{id}"`, for the

@@ -575,15 +575,28 @@ pub fn sync_unpush_entries(
     Ok(count)
 }
 
-/// Take everything this device has synced off the server, keeping the local
-/// copies. Same tombstone semantics as [`sync_unpush_entries`].
+/// Take everything this account has off the server, keeping the local copies.
+/// Same tombstone semantics as [`sync_unpush_entries`].
+///
+/// The list comes from the server, not from this device's records, so rows
+/// another device pushed are removed too — otherwise they sat there unreachable
+/// and, for images, went on using storage after the account looked empty. If
+/// the server cannot be reached the local records are used instead, which is
+/// still better than doing nothing.
 ///
 /// Returns the keys it tombstoned, so the UI can follow them out of
 /// [`sync_settled_count`] the same way an upload follows keys in.
 #[tauri::command]
-pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
-    let keys: Vec<String> = sync.entry_states().into_keys().collect();
+    let mut keys: Vec<String> = sync.entry_states().into_keys().collect();
+    if let Ok(remote) = sync.server_entry_keys().await {
+        for key in remote {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+    }
     for key in &keys {
         let Some((kind, id)) = key.split_once(':') else {
             continue;
@@ -597,11 +610,30 @@ pub fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String
     Ok(keys)
 }
 
+/// How many entries this account still has on the server.
+///
+/// Checked after a bulk removal rather than trusted: the removal used to work
+/// off this device's own records, so rows another device pushed were left
+/// behind while the UI reported everything gone - an image row went on using
+/// storage with nothing to show for it. Asking the server closes that gap for
+/// good, whatever the local records happen to say.
+#[tauri::command]
+pub async fn sync_server_entry_count(state: State<'_, AppState>) -> Result<usize, String> {
+    let sync = sync_client(&state)?;
+    Ok(sync.server_entry_keys().await?.len())
+}
+
 /// Where a bulk upload or removal has got to.
 #[derive(serde::Serialize)]
 pub struct BulkProgressOut {
     /// How many of the asked-about keys the server has acknowledged.
     pub settled: usize,
+    /// How many are still known to sync at all - acknowledged, queued, or being
+    /// pushed right now. This, not `settled`, is what a removal counts down:
+    /// "not acknowledged" also describes a tombstone that has not gone out yet,
+    /// and a row this device has no local record of would otherwise read as
+    /// already removed on the first poll.
+    pub present: usize,
     /// How many were refused and will never arrive without a manual retry.
     pub failed: usize,
     /// Pushes talking to the server right now, across the whole app.
@@ -610,8 +642,8 @@ pub struct BulkProgressOut {
 
 /// Progress of a bulk upload or removal. Both are fan-outs of independent
 /// background tasks with no completion signal of their own, so the UI polls
-/// this: an upload watches `settled` rise to the total, a removal watches it
-/// fall to zero.
+/// this: an upload watches `settled` rise to the total, a removal watches
+/// `present` fall to zero.
 ///
 /// `in_flight` is what keeps the UI honest. A batch of large images can go a
 /// long time without a single one finishing, which looks identical to a stall
@@ -621,7 +653,7 @@ pub struct BulkProgressOut {
 pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> BulkProgressOut {
     let guard = state.sync_client.lock();
     let Some(sync) = guard.as_ref() else {
-        return BulkProgressOut { settled: 0, failed: 0, in_flight: 0 };
+        return BulkProgressOut { settled: 0, present: 0, failed: 0, in_flight: 0 };
     };
     let states = sync.entry_states();
     let refused: std::collections::HashSet<String> =
@@ -630,6 +662,7 @@ pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> Bulk
         .iter()
         .filter(|k| states.get(*k).is_some_and(|s| *s == "synced"))
         .count();
+    let present = keys.iter().filter(|k| states.contains_key(*k)).count();
     let failed = keys
         .iter()
         .filter(|k| {
@@ -639,6 +672,7 @@ pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> Bulk
         .count();
     BulkProgressOut {
         settled,
+        present,
         failed,
         in_flight: sync.pushes_in_flight(),
     }
