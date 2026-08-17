@@ -1,5 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Note, ClipboardEntry } from "../../../types";
 
 import type { SortMode } from "../sort-options";
@@ -24,7 +29,11 @@ import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
 import { useSpaceShares } from "../../../hooks/useSpaceShares";
-import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
+import {
+  useEntrySyncStates,
+  useSyncBadgesVisible,
+} from "../../../hooks/useEntrySyncStates";
+import { setCloudCopy } from "../../../hooks/cloudActions";
 import NoteEditor from "./note-editor/NoteEditor";
 import NoteCard from "./note-card/NoteCard";
 import NotesFilterDropdown, {
@@ -90,6 +99,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   // Only the menu needs these here, to say whether the note already has a
   // server copy. Notes cards carry no badge of their own.
   const noteSyncStates = useEntrySyncStates();
+  const syncBadgesVisible = useSyncBadgesVisible();
 
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
@@ -322,7 +332,11 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
         }
         rightSlot={
           <>
-            <LayoutSegment layout={layout} onLayoutChange={selectLayout} showSingle />
+            <LayoutSegment
+              layout={layout}
+              onLayoutChange={selectLayout}
+              showSingle
+            />
 
             <div className="cs-toolbar-sep" />
 
@@ -386,16 +400,18 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       onBulkRemoveGroup([...multiSelect.selectedIds], group);
                   }}
                   onBulkSync={() =>
-                    invoke("sync_push_entries", {
-                      clientIds: [...multiSelect.selectedIds],
-                      entryType: "note",
-                    }).catch(() => {})
+                    void setCloudCopy(
+                      [...multiSelect.selectedIds],
+                      "note",
+                      true,
+                    )
                   }
                   onBulkUnsync={() =>
-                    invoke("sync_unpush_entries", {
-                      clientIds: [...multiSelect.selectedIds],
-                      entryType: "note",
-                    }).catch(() => {})
+                    void setCloudCopy(
+                      [...multiSelect.selectedIds],
+                      "note",
+                      false,
+                    )
                   }
                   availableGroups={availableGroups}
                   commonGroups={commonGroups}
@@ -516,6 +532,19 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       onOpen={handleOpen}
                       onDelete={handleDelete}
                       onContextMenu={handleContextMenu}
+                      syncState={
+                        syncBadgesVisible
+                          ? noteSyncStates[`note:${n.id}`]
+                          : undefined
+                      }
+                      sharedSpaceNames={(
+                        spaceShares.shares[`note:${n.id}`] ?? []
+                      )
+                        .map(
+                          (id) =>
+                            spaceShares.spaces.find((sp) => sp.id === id)?.name,
+                        )
+                        .filter((name): name is string => !!name)}
                     />
                   )}
                 </React.Fragment>
@@ -596,10 +625,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             }
             inCloud={!!noteSyncStates[`note:${menuNote.id}`]}
             onToggleCloud={(upload) => {
-              invoke(upload ? "sync_push_entries" : "sync_unpush_entries", {
-                clientIds: [menuNote.id],
-                entryType: "note",
-              }).catch(() => {});
+              void setCloudCopy([menuNote.id], "note", upload);
             }}
             showCopy={false}
             showSave={false}

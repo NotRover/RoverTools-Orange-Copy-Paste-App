@@ -24,7 +24,7 @@ pub mod sync_state;
 pub mod types;
 pub mod ws_listener;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -83,6 +83,8 @@ struct PushCtx {
     gate: Arc<Semaphore>,
     /// Remaining blob storage, shared so one 402 stops the whole batch.
     budget: BlobBudget,
+    /// Pushes running right now, so the UI can show them as pending.
+    in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Bytes of blob storage left on the account, as last known.
@@ -322,6 +324,11 @@ pub struct SyncClient {
     /// Blob storage still available, as last known.  `None` until a quota
     /// check has run.  See [`BlobBudget`].
     blob_budget: BlobBudget,
+    /// Entry keys with a push running right now. Reported as "pending" so the
+    /// card badge moves the moment the user asks for an upload, instead of
+    /// staying blank until the server answers - a wait long enough to read as
+    /// "nothing happened".
+    in_flight: Arc<Mutex<HashSet<String>>>,
     /// Client-to-server ID mapping.
     id_map: Arc<Mutex<IdMap>>,
     /// Sync state (cursor, device_id, user_id).
@@ -457,6 +464,7 @@ impl SyncClient {
             pending_queue,
             push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
             blob_budget: Arc::new(Mutex::new(None)),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
             id_map,
             sync_state,
             status,
@@ -1037,6 +1045,7 @@ impl SyncClient {
             app: self.app.clone(),
             gate: Arc::clone(&self.push_gate),
             budget: Arc::clone(&self.blob_budget),
+            in_flight: Arc::clone(&self.in_flight),
         }
     }
 
@@ -1455,7 +1464,13 @@ impl SyncClient {
             // nothing about the space the entry travelled through. Recording the
             // server ids is what lets the Spaces screen place a received entry
             // under the space it actually came from.
-            id_map.set_entry_shares(&key, &e.space_ids);
+            // Not while we are pushing this entry: a share we just made is
+            // newer than anything this response can carry, and a pull that
+            // overlapped the push would write the pre-share list back - the
+            // checkmark switching off and on again as the push lands.
+            if !self.in_flight.lock().contains(&key) {
+                id_map.set_entry_shares(&key, &e.space_ids);
+            }
             if from_space {
                 id_map.mark_entry_remote(&key);
                 // Only for entries that came through a space: a space row has to
@@ -1594,6 +1609,12 @@ impl SyncClient {
             .collect();
         for key in self.pending_queue.lock().pending_keys() {
             states.insert(key, "pending");
+        }
+        // A push that is running has no id_map row and no queue entry yet, so
+        // without this the item reads as "not in the cloud" for the whole
+        // round trip.
+        for key in self.in_flight.lock().iter() {
+            states.entry(key.clone()).or_insert("pending");
         }
         states
     }
@@ -2202,6 +2223,7 @@ impl SyncClient {
             .ok()
             .map(|d| d.join("images"));
         let id_map = Arc::clone(&self.id_map);
+        let in_flight = Arc::clone(&self.in_flight);
 
         self.handle.spawn(async move {
             let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
@@ -2245,7 +2267,9 @@ impl SyncClient {
             let key = format!("clipboard:{}", meta.client_id);
             let mut id_map = id_map.lock();
             id_map.set_entry(&key, &meta.server_id);
-            id_map.set_entry_shares(&key, &meta.space_ids);
+            if !in_flight.lock().contains(&key) {
+                id_map.set_entry_shares(&key, &meta.space_ids);
+            }
             if meta.remote {
                 id_map.mark_entry_remote(&key);
                 if let Some(owner) = meta.owner_id.as_deref() {
@@ -2446,6 +2470,29 @@ async fn upload_image_blob(
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
 /// Shared body of `spawn_push_clipboard_entry` / `spawn_push_note`.  `enc_key`
 /// is the entry's freshly minted CEK; `job.wrapped_keys` carries its envelope.
+/// Drops an entry out of the in-flight set however `push_entry_task` ends -
+/// success, an early `return` on an encryption error, or a panic. Tracking it
+/// by hand left items stuck on "pending" forever down the error paths.
+struct InFlightGuard {
+    set: Arc<Mutex<HashSet<String>>>,
+    key: String,
+    app: tauri::AppHandle,
+    entry_type: &'static str,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.set.lock().remove(&self.key);
+        // The success path emits its own event; this covers the failure paths,
+        // which would otherwise leave the amber badge until something else
+        // refreshed it.
+        let _ = self.app.emit(
+            "sync:entry-queued",
+            serde_json::json!({ "key": self.key, "entry_type": self.entry_type }),
+        );
+    }
+}
+
 async fn push_entry_task(
     ctx: PushCtx,
     enc_key: Zeroizing<[u8; 32]>,
@@ -2470,6 +2517,21 @@ async fn push_entry_task(
         blob_key,
         blob_size,
     } = job;
+
+    // Claimed before any encryption or network work, so the badge turns amber
+    // on the click rather than on the response.
+    let entry_key_flight = format!("{entry_type}:{client_id}");
+    ctx.in_flight.lock().insert(entry_key_flight.clone());
+    let _ = ctx.app.emit(
+        "sync:entry-queued",
+        serde_json::json!({ "client_id": client_id, "entry_type": entry_type }),
+    );
+    let _flight = InFlightGuard {
+        set: Arc::clone(&ctx.in_flight),
+        key: entry_key_flight,
+        app: ctx.app.clone(),
+        entry_type,
+    };
 
     let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
         Ok(c) => c,
