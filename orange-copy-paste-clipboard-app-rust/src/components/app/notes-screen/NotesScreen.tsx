@@ -28,7 +28,11 @@ import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
-import { useSpaceShares } from "../../../hooks/useSpaceShares";
+import {
+  useSpaceShares,
+  useRemoteEntryKeys,
+} from "../../../hooks/useSpaceShares";
+import { ActiveFilterStrip } from "../clipboard-screen/search-filter/FilterParts";
 import {
   useEntrySyncStates,
   useSyncBadgesVisible,
@@ -39,7 +43,7 @@ import NoteCard from "./note-card/NoteCard";
 import NotesFilterDropdown, {
   useNotesFilter,
 } from "./notes-filter/NotesFilterDropdown";
-import { stripHtml, isNoteExpandable } from "./notes-utils";
+import { isNoteExpandable } from "./notes-utils";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
 
@@ -92,14 +96,33 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
-  const nf = useNotesFilter();
 
   const multiSelect = useMultiSelect();
   const spaceShares = useSpaceShares();
-  // Only the menu needs these here, to say whether the note already has a
-  // server copy. Notes cards carry no badge of their own.
+  // The menu needs these to say whether the note already has a server copy,
+  // and the filters need them to answer "which notes have I not uploaded".
   const noteSyncStates = useEntrySyncStates();
   const syncBadgesVisible = useSyncBadgesVisible();
+  const remoteKeys = useRemoteEntryKeys();
+
+  const cloudFilterContext = useMemo(
+    () => ({
+      syncStates: noteSyncStates,
+      shares: spaceShares.shares,
+      remoteKeys,
+      spaces: spaceShares.spaces,
+      signedIn: spaceShares.signedIn,
+    }),
+    [
+      noteSyncStates,
+      spaceShares.shares,
+      remoteKeys,
+      spaceShares.spaces,
+      spaceShares.signedIn,
+    ],
+  );
+
+  const nf = useNotesFilter(notes, search, cloudFilterContext);
 
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
@@ -131,27 +154,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   // Close filter dropdown on outside click
   useClickOutside(nf.filterRef, nf.filtersOpen, () => nf.setFiltersOpen(false));
 
-  // Filter + sort memoised so they only recompute when inputs change, not on
-  // every keystroke / select-mode toggle / resize.
+  // Sort memoised so it only recomputes when the filtered set or the mode
+  // changes, not on every select-mode toggle / resize.
   const sortedNotes = useMemo(() => {
-    const filtered = notes.filter((n) => {
-      if (nf.pinnedOnly && !n.pinned) return false;
-      if (
-        nf.selectedGroups.size > 0 &&
-        !n.groups.some((g) => nf.selectedGroups.has(g))
-      )
-        return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (
-          !n.title.toLowerCase().includes(q) &&
-          !stripHtml(n.content).toLowerCase().includes(q)
-        )
-          return false;
-      }
-      return true;
-    });
-    return filtered.sort((a, b) => {
+    return [...nf.filteredNotes].sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       switch (sort) {
         case "oldest":
@@ -164,7 +170,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
           return b.updated_at - a.updated_at;
       }
     });
-  }, [notes, nf.pinnedOnly, nf.selectedGroups, search, sort]);
+  }, [nf.filteredNotes, sort]);
 
   const editingNote = editingId
     ? (notes.find((n) => n.id === editingId) ?? null)
@@ -431,6 +437,14 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
         }
       />
 
+      {/* What the badge cannot say: which filters are on, and what they left. */}
+      <ActiveFilterStrip
+        names={nf.filterNames}
+        matched={nf.filteredNotes.length}
+        total={nf.totalCount}
+        onClear={nf.clearAll}
+      />
+
       <div
         ref={mainRef}
         className={`ns-main${editingNote ? " ns-main--editing" : ""}${isResizingSplit ? " ns-main--resizing" : ""}`}
@@ -463,13 +477,16 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 {search.trim() ? (
                   <>
                     Nothing matches &ldquo;{search.trim()}&rdquo;
-                    {nf.activeFilterCount > 0
-                      ? " with the current filters"
-                      : ""}
+                    {nf.filterNames.length > 0 ? (
+                      <> with {nf.filterNames.join(", ")}</>
+                    ) : null}
                     .
                   </>
                 ) : (
-                  <>No notes match the current filters.</>
+                  <>
+                    No notes match{" "}
+                    {nf.filterNames.join(", ") || "the current filters"}.
+                  </>
                 )}
               </p>
             </div>

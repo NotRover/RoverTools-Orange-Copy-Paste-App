@@ -12,6 +12,7 @@ import {
   FilterDropdown,
   NoResults,
 } from "./search-filter/SearchFilter";
+import { ActiveFilterStrip } from "./search-filter/FilterParts";
 import {
   useEntrySyncStates,
   useSyncBadgesVisible,
@@ -534,6 +535,14 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             )}
           </>
         }
+      />
+
+      {/* What the badge cannot say: which filters are on, and what they left. */}
+      <ActiveFilterStrip
+        names={sf.filterNames}
+        matched={sf.filteredEntries.length}
+        total={sf.totalCount}
+        onClear={sf.clearAllFilters}
       />
 
       <div

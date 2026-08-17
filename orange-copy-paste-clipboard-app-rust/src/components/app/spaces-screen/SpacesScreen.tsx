@@ -31,12 +31,25 @@ import {
 } from "../../../types";
 import { UserAvatar } from "../../UserAvatar";
 import { EntryTypePill } from "../../entry-types/EntryTypePill";
-import { TYPE_ICONS, TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import Topbar, { SortDropdown, LayoutSegment } from "../topbar/Topbar";
 import { RowsIcon } from "../../icons";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
 import "../clipboard-screen/search-filter/SearchFilter.css";
+import {
+  CardDivider,
+  DateSection,
+  FilterCardShell,
+  FilterChip,
+  GroupChips,
+  SectionLabel,
+  TypeGrid,
+  dateWindow,
+} from "../clipboard-screen/search-filter/FilterParts";
+import type {
+  CountMap,
+  DatePreset,
+} from "../clipboard-screen/search-filter/FilterParts";
 import {
   Plus,
   Key,
@@ -138,10 +151,13 @@ const DEFAULT_FILTER: SendFilter = {
   content: "both",
 };
 
-/** How many narrowing rules a filter carries, for the header badge. */
+/** How many narrowing rules a filter carries, for the header badge. Being
+ *  switched on is not itself a rule: on with nothing set means "share
+ *  everything", which is zero narrowing, not one. */
 function filterRuleCount(f: SendFilter | undefined): number {
   if (!f?.enabled) return 0;
-  let n = 1; // the filter itself is on
+  let n = 0;
+  if (f.content !== "both") n++;
   if (f.kinds.length > 0) n++;
   if (f.groups.length > 0) n++;
   return n;
@@ -298,6 +314,8 @@ const FeedCardMenu: React.FC<{
 interface FeedFilterState {
   selectedKinds: Set<DisplayKind>;
   toggleKind: (k: DisplayKind) => void;
+  datePreset: DatePreset;
+  setDatePreset: (p: DatePreset) => void;
   dateAfter: string;
   setDateAfter: (v: string) => void;
   dateBefore: string;
@@ -307,21 +325,17 @@ interface FeedFilterState {
   filtersOpen: boolean;
   setFiltersOpen: React.Dispatch<React.SetStateAction<boolean>>;
   filterRef: React.RefObject<HTMLDivElement | null>;
+  /** Feed items surviving the filters, and the whole feed, for the header. */
+  matched: number;
+  total: number;
+  /** Per-kind counts, computed against the other filters. */
+  kindCounts: CountMap;
 }
 
 const FeedFilterDropdown: React.FC<{
   sf: FeedFilterState;
   feedFilter: FeedFilter;
 }> = ({ sf, feedFilter }) => {
-  const todayStr = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }, []);
-  const dateActive = !!(
-    sf.dateAfter ||
-    (sf.dateBefore && sf.dateBefore !== todayStr)
-  );
-
   return (
     <div className="sort-dropdown" ref={sf.filterRef}>
       <button
@@ -340,69 +354,39 @@ const FeedFilterDropdown: React.FC<{
         )}
       </button>
       {sf.filtersOpen && (
-        <div className="cs-filter-card">
+        <FilterCardShell
+          matched={sf.matched}
+          total={sf.total}
+          activeCount={sf.activeFilterCount}
+          onClear={sf.clearAll}
+        >
           {feedFilter !== "notes" && (
-            <div className="cs-card-section">
-              <div className="cs-section-label">
-                Clipboard Types
-                {sf.selectedKinds.size > 0 && (
-                  <span className="cs-count">{sf.selectedKinds.size}</span>
-                )}
-              </div>
-              <div className="cs-type-grid">
-                {ALL_DISPLAY_KINDS.map((k) => (
-                  <label
-                    key={k}
-                    className={`cs-type-option${sf.selectedKinds.has(k) ? " cs-type-option--on" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={sf.selectedKinds.has(k)}
-                      onChange={() => sf.toggleKind(k)}
-                      className="cs-type-cb"
-                    />
-                    <span className={`cs-type-icon type-pill type-pill--${k}`}>
-                      {TYPE_ICONS[k]}
-                    </span>
-                    <span className="cs-type-name">{TYPE_LABELS[k]}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-          {feedFilter !== "notes" && <div className="cs-card-divider" />}
-          <div className="cs-card-section">
-            <div className="cs-section-label">
-              Date{dateActive && <span className="cs-count">1</span>}
-            </div>
-            <div className="cs-date-row">
-              <input
-                type="date"
-                className="cs-date-input"
-                value={sf.dateAfter}
-                onChange={(e) => sf.setDateAfter(e.target.value)}
-                title="After"
-              />
-              <span className="cs-date-sep">-</span>
-              <input
-                type="date"
-                className="cs-date-input"
-                value={sf.dateBefore}
-                onChange={(e) => sf.setDateBefore(e.target.value)}
-                title="Before"
-              />
-            </div>
-          </div>
-          {sf.activeFilterCount > 0 && (
             <>
-              <div className="cs-card-divider" />
-              <button className="cs-card-clear-btn" onClick={sf.clearAll}>
-                <X size={12} />
-                Clear Filters
-              </button>
+              <div className="cs-card-section">
+                <SectionLabel
+                  name="Type"
+                  count={sf.selectedKinds.size}
+                  hint="all types"
+                />
+                <TypeGrid
+                  kinds={ALL_DISPLAY_KINDS}
+                  selected={sf.selectedKinds}
+                  onToggle={sf.toggleKind}
+                  counts={sf.kindCounts}
+                />
+              </div>
+              <CardDivider />
             </>
           )}
-        </div>
+          <DateSection
+            preset={sf.datePreset}
+            setPreset={sf.setDatePreset}
+            after={sf.dateAfter}
+            setAfter={sf.setDateAfter}
+            before={sf.dateBefore}
+            setBefore={sf.setDateBefore}
+          />
+        </FilterCardShell>
       )}
     </div>
   );
@@ -1112,10 +1096,37 @@ const SpaceSettings: React.FC<{
     onDelete();
   };
 
+  /* A rule with no type ticked used to mean "every type", so the boxes said
+     one thing and the rule did another. The stored empty list still means
+     every type - that is what the sync engine reads - but it now draws as
+     every box ticked, so what you see is what leaves this machine. Untick to
+     narrow; tick the last one back and it collapses to the empty list again.
+     The final tick cannot come off: a rule that shares nothing is a rule that
+     should be switched off instead. */
+  const selectedKinds = useMemo(
+    () =>
+      new Set(
+        filter.kinds.length > 0
+          ? (filter.kinds as DisplayKind[])
+          : ALL_DISPLAY_KINDS,
+      ),
+    [filter.kinds],
+  );
+
+  const lastKind = selectedKinds.size === 1;
+
   const toggleKind = (k: DisplayKind) => {
-    const kinds = filter.kinds.includes(k)
-      ? filter.kinds.filter((x) => x !== k)
-      : [...filter.kinds, k];
+    const next = new Set(selectedKinds);
+    if (next.has(k)) {
+      if (next.size === 1) return; // held by the disabled checkbox
+      next.delete(k);
+    } else {
+      next.add(k);
+    }
+    const kinds =
+      next.size === ALL_DISPLAY_KINDS.length
+        ? []
+        : ALL_DISPLAY_KINDS.filter((x) => next.has(x));
     onFilter({ ...filter, kinds });
   };
 
@@ -1125,6 +1136,11 @@ const SpaceSettings: React.FC<{
       : [...filter.groups, g];
     onFilter({ ...filter, groups });
   };
+
+  const selectedGroups = useMemo(
+    () => new Set(filter.groups),
+    [filter.groups],
+  );
 
   return (
     <div className="sp-settings">
@@ -1191,17 +1207,28 @@ const SpaceSettings: React.FC<{
           </label>
 
           {filter.enabled && (
+            /* Same parts as the filter cards on the other screens: section
+               labels, hairline dividers, the segmented control and the chip.
+               A share rule is a filter, so it should not look like its own
+               invention. */
             <div className="sp-filter-body">
-              <div className="sp-filter-section">
-                <div className="sp-filter-label">Content</div>
-                <div className="sp-pill-row">
+              <div className="cs-card-section">
+                <SectionLabel name="Content" />
+                <div className="cs-seg">
                   {CONTENT_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
                       type="button"
-                      className={`sp-pill${filter.content === opt.value ? " sp-pill--on" : ""}`}
+                      className={`cs-seg-btn${filter.content === opt.value ? " cs-seg-btn--on" : ""}`}
                       onClick={() =>
-                        onFilter({ ...filter, content: opt.value })
+                        onFilter({
+                          ...filter,
+                          content: opt.value,
+                          // Notes have no clipboard type, so the type rule stops
+                          // applying. Drop it rather than hiding a selection
+                          // that quietly comes back on the way out.
+                          kinds: opt.value === "notes" ? [] : filter.kinds,
+                        })
                       }
                     >
                       {opt.label}
@@ -1211,78 +1238,58 @@ const SpaceSettings: React.FC<{
               </div>
 
               {filter.content !== "notes" && (
-                <div className="sp-filter-section">
-                  <div className="sp-filter-label">
-                    Clipboard types
-                    {filter.kinds.length > 0 ? (
-                      <span className="sp-settings-count">
-                        {filter.kinds.length}
-                      </span>
-                    ) : (
-                      <span className="sp-filter-hint">all types</span>
-                    )}
+                <>
+                  <CardDivider />
+                  <div className="cs-card-section">
+                    <SectionLabel
+                      name="Clipboard types"
+                      count={selectedKinds.size}
+                    />
+                    <TypeGrid
+                      kinds={ALL_DISPLAY_KINDS}
+                      selected={selectedKinds}
+                      onToggle={toggleKind}
+                      locked={
+                        lastKind
+                          ? {
+                              has: (k) => selectedKinds.has(k),
+                              reason:
+                                "Keep at least one type, or switch sharing off.",
+                            }
+                          : undefined
+                      }
+                    />
                   </div>
-                  <div className="cs-type-grid">
-                    {ALL_DISPLAY_KINDS.map((k) => (
-                      <label
-                        key={k}
-                        className={`cs-type-option${filter.kinds.includes(k) ? " cs-type-option--on" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={filter.kinds.includes(k)}
-                          onChange={() => toggleKind(k)}
-                          className="cs-type-cb"
-                        />
-                        <span
-                          className={`cs-type-icon type-pill type-pill--${k}`}
-                        >
-                          {TYPE_ICONS[k]}
-                        </span>
-                        <span className="cs-type-name">{TYPE_LABELS[k]}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                </>
               )}
 
-              <div className="sp-filter-section">
-                <div className="sp-filter-label">
-                  Groups
-                  {filter.groups.length > 0 ? (
-                    <span className="sp-settings-count">
-                      {filter.groups.length}
-                    </span>
-                  ) : (
-                    <span className="sp-filter-hint">any group</span>
-                  )}
-                </div>
+              <CardDivider />
+              <div className="cs-card-section">
+                <SectionLabel
+                  name="Groups"
+                  count={filter.groups.length}
+                  hint="any group"
+                />
                 {availableGroups.length === 0 ? (
                   <p className="sp-filter-empty">
                     You have no groups yet. Tag items with a group to filter by
                     it.
                   </p>
                 ) : (
-                  <div className="sp-chip-row">
-                    {availableGroups.map((g) => {
-                      const on = filter.groups.includes(g);
-                      const c = groupColor(g);
-                      return (
-                        <button
-                          key={g}
-                          type="button"
-                          className={`sp-group-chip${on ? " sp-group-chip--on" : ""}`}
-                          style={
-                            on ? { background: c.bg, color: c.fg } : undefined
-                          }
-                          onClick={() => toggleGroup(g)}
-                        >
-                          <span className="sp-group-chip-dot" />
-                          {g}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <GroupChips
+                    groups={availableGroups}
+                    selected={selectedGroups}
+                    onToggle={toggleGroup}
+                    /* The neutral state as a chip you can see and click, not
+                       a silent empty list that behaved like "everything". */
+                    leading={
+                      <FilterChip
+                        label="Any group"
+                        on={filter.groups.length === 0}
+                        onToggle={() => onFilter({ ...filter, groups: [] })}
+                      />
+                    }
+                  />
                 )}
               </div>
             </div>
@@ -1623,11 +1630,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
     new Set(),
   );
+  const [datePreset, setDatePreset] = useState<DatePreset>("any");
   const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
+  const [dateBefore, setDateBefore] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -1778,23 +1783,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     return fallback;
   };
 
-  const todayStr = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }, []);
-
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (selectedKinds.size > 0) n++;
-    if (dateAfter || (dateBefore && dateBefore !== todayStr)) n++;
-    return n;
-  }, [selectedKinds, dateAfter, dateBefore, todayStr]);
+  const activeFilterCount = useMemo(
+    () => selectedKinds.size + (datePreset === "any" ? 0 : 1),
+    [selectedKinds, datePreset],
+  );
 
   const clearAllFilters = useCallback(() => {
     setSelectedKinds(new Set());
+    setDatePreset("any");
     setDateAfter("");
-    setDateBefore(todayStr);
-  }, [todayStr]);
+    setDateBefore("");
+  }, []);
 
   const toggleDay = useCallback((label: string) => {
     setCollapsedDays((prev) => {
@@ -1813,20 +1812,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       return next;
     });
   }, []);
-
-  const sf: FeedFilterState = {
-    selectedKinds,
-    toggleKind,
-    dateAfter,
-    setDateAfter,
-    dateBefore,
-    setDateBefore,
-    activeFilterCount,
-    clearAll: clearAllFilters,
-    filtersOpen,
-    setFiltersOpen,
-    filterRef,
-  };
 
   useEffect(() => {
     if (!filtersOpen) return;
@@ -2043,13 +2028,12 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           (item.kind === "clipboard" &&
             selectedKinds.has(deriveDisplayKind(item.entry))),
       );
-    if (dateAfter) {
-      const ts = new Date(dateAfter + "T00:00:00").getTime();
-      pool = pool.filter((item) => feedTimestamp(item) >= ts);
-    }
-    if (dateBefore) {
-      const ts = new Date(dateBefore + "T23:59:59.999").getTime();
-      pool = pool.filter((item) => feedTimestamp(item) <= ts);
+    if (datePreset !== "any") {
+      const [from, to] = dateWindow(datePreset, dateAfter, dateBefore);
+      pool = pool.filter((item) => {
+        const ts = feedTimestamp(item);
+        return ts >= from && ts <= to;
+      });
     }
     if (search.trim())
       pool = pool.filter(
@@ -2089,7 +2073,44 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         sorted.sort((a, b) => getTs(b) - getTs(a));
     }
     return sorted;
-  }, [allFeedItems, selectedKinds, dateAfter, dateBefore, search, sort]);
+  }, [allFeedItems, selectedKinds, datePreset, dateAfter, dateBefore, search, sort]);
+
+  /** What each type would leave you with: date and search applied, the type
+   *  filter itself excluded. Placeholders have no type, so they sit outside. */
+  const kindCounts = useMemo<CountMap>(() => {
+    const out: CountMap = {};
+    for (const k of ALL_DISPLAY_KINDS) out[k] = 0;
+    const [from, to] = dateWindow(datePreset, dateAfter, dateBefore);
+    const q = search.trim();
+    for (const item of allFeedItems) {
+      if (item.kind !== "clipboard") continue;
+      const ts = feedTimestamp(item);
+      if (datePreset !== "any" && (ts < from || ts > to)) continue;
+      if (q && !matchesSearch(item, q)) continue;
+      const k = deriveDisplayKind(item.entry);
+      if (k in out) out[k] += 1;
+    }
+    return out;
+  }, [allFeedItems, datePreset, dateAfter, dateBefore, search]);
+
+  const sf: FeedFilterState = {
+    selectedKinds,
+    toggleKind,
+    datePreset,
+    setDatePreset,
+    dateAfter,
+    setDateAfter,
+    dateBefore,
+    setDateBefore,
+    activeFilterCount,
+    clearAll: clearAllFilters,
+    filtersOpen,
+    setFiltersOpen,
+    filterRef,
+    matched: feedItems.length,
+    total: allFeedItems.length,
+    kindCounts,
+  };
 
   const feedByDay = useMemo(() => {
     const days: { label: string; items: FeedItem[] }[] = [];

@@ -98,6 +98,187 @@
   animation: sortDropIn 0.12s ease-out;
 }
 
+/* Padding moves to the body so the header can sit flush across the card. */
+.cs-filter-card--shell {
+  padding: 0;
+  width: 304px;
+  overflow: hidden;
+}
+
+/* Two columns, for a screen with enough sections that one column would run
+   past the window. Wider beats taller: every option stays on screen. Sized so
+   a column still fits the three Quick switches on one line, and so the card
+   clears the 640px window minimum with room to spare. */
+.cs-filter-card--wide {
+  width: 604px;
+}
+
+/* No type grid to fit, so the card needs less room and the columns can share
+   it evenly. */
+.cs-filter-card--compact {
+  width: 540px;
+}
+
+/* Card header: title, live match count, Clear. Fixed, so the card does not
+   change height the moment a filter goes on and Clear never moves. */
+.cs-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 8px 9px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.cs-card-head-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.cs-card-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cs-card-result {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cs-card-result b {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.cs-card-head-clear {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs, 7px);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.cs-card-head-clear:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-dim);
+}
+
+.cs-card-head-clear:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* The body does not scroll: a filter list you have to scroll cannot be read
+   at a glance, which is the only job it has. When one column would run long
+   the card widens instead, and the columns split the height between them. */
+.cs-card-body {
+  display: flex;
+  align-items: stretch;
+  padding: 10px;
+  gap: 10px;
+}
+
+.cs-card-col {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The first column carries the widest content - the three Quick switches on
+   one line, and the two-across type grid - so it gets the larger share. The
+   second holds chips that wrap happily either way. */
+.cs-card-col:first-child {
+  flex: 1.18;
+}
+
+.cs-filter-card--compact .cs-card-col:first-child {
+  flex: 1;
+}
+
+/* Column rule, drawn on the second column so a one-column card has none. */
+.cs-card-col + .cs-card-col {
+  border-left: 0.5px solid var(--border);
+  padding-left: 10px;
+}
+
+/* A section already carries its own top divider inside a column, so the one
+   that would sit above the first section in each column is redundant. */
+.cs-card-col > .cs-card-divider:first-child {
+  display: none;
+}
+
+/* Filter chip — one picker shape for quick toggles, spaces and groups, on
+   every screen that filters. Squircle, on the theme's radius scale. */
+.cs-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 1px 2px 0;
+}
+
+.cs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3.5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs, 7px);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.cs-chip:hover {
+  color: var(--text);
+  border-color: var(--border-light);
+}
+
+.cs-chip--on {
+  border-color: transparent;
+}
+
+/* Nothing to find down this branch. Dimmed rather than hidden, because a
+   vanishing chip reflows every chip after it on each click. */
+.cs-chip--dead {
+  opacity: 0.38;
+}
+
+.cs-chip-count {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.62;
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 /* Shared card styles (used by filter card + options card) */
 
 .cs-card-section {
@@ -107,7 +288,7 @@
 }
 
 .cs-card-divider {
-  height: 1px;
+  height: 0.5px;
   background: var(--border);
   margin: 6px 0;
 }
@@ -136,38 +317,6 @@
   background: var(--accent-dim-strong);
   color: var(--accent);
   line-height: 1;
-}
-
-.cs-card-clear-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.12s ease;
-  user-select: none;
-}
-
-.cs-card-clear-btn:hover {
-  color: var(--danger);
-  background: var(--danger-dim);
-}
-
-.cs-card-clear-btn--danger {
-  color: color-mix(in srgb, var(--danger) 68%, var(--text-muted));
-}
-
-.cs-card-clear-btn--danger:hover {
-  color: var(--danger);
-  background: var(--danger-dim);
 }
 
 /* Type grid — compact 2-col checkboxes */
@@ -240,11 +389,28 @@
 }
 
 .cs-type-option:hover {
-  background: var(--surface-hover, rgba(255,255,255,.04));
+  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
 }
 
-.cs-type-option--on {
-  background: var(--surface-hover, rgba(255,255,255,.04));
+/* Selection reads from the box, the icon and the weight - not a filled slab.
+   With every type ticked (a share rule's default) eight filled rows turn the
+   grid into a block of panels, and the fill stops meaning anything. */
+.cs-type-option .cs-type-icon {
+  opacity: 0.5;
+  transition: opacity 0.1s ease;
+}
+
+.cs-type-option--on .cs-type-icon {
+  opacity: 1;
+}
+
+/* Held: the last ticked type in a share rule, which has nowhere to go. */
+.cs-type-cb:disabled {
+  cursor: default;
+}
+
+.cs-type-option:has(.cs-type-cb:disabled) {
+  cursor: default;
 }
 
 .cs-type-cb {
@@ -292,6 +458,38 @@
   font-weight: 600;
 }
 
+/* How many entries this option would leave you with: every other filter
+   applied, this option's own dimension excluded. */
+.cs-option-count {
+  margin-left: auto;
+  padding-left: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-type-option--dead {
+  opacity: 0.34;
+}
+
+.cs-seg-count {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Section hint, for a section whose neutral state needs saying out loud
+   ("all types", "any time") rather than a count. */
+.cs-section-hint {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
 /* Date section */
 
 .cs-date-row {
@@ -330,6 +528,75 @@
   cursor: pointer;
   width: 11px;
   height: 11px;
+}
+
+/* Active filter strip — the closed-card answer. A badge can only say how
+   many filters are on; this says which, and what they left you with. */
+
+/* Sized to its text, not to the window: a full-width bar puts Clear an inch
+   from the words it belongs to. */
+.cs-filter-strip {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 7px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  margin: 7px 12px 0;
+  padding: 5px 5px 5px 9px;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.cs-filter-strip-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.cs-filter-strip-count {
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-filter-strip-names {
+  color: var(--text-secondary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sits right after the names, not at the far edge, with a hairline to keep it
+   from reading as part of the sentence. */
+.cs-filter-strip-clear {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px 3px 8px;
+  border: 0;
+  border-left: 0.5px solid var(--border);
+  border-radius: 0 var(--radius-xs, 7px) var(--radius-xs, 7px) 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.cs-filter-strip-clear:hover {
+  color: var(--danger);
+  background: var(--danger-dim);
 }
 
 /* No search results */
