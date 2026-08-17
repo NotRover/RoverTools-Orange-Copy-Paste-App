@@ -425,7 +425,7 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, Str
     }
     for note in notes {
         keys.push(format!("note:{}", note.id));
-        sync.on_new_note(note);
+        sync.on_manual_push_note(note);
     }
     Ok(keys)
 }
@@ -533,7 +533,7 @@ pub fn sync_push_entries(
         if entry_type == "note" {
             let note = state.notes.lock().all().iter().find(|n| n.id == id).cloned();
             if let Some(note) = note {
-                sync.on_new_note(note);
+                sync.on_manual_push_note(note);
                 pushed += 1;
             }
         } else {

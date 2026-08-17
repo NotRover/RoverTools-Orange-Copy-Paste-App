@@ -1706,32 +1706,19 @@
 
 /* Send filter body */
 
+/* The rule editor is a filter, so it is built from the filter card's parts
+   (`cs-card-section`, `cs-section-label`, `cs-seg`, `cs-chip`) and only needs
+   its own frame. Spacing comes from the dividers inside. */
 .sp-filter-body {
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  padding: 11px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  gap: 4px;
+  padding: 10px;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm, 10px);
   background: var(--surface);
 }
 
-.sp-filter-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.sp-filter-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.sp-filter-hint,
 .sp-danger-note {
   font-size: 10px;
   font-weight: 500;
@@ -1744,65 +1731,9 @@
   color: var(--text-muted);
 }
 
-.sp-pill-row,
-.sp-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.sp-pill {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.sp-pill:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.sp-pill--on {
-  border-color: transparent;
-  background: var(--cta, var(--accent));
-  color: #fff;
-}
-
-.sp-group-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.sp-group-chip:hover {
-  border-color: var(--accent);
-}
-
-.sp-group-chip--on {
-  border-color: transparent;
-}
-
-.sp-group-chip-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
+/* Content, types and groups here are the filter card's own `cs-seg`,
+   `cs-type-grid` and `cs-chip`, so the picker looks the same in space rules
+   as it does on every other screen. */
 
 /* Members inside the settings panel */
 

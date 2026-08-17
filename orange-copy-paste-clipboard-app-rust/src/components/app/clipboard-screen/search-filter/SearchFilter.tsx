@@ -1,19 +1,12 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import {
-  ShareNetwork,
-  CloudCheck,
-  CloudSlash,
-  ArrowDown,
-} from "@phosphor-icons/react";
+import { ArrowDown } from "@phosphor-icons/react";
 import type { ClipboardEntry, DisplayKind, Space } from "../../../../types";
 import {
   deriveDisplayKind,
   htmlPlainText,
-  groupColor,
   imageDisplayName,
 } from "../../../../types";
 import {
-  TYPE_ICONS,
   TYPE_LABELS,
   PinIcon as PinIconElement,
 } from "../../../entry-types/EntryTypePill";
@@ -24,7 +17,27 @@ import {
   SearchXIcon,
   SaveStarIcon,
 } from "../../../icons";
+import {
+  CardDivider,
+  ChipRow,
+  CloudSection,
+  DateSection,
+  FilterCardShell,
+  FilterChip,
+  GroupChips,
+  SectionLabel,
+  TypeGrid,
+  dateWindow,
+} from "./FilterParts";
+import type {
+  CloudFilter,
+  CountMap,
+  DatePreset,
+  ShareFilter,
+} from "./FilterParts";
 import "./SearchFilter.css";
+
+export type { CloudFilter, ShareFilter, DatePreset };
 
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "text",
@@ -37,15 +50,22 @@ const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "folder",
 ];
 
+/** The group that backs the Saved quick filter. Shown alongside Pinned rather
+ *  than in the group list, because it is a system tag, not one you made. */
+const SAVED_GROUP = "Saved";
+
+function entryText(entry: ClipboardEntry): string {
+  if (entry.type === "html") return htmlPlainText(entry.content);
+  if (entry.type === "image") return imageDisplayName(entry);
+  return entry.content;
+}
+
+/** Matches content and group names, so a word that is a filter in one place
+ *  is not invisible in the other. */
 function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   const lower = q.toLowerCase();
-  if (entry.type === "text") return entry.content.toLowerCase().includes(lower);
-  if (entry.type === "html")
-    return htmlPlainText(entry.content).toLowerCase().includes(lower);
-  if (entry.type === "file") return entry.content.toLowerCase().includes(lower);
-  if (entry.type === "image")
-    return imageDisplayName(entry).toLowerCase().includes(lower);
-  return false;
+  if (entryText(entry).toLowerCase().includes(lower)) return true;
+  return (entry.groups ?? []).some((g) => g.toLowerCase().includes(lower));
 }
 
 // Hook
@@ -65,10 +85,42 @@ export interface CloudFilterContext {
   signedIn: boolean;
 }
 
-/** Server-copy filter: either state, only uploaded, or only local. */
-export type CloudFilter = "any" | "in" | "out";
-/** Sharing filter: either state, in at least one space, or in none. */
-export type ShareFilter = "any" | "shared" | "private";
+/** Selections per section. The card's badge is their sum, so a section and the
+ *  badge can never disagree. */
+export interface SectionCounts {
+  quick: number;
+  kinds: number;
+  cloud: number;
+  groups: number;
+  date: number;
+}
+
+/** What each option would leave you with: every other filter applied, that
+ *  option's own dimension excluded. */
+export interface OptionCounts {
+  kinds: CountMap;
+  groups: CountMap;
+  spaces: CountMap;
+  pinned: number;
+  saved: number;
+  received: number;
+  inCloud: number;
+  localOnly: number;
+  shared: number;
+  notShared: number;
+}
+
+/** Which dimension to leave out of a pass, when counting that dimension. */
+type Dimension =
+  | "pinned"
+  | "saved"
+  | "kinds"
+  | "cloud"
+  | "share"
+  | "spaces"
+  | "groups"
+  | "received"
+  | "date";
 
 export interface SearchFilterState {
   searchQuery: string;
@@ -77,6 +129,8 @@ export interface SearchFilterState {
   toggleKind: (k: DisplayKind) => void;
   pinnedOnly: boolean;
   setPinnedOnly: React.Dispatch<React.SetStateAction<boolean>>;
+  datePreset: DatePreset;
+  setDatePreset: (p: DatePreset) => void;
   dateAfter: string;
   setDateAfter: (v: string) => void;
   dateBefore: string;
@@ -94,9 +148,14 @@ export interface SearchFilterState {
   receivedOnly: boolean;
   setReceivedOnly: React.Dispatch<React.SetStateAction<boolean>>;
   cloud: CloudFilterContext | null;
+  sectionCounts: SectionCounts;
   activeFilterCount: number;
+  optionCounts: OptionCounts;
+  /** Active filters in plain words, for the strip and the empty state. */
+  filterNames: string[];
   clearAllFilters: () => void;
   filteredEntries: ClipboardEntry[];
+  totalCount: number;
   isFiltering: boolean;
   filterRef: React.RefObject<HTMLDivElement | null>;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
@@ -117,11 +176,9 @@ export function useSearchFilter(
     new Set(),
   );
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [datePreset, setDatePreset] = useState<DatePreset>("any");
   const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
+  const [dateBefore, setDateBefore] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedFilterGroups, setSelectedFilterGroups] = useState<Set<string>>(
     new Set(),
@@ -156,105 +213,206 @@ export function useSearchFilter(
     });
   }, []);
 
-  const todayStr = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }, []);
+  const savedOnly = selectedFilterGroups.has(SAVED_GROUP);
 
-  const activeFilterCount = useMemo(() => {
-    let n = 0;
-    if (selectedKinds.size > 0) n++;
-    if (pinnedOnly) n++;
-    if (dateAfter || (dateBefore && dateBefore !== todayStr)) n++;
-    if (selectedFilterGroups.size > 0) n++;
-    if (cloudFilter !== "any") n++;
-    if (shareFilter !== "any") n++;
-    if (selectedSpaceIds.size > 0) n++;
-    if (receivedOnly) n++;
-    return n;
-  }, [
-    selectedKinds,
-    pinnedOnly,
-    dateAfter,
-    dateBefore,
-    selectedFilterGroups,
-    todayStr,
-    cloudFilter,
-    shareFilter,
-    selectedSpaceIds,
-    receivedOnly,
-  ]);
+  /** Groups you made, without the system tag the Saved switch owns. */
+  const userGroups = useMemo(() => {
+    const next = new Set(selectedFilterGroups);
+    next.delete(SAVED_GROUP);
+    return next;
+  }, [selectedFilterGroups]);
+
+  const sectionCounts = useMemo<SectionCounts>(
+    () => ({
+      quick: (pinnedOnly ? 1 : 0) + (savedOnly ? 1 : 0) + (receivedOnly ? 1 : 0),
+      kinds: selectedKinds.size,
+      cloud: cloud?.signedIn
+        ? (cloudFilter !== "any" ? 1 : 0) +
+          (shareFilter !== "any" ? 1 : 0) +
+          selectedSpaceIds.size
+        : 0,
+      groups: userGroups.size,
+      date: datePreset === "any" ? 0 : 1,
+    }),
+    [
+      pinnedOnly,
+      savedOnly,
+      receivedOnly,
+      selectedKinds,
+      cloud?.signedIn,
+      cloudFilter,
+      shareFilter,
+      selectedSpaceIds,
+      userGroups,
+      datePreset,
+    ],
+  );
+
+  const activeFilterCount = useMemo(
+    () => Object.values(sectionCounts).reduce((a, b) => a + b, 0),
+    [sectionCounts],
+  );
 
   const clearAllFilters = useCallback(() => {
     setSelectedKinds(new Set());
     setPinnedOnly(false);
+    setDatePreset("any");
     setDateAfter("");
-    setDateBefore(todayStr);
+    setDateBefore("");
     setSelectedFilterGroups(new Set());
     setCloudFilter("any");
     setShareFilter("any");
     setSelectedSpaceIds(new Set());
     setReceivedOnly(false);
-  }, [todayStr]);
+  }, []);
 
-  const filteredEntries = useMemo(() => {
-    let pool = entries;
-    if (selectedKinds.size > 0) {
-      pool = pool.filter((e) => selectedKinds.has(deriveDisplayKind(e)));
+  /** One predicate for the list and for every count. `skip` leaves a single
+   *  dimension out, so a count reads as "what I get if I pick this" rather
+   *  than "what is showing now". */
+  const passes = useCallback(
+    (e: ClipboardEntry, skip: Dimension | null): boolean => {
+      if (skip !== "pinned" && pinnedOnly && !e.pinned) return false;
+      if (skip !== "saved" && savedOnly && !e.groups?.includes(SAVED_GROUP))
+        return false;
+      if (skip !== "kinds" && selectedKinds.size > 0) {
+        if (!selectedKinds.has(deriveDisplayKind(e))) return false;
+      }
+      if (skip !== "groups" && userGroups.size > 0) {
+        if (!e.groups?.some((g) => userGroups.has(g))) return false;
+      }
+      if (skip !== "date") {
+        const [from, to] = dateWindow(datePreset, dateAfter, dateBefore);
+        if (e.timestamp < from || e.timestamp > to) return false;
+      }
+      // Cloud and space state is Rust-owned bookkeeping keyed by entry id,
+      // not fields on the entry, so it all resolves through the same key.
+      if (cloud) {
+        const key = `clipboard:${e.id}`;
+        if (skip !== "cloud" && cloudFilter !== "any") {
+          if (!!cloud.syncStates[key] !== (cloudFilter === "in")) return false;
+        }
+        if (skip !== "share" && shareFilter !== "any") {
+          const shared = (cloud.shares[key]?.length ?? 0) > 0;
+          if (shared !== (shareFilter === "shared")) return false;
+        }
+        if (skip !== "spaces" && selectedSpaceIds.size > 0) {
+          const ids = cloud.shares[key] ?? [];
+          if (!ids.some((id) => selectedSpaceIds.has(id))) return false;
+        }
+        if (skip !== "received" && receivedOnly && !cloud.remoteKeys.has(key))
+          return false;
+      }
+      if (searchQuery.trim() && !matchesQuery(e, searchQuery.trim()))
+        return false;
+      return true;
+    },
+    [
+      pinnedOnly,
+      savedOnly,
+      selectedKinds,
+      userGroups,
+      datePreset,
+      dateAfter,
+      dateBefore,
+      cloud,
+      cloudFilter,
+      shareFilter,
+      selectedSpaceIds,
+      receivedOnly,
+      searchQuery,
+    ],
+  );
+
+  const filteredEntries = useMemo(
+    () => entries.filter((e) => passes(e, null)),
+    [entries, passes],
+  );
+
+  const optionCounts = useMemo<OptionCounts>(() => {
+    const pool = (skip: Dimension) => entries.filter((e) => passes(e, skip));
+    const tally = <T extends string>(
+      items: ClipboardEntry[],
+      keys: T[],
+      of: (e: ClipboardEntry) => T[] | T,
+    ): CountMap => {
+      const out: CountMap = {};
+      for (const k of keys) out[k] = 0;
+      for (const e of items) {
+        const v = of(e);
+        for (const k of Array.isArray(v) ? v : [v]) {
+          if (k in out) out[k] += 1;
+        }
+      }
+      return out;
+    };
+
+    const key = (e: ClipboardEntry) => `clipboard:${e.id}`;
+    const spaceIds = (cloud?.spaces ?? []).map((s) => s.id);
+    const groupNames = Array.from(
+      new Set(entries.flatMap((e) => e.groups ?? [])),
+    ).filter((g) => g !== SAVED_GROUP);
+
+    const cloudPool = cloud ? pool("cloud") : [];
+    const sharePool = cloud ? pool("share") : [];
+
+    return {
+      kinds: tally(pool("kinds"), ALL_DISPLAY_KINDS, deriveDisplayKind),
+      groups: tally(pool("groups"), groupNames, (e) => e.groups ?? []),
+      spaces: tally(pool("spaces"), spaceIds, (e) =>
+        cloud ? (cloud.shares[key(e)] ?? []) : [],
+      ),
+      pinned: pool("pinned").filter((e) => e.pinned).length,
+      saved: pool("saved").filter((e) => e.groups?.includes(SAVED_GROUP))
+        .length,
+      received: cloud
+        ? pool("received").filter((e) => cloud.remoteKeys.has(key(e))).length
+        : 0,
+      inCloud: cloudPool.filter((e) => !!cloud?.syncStates[key(e)]).length,
+      localOnly: cloudPool.filter((e) => !cloud?.syncStates[key(e)]).length,
+      shared: sharePool.filter(
+        (e) => (cloud?.shares[key(e)]?.length ?? 0) > 0,
+      ).length,
+      notShared: sharePool.filter(
+        (e) => (cloud?.shares[key(e)]?.length ?? 0) === 0,
+      ).length,
+    };
+  }, [entries, passes, cloud]);
+
+  const filterNames = useMemo(() => {
+    const out: string[] = [];
+    if (pinnedOnly) out.push("Pinned");
+    if (savedOnly) out.push("Saved");
+    if (receivedOnly) out.push("From others");
+    for (const k of ALL_DISPLAY_KINDS) {
+      if (selectedKinds.has(k)) out.push(TYPE_LABELS[k]);
     }
-    if (pinnedOnly) pool = pool.filter((e) => e.pinned);
-    if (dateAfter) {
-      const ts = new Date(dateAfter + "T00:00:00").getTime();
-      pool = pool.filter((e) => e.timestamp >= ts);
-    }
-    if (dateBefore) {
-      const ts = new Date(dateBefore + "T23:59:59.999").getTime();
-      pool = pool.filter((e) => e.timestamp <= ts);
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim();
-      pool = pool.filter((e) => matchesQuery(e, q));
-    }
-    if (selectedFilterGroups.size > 0) {
-      pool = pool.filter(
-        (e) => e.groups && e.groups.some((g) => selectedFilterGroups.has(g)),
-      );
-    }
-    // Cloud and space filters read Rust-owned bookkeeping keyed by entry id,
-    // not fields on the entry, so they all resolve through the same key.
-    if (cloud) {
-      const key = (e: ClipboardEntry) => `clipboard:${e.id}`;
+    if (cloud?.signedIn) {
       if (cloudFilter !== "any") {
-        const want = cloudFilter === "in";
-        pool = pool.filter((e) => !!cloud.syncStates[key(e)] === want);
+        out.push(cloudFilter === "in" ? "In cloud" : "Local only");
       }
       if (shareFilter !== "any") {
-        const want = shareFilter === "shared";
-        pool = pool.filter(
-          (e) => (cloud.shares[key(e)]?.length ?? 0) > 0 === want,
-        );
+        out.push(shareFilter === "shared" ? "In a space" : "Not shared");
       }
-      if (selectedSpaceIds.size > 0) {
-        pool = pool.filter((e) =>
-          (cloud.shares[key(e)] ?? []).some((id) => selectedSpaceIds.has(id)),
-        );
+      for (const s of cloud.spaces) {
+        if (selectedSpaceIds.has(s.id)) out.push(s.name);
       }
-      if (receivedOnly) pool = pool.filter((e) => cloud.remoteKeys.has(key(e)));
     }
-    return pool;
+    userGroups.forEach((g) => out.push(g));
+    if (datePreset === "today") out.push("Today");
+    if (datePreset === "7d") out.push("Last 7 days");
+    if (datePreset === "range") out.push("Date range");
+    return out;
   }, [
-    entries,
-    searchQuery,
-    selectedKinds,
     pinnedOnly,
-    dateAfter,
-    dateBefore,
-    selectedFilterGroups,
+    savedOnly,
+    receivedOnly,
+    selectedKinds,
     cloud,
     cloudFilter,
     shareFilter,
     selectedSpaceIds,
-    receivedOnly,
+    userGroups,
+    datePreset,
   ]);
 
   const isFiltering = searchQuery.trim().length > 0 || activeFilterCount > 0;
@@ -266,6 +424,8 @@ export function useSearchFilter(
     toggleKind,
     pinnedOnly,
     setPinnedOnly,
+    datePreset,
+    setDatePreset,
     dateAfter,
     setDateAfter,
     dateBefore,
@@ -283,9 +443,13 @@ export function useSearchFilter(
     receivedOnly,
     setReceivedOnly,
     cloud,
+    sectionCounts,
     activeFilterCount,
+    optionCounts,
+    filterNames,
     clearAllFilters,
     filteredEntries,
+    totalCount: entries.length,
     isFiltering,
     filterRef,
     searchInputRef,
@@ -333,324 +497,151 @@ interface FilterDropdownProps {
 export const FilterDropdown: React.FC<FilterDropdownProps> = ({
   sf,
   availableGroups,
-}) => (
-  <div className="sort-dropdown" ref={sf.filterRef}>
-    <button
-      className={`cs-tb-btn${sf.filtersOpen ? " cs-tb-btn--open" : ""}`}
-      onClick={() => {
-        if (!sf.filtersOpen) document.dispatchEvent(new Event("tooltip:hide"));
-        sf.setFiltersOpen((v) => !v);
-      }}
-      data-tooltip="Filters"
-      data-tooltip-pos="below"
-    >
-      <FilterIcon size={12} />
-      {sf.activeFilterCount > 0 && (
-        <span className="cs-tb-badge">{sf.activeFilterCount}</span>
-      )}
-    </button>
-    {sf.filtersOpen && (
-      <div className="cs-filter-card">
-        {/* System section */}
-        <div className="cs-card-section">
-          <div className="cs-section-label">
-            System
-            {(sf.pinnedOnly ? 1 : 0) +
-              (sf.selectedFilterGroups.has("Saved") ? 1 : 0) >
-              0 && (
-              <span className="cs-count">
-                {(sf.pinnedOnly ? 1 : 0) +
-                  (sf.selectedFilterGroups.has("Saved") ? 1 : 0)}
-              </span>
-            )}
-          </div>
-          <div className="cs-type-grid">
-            <label
-              className={`cs-type-option${sf.pinnedOnly ? " cs-type-option--on" : ""}`}
-            >
-              <input
-                type="checkbox"
-                checked={sf.pinnedOnly}
-                onChange={() => sf.setPinnedOnly((v) => !v)}
-                className="cs-type-cb"
-              />
-              <span
-                className="cs-type-icon type-pill"
-                style={{
-                  background: "var(--accent-dim)",
-                  color: "var(--accent)",
-                }}
-              >
-                {PinIconElement}
-              </span>
-              <span className="cs-type-name">Pinned</span>
-            </label>
-            <label
-              className={`cs-type-option${sf.selectedFilterGroups.has("Saved") ? " cs-type-option--on" : ""}`}
-            >
-              <input
-                type="checkbox"
-                checked={sf.selectedFilterGroups.has("Saved")}
-                onChange={() => sf.toggleFilterGroup("Saved")}
-                className="cs-type-cb"
-              />
-              <span
-                className="cs-type-icon type-pill"
-                style={{
-                  background: "rgba(34, 197, 94, 0.12)",
-                  color: "#22c55e",
-                }}
-              >
-                <SaveStarIcon size={9} filled />
-              </span>
-              <span className="cs-type-name">Saved</span>
-            </label>
-          </div>
-        </div>
+}) => {
+  const groups = availableGroups.filter((g) => g !== SAVED_GROUP);
 
-        {/* Cloud section. Hidden entirely when signed out, where every answer
-            would be the same. */}
-        {sf.cloud?.signedIn && (
-          <>
-            <div className="cs-card-divider" />
-            <div className="cs-card-section">
-              <div className="cs-section-label">
-                Cloud
-                {(sf.cloudFilter !== "any" ? 1 : 0) +
-                  (sf.shareFilter !== "any" ? 1 : 0) +
-                  (sf.receivedOnly ? 1 : 0) +
-                  (sf.selectedSpaceIds.size > 0 ? 1 : 0) >
-                  0 && (
-                  <span className="cs-count">
-                    {(sf.cloudFilter !== "any" ? 1 : 0) +
-                      (sf.shareFilter !== "any" ? 1 : 0) +
-                      (sf.receivedOnly ? 1 : 0) +
-                      (sf.selectedSpaceIds.size > 0 ? 1 : 0)}
-                  </span>
-                )}
-              </div>
+  const dateSection = (
+    <DateSection
+      preset={sf.datePreset}
+      setPreset={sf.setDatePreset}
+      after={sf.dateAfter}
+      setAfter={sf.setDateAfter}
+      before={sf.dateBefore}
+      setBefore={sf.setDateBefore}
+    />
+  );
 
-              {/* Three-way toggles: the two states are opposites, so a pair of
-                  checkboxes would let you ask for both at once and get nothing. */}
-              <div className="cs-seg">
-                <button
-                  className={`cs-seg-btn${sf.cloudFilter === "any" ? " cs-seg-btn--on" : ""}`}
-                  onClick={() => sf.setCloudFilter("any")}
-                >
-                  All
-                </button>
-                <button
-                  className={`cs-seg-btn${sf.cloudFilter === "in" ? " cs-seg-btn--on" : ""}`}
-                  onClick={() => sf.setCloudFilter("in")}
-                >
-                  <CloudCheck size={10} />
-                  In cloud
-                </button>
-                <button
-                  className={`cs-seg-btn${sf.cloudFilter === "out" ? " cs-seg-btn--on" : ""}`}
-                  onClick={() => sf.setCloudFilter("out")}
-                >
-                  <CloudSlash size={10} />
-                  Local only
-                </button>
-              </div>
+  const groupsSection = groups.length > 0 && (
+    <div className="cs-card-section">
+      <SectionLabel
+        name="Groups"
+        count={sf.sectionCounts.groups}
+        hint="any group"
+      />
+      <GroupChips
+        groups={groups}
+        selected={sf.selectedFilterGroups}
+        onToggle={sf.toggleFilterGroup}
+        counts={sf.optionCounts.groups}
+      />
+    </div>
+  );
 
-              <div className="cs-seg">
-                <button
-                  className={`cs-seg-btn${sf.shareFilter === "any" ? " cs-seg-btn--on" : ""}`}
-                  onClick={() => sf.setShareFilter("any")}
-                >
-                  All
-                </button>
-                <button
-                  className={`cs-seg-btn${sf.shareFilter === "shared" ? " cs-seg-btn--on" : ""}`}
-                  onClick={() => sf.setShareFilter("shared")}
-                >
-                  <ShareNetwork size={10} />
-                  In a space
-                </button>
-                <button
-                  className={`cs-seg-btn${sf.shareFilter === "private" ? " cs-seg-btn--on" : ""}`}
-                  onClick={() => sf.setShareFilter("private")}
-                >
-                  Not shared
-                </button>
-              </div>
+  /* Only worth a second column when there is enough to put in it: signed out
+     with no groups, the card has nothing to move over. */
+  const splitColumns = !!sf.cloud?.signedIn || groups.length > 0;
 
-              <div className="cs-type-grid">
-                <label
-                  className={`cs-type-option${sf.receivedOnly ? " cs-type-option--on" : ""}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={sf.receivedOnly}
-                    onChange={() => sf.setReceivedOnly((v) => !v)}
-                    className="cs-type-cb"
-                  />
-                  <span
-                    className="cs-type-icon type-pill"
-                    style={{
-                      background: "var(--accent-dim)",
-                      color: "var(--accent)",
-                    }}
-                  >
-                    <ArrowDown size={9} weight="bold" />
-                  </span>
-                  <span className="cs-type-name">From others</span>
-                </label>
-              </div>
-
-              {sf.cloud.spaces.length > 0 && (
-                <div className="cs-type-grid">
-                  {sf.cloud.spaces.map((space) => (
-                    <label
-                      key={space.id}
-                      className={`cs-type-option${sf.selectedSpaceIds.has(space.id) ? " cs-type-option--on" : ""}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={sf.selectedSpaceIds.has(space.id)}
-                        onChange={() => sf.toggleSpaceFilter(space.id)}
-                        className="cs-type-cb"
-                      />
-                      <span
-                        className="cs-type-icon type-pill"
-                        style={{
-                          background: "var(--accent-dim)",
-                          color: "var(--accent)",
-                        }}
-                      >
-                        <ShareNetwork size={9} />
-                      </span>
-                      <span className="cs-type-name">{space.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Types section */}
-        <div className="cs-card-divider" />
-        <div className="cs-card-section">
-          <div className="cs-section-label">
-            Types
-            {sf.selectedKinds.size > 0 && (
-              <span className="cs-count">{sf.selectedKinds.size}</span>
-            )}
-          </div>
-          <div className="cs-type-grid">
-            {ALL_DISPLAY_KINDS.map((k) => (
-              <label
-                key={k}
-                className={`cs-type-option${sf.selectedKinds.has(k) ? " cs-type-option--on" : ""}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={sf.selectedKinds.has(k)}
-                  onChange={() => sf.toggleKind(k)}
-                  className="cs-type-cb"
-                />
-                <span className={`cs-type-icon type-pill type-pill--${k}`}>
-                  {TYPE_ICONS[k]}
-                </span>
-                <span className="cs-type-name">{TYPE_LABELS[k]}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Groups section */}
-        {availableGroups.filter((g) => g !== "Saved").length > 0 && (
-          <>
-            <div className="cs-card-divider" />
-            <div className="cs-card-section">
-              <div className="cs-section-label">
-                Groups
-                {sf.selectedFilterGroups.size > 0 && (
-                  <span className="cs-count">
-                    {sf.selectedFilterGroups.size}
-                  </span>
-                )}
-              </div>
-              <div className="cs-type-grid">
-                {availableGroups
-                  .filter((g) => g !== "Saved")
-                  .map((g) => {
-                    const gc = groupColor(g);
-                    return (
-                      <label
-                        key={g}
-                        className={`cs-type-option${sf.selectedFilterGroups.has(g) ? " cs-type-option--on" : ""}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={sf.selectedFilterGroups.has(g)}
-                          onChange={() => sf.toggleFilterGroup(g)}
-                          className="cs-type-cb"
-                        />
-                        <span
-                          className="cs-type-icon type-pill"
-                          style={{ background: gc.bg, color: gc.fg }}
-                        >
-                          <span
-                            className="cs-color-dot"
-                            style={{ background: gc.fg }}
-                          />
-                        </span>
-                        <span className="cs-type-name">{g}</span>
-                      </label>
-                    );
-                  })}
-              </div>
-            </div>
-          </>
-        )}
-
-        <div className="cs-card-divider" />
-
-        {/* Date section */}
-        <div className="cs-card-section">
-          <div className="cs-section-label">
-            Date
-            {(sf.dateAfter || sf.dateBefore) && (
-              <span className="cs-count">1</span>
-            )}
-          </div>
-          <div className="cs-date-row">
-            <input
-              type="date"
-              className="cs-date-input"
-              value={sf.dateAfter}
-              onChange={(e) => sf.setDateAfter(e.target.value)}
-              title="After"
-            />
-            <span className="cs-date-sep">-</span>
-            <input
-              type="date"
-              className="cs-date-input"
-              value={sf.dateBefore}
-              onChange={(e) => sf.setDateBefore(e.target.value)}
-              title="Before"
-            />
-          </div>
-        </div>
-
-        {/* Clear filters button */}
+  return (
+    <div className="sort-dropdown" ref={sf.filterRef}>
+      <button
+        className={`cs-tb-btn${sf.filtersOpen ? " cs-tb-btn--open" : ""}`}
+        onClick={() => {
+          if (!sf.filtersOpen) document.dispatchEvent(new Event("tooltip:hide"));
+          sf.setFiltersOpen((v) => !v);
+        }}
+        data-tooltip="Filters"
+        data-tooltip-pos="below"
+      >
+        <FilterIcon size={12} />
         {sf.activeFilterCount > 0 && (
-          <>
-            <div className="cs-card-divider" />
-            <button className="cs-card-clear-btn" onClick={sf.clearAllFilters}>
-              <CloseIcon size={12} />
-              Clear Filters
-            </button>
-          </>
+          <span className="cs-tb-badge">{sf.activeFilterCount}</span>
         )}
-      </div>
-    )}
-  </div>
-);
+      </button>
+      {sf.filtersOpen && (
+        <FilterCardShell
+          matched={sf.filteredEntries.length}
+          total={sf.totalCount}
+          activeCount={sf.activeFilterCount}
+          onClear={sf.clearAllFilters}
+          secondary={
+            splitColumns ? (
+              <>
+                {/* Hidden entirely when signed out, where every answer is the
+                    same. The column then holds groups and date alone. */}
+                {sf.cloud?.signedIn && (
+                  <CloudSection
+                    spaces={sf.cloud.spaces}
+                    cloudFilter={sf.cloudFilter}
+                    setCloudFilter={sf.setCloudFilter}
+                    shareFilter={sf.shareFilter}
+                    setShareFilter={sf.setShareFilter}
+                    selectedSpaceIds={sf.selectedSpaceIds}
+                    toggleSpace={sf.toggleSpaceFilter}
+                    count={sf.sectionCounts.cloud}
+                    counts={{
+                      inCloud: sf.optionCounts.inCloud,
+                      localOnly: sf.optionCounts.localOnly,
+                      shared: sf.optionCounts.shared,
+                      notShared: sf.optionCounts.notShared,
+                      spaces: sf.optionCounts.spaces,
+                    }}
+                  />
+                )}
+
+                {groupsSection && (
+                  <>
+                    <CardDivider />
+                    {groupsSection}
+                  </>
+                )}
+              </>
+            ) : undefined
+          }
+        >
+          {/* Quick: the one-off switches, which were split across two
+              sections at opposite ends of the card. */}
+          <div className="cs-card-section">
+            <SectionLabel name="Quick" count={sf.sectionCounts.quick} />
+            <ChipRow>
+              <FilterChip
+                label="Pinned"
+                on={sf.pinnedOnly}
+                onToggle={() => sf.setPinnedOnly((v) => !v)}
+                count={sf.optionCounts.pinned}
+                icon={PinIconElement}
+              />
+              <FilterChip
+                label="Saved"
+                on={sf.selectedFilterGroups.has(SAVED_GROUP)}
+                onToggle={() => sf.toggleFilterGroup(SAVED_GROUP)}
+                count={sf.optionCounts.saved}
+                color={{ bg: "rgba(34, 197, 94, 0.16)", fg: "#22c55e" }}
+                icon={<SaveStarIcon size={9} filled />}
+              />
+              {sf.cloud?.signedIn && (
+                <FilterChip
+                  label="From others"
+                  on={sf.receivedOnly}
+                  onToggle={() => sf.setReceivedOnly((v) => !v)}
+                  count={sf.optionCounts.received}
+                  icon={<ArrowDown size={10} weight="bold" />}
+                />
+              )}
+            </ChipRow>
+          </div>
+
+          <CardDivider />
+          <div className="cs-card-section">
+            <SectionLabel
+              name="Type"
+              count={sf.sectionCounts.kinds}
+              hint="all types"
+            />
+            <TypeGrid
+              kinds={ALL_DISPLAY_KINDS}
+              selected={sf.selectedKinds}
+              onToggle={sf.toggleKind}
+              counts={sf.optionCounts.kinds}
+            />
+          </div>
+
+          <CardDivider />
+          {dateSection}
+        </FilterCardShell>
+      )}
+    </div>
+  );
+};
 
 // No results component
 
@@ -658,19 +649,22 @@ interface NoResultsProps {
   sf: SearchFilterState;
 }
 
-export const NoResults: React.FC<NoResultsProps> = ({ sf }) => (
-  <div className="cs-no-results">
-    <SearchXIcon size={44} className="cs-no-results-icon" />
-    <p className="cs-no-results-title">No results</p>
-    <p className="cs-no-results-subtitle">
-      {sf.searchQuery.trim() ? (
-        <>
-          Nothing matches &ldquo;{sf.searchQuery.trim()}&rdquo;
-          {sf.activeFilterCount > 0 ? " with the current filters" : ""}.
-        </>
-      ) : (
-        <>No entries match the current filters.</>
-      )}
-    </p>
-  </div>
-);
+export const NoResults: React.FC<NoResultsProps> = ({ sf }) => {
+  const names = sf.filterNames.join(", ");
+  return (
+    <div className="cs-no-results">
+      <SearchXIcon size={44} className="cs-no-results-icon" />
+      <p className="cs-no-results-title">No results</p>
+      <p className="cs-no-results-subtitle">
+        {sf.searchQuery.trim() ? (
+          <>
+            Nothing matches &ldquo;{sf.searchQuery.trim()}&rdquo;
+            {names ? <> with {names}</> : null}.
+          </>
+        ) : (
+          <>No entries match {names || "the current filters"}.</>
+        )}
+      </p>
+    </div>
+  );
+};
