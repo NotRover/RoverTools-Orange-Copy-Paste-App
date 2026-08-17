@@ -939,6 +939,10 @@ impl SyncClient {
         *self.user.lock() = None;
         self.stop_ws_listener();
         self.status.lock().connected = false;
+        // Distinct from `status-changed { connected: false }`, which means "signed
+        // in but the socket is down". Without it the sidebar kept whatever the
+        // connection last was and read "Connected" while signed out.
+        let _ = self.app.emit("sync:signed-out", serde_json::Value::Null);
     }
 
     // ── WS management ─────────────────────────────────────────────

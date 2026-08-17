@@ -50,6 +50,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["orange"]
+      }
+    },
     "updater": {
       "endpoints": [
         "https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json"

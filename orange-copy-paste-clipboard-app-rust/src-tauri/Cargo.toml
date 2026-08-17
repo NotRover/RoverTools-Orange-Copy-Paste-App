@@ -36,6 +36,11 @@ tauri-plugin-autostart = "2"
 # Backs the `--trigger copy|paste` popup trigger, which is the reliable way to
 # fire the shortcuts on Wayland compositors that don't deliver global hotkeys.
 tauri-plugin-single-instance = "2"
+# Deep links: registers the `orange://` scheme so an invite link opens the app.
+# The scheme association itself is written by the installer (see
+# `tauri.conf.json` -> plugins.deep-link); on a dev or portable run the plugin
+# registers it at startup instead.
+tauri-plugin-deep-link = "2"
 # Self-update: checks a signed static release feed, downloads and swaps the app
 # in place. Bundles must carry a signature made with the private half of the key
 # in `tauri.conf.json`, which is what makes a plain static feed safe to trust.

@@ -1350,7 +1350,9 @@ const SpaceSettings: React.FC<{
                 <button
                   type="button"
                   className="sp-btn sp-btn--icon"
-                  onClick={() => copy("code", space.invite_code!)}
+                  onClick={() =>
+                    copy("code", formatInviteCode(space.invite_code!))
+                  }
                   data-tooltip="Copy code"
                   data-tooltip-pos="top"
                 >
@@ -1546,6 +1548,9 @@ interface SpacesScreenProps {
   syncConnected: boolean | null;
   availableGroups: string[];
   onCopyEntry: (id: string) => void;
+  /** Code from an invite link the user opened, joined once and then cleared. */
+  joinCode?: string | null;
+  onJoinCodeConsumed?: () => void;
 }
 
 // ── Main screen ───────────────────────────────────────────────────────
@@ -1556,6 +1561,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   syncConnected,
   availableGroups,
   onCopyEntry,
+  joinCode,
+  onJoinCodeConsumed,
 }) => {
   const [spaces, setSpaces] = useState<Space[]>(cache.spaces);
   const [loaded, setLoaded] = useState(cache.loaded);
@@ -2255,6 +2262,16 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     },
     [refreshInvites],
   );
+
+  // An invite link the user opened. Joining straight away rather than
+  // prefilling the form: they already chose to open the link, and a second
+  // confirmation would be a step with nothing behind it.
+  useEffect(() => {
+    const code = joinCode?.trim();
+    if (!code) return;
+    onJoinCodeConsumed?.();
+    void handleJoin(code);
+  }, [joinCode, handleJoin, onJoinCodeConsumed]);
 
   const receivedPending = invites.received.filter(
     (i) => i.status === "pending",

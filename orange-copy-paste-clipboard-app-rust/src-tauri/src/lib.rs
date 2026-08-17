@@ -14,7 +14,7 @@ use crate::clipboard::history::ClipboardHistory;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub type SharedHistory = Arc<Mutex<ClipboardHistory>>;
 type SuppressFlag = Arc<AtomicBool>;
@@ -358,6 +358,35 @@ fn parse_trigger_action(args: &[String]) -> Option<String> {
     None
 }
 
+/// The space invite code carried by an `orange://join?code=...` URL.
+fn parse_join_code(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("orange://")?;
+    let query = rest.split_once('?').map(|(_, q)| q)?;
+    for pair in query.split('&') {
+        if let Some(code) = pair.strip_prefix("code=") {
+            let code = code.trim();
+            if !code.is_empty() {
+                return Some(code.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Hand an opened `orange://` URL to the UI. Only invite links are understood;
+/// anything else is ignored rather than surfacing an error for a URL the user
+/// never typed.
+fn dispatch_deep_link(app: &tauri::AppHandle, url: &str) {
+    let Some(code) = parse_join_code(url) else {
+        return;
+    };
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit("spaces:join-code", serde_json::json!({ "code": code }));
+}
+
 /// Dispatch a forwarded CLI invocation to the matching popup handler.
 /// A no-op for unrecognized actions.
 fn dispatch_trigger(app: &tauri::AppHandle, args: &[String]) {
@@ -371,7 +400,11 @@ fn dispatch_trigger(app: &tauri::AppHandle, args: &[String]) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let launch_args: Vec<String> = std::env::args().collect();
-    let is_trigger = parse_trigger_action(&launch_args).is_some();
+    // A deep link is handled like a trigger: it belongs to the running instance,
+    // so this process must forward it rather than replace the app the user is
+    // already looking at.
+    let is_deep_link = launch_args.iter().any(|a| a.starts_with("orange://"));
+    let is_trigger = parse_trigger_action(&launch_args).is_some() || is_deep_link;
 
     // A `--trigger` launch must reach the ALREADY-RUNNING instance (via the
     // single-instance plugin) and fire the popup there, so it must NOT kill the
@@ -409,7 +442,15 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if parse_trigger_action(&argv).is_some() {
                 dispatch_trigger(app, &argv);
-            } else if let Some(w) = app.get_webview_window("main") {
+                return;
+            }
+            // An invite link opened while the app is already running arrives
+            // here as an argument to the second launch, not through the
+            // deep-link plugin's own callback.
+            if let Some(url) = argv.iter().find(|a| a.starts_with("orange://")) {
+                dispatch_deep_link(app, url);
+            }
+            if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 crate::runtime::window_state::apply_deferred_zoom(app);
                 let _ = w.set_focus();
@@ -422,6 +463,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
             crate::health::health_trouble,
@@ -561,6 +603,19 @@ pub fn run() {
                 app.handle().clone(),
             );
             setup_runtime(app, &history, &suppress)?;
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Installed builds get the scheme from the installer; a dev or
+                // portable run has to claim it at startup or the link has no
+                // handler at all.
+                let _ = app.deep_link().register_all();
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        dispatch_deep_link(&handle, url.as_str());
+                    }
+                });
+            }
             // Close the splash window from Rust — JS close() is unreliable for
             // conf.json windows on Windows (handle can persist as a click-blocker).
             let state     = app.state::<AppState>();
