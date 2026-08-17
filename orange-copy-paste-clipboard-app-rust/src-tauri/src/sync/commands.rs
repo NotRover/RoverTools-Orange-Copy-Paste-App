@@ -857,7 +857,22 @@ pub fn space_set_entry_shares(
     }
     let sync = sync_client(&state)?;
     let key = format!("{entry_type}:{entry_id}");
-    sync.id_map.lock().set_entry_shares(&key, &space_ids);
+    // Spaces this gesture takes the entry out of. Each one keeps a placeholder,
+    // so the feed there says the item was pulled back rather than losing the
+    // row without a word.
+    let dropped: Vec<String> = {
+        let mut id_map = sync.id_map.lock();
+        let dropped: Vec<String> = id_map
+            .shares_for(&key)
+            .into_iter()
+            .filter(|s| !space_ids.contains(s))
+            .collect();
+        id_map.set_entry_shares(&key, &space_ids);
+        dropped
+    };
+    if !dropped.is_empty() {
+        sync.mark_unshared(&key, dropped);
+    }
 
     // Re-push with the new share set (the push path reads the record above).
     if entry_type == "note" {
@@ -1022,7 +1037,7 @@ pub async fn space_remove_entry(
     let (sync, http) = sync_http(&state)?;
     http.remove_space_entry(&space_id, &client_id, &entry_type)
         .await?;
-    sync.drop_space_entry(&space_id, &client_id, &entry_type);
+    sync.drop_space_entry(&space_id, &client_id, &entry_type, true);
     Ok(())
 }
 

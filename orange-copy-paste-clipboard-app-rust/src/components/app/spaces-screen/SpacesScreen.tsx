@@ -551,21 +551,41 @@ const RemovedRow: React.FC<{
   owner: SpaceMember | null;
   isNote: boolean;
 }> = ({ item, owner, isNote }) => {
-  const who = owner?.display_name?.trim();
+  // The content is gone, but the record of it is not: an owner id on the
+  // marker means someone else put it here, which is the same thing the arrow
+  // and the name pill say on a live card.
+  const incoming = !!item.marker.owner_id;
   const what = isNote ? "note" : "item";
   return (
     <div className="sp-removed-row">
       <span className="sp-removed-icon">
         <Prohibit size={11} weight="bold" />
       </span>
-      <span className="sp-removed-text">
-        {item.marker.by_author
-          ? who
-            ? `${who} removed a shared ${what}`
-            : `A shared ${what} was removed`
-          : `A space owner took down a shared ${what}`}
+      <DirectionBadge incoming={incoming} />
+      <OwnerBadge owner={owner} incoming={incoming} />
+      <span
+        className={`sp-list-source-badge sp-list-source-badge--${isNote ? "note" : "clip"}`}
+      >
+        {isNote ? <NoteIcon size={10} /> : <Clipboard size={10} />}
       </span>
-      <span className="sp-removed-time">{timeAgo(item.marker.deleted_at)}</span>
+      <span className="sp-removed-text">
+        {/* Two different things, and the difference matters: one took the
+            item away, the other only took it out of this space. */}
+        {item.marker.content_gone
+          ? item.marker.by_author
+            ? `Removed this ${what}`
+            : `This ${what} was taken down by a space owner`
+          : item.marker.by_author
+            ? `Stopped sharing this ${what} here`
+            : `A space owner took this ${what} out of the space`}
+      </span>
+      <span
+        className="sp-removed-time"
+        data-tooltip={new Date(item.marker.deleted_at).toLocaleString()}
+        data-tooltip-pos="left"
+      >
+        {timeAgo(item.marker.deleted_at)}
+      </span>
     </div>
   );
 };
@@ -1030,6 +1050,8 @@ const SpaceSettings: React.FC<{
   selfUserId: string | null;
   autocopy: boolean;
   onAutocopy: (enabled: boolean) => void;
+  showRemoved: boolean;
+  onShowRemoved: (enabled: boolean) => void;
   filter: SendFilter;
   onFilter: (next: SendFilter) => void;
   availableGroups: string[];
@@ -1043,6 +1065,8 @@ const SpaceSettings: React.FC<{
   selfUserId,
   autocopy,
   onAutocopy,
+  showRemoved,
+  onShowRemoved,
   filter,
   onFilter,
   availableGroups,
@@ -1137,10 +1161,7 @@ const SpaceSettings: React.FC<{
     onFilter({ ...filter, groups });
   };
 
-  const selectedGroups = useMemo(
-    () => new Set(filter.groups),
-    [filter.groups],
-  );
+  const selectedGroups = useMemo(() => new Set(filter.groups), [filter.groups]);
 
   return (
     <div className="sp-settings">
@@ -1294,6 +1315,23 @@ const SpaceSettings: React.FC<{
               </div>
             </div>
           )}
+
+          <label className="sp-toggle-row">
+            <span className="sp-toggle-text">
+              <span className="sp-toggle-title">Show removed items</span>
+              <span className="sp-toggle-desc">
+                {showRemoved
+                  ? "Items taken out of this space leave a line saying who removed them and when."
+                  : "Removed items disappear from the feed with no trace."}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              className="sp-switch"
+              checked={showRemoved}
+              onChange={(e) => onShowRemoved(e.target.checked)}
+            />
+          </label>
         </div>
 
         {/* People: who is here, and how to add more. */}
@@ -1327,20 +1365,28 @@ const SpaceSettings: React.FC<{
                       waiting for key
                     </span>
                   )}
-                  <Circle
-                    size={6}
-                    weight="fill"
-                    color={m.online ? "#22c55e" : "#6b7280"}
-                  />
                   {space.is_owner && m.user_id !== selfUserId && (
                     <button
                       type="button"
-                      className="sp-btn sp-btn--danger"
+                      className="sp-btn sp-btn--danger sp-member-remove"
                       onClick={() => onRemoveMember(m.user_id)}
                     >
                       Remove
                     </button>
                   )}
+                  {/* Last in the row, so it sits in the same column on every
+                      line no matter which badges or buttons come before it. */}
+                  <span
+                    className="sp-member-dot"
+                    data-tooltip={m.online ? "Online now" : "Offline"}
+                    data-tooltip-pos="left"
+                  >
+                    <Circle
+                      size={8}
+                      weight="fill"
+                      color={m.online ? "#22c55e" : "#6b7280"}
+                    />
+                  </span>
                 </div>
               ))
             )}
@@ -1496,6 +1542,7 @@ const cache: {
   invites: SyncInviteList;
   filters: Record<string, SendFilter>;
   autocopy: Record<string, boolean>;
+  showRemoved: Record<string, boolean>;
 } = {
   loaded: false,
   spaces: [],
@@ -1505,6 +1552,7 @@ const cache: {
   invites: { sent: [], received: [] },
   filters: {},
   autocopy: {},
+  showRemoved: {},
 };
 
 const SELECTED_KEY = "spaces-selected";
@@ -1609,6 +1657,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [autocopy, setAutocopy] = useState<Record<string, boolean>>(
     cache.autocopy,
   );
+  // Whether this space's feed keeps the placeholders for removed items. On by
+  // default: a row vanishing with no trace is the confusing case.
+  const [showRemoved, setShowRemoved] = useState<Record<string, boolean>>(
+    cache.showRemoved,
+  );
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
   const [search, setSearch] = useState("");
@@ -1641,14 +1694,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [spaces, selectedId],
   );
 
+  // Off means the placeholders are not on screen, so there is nothing for the
+  // clear button to act on either.
+  const placeholdersOn = selected ? showRemoved[selected.id] !== false : false;
+
   const removedCount = useMemo(
     () =>
-      selected
+      selected && placeholdersOn
         ? Object.values(deletedMarkers).filter((m) =>
             m.space_ids.includes(selected.id),
           ).length
         : 0,
-    [deletedMarkers, selected],
+    [deletedMarkers, selected, placeholdersOn],
   );
 
   // Clearing forgets the placeholders only. The items stay gone: the same
@@ -1706,6 +1763,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       return selected.members.find((m) => m.user_id === userId) ?? null;
     },
     [entryOwners, selected],
+  );
+
+  /* Removing an item drops its id_map row, so `ownerFor` has nothing left to
+     look up. The marker keeps the author's id for exactly this reason. */
+  const removedOwnerFor = useCallback(
+    (marker: DeletedMarker): SpaceMember | null => {
+      if (!marker.owner_id || !selected) return null;
+      return (
+        selected.members.find((m) => m.user_id === marker.owner_id) ?? null
+      );
+    },
+    [selected],
   );
 
   // How much is in each space, counted from the share map rather than the feed
@@ -1879,7 +1948,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch(() => setSelfUserId(null));
   }, [syncConnected, reloadSpaces, refreshShares, refreshInvites]);
 
-  // Auto-copy is per device, so it is read from local settings per space.
+  // Auto-copy and the placeholder toggle are per device, so both are read from
+  // local settings per space.
   useEffect(() => {
     let cancelled = false;
     Promise.all(
@@ -1890,6 +1960,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       ),
     ).then((pairs) => {
       if (!cancelled) setAutocopy(Object.fromEntries(pairs));
+    });
+    Promise.all(
+      spaces.map((s) =>
+        invoke<boolean | null>("get_setting", {
+          key: `space_show_removed:${s.id}`,
+        })
+          .then((v) => [s.id, v !== false] as const)
+          .catch(() => [s.id, true] as const),
+      ),
+    ).then((pairs) => {
+      if (!cancelled) setShowRemoved(Object.fromEntries(pairs));
     });
     return () => {
       cancelled = true;
@@ -1977,6 +2058,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     cache.invites = invites;
     cache.filters = sendFilters;
     cache.autocopy = autocopy;
+    cache.showRemoved = showRemoved;
   });
 
   useEffect(() => {
@@ -2006,16 +2088,26 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       for (const note of notes)
         if (inSpace(`note:${note.id}`)) items.push({ kind: "note", note });
     // Placeholders for what was taken out. Filtered by the same kind segment as
-    // real items, off the key rather than the content it no longer has.
-    for (const [key, marker] of Object.entries(deletedMarkers)) {
-      if (!marker.space_ids.includes(selected.id)) continue;
-      const isNote = key.startsWith("note:");
-      if (feedFilter === "notes" && !isNote) continue;
-      if (feedFilter === "clipboard" && isNote) continue;
-      items.push({ kind: "removed", key, marker });
-    }
+    // real items, off the key rather than the content it no longer has. The
+    // space can turn them off; the records stay, they just stop showing.
+    if (placeholdersOn)
+      for (const [key, marker] of Object.entries(deletedMarkers)) {
+        if (!marker.space_ids.includes(selected.id)) continue;
+        const isNote = key.startsWith("note:");
+        if (feedFilter === "notes" && !isNote) continue;
+        if (feedFilter === "clipboard" && isNote) continue;
+        items.push({ kind: "removed", key, marker });
+      }
     return items;
-  }, [selected, feedFilter, entries, notes, entryShares, deletedMarkers]);
+  }, [
+    selected,
+    feedFilter,
+    entries,
+    notes,
+    entryShares,
+    deletedMarkers,
+    placeholdersOn,
+  ]);
 
   const feedItems = useMemo((): FeedItem[] => {
     let pool = allFeedItems;
@@ -2073,7 +2165,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         sorted.sort((a, b) => getTs(b) - getTs(a));
     }
     return sorted;
-  }, [allFeedItems, selectedKinds, datePreset, dateAfter, dateBefore, search, sort]);
+  }, [
+    allFeedItems,
+    selectedKinds,
+    datePreset,
+    dateAfter,
+    dateBefore,
+    search,
+    sort,
+  ]);
 
   /** What each type would leave you with: date and search applied, the type
    *  filter itself excluded. Placeholders have no type, so they sit outside. */
@@ -2223,6 +2323,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         setAutocopy((prev) => ({ ...prev, [spaceId]: !enabled }));
         setSpaceError(errMsg(e, "Could not change auto-copy."));
       }
+    },
+    [],
+  );
+
+  // A view preference for this device, so it goes straight to local settings.
+  const handleSetShowRemoved = useCallback(
+    (spaceId: string, enabled: boolean) => {
+      setShowRemoved((prev) => ({ ...prev, [spaceId]: enabled }));
+      invoke("set_setting", {
+        key: `space_show_removed:${spaceId}`,
+        value: enabled,
+      }).catch(() => {});
     },
     [],
   );
@@ -2514,7 +2626,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                     <RemovedRow
                                       key={item.key}
                                       item={item}
-                                      owner={ownerFor(item.key)}
+                                      owner={removedOwnerFor(item.marker)}
                                       isNote={item.key.startsWith("note:")}
                                     />
                                   ) : item.kind === "clipboard" ? (
@@ -2634,6 +2746,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             selfUserId={selfUserId}
             autocopy={autocopy[selected.id] === true}
             onAutocopy={(enabled) => handleSetAutocopy(selected.id, enabled)}
+            showRemoved={placeholdersOn}
+            onShowRemoved={(enabled) =>
+              handleSetShowRemoved(selected.id, enabled)
+            }
             filter={selectedFilter}
             onFilter={(next) => handleSetFilter(selected.id, next)}
             availableGroups={availableGroups}

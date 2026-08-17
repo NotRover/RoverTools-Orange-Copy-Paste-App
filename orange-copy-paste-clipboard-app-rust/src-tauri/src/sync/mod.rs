@@ -1258,6 +1258,7 @@ impl SyncClient {
                     owner_id,
                     deleted_at: now_ms(),
                     by_author: !is_remote,
+                    content_gone: true,
                 },
             );
         }
@@ -1391,6 +1392,7 @@ impl SyncClient {
                             owner_id,
                             deleted_at: e.deleted_at.unwrap_or_else(now_ms),
                             by_author: true,
+                            content_gone: true,
                         },
                     );
                 }
@@ -1740,6 +1742,22 @@ impl SyncClient {
         self.id_map.lock().entry_owners()
     }
 
+    /// Record that our own entry was pulled back out of these spaces, so each
+    /// one keeps a placeholder where the item used to be. The entry itself is
+    /// untouched: it is still ours, and still in whatever spaces remain.
+    pub fn mark_unshared(&self, key: &str, spaces: Vec<String>) {
+        self.id_map.lock().mark_deleted(
+            key,
+            crate::sync::id_map::DeletedMarker {
+                space_ids: spaces,
+                owner_id: None,
+                deleted_at: now_ms(),
+                by_author: true,
+                content_gone: false,
+            },
+        );
+    }
+
     /// Items removed from a space, for the feed's placeholders.
     pub fn deleted_markers(&self) -> HashMap<String, crate::sync::id_map::DeletedMarker> {
         self.id_map.lock().deleted_markers()
@@ -1749,12 +1767,17 @@ impl SyncClient {
     /// whoever posted it. Either way the space stops carrying it.
     ///
     /// What that means depends on whose entry it is. Ours: it only leaves the
-    /// space, the copy in our own history is untouched and there is no
-    /// placeholder — nothing was taken from us. Someone else's: the local copy
-    /// goes, and a placeholder stands in for it so the row does not silently
-    /// vanish. `by_author` is false in that case by definition: whoever removed
-    /// it, it was not the person reading the placeholder.
-    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str) {
+    /// space and the copy in our own history is untouched. Someone else's: the
+    /// local copy goes too.
+    ///
+    /// Either way the space feed keeps a placeholder. Our own item leaving used
+    /// to disappear without trace, so a space could not answer "what happened
+    /// to the thing I posted here" — the row simply was not there any more.
+    ///
+    /// `by_me` says who did it, which is the only thing this side cannot infer:
+    /// the entry-removed event means a space owner acted, and the command means
+    /// the reader did.
+    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_me: bool) {
         use crate::state::app_state::AppState;
         use std::sync::atomic::Ordering;
 
@@ -1769,6 +1792,19 @@ impl SyncClient {
                 .filter(|s| s != space_id)
                 .collect();
             id_map.set_entry_shares(&key, &kept);
+            // Ours, so no owner id: the badge reads "You", the same as it does
+            // on a live card we posted. Only this space is named - the item is
+            // still in every other space it was shared into.
+            id_map.mark_deleted(
+                &key,
+                crate::sync::id_map::DeletedMarker {
+                    space_ids: vec![space_id.to_string()],
+                    owner_id: None,
+                    deleted_at: now_ms(),
+                    by_author: by_me,
+                    content_gone: false,
+                },
+            );
             drop(id_map);
             let _ = self.app.emit(
                 if entry_type == "note" {
@@ -1802,6 +1838,7 @@ impl SyncClient {
                     owner_id,
                     deleted_at: now_ms(),
                     by_author: false,
+                    content_gone: true,
                 },
             );
             id_map.remove_entry(&key);

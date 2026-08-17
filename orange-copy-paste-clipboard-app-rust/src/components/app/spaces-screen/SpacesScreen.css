@@ -386,8 +386,12 @@
 /* What is left where a removed item used to be. Dashed and dim so it reads as
    an absence rather than another row competing for attention, and it stays out
    of the grid's card rhythm by spanning the full width. */
+/* The tiles feed is a multi-column flow, not a grid, so this row cannot span
+   the full width - and without a break rule the box itself split down the
+   column boundary, leaving an empty frame in one column and the text spilling
+   past the other. It behaves like the cards instead. */
 .sp-removed-row {
-  grid-column: 1 / -1;
+  break-inside: avoid;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -396,6 +400,10 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
+}
+
+.sp-feed-card-grid .sp-removed-row {
+  margin-bottom: 10px;
 }
 
 .sp-removed-icon {
@@ -1199,6 +1207,11 @@
   color: #6366f1;
 }
 
+.sp-list-source-badge--note {
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+}
+
 /* ── Minimal card copy button (tiles mode) ── */
 
 .sp-card-copy-btn {
@@ -1750,6 +1763,24 @@
   padding: 6px 9px;
   border-radius: 8px;
   background: var(--surface);
+}
+
+/* A presence light, not a control: fixed width so the dots line up down the
+   list, and it keeps its own small gap from whatever precedes it. */
+.sp-member-dot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+}
+
+/* Removing someone is rare and destructive, so the button stays quiet: a size
+   below the buttons you are meant to press. */
+.sp-member-remove {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
 }
 
 .sp-member-name {
