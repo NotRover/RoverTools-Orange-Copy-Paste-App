@@ -247,7 +247,7 @@ impl WsListener {
                             .get("entry_type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("clipboard");
-                        sync.drop_space_entry(space_id, client_id, entry_type);
+                        sync.drop_space_entry(space_id, client_id, entry_type, false);
                     }
                 }
             }

@@ -84,6 +84,9 @@ export interface DeletedMarker {
   deleted_at: number;
   /** True when the author removed it, false when a space owner took it down. */
   by_author: boolean;
+  /** Whether the local copy went with it. False means the item only left this
+   *  space and is still yours. */
+  content_gone: boolean;
 }
 
 /** Per-space send filter: which of my entries auto-flow into the space.

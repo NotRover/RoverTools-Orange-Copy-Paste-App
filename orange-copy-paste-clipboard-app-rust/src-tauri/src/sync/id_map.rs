@@ -54,6 +54,22 @@ pub struct DeletedMarker {
     pub deleted_at: u64,
     /// True when its author removed it, false when a space owner took it down.
     pub by_author: bool,
+    /// Whether the local copy went with it.
+    ///
+    /// A removal takes the item away and must never be merged back — the server
+    /// still holds it, so every pull would offer it again. Leaving one space is
+    /// not that: the item is still ours, still in other spaces, and still has
+    /// to accept edits from our other devices. Both leave a placeholder in the
+    /// feed; only this one blocks the merge.
+    ///
+    /// Defaults true so records written before the distinction existed keep
+    /// their old meaning.
+    #[serde(default = "yes")]
+    pub content_gone: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 pub struct IdMap {
@@ -168,9 +184,13 @@ impl IdMap {
         self.persist();
     }
 
-    /// Whether this item has already been removed here.
+    /// Whether this item was taken away here, as opposed to merely leaving a
+    /// space. Only the first blocks a re-merge.
     pub fn is_deleted(&self, client_id: &str) -> bool {
-        self.data.deleted_markers.contains_key(client_id)
+        self.data
+            .deleted_markers
+            .get(client_id)
+            .is_some_and(|m| m.content_gone)
     }
 
     /// Every removal, for the Spaces feed's placeholders.
