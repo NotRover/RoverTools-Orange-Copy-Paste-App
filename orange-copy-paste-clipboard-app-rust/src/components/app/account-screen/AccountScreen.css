@@ -872,6 +872,14 @@
   transition: width 0.24s ease;
 }
 
+.acct-quota-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted, #909090);
+  opacity: 0.75;
+}
+
 .acct-quota-fill--warn { background: var(--acct-warn); }
 
 /* Trust closer for the signed-in column — the same line the auth card ends on. */

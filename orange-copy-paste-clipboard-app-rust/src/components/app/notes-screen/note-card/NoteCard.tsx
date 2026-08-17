@@ -2,9 +2,11 @@ import React from "react";
 import type { ClipboardEntry, Note } from "../../../../types";
 import { groupColor } from "../../../../types";
 import { CheckIcon, PinIcon, TrashIcon } from "../../../icons";
+import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
 import { deriveNoteTitle } from "../notes-utils";
 import { useRelativeTime } from "../../../../hooks/useRelativeTime";
 import NotePreview from "../NotePreview";
+import { CloudArrowUp, CloudCheck, ShareNetwork } from "@phosphor-icons/react";
 import "./note-card.css";
 
 interface NoteCardProps {
@@ -17,6 +19,11 @@ interface NoteCardProps {
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
+  /** Cloud state for this note. Undefined hides the badge, which is also what
+   *  the badge preference does when it is switched off. */
+  syncState?: EntrySyncState;
+  /** Spaces this note is shared into, for the share chip. */
+  sharedSpaceNames?: string[];
 }
 
 const NoteCardImpl: React.FC<NoteCardProps> = ({
@@ -29,6 +36,8 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
   onOpen,
   onDelete,
   onContextMenu,
+  syncState,
+  sharedSpaceNames = [],
 }) => {
   const content = note.content ?? "";
   const relTime = useRelativeTime(note.updated_at);
@@ -99,8 +108,36 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
               );
             })}
           </div>
+          {/* Where this note went, sat next to the time exactly as on a
+              clipboard card: cloud for your own devices, share for other
+              people. */}
+          {sharedSpaceNames.length > 0 && (
+            <span
+              className="ns-card-sync ns-card-sync--shared"
+              data-tooltip={`Shared to ${sharedSpaceNames.join(", ")}`}
+            >
+              <ShareNetwork size={15} />
+              {sharedSpaceNames.length > 1 && (
+                <span className="ns-card-sync-count">
+                  {sharedSpaceNames.length}
+                </span>
+              )}
+            </span>
+          )}
+          {syncState && (
+            <span
+              className={`ns-card-sync ns-card-sync--${syncState}`}
+              data-tooltip={syncState === "synced" ? "Synced" : "Sync pending"}
+            >
+              {syncState === "synced" ? (
+                <CloudCheck size={15} />
+              ) : (
+                <CloudArrowUp size={15} />
+              )}
+            </span>
+          )}
           <span className="ns-card-time ns-card-time--pinned">
-            {note.pinned && <PinIcon size={8} />}
+            {note.pinned && <PinIcon size={9} filled />}
             {relTime}
           </span>
         </div>

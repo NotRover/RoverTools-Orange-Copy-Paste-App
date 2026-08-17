@@ -158,6 +158,11 @@ const App: React.FC = () => {
 
   // null = sync inactive/not logged in; true/false = WS connected state
   const [syncConnected, setSyncConnected] = useState<boolean | null>(null);
+  // Code from an `orange://join?code=...` link. Held here rather than in the
+  // Spaces screen because that screen is only mounted while it is active, so a
+  // link opened from any other screen would arrive with nobody listening.
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const clearJoinCode = useCallback(() => setJoinCode(null), []);
   // Bumped whenever a merge lands, to briefly show a "syncing" pulse.
   const [syncTick, setSyncTick] = useState(0);
   const [syncActivity, setSyncActivity] = useState(false);
@@ -483,7 +488,13 @@ const App: React.FC = () => {
   // Track cloud sync connection state.
   useEffect(() => {
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+    const track = (p: Promise<() => void>) => {
+      p.then((fn) => {
+        if (cancelled) fn();
+        else unlisteners.push(fn);
+      });
+    };
     // Seed from the current status: the socket usually comes up during
     // startup, so waiting for the next event left every indicator reading
     // "inactive" on a device that was signed in and online the whole time.
@@ -495,15 +506,30 @@ const App: React.FC = () => {
         });
       })
       .catch(() => {});
-    listen<{ connected: boolean }>("sync:status-changed", (event) => {
-      if (!cancelled) setSyncConnected(event.payload.connected);
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
+    track(
+      listen<{ connected: boolean }>("sync:status-changed", (event) => {
+        if (!cancelled) setSyncConnected(event.payload.connected);
+      }),
+    );
+    // Back to null, not false: false means signed in with the socket down, and
+    // showing either that or the last connected state is wrong once there is no
+    // account behind it.
+    track(
+      listen("sync:signed-out", () => {
+        if (!cancelled) setSyncConnected(null);
+      }),
+    );
+    track(
+      listen<{ code: string }>("spaces:join-code", (event) => {
+        const code = event.payload?.code?.trim();
+        if (cancelled || !code) return;
+        setJoinCode(code);
+        setScreen("spaces");
+      }),
+    );
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, []);
 
@@ -1345,6 +1371,8 @@ const App: React.FC = () => {
             syncConnected={syncConnected}
             availableGroups={availableGroups}
             onCopyEntry={handleCopy}
+            joinCode={joinCode}
+            onJoinCodeConsumed={clearJoinCode}
           />
         ) : screen === "notes" ? (
           <NotesScreen

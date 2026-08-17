@@ -183,22 +183,15 @@
 .card-menu-count {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 15px;
-  height: 15px;
-  margin-right: 1px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--accent-dim-strong);
+  margin-right: 3px;
   color: var(--accent);
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: normal;
 }
 
 .card-menu-item--off .card-menu-count {
-  background: var(--surface-hover);
   color: var(--text-muted);
 }
 

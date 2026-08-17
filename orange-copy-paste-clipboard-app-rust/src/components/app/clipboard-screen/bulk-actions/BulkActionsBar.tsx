@@ -1,7 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { groupColor } from "../../../../types";
 import type { Space } from "../../../../types";
-import { ShareNetwork, Check, CloudArrowUp, CloudSlash } from "@phosphor-icons/react";
+import {
+  ShareNetwork,
+  Check,
+  Cloud,
+  CloudArrowUp,
+  CloudSlash,
+} from "@phosphor-icons/react";
 import {
   TrashIcon,
   PinIcon,
@@ -279,7 +285,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
             data-tooltip="Upload or remove from your account"
             data-tooltip-pos="below"
           >
-            <CloudArrowUp size={11} />
+            <Cloud size={11} />
             <span>Cloud</span>
             <ChevronDownIcon
               size={8}
@@ -290,7 +296,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
           {cloudOpen && (
             <div className="bulk-popup-groups-flyout">
               <div className="bulk-popup-flyout-header">
-                <CloudArrowUp size={9} />
+                <Cloud size={9} />
                 <span>Cloud copy</span>
               </div>
               <div className="bulk-popup-flyout-spaces">
@@ -312,7 +318,9 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                   }}
                 >
                   <CloudSlash size={11} />
-                  <span className="bulk-popup-row-label">Remove from cloud</span>
+                  <span className="bulk-popup-row-label">
+                    Remove from cloud
+                  </span>
                 </button>
               </div>
               <p className="bulk-popup-flyout-note">

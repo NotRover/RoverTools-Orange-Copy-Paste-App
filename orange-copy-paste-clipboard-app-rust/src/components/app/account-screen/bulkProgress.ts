@@ -77,13 +77,21 @@ export async function trackBulk(keys: string[], mode: "upload" | "remove") {
   while (runId === run) {
     await new Promise((r) => setTimeout(r, 700));
     if (runId !== run) return;
-    let p: { settled: number; failed: number; in_flight: number };
+    let p: {
+      settled: number;
+      present: number;
+      failed: number;
+      in_flight: number;
+    };
     try {
       p = await invoke<typeof p>("sync_bulk_progress", { keys });
     } catch {
       break;
     }
-    done = mode === "upload" ? p.settled : total - p.settled;
+    // A removal counts down what sync still knows about, not what it has
+    // acknowledged: a tombstone that has not gone out yet is unacknowledged too,
+    // so counting acknowledgements called the run finished before it started.
+    done = mode === "upload" ? p.settled : total - p.present;
     failed = p.failed;
     emit({ progress: { mode, done, total }, result: null });
     if (done + failed >= total) break;
@@ -103,13 +111,36 @@ export async function trackBulk(keys: string[], mode: "upload" | "remove") {
   if (runId !== run) return;
 
   const left = total - done;
+  if (mode === "upload") {
+    emit({
+      progress: null,
+      result:
+        left <= 0
+          ? `Uploaded ${total} item${total === 1 ? "" : "s"}.`
+          : `Uploaded ${done} of ${total}. ${left} did not go through - check the skipped list above.`,
+    });
+    return;
+  }
+
+  // Ask the server what is left rather than reporting the local tally. A
+  // removal that missed rows this device did not know about used to say
+  // everything was gone while they kept their storage; if any survive, say so
+  // instead of claiming a clean sweep.
+  let remaining: number | null = null;
+  try {
+    remaining = await invoke<number>("sync_server_entry_count");
+  } catch {
+    /* offline: fall back to what the local tally saw */
+  }
+  if (runId !== run) return;
+
   emit({
     progress: null,
     result:
-      mode === "upload"
-        ? left <= 0
-          ? `Uploaded ${total} item${total === 1 ? "" : "s"}.`
-          : `Uploaded ${done} of ${total}. ${left} did not go through - check the skipped list above.`
+      remaining !== null
+        ? remaining === 0
+          ? `Removed ${done} item${done === 1 ? "" : "s"} from the server. They stay on this device.`
+          : `Removed ${done}, but ${remaining} ${remaining === 1 ? "is" : "are"} still on the server. Try again.`
         : left <= 0
           ? `Removed ${total} item${total === 1 ? "" : "s"} from the server. They stay on this device.`
           : `Removed ${done} of ${total}. ${left} are still on the server; try again.`,
