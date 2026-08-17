@@ -1484,19 +1484,6 @@ export const HrIcon: React.FC<IconProps> = ({ size = 14, className }) => (
   </svg>
 );
 
-/* ── Cloud sync (sidebar nav) ── */
-
-export const CloudSyncIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
-  size = 18,
-  strokeWidth = 2,
-  className,
-}) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-    <path d="M9 15l2 2 4-4" />
-  </svg>
-);
-
 /* ── Users / group ── */
 
 export const UsersIcon: React.FC<IconProps & { strokeWidth?: number }> = ({

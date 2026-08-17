@@ -429,3 +429,33 @@
 .ns-card--selected .ns-card-checkbox svg {
   opacity: 1;
 }
+
+/* Cloud and space badges, matching the entry card's chip row. Notes had no
+   badge at all, so an upload or a share changed nothing a user could see. */
+
+.ns-card-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.ns-card-sync--synced {
+  color: #10b981;
+}
+
+.ns-card-sync--pending {
+  color: #f59e0b;
+}
+
+.ns-card-sync--shared {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+.ns-card-sync-count {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}

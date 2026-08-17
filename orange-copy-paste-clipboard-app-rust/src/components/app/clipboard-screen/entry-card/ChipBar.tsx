@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ClipboardEntry } from "../../../../types";
 import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
 import { deriveDisplayKind, groupColor } from "../../../../types";
@@ -11,7 +17,8 @@ import {
   TYPE_ICONS,
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
-import { ChevronDownIcon, CheckIcon, ClipboardIcon, CloudSyncIcon } from "../../../icons";
+import { ChevronDownIcon, CheckIcon, ClipboardIcon } from "../../../icons";
+import { CloudArrowUp, CloudCheck } from "@phosphor-icons/react";
 import { ShareNetwork } from "@phosphor-icons/react";
 
 const CHIP_GAP_PX = 4;
@@ -72,9 +79,13 @@ const ChipBar: React.FC<ChipBarProps> = ({
   const overflowMeasureRef = useRef<HTMLButtonElement | null>(null);
 
   // Build an ordered list of optional base chips (excluding type, which always shows)
-  const optionalBases: Array<{ key: "pinned" | "saved" | "clipboard"; width: 0 }> = [];
+  const optionalBases: Array<{
+    key: "pinned" | "saved" | "clipboard";
+    width: 0;
+  }> = [];
   if (entry.pinned) optionalBases.push({ key: "pinned", width: 0 });
-  if (entryGroups.includes("Saved")) optionalBases.push({ key: "saved", width: 0 });
+  if (entryGroups.includes("Saved"))
+    optionalBases.push({ key: "saved", width: 0 });
   if (isInClipboard) optionalBases.push({ key: "clipboard", width: 0 });
 
   const visibleBases = optionalBases.slice(0, visibleBaseCount);
@@ -105,11 +116,14 @@ const ChipBar: React.FC<ChipBarProps> = ({
     const baseRefs = [pinMeasureRef, savedMeasureRef, clipboardMeasureRef];
     const baseWidths: number[] = [];
     if (entry.pinned) baseWidths.push(widthOf(baseRefs[0].current));
-    if (entryGroups.includes("Saved")) baseWidths.push(widthOf(baseRefs[1].current));
+    if (entryGroups.includes("Saved"))
+      baseWidths.push(widthOf(baseRefs[1].current));
     if (isInClipboard) baseWidths.push(widthOf(baseRefs[2].current));
 
     const overflowWidth = widthOf(overflowMeasureRef.current);
-    const groupWidths = displayGroups.map((_, i) => widthOf(groupMeasureRefs.current[i]));
+    const groupWidths = displayGroups.map((_, i) =>
+      widthOf(groupMeasureRefs.current[i]),
+    );
 
     // All optional chip widths in order: bases then groups
     const allOptionalWidths = [...baseWidths, ...groupWidths];
@@ -121,7 +135,10 @@ const ChipBar: React.FC<ChipBarProps> = ({
     for (const w of allOptionalWidths) {
       if (w <= 0) continue;
       const next = tempUsed + (tempChips > 0 ? CHIP_GAP_PX : 0) + w;
-      if (next > containerWidth) { fitAll = false; break; }
+      if (next > containerWidth) {
+        fitAll = false;
+        break;
+      }
       tempUsed = next;
       tempChips++;
     }
@@ -146,7 +163,10 @@ const ChipBar: React.FC<ChipBarProps> = ({
     let baseFit = 0;
     let fitCount = 0;
     for (const w of baseWidths) {
-      if (w <= 0) { baseFit++; continue; }
+      if (w <= 0) {
+        baseFit++;
+        continue;
+      }
       const needed = (fitCount > 0 ? CHIP_GAP_PX : 0) + w;
       if (needed > budget) break;
       budget -= needed;
@@ -203,7 +223,11 @@ const ChipBar: React.FC<ChipBarProps> = ({
     if (entry.type === "file" && isMulti) {
       return (
         <button
-          ref={withMeasureRef ? (typeMeasureRef as React.Ref<HTMLButtonElement>) : undefined}
+          ref={
+            withMeasureRef
+              ? (typeMeasureRef as React.Ref<HTMLButtonElement>)
+              : undefined
+          }
           className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
           onClick={
             withMeasureRef
@@ -225,9 +249,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
           <span className="card-type-label">
             {imageFiles.length === files.length ? "Images" : "Files"}
           </span>
-          {!withMeasureRef && (
-            <ChevronDownIcon className="card-type-chevron" />
-          )}
+          {!withMeasureRef && <ChevronDownIcon className="card-type-chevron" />}
         </button>
       );
     }
@@ -236,7 +258,11 @@ const ChipBar: React.FC<ChipBarProps> = ({
       const dk = deriveDisplayKind(entry);
       return (
         <button
-          ref={withMeasureRef ? (typeMeasureRef as React.Ref<HTMLButtonElement>) : undefined}
+          ref={
+            withMeasureRef
+              ? (typeMeasureRef as React.Ref<HTMLButtonElement>)
+              : undefined
+          }
           className={`card-type-chip card-type-chip--${dk} card-type-chip--clickable${contentExpanded ? " open" : ""}`}
           onClick={
             withMeasureRef
@@ -246,13 +272,13 @@ const ChipBar: React.FC<ChipBarProps> = ({
                   setContentExpanded((v) => !v);
                 }
           }
-          data-tooltip={withMeasureRef ? undefined : contentExpanded ? "Collapse" : "Expand"}
+          data-tooltip={
+            withMeasureRef ? undefined : contentExpanded ? "Collapse" : "Expand"
+          }
         >
           {TYPE_ICONS[dk]}
           <span className="card-type-label">{TYPE_LABELS[dk]}</span>
-          {!withMeasureRef && (
-            <ChevronDownIcon className="card-type-chevron" />
-          )}
+          {!withMeasureRef && <ChevronDownIcon className="card-type-chevron" />}
         </button>
       );
     }
@@ -332,7 +358,8 @@ const ChipBar: React.FC<ChipBarProps> = ({
           {renderTypeChip()}
           {visibleBases.some((b) => b.key === "pinned") && renderPinnedChip()}
           {visibleBases.some((b) => b.key === "saved") && renderSavedChip()}
-          {visibleBases.some((b) => b.key === "clipboard") && renderClipboardChip()}
+          {visibleBases.some((b) => b.key === "clipboard") &&
+            renderClipboardChip()}
           {visibleGroups.length > 0 &&
             visibleGroups.map((g) => renderGroupChip(g, g))}
           {totalHiddenCount > 0 && (
@@ -340,9 +367,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
               type="button"
               className={`card-type-chip card-type-chip--group-overflow card-type-chip--group-overflow-btn${showHiddenChips ? " active" : ""}`}
               data-tooltip={
-                showHiddenChips
-                  ? "Hide"
-                  : `show ${totalHiddenCount} more`
+                showHiddenChips ? "Hide" : `show ${totalHiddenCount} more`
               }
               onClick={(e) => {
                 e.stopPropagation();
@@ -377,9 +402,11 @@ const ChipBar: React.FC<ChipBarProps> = ({
             className="card-share-icon"
             data-tooltip={`Shared to ${sharedSpaceNames.join(", ")}`}
           >
-            <ShareNetwork size={11} />
+            <ShareNetwork size={15} />
             {sharedSpaceNames.length > 1 && (
-              <span className="card-share-count">{sharedSpaceNames.length}</span>
+              <span className="card-share-count">
+                {sharedSpaceNames.length}
+              </span>
             )}
           </span>
         )}
@@ -388,7 +415,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             className="card-sync-icon card-sync-icon--synced"
             data-tooltip="Synced"
           >
-            <CloudSyncIcon size={11} />
+            <CloudCheck size={15} />
           </span>
         )}
         {syncState === "pending" && (
@@ -396,7 +423,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             className="card-sync-icon card-sync-icon--pending"
             data-tooltip="Sync pending"
           >
-            <CloudSyncIcon size={11} />
+            <CloudArrowUp size={15} />
           </span>
         )}
         {justPinned ? (
@@ -423,7 +450,8 @@ const ChipBar: React.FC<ChipBarProps> = ({
         >
           {hiddenBases.some((b) => b.key === "pinned") && renderPinnedChip()}
           {hiddenBases.some((b) => b.key === "saved") && renderSavedChip()}
-          {hiddenBases.some((b) => b.key === "clipboard") && renderClipboardChip()}
+          {hiddenBases.some((b) => b.key === "clipboard") &&
+            renderClipboardChip()}
           {hiddenGroups.map((g) => {
             const gc = groupColor(g);
             return (

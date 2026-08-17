@@ -1,12 +1,17 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ShareNetwork,
-  CloudArrowUp,
+  CloudCheck,
   CloudSlash,
   ArrowDown,
 } from "@phosphor-icons/react";
 import type { ClipboardEntry, DisplayKind, Space } from "../../../../types";
-import { deriveDisplayKind, htmlPlainText, groupColor, imageDisplayName } from "../../../../types";
+import {
+  deriveDisplayKind,
+  htmlPlainText,
+  groupColor,
+  imageDisplayName,
+} from "../../../../types";
 import {
   TYPE_ICONS,
   TYPE_LABELS,
@@ -22,15 +27,24 @@ import {
 import "./SearchFilter.css";
 
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
-  "text", "url", "html", "image", "video", "document", "file", "folder",
+  "text",
+  "url",
+  "html",
+  "image",
+  "video",
+  "document",
+  "file",
+  "folder",
 ];
 
 function matchesQuery(entry: ClipboardEntry, q: string): boolean {
   const lower = q.toLowerCase();
   if (entry.type === "text") return entry.content.toLowerCase().includes(lower);
-  if (entry.type === "html") return htmlPlainText(entry.content).toLowerCase().includes(lower);
+  if (entry.type === "html")
+    return htmlPlainText(entry.content).toLowerCase().includes(lower);
   if (entry.type === "file") return entry.content.toLowerCase().includes(lower);
-  if (entry.type === "image") return imageDisplayName(entry).toLowerCase().includes(lower);
+  if (entry.type === "image")
+    return imageDisplayName(entry).toLowerCase().includes(lower);
   return false;
 }
 
@@ -95,9 +109,13 @@ export function useSearchFilter(
   const [searchQuery, setSearchQuery] = useState("");
   const [cloudFilter, setCloudFilter] = useState<CloudFilter>("any");
   const [shareFilter, setShareFilter] = useState<ShareFilter>("any");
-  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(new Set());
+  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [receivedOnly, setReceivedOnly] = useState(false);
-  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(new Set());
+  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
+    new Set(),
+  );
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [dateAfter, setDateAfter] = useState("");
   const [dateBefore, setDateBefore] = useState(() => {
@@ -105,7 +123,9 @@ export function useSearchFilter(
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [selectedFilterGroups, setSelectedFilterGroups] = useState<Set<string>>(new Set());
+  const [selectedFilterGroups, setSelectedFilterGroups] = useState<Set<string>>(
+    new Set(),
+  );
   const filterRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -153,8 +173,16 @@ export function useSearchFilter(
     if (receivedOnly) n++;
     return n;
   }, [
-    selectedKinds, pinnedOnly, dateAfter, dateBefore, selectedFilterGroups, todayStr,
-    cloudFilter, shareFilter, selectedSpaceIds, receivedOnly,
+    selectedKinds,
+    pinnedOnly,
+    dateAfter,
+    dateBefore,
+    selectedFilterGroups,
+    todayStr,
+    cloudFilter,
+    shareFilter,
+    selectedSpaceIds,
+    receivedOnly,
   ]);
 
   const clearAllFilters = useCallback(() => {
@@ -202,7 +230,9 @@ export function useSearchFilter(
       }
       if (shareFilter !== "any") {
         const want = shareFilter === "shared";
-        pool = pool.filter((e) => ((cloud.shares[key(e)]?.length ?? 0) > 0) === want);
+        pool = pool.filter(
+          (e) => (cloud.shares[key(e)]?.length ?? 0) > 0 === want,
+        );
       }
       if (selectedSpaceIds.size > 0) {
         pool = pool.filter((e) =>
@@ -213,28 +243,52 @@ export function useSearchFilter(
     }
     return pool;
   }, [
-    entries, searchQuery, selectedKinds, pinnedOnly, dateAfter, dateBefore,
-    selectedFilterGroups, cloud, cloudFilter, shareFilter, selectedSpaceIds, receivedOnly,
+    entries,
+    searchQuery,
+    selectedKinds,
+    pinnedOnly,
+    dateAfter,
+    dateBefore,
+    selectedFilterGroups,
+    cloud,
+    cloudFilter,
+    shareFilter,
+    selectedSpaceIds,
+    receivedOnly,
   ]);
 
   const isFiltering = searchQuery.trim().length > 0 || activeFilterCount > 0;
 
   return {
-    searchQuery, setSearchQuery,
-    selectedKinds, toggleKind,
-    pinnedOnly, setPinnedOnly,
-    dateAfter, setDateAfter,
-    dateBefore, setDateBefore,
-    filtersOpen, setFiltersOpen,
-    selectedFilterGroups, toggleFilterGroup,
-    cloudFilter, setCloudFilter,
-    shareFilter, setShareFilter,
-    selectedSpaceIds, toggleSpaceFilter,
-    receivedOnly, setReceivedOnly,
+    searchQuery,
+    setSearchQuery,
+    selectedKinds,
+    toggleKind,
+    pinnedOnly,
+    setPinnedOnly,
+    dateAfter,
+    setDateAfter,
+    dateBefore,
+    setDateBefore,
+    filtersOpen,
+    setFiltersOpen,
+    selectedFilterGroups,
+    toggleFilterGroup,
+    cloudFilter,
+    setCloudFilter,
+    shareFilter,
+    setShareFilter,
+    selectedSpaceIds,
+    toggleSpaceFilter,
+    receivedOnly,
+    setReceivedOnly,
     cloud,
-    activeFilterCount, clearAllFilters,
-    filteredEntries, isFiltering,
-    filterRef, searchInputRef,
+    activeFilterCount,
+    clearAllFilters,
+    filteredEntries,
+    isFiltering,
+    filterRef,
+    searchInputRef,
   };
 }
 
@@ -276,7 +330,10 @@ interface FilterDropdownProps {
   availableGroups: string[];
 }
 
-export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGroups }) => (
+export const FilterDropdown: React.FC<FilterDropdownProps> = ({
+  sf,
+  availableGroups,
+}) => (
   <div className="sort-dropdown" ref={sf.filterRef}>
     <button
       className={`cs-tb-btn${sf.filtersOpen ? " cs-tb-btn--open" : ""}`}
@@ -298,23 +355,52 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
         <div className="cs-card-section">
           <div className="cs-section-label">
             System
-            {((sf.pinnedOnly ? 1 : 0) + (sf.selectedFilterGroups.has("Saved") ? 1 : 0)) > 0 && (
+            {(sf.pinnedOnly ? 1 : 0) +
+              (sf.selectedFilterGroups.has("Saved") ? 1 : 0) >
+              0 && (
               <span className="cs-count">
-                {(sf.pinnedOnly ? 1 : 0) + (sf.selectedFilterGroups.has("Saved") ? 1 : 0)}
+                {(sf.pinnedOnly ? 1 : 0) +
+                  (sf.selectedFilterGroups.has("Saved") ? 1 : 0)}
               </span>
             )}
           </div>
           <div className="cs-type-grid">
-            <label className={`cs-type-option${sf.pinnedOnly ? " cs-type-option--on" : ""}`}>
-              <input type="checkbox" checked={sf.pinnedOnly} onChange={() => sf.setPinnedOnly((v) => !v)} className="cs-type-cb" />
-              <span className="cs-type-icon type-pill" style={{ background: "var(--accent-dim)", color: "var(--accent)" }}>
+            <label
+              className={`cs-type-option${sf.pinnedOnly ? " cs-type-option--on" : ""}`}
+            >
+              <input
+                type="checkbox"
+                checked={sf.pinnedOnly}
+                onChange={() => sf.setPinnedOnly((v) => !v)}
+                className="cs-type-cb"
+              />
+              <span
+                className="cs-type-icon type-pill"
+                style={{
+                  background: "var(--accent-dim)",
+                  color: "var(--accent)",
+                }}
+              >
                 {PinIconElement}
               </span>
               <span className="cs-type-name">Pinned</span>
             </label>
-            <label className={`cs-type-option${sf.selectedFilterGroups.has("Saved") ? " cs-type-option--on" : ""}`}>
-              <input type="checkbox" checked={sf.selectedFilterGroups.has("Saved")} onChange={() => sf.toggleFilterGroup("Saved")} className="cs-type-cb" />
-              <span className="cs-type-icon type-pill" style={{ background: "rgba(34, 197, 94, 0.12)", color: "#22c55e" }}>
+            <label
+              className={`cs-type-option${sf.selectedFilterGroups.has("Saved") ? " cs-type-option--on" : ""}`}
+            >
+              <input
+                type="checkbox"
+                checked={sf.selectedFilterGroups.has("Saved")}
+                onChange={() => sf.toggleFilterGroup("Saved")}
+                className="cs-type-cb"
+              />
+              <span
+                className="cs-type-icon type-pill"
+                style={{
+                  background: "rgba(34, 197, 94, 0.12)",
+                  color: "#22c55e",
+                }}
+              >
                 <SaveStarIcon size={9} filled />
               </span>
               <span className="cs-type-name">Saved</span>
@@ -330,10 +416,11 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
             <div className="cs-card-section">
               <div className="cs-section-label">
                 Cloud
-                {((sf.cloudFilter !== "any" ? 1 : 0) +
+                {(sf.cloudFilter !== "any" ? 1 : 0) +
                   (sf.shareFilter !== "any" ? 1 : 0) +
                   (sf.receivedOnly ? 1 : 0) +
-                  (sf.selectedSpaceIds.size > 0 ? 1 : 0)) > 0 && (
+                  (sf.selectedSpaceIds.size > 0 ? 1 : 0) >
+                  0 && (
                   <span className="cs-count">
                     {(sf.cloudFilter !== "any" ? 1 : 0) +
                       (sf.shareFilter !== "any" ? 1 : 0) +
@@ -356,7 +443,7 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
                   className={`cs-seg-btn${sf.cloudFilter === "in" ? " cs-seg-btn--on" : ""}`}
                   onClick={() => sf.setCloudFilter("in")}
                 >
-                  <CloudArrowUp size={10} />
+                  <CloudCheck size={10} />
                   In cloud
                 </button>
                 <button
@@ -391,7 +478,9 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
               </div>
 
               <div className="cs-type-grid">
-                <label className={`cs-type-option${sf.receivedOnly ? " cs-type-option--on" : ""}`}>
+                <label
+                  className={`cs-type-option${sf.receivedOnly ? " cs-type-option--on" : ""}`}
+                >
                   <input
                     type="checkbox"
                     checked={sf.receivedOnly}
@@ -400,7 +489,10 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
                   />
                   <span
                     className="cs-type-icon type-pill"
-                    style={{ background: "var(--accent-dim)", color: "var(--accent)" }}
+                    style={{
+                      background: "var(--accent-dim)",
+                      color: "var(--accent)",
+                    }}
                   >
                     <ArrowDown size={9} weight="bold" />
                   </span>
@@ -423,7 +515,10 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
                       />
                       <span
                         className="cs-type-icon type-pill"
-                        style={{ background: "var(--accent-dim)", color: "var(--accent)" }}
+                        style={{
+                          background: "var(--accent-dim)",
+                          color: "var(--accent)",
+                        }}
                       >
                         <ShareNetwork size={9} />
                       </span>
@@ -441,13 +536,25 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
         <div className="cs-card-section">
           <div className="cs-section-label">
             Types
-            {sf.selectedKinds.size > 0 && <span className="cs-count">{sf.selectedKinds.size}</span>}
+            {sf.selectedKinds.size > 0 && (
+              <span className="cs-count">{sf.selectedKinds.size}</span>
+            )}
           </div>
           <div className="cs-type-grid">
             {ALL_DISPLAY_KINDS.map((k) => (
-              <label key={k} className={`cs-type-option${sf.selectedKinds.has(k) ? " cs-type-option--on" : ""}`}>
-                <input type="checkbox" checked={sf.selectedKinds.has(k)} onChange={() => sf.toggleKind(k)} className="cs-type-cb" />
-                <span className={`cs-type-icon type-pill type-pill--${k}`}>{TYPE_ICONS[k]}</span>
+              <label
+                key={k}
+                className={`cs-type-option${sf.selectedKinds.has(k) ? " cs-type-option--on" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={sf.selectedKinds.has(k)}
+                  onChange={() => sf.toggleKind(k)}
+                  className="cs-type-cb"
+                />
+                <span className={`cs-type-icon type-pill type-pill--${k}`}>
+                  {TYPE_ICONS[k]}
+                </span>
                 <span className="cs-type-name">{TYPE_LABELS[k]}</span>
               </label>
             ))}
@@ -461,21 +568,41 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
             <div className="cs-card-section">
               <div className="cs-section-label">
                 Groups
-                {sf.selectedFilterGroups.size > 0 && <span className="cs-count">{sf.selectedFilterGroups.size}</span>}
+                {sf.selectedFilterGroups.size > 0 && (
+                  <span className="cs-count">
+                    {sf.selectedFilterGroups.size}
+                  </span>
+                )}
               </div>
               <div className="cs-type-grid">
-                {availableGroups.filter((g) => g !== "Saved").map((g) => {
-                  const gc = groupColor(g);
-                  return (
-                    <label key={g} className={`cs-type-option${sf.selectedFilterGroups.has(g) ? " cs-type-option--on" : ""}`}>
-                      <input type="checkbox" checked={sf.selectedFilterGroups.has(g)} onChange={() => sf.toggleFilterGroup(g)} className="cs-type-cb" />
-                      <span className="cs-type-icon type-pill" style={{ background: gc.bg, color: gc.fg }}>
-                        <span className="cs-color-dot" style={{ background: gc.fg }} />
-                      </span>
-                      <span className="cs-type-name">{g}</span>
-                    </label>
-                  );
-                })}
+                {availableGroups
+                  .filter((g) => g !== "Saved")
+                  .map((g) => {
+                    const gc = groupColor(g);
+                    return (
+                      <label
+                        key={g}
+                        className={`cs-type-option${sf.selectedFilterGroups.has(g) ? " cs-type-option--on" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sf.selectedFilterGroups.has(g)}
+                          onChange={() => sf.toggleFilterGroup(g)}
+                          className="cs-type-cb"
+                        />
+                        <span
+                          className="cs-type-icon type-pill"
+                          style={{ background: gc.bg, color: gc.fg }}
+                        >
+                          <span
+                            className="cs-color-dot"
+                            style={{ background: gc.fg }}
+                          />
+                        </span>
+                        <span className="cs-type-name">{g}</span>
+                      </label>
+                    );
+                  })}
               </div>
             </div>
           </>
@@ -487,12 +614,26 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({ sf, availableGro
         <div className="cs-card-section">
           <div className="cs-section-label">
             Date
-            {(sf.dateAfter || sf.dateBefore) && <span className="cs-count">1</span>}
+            {(sf.dateAfter || sf.dateBefore) && (
+              <span className="cs-count">1</span>
+            )}
           </div>
           <div className="cs-date-row">
-            <input type="date" className="cs-date-input" value={sf.dateAfter} onChange={(e) => sf.setDateAfter(e.target.value)} title="After" />
+            <input
+              type="date"
+              className="cs-date-input"
+              value={sf.dateAfter}
+              onChange={(e) => sf.setDateAfter(e.target.value)}
+              title="After"
+            />
             <span className="cs-date-sep">-</span>
-            <input type="date" className="cs-date-input" value={sf.dateBefore} onChange={(e) => sf.setDateBefore(e.target.value)} title="Before" />
+            <input
+              type="date"
+              className="cs-date-input"
+              value={sf.dateBefore}
+              onChange={(e) => sf.setDateBefore(e.target.value)}
+              title="Before"
+            />
           </div>
         </div>
 
@@ -522,9 +663,14 @@ export const NoResults: React.FC<NoResultsProps> = ({ sf }) => (
     <SearchXIcon size={44} className="cs-no-results-icon" />
     <p className="cs-no-results-title">No results</p>
     <p className="cs-no-results-subtitle">
-      {sf.searchQuery.trim()
-        ? <>Nothing matches &ldquo;{sf.searchQuery.trim()}&rdquo;{sf.activeFilterCount > 0 ? " with the current filters" : ""}.</>
-        : <>No entries match the current filters.</>}
+      {sf.searchQuery.trim() ? (
+        <>
+          Nothing matches &ldquo;{sf.searchQuery.trim()}&rdquo;
+          {sf.activeFilterCount > 0 ? " with the current filters" : ""}.
+        </>
+      ) : (
+        <>No entries match the current filters.</>
+      )}
     </p>
   </div>
 );
