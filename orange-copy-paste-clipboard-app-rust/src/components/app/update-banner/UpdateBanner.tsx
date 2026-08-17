@@ -1,7 +1,22 @@
-import React, { useState } from "react";
-import { ArrowClockwise, DownloadSimple, X } from "@phosphor-icons/react";
+import React, { useMemo, useState } from "react";
+import {
+  ArrowClockwise,
+  CaretDown,
+  DownloadSimple,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
 import type { Updater } from "../../../hooks/useUpdater";
 import "./UpdateBanner.css";
+
+/** Notes arrive as plain commit subjects, one per line, usually bullet-prefixed.
+    Stripping the marker here lets the list render as a real list instead of a
+    block of pre-formatted text. */
+const parseNotes = (raw: string): string[] =>
+  raw
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+    .filter(Boolean);
 
 /**
  * The one place an update interrupts the user, and it interrupts gently: a strip
@@ -17,42 +32,71 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
 
   const active =
     visible && info !== null && stage !== "idle" && stage !== "checking";
+
+  const notes = useMemo(
+    () => (info?.notes ? parseNotes(info.notes) : []),
+    [info?.notes],
+  );
+
   if (!active || !info) return null;
 
   const busy = stage === "downloading" || stage === "installing";
 
-  return (
-    <div className="app-update" role="status" aria-live="polite">
-      <div className="app-update-text">
-        <strong>Version {info.version} is available.</strong>{" "}
-        <span className="app-update-from">You have {info.current_version}.</span>
-        {stage === "downloading" && (
-          <span className="app-update-note">
-            {percent === null ? "Downloading..." : `Downloading ${percent}%`}
-          </span>
-        )}
-        {stage === "ready" && (
-          <span className="app-update-note">
-            Downloaded and verified. The app restarts to finish installing.
-          </span>
-        )}
-        {stage === "installing" && <span className="app-update-note">Installing...</span>}
-        {stage === "error" && error && (
-          <span className="app-update-note app-update-error">{error}</span>
-        )}
+  const status =
+    stage === "downloading"
+      ? percent === null
+        ? "Downloading..."
+        : `Downloading ${percent}%`
+      : stage === "ready"
+        ? "Downloaded and verified. The app restarts to finish installing."
+        : stage === "installing"
+          ? "Installing..."
+          : stage === "error" && error
+            ? error
+            : null;
 
-        {info.notes && (
-          <>
-            <button
-              type="button"
-              className="app-update-notes-toggle"
-              onClick={() => setNotesOpen((v) => !v)}
-              aria-expanded={notesOpen}
-            >
-              {notesOpen ? "Hide what's new" : "What's new"}
-            </button>
-            {notesOpen && <pre className="app-update-notes">{info.notes}</pre>}
-          </>
+  return (
+    <div className="app-update" role="status" aria-live="polite" data-stage={stage}>
+      <span className="app-update-icon" aria-hidden="true">
+        {stage === "error" ? (
+          <WarningCircle size={15} weight="regular" />
+        ) : stage === "ready" ? (
+          <ArrowClockwise size={14} weight="regular" />
+        ) : (
+          <DownloadSimple size={14} weight="regular" />
+        )}
+      </span>
+
+      <div className="app-update-body">
+        <div className="app-update-head">
+          <strong className="app-update-title">Version {info.version} is available</strong>
+          <span className="app-update-dot" aria-hidden="true" />
+          <span className="app-update-from">You have {info.current_version}</span>
+
+          {notes.length > 0 && (
+            <>
+              <span className="app-update-dot" aria-hidden="true" />
+              <button
+                type="button"
+                className="app-update-toggle"
+                onClick={() => setNotesOpen((v) => !v)}
+                aria-expanded={notesOpen}
+              >
+                What's new
+                <CaretDown
+                  size={10}
+                  weight="bold"
+                  className={notesOpen ? "is-open" : undefined}
+                />
+              </button>
+            </>
+          )}
+        </div>
+
+        {status && (
+          <p className={`app-update-status${stage === "error" ? " is-error" : ""}`}>
+            {status}
+          </p>
         )}
 
         {stage === "downloading" && (
@@ -64,6 +108,14 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
               style={percent === null ? undefined : { width: `${percent}%` }}
             />
           </div>
+        )}
+
+        {notesOpen && notes.length > 0 && (
+          <ul className="app-update-notes">
+            {notes.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
         )}
       </div>
 

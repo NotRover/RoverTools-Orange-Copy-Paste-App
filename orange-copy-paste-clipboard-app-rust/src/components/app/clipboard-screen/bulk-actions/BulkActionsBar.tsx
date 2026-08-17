@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { groupColor } from "../../../../types";
 import type { Space } from "../../../../types";
-import { ShareNetwork, Check, CloudArrowUp } from "@phosphor-icons/react";
+import { ShareNetwork, Check, CloudArrowUp, CloudSlash } from "@phosphor-icons/react";
 import {
   TrashIcon,
   PinIcon,
@@ -260,7 +260,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                       <span className="bulk-popup-space-check">
                         {active && <Check size={9} weight="bold" />}
                       </span>
-                      <span className="bulk-popup-flyout-name">{space.name}</span>
+                      <span className="bulk-popup-row-label">{space.name}</span>
                     </button>
                   );
                 })}
@@ -301,7 +301,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                     setCloudOpen(false);
                   }}
                 >
-                  <span className="bulk-popup-flyout-name">Upload to cloud</span>
+                  <CloudArrowUp size={11} />
+                  <span className="bulk-popup-row-label">Upload to cloud</span>
                 </button>
                 <button
                   className="bulk-popup-space-row bulk-popup-space-row--danger"
@@ -310,9 +311,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                     setCloudOpen(false);
                   }}
                 >
-                  <span className="bulk-popup-flyout-name">
-                    Remove from cloud
-                  </span>
+                  <CloudSlash size={11} />
+                  <span className="bulk-popup-row-label">Remove from cloud</span>
                 </button>
               </div>
               <p className="bulk-popup-flyout-note">

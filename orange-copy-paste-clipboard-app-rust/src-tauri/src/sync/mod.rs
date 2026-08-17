@@ -150,6 +150,8 @@ struct ImageMergeMeta {
     autocopy: bool,
     /// Another member wrote this one (its key came from a space keyring).
     remote: bool,
+    /// Which account wrote it, when `remote`. Names the sender on a space row.
+    owner_id: Option<String>,
 }
 
 /// Read the send-filter map and sync mode from `settings.json` (both default
@@ -1195,12 +1197,38 @@ impl SyncClient {
         let map_key = format!("{type_str}:{client_id}");
         // The tombstone must reach the same spaces the entry did, so members
         // remove it too. Captured before the id_map row is dropped below.
-        let space_ids = self
-            .id_map
-            .lock()
-            .entry_shares()
-            .remove(&map_key)
-            .unwrap_or_default();
+        let (space_ids, is_remote, owner_id) = {
+            let map = self.id_map.lock();
+            (
+                map.shares_for(&map_key),
+                map.is_remote(&map_key),
+                map.owner_of(&map_key),
+            )
+        };
+
+        // A removal in a space leaves a placeholder, so the item does not just
+        // disappear from under the other members.
+        if !space_ids.is_empty() {
+            self.id_map.lock().mark_deleted(
+                &map_key,
+                crate::sync::id_map::DeletedMarker {
+                    space_ids: space_ids.clone(),
+                    owner_id,
+                    deleted_at: now_ms(),
+                    by_author: !is_remote,
+                },
+            );
+        }
+
+        // Someone else wrote this one, so removing it here is a local decision
+        // and must stay local. Pushing a tombstone would not update their row
+        // (rows are keyed by owner) — it would insert one of ours carrying the
+        // same space ids, and take the item down for every member. The marker
+        // above is what stops the next pull handing it straight back.
+        if is_remote {
+            self.id_map.lock().remove_entry(&map_key);
+            return;
+        }
 
         self.handle.spawn(async move {
             // "Remove from cloud" fans out one of these per entry, so they
@@ -1269,6 +1297,12 @@ impl SyncClient {
             }
             let is_note = e.entry_type == "note";
 
+            let key = format!(
+                "{}:{}",
+                if is_note { "note" } else { "clipboard" },
+                e.client_id
+            );
+
             // Tombstone → remove locally.
             if e.deleted_at.is_some() {
                 if is_note {
@@ -1276,11 +1310,38 @@ impl SyncClient {
                 } else {
                     clip_changed |= state.history.lock().remove(&e.client_id);
                 }
-                self.id_map.lock().remove_entry(&format!(
-                    "{}:{}",
-                    if is_note { "note" } else { "clipboard" },
-                    e.client_id
-                ));
+                let mut id_map = self.id_map.lock();
+                // Spaces come off the id_map row rather than the tombstone: the
+                // payload carries them too, but the local record is what this
+                // device actually saw the item in.
+                let space_ids = {
+                    let local = id_map.shares_for(&key);
+                    if local.is_empty() {
+                        e.space_ids.clone()
+                    } else {
+                        local
+                    }
+                };
+                if !space_ids.is_empty() {
+                    let owner_id = id_map.owner_of(&key);
+                    id_map.mark_deleted(
+                        &key,
+                        crate::sync::id_map::DeletedMarker {
+                            space_ids,
+                            owner_id,
+                            deleted_at: e.deleted_at.unwrap_or_else(now_ms),
+                            by_author: true,
+                        },
+                    );
+                }
+                id_map.remove_entry(&key);
+                continue;
+            }
+
+            // Already removed here. Re-merging would resurrect an item the user
+            // took out, which is exactly what a member's local removal must not
+            // do — the server still holds it, so every pull would offer it.
+            if self.id_map.lock().is_deleted(&key) {
                 continue;
             }
 
@@ -1353,6 +1414,7 @@ impl SyncClient {
                                     pinned: e.pinned,
                                     autocopy: live && self.autocopy_enabled(&e.space_ids),
                                     remote: from_space,
+                                    owner_id: e.user_id.clone(),
                                 },
                             );
                         }
@@ -1387,11 +1449,6 @@ impl SyncClient {
                 clip_changed = true;
             }
 
-            let key = format!(
-                "{}:{}",
-                if is_note { "note" } else { "clipboard" },
-                e.client_id
-            );
             let mut id_map = self.id_map.lock();
             id_map.set_entry(&key, &e.server_id);
             // The sender's metadata carries *their* local group names, which say
@@ -1401,6 +1458,12 @@ impl SyncClient {
             id_map.set_entry_shares(&key, &e.space_ids);
             if from_space {
                 id_map.mark_entry_remote(&key);
+                // Only for entries that came through a space: a space row has to
+                // say who sent it, and our own entries are the ones without an
+                // owner recorded.
+                if let Some(owner) = e.user_id.as_deref() {
+                    id_map.set_entry_owner(&key, owner);
+                }
             }
         }
 
@@ -1543,6 +1606,99 @@ impl SyncClient {
     /// Entry keys another member wrote, for the direction glyph on space rows.
     pub fn remote_entries(&self) -> Vec<String> {
         self.id_map.lock().remote_entries()
+    }
+
+    /// Which account wrote each received entry, for the sender badge on space
+    /// rows.
+    pub fn entry_owners(&self) -> HashMap<String, String> {
+        self.id_map.lock().entry_owners()
+    }
+
+    /// Items removed from a space, for the feed's placeholders.
+    pub fn deleted_markers(&self) -> HashMap<String, crate::sync::id_map::DeletedMarker> {
+        self.id_map.lock().deleted_markers()
+    }
+
+    /// An entry left a space — taken down by the space owner, or un-shared by
+    /// whoever posted it. Either way the space stops carrying it.
+    ///
+    /// What that means depends on whose entry it is. Ours: it only leaves the
+    /// space, the copy in our own history is untouched and there is no
+    /// placeholder — nothing was taken from us. Someone else's: the local copy
+    /// goes, and a placeholder stands in for it so the row does not silently
+    /// vanish. `by_author` is false in that case by definition: whoever removed
+    /// it, it was not the person reading the placeholder.
+    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str) {
+        use crate::state::app_state::AppState;
+        use std::sync::atomic::Ordering;
+
+        let key = format!("{entry_type}:{client_id}");
+        let is_remote = self.id_map.lock().is_remote(&key);
+
+        if !is_remote {
+            let mut id_map = self.id_map.lock();
+            let kept: Vec<String> = id_map
+                .shares_for(&key)
+                .into_iter()
+                .filter(|s| s != space_id)
+                .collect();
+            id_map.set_entry_shares(&key, &kept);
+            drop(id_map);
+            let _ = self.app.emit(
+                if entry_type == "note" {
+                    "sync:notes-merged"
+                } else {
+                    "sync:history-merged"
+                },
+                serde_json::Value::Null,
+            );
+            return;
+        }
+
+        let state = self.app.state::<AppState>();
+        let changed = if entry_type == "note" {
+            state.notes.lock().delete(client_id)
+        } else {
+            state.history.lock().remove(client_id)
+        };
+
+        {
+            let mut id_map = self.id_map.lock();
+            let mut space_ids = id_map.shares_for(&key);
+            if !space_ids.iter().any(|s| s == space_id) {
+                space_ids.push(space_id.to_string());
+            }
+            let owner_id = id_map.owner_of(&key);
+            id_map.mark_deleted(
+                &key,
+                crate::sync::id_map::DeletedMarker {
+                    space_ids,
+                    owner_id,
+                    deleted_at: now_ms(),
+                    by_author: false,
+                },
+            );
+            id_map.remove_entry(&key);
+        }
+
+        // Emitted even when nothing local changed: the Spaces feed still gains
+        // a placeholder row, and it refreshes off these two events.
+        if entry_type == "note" {
+            if changed {
+                state.notes_dirty.store(true, Ordering::Relaxed);
+            }
+            let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
+        } else {
+            if changed {
+                state.history_dirty.store(true, Ordering::Relaxed);
+            }
+            let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
+        }
+    }
+
+    /// Forget the placeholders for one space. Returns how many went.
+    pub fn clear_removed_in_space(&self, space_id: &str) -> usize {
+        self.id_map.lock().clear_deleted_in_space(space_id)
     }
 
     /// Record the storage the account has left, from a fresh quota check.
@@ -2092,6 +2248,9 @@ impl SyncClient {
             id_map.set_entry_shares(&key, &meta.space_ids);
             if meta.remote {
                 id_map.mark_entry_remote(&key);
+                if let Some(owner) = meta.owner_id.as_deref() {
+                    id_map.set_entry_owner(&key, owner);
+                }
             }
             drop(id_map);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);

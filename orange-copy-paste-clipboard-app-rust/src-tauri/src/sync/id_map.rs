@@ -27,6 +27,33 @@ struct IdMapData {
     /// what lets a space row say whether an item came in or went out.
     #[serde(default)]
     remote_entries: HashSet<String>,
+    /// Who wrote each entry, keyed like `entries`. Only recorded for entries
+    /// that arrived from someone else — our own are implied by their absence,
+    /// so this stays empty for a single-user account.
+    #[serde(default)]
+    entry_owners: HashMap<String, String>,
+    /// Items removed from a space, keyed like `entries`.
+    ///
+    /// Two jobs. It is what the Spaces feed renders as a placeholder, so a
+    /// removal reads as "this was taken down" rather than a row silently
+    /// vanishing. And it suppresses re-merge: a member who removes an item they
+    /// received never pushes a tombstone (that would delete it for everyone),
+    /// so without a local record the next pull would hand it straight back.
+    #[serde(default)]
+    deleted_markers: HashMap<String, DeletedMarker>,
+}
+
+/// A removed item, kept after its content is gone.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletedMarker {
+    /// Spaces the item was in when it went.
+    pub space_ids: Vec<String>,
+    /// Account that wrote it, when known.
+    pub owner_id: Option<String>,
+    /// When it was removed, ms since epoch.
+    pub deleted_at: u64,
+    /// True when its author removed it, false when a space owner took it down.
+    pub by_author: bool,
 }
 
 pub struct IdMap {
@@ -74,6 +101,7 @@ impl IdMap {
         self.data.entries.remove(client_id);
         self.data.entry_shares.remove(client_id);
         self.data.remote_entries.remove(client_id);
+        self.data.entry_owners.remove(client_id);
         self.persist();
     }
 
@@ -90,6 +118,85 @@ impl IdMap {
     /// Keys of every entry that came from another member.
     pub fn remote_entries(&self) -> Vec<String> {
         self.data.remote_entries.iter().cloned().collect()
+    }
+
+    /// Whether another member wrote this one.
+    pub fn is_remote(&self, client_id: &str) -> bool {
+        self.data.remote_entries.contains(client_id)
+    }
+
+    /// Spaces one entry is shared into, without cloning the whole map.
+    pub fn shares_for(&self, client_id: &str) -> Vec<String> {
+        self.data
+            .entry_shares
+            .get(client_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Who wrote one entry, if it came from someone else.
+    pub fn owner_of(&self, client_id: &str) -> Option<String> {
+        self.data.entry_owners.get(client_id).cloned()
+    }
+
+    /// Record which account wrote `client_id`. Idempotent, for the same reason
+    /// as `mark_entry_remote`: a re-merge must not rewrite the file.
+    pub fn set_entry_owner(&mut self, client_id: &str, user_id: &str) {
+        if self.data.entry_owners.get(client_id).map(String::as_str) == Some(user_id) {
+            return;
+        }
+        self.data
+            .entry_owners
+            .insert(client_id.to_string(), user_id.to_string());
+        self.persist();
+    }
+
+    /// Owner account id per entry key, for the Spaces feed to resolve against
+    /// the space's member list.
+    pub fn entry_owners(&self) -> HashMap<String, String> {
+        self.data.entry_owners.clone()
+    }
+
+    // ── Removals ──────────────────────────────────────────────────
+
+    /// Record that an item is gone, keeping enough to show a placeholder and to
+    /// recognise it if the server offers it again.
+    pub fn mark_deleted(&mut self, client_id: &str, marker: DeletedMarker) {
+        self.data
+            .deleted_markers
+            .insert(client_id.to_string(), marker);
+        self.persist();
+    }
+
+    /// Whether this item has already been removed here.
+    pub fn is_deleted(&self, client_id: &str) -> bool {
+        self.data.deleted_markers.contains_key(client_id)
+    }
+
+    /// Every removal, for the Spaces feed's placeholders.
+    pub fn deleted_markers(&self) -> HashMap<String, DeletedMarker> {
+        self.data.deleted_markers.clone()
+    }
+
+    /// Drop a removal record. Used when the user clears the placeholders, and
+    /// when the same item is deliberately captured again locally.
+    pub fn clear_deleted(&mut self, client_id: &str) {
+        if self.data.deleted_markers.remove(client_id).is_some() {
+            self.persist();
+        }
+    }
+
+    /// Forget every removal in a space, for "clear removed items".
+    pub fn clear_deleted_in_space(&mut self, space_id: &str) -> usize {
+        let before = self.data.deleted_markers.len();
+        self.data
+            .deleted_markers
+            .retain(|_, m| !m.space_ids.iter().any(|s| s == space_id));
+        let removed = before - self.data.deleted_markers.len();
+        if removed > 0 {
+            self.persist();
+        }
+        removed
     }
 
     // ── Share membership ──────────────────────────────────────────
@@ -129,6 +236,7 @@ impl IdMap {
         self.data.entries.remove(&key);
         self.data.entry_shares.remove(&key);
         self.data.remote_entries.remove(&key);
+        self.data.entry_owners.remove(&key);
         self.persist();
         Some(key)
     }

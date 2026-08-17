@@ -221,6 +221,10 @@ pub struct PulledEntry {
     /// Originating device — used to skip our own entries echoed back over WS.
     #[serde(default)]
     pub device_id: Option<String>,
+    /// Account that wrote the entry. Names the sender on a space row; our own
+    /// entries carry our id, so the Spaces feed compares before showing it.
+    #[serde(default)]
+    pub user_id: Option<String>,
     pub entry_type: String,
     #[serde(default)]
     pub kind: Option<String>,
@@ -994,6 +998,24 @@ impl SyncHttpClient {
                 Method::DELETE,
                 &format!("/api/v1/spaces/{space_id}/members/{member_user_id}"),
             )
+        })
+        .await
+    }
+
+    /// Take a shared entry down from a space we own. Moderation, not deletion:
+    /// the author keeps their personal copy, the space stops carrying it.
+    pub async fn remove_space_entry(
+        &self,
+        space_id: &str,
+        client_id: &str,
+        entry_type: &str,
+    ) -> Result<(), String> {
+        self.get_ok("remove space entry", true, || {
+            self.authed(
+                Method::DELETE,
+                &format!("/api/v1/spaces/{space_id}/entries/{client_id}"),
+            )
+            .map(|req| req.query(&[("entry_type", entry_type)]))
         })
         .await
     }

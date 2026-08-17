@@ -1,86 +1,159 @@
 /* Update strip: sits under the titlebar, above the screen content.
-   Deliberately the same shape as `.app-degraded` in App.css — both are
-   "the app needs to tell you something" bars, and looking alike keeps the
-   window from growing a second visual language. */
+
+   Quiet by design — a plain surface band in the same family as `.app-degraded`
+   in App.css. The only accent in the resting state is the Download button and
+   the leading icon; everything else is the app's normal chrome. */
 
 .app-update {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 9px;
   flex-shrink: 0;
-  padding: 10px 14px;
+  padding: 10px 12px 10px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--accent-dim);
+  background: var(--surface);
 }
 
-.app-update-text {
+/* ── Leading icon ──────────────────────────────────────────────────── */
+
+.app-update-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 26px;
+  color: var(--text-muted);
+}
+
+.app-update[data-stage="error"] .app-update-icon {
+  color: var(--danger);
+}
+
+/* ── Text column ───────────────────────────────────────────────────── */
+
+.app-update-body {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
 }
 
-.app-update-text strong {
-  color: var(--text);
+.app-update-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-height: 26px;
+}
+
+.app-update-title {
+  font-size: 12.5px;
   font-weight: 600;
+  color: var(--text);
 }
 
 .app-update-from {
-  opacity: 0.75;
+  font-size: 11.5px;
+  color: var(--text-muted);
 }
 
-.app-update-note {
-  display: block;
-  margin-top: 3px;
-  font-size: 11px;
-  opacity: 0.85;
+.app-update-dot {
+  width: 3px;
+  height: 3px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.6;
+}
+
+.app-update-status {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
-.app-update-error {
+.app-update-status.is-error {
   color: var(--danger);
-  opacity: 1;
 }
 
 /* ── Release notes ─────────────────────────────────────────────────── */
 
-.app-update-notes-toggle {
-  display: inline-block;
-  margin-top: 4px;
+.app-update-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border: 0;
-  background: none;
   font: inherit;
-  font-size: 11px;
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: none;
   cursor: pointer;
+  transition: color 0.13s ease;
 }
 
-/* Notes come from commit subjects, so they arrive as plain lines. `pre` keeps
-   those line breaks without pulling in a markdown renderer, and wrapping stops a
-   long subject from stretching the window. */
+.app-update-toggle:hover {
+  color: var(--text);
+}
+
+.app-update-toggle svg {
+  transition: transform 0.16s ease;
+}
+
+.app-update-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+
+/* No box, no scroll well. A boxed list of fifteen one-line sentences reads as a
+   cramped scroll pit; a hairline and two columns let the whole list sit on the
+   strip and be read at a glance. Columns fit themselves to the window, so a
+   narrow window falls back to one. */
 .app-update-notes {
-  margin: 6px 0 0;
-  max-height: 132px;
-  overflow-y: auto;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 10px);
-  background: var(--bg-subtle);
-  font-family: inherit;
-  font-size: 11px;
-  line-height: 1.55;
-  white-space: pre-wrap;
+  margin: 9px 0 2px;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--border);
+  columns: 300px 2;
+  column-gap: 32px;
+  list-style: none;
+  animation: app-update-notes-in 0.16s ease;
+}
+
+.app-update-notes li {
+  position: relative;
+  padding-left: 13px;
+  break-inside: avoid;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.app-update-notes li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 9px;
+  width: 4px;
+  height: 1px;
+  background: var(--text-muted);
+}
+
+@keyframes app-update-notes-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ── Progress ──────────────────────────────────────────────────────── */
 
 .app-update-bar {
   margin-top: 7px;
+  max-width: 320px;
   height: 3px;
   border-radius: 2px;
   background: var(--border);
@@ -115,6 +188,14 @@
     animation: none;
     opacity: 0.5;
   }
+
+  .app-update-notes {
+    animation: none;
+  }
+
+  .app-update-toggle svg {
+    transition: none;
+  }
 }
 
 /* ── Actions ───────────────────────────────────────────────────────── */
@@ -124,6 +205,7 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  min-height: 26px;
 }
 
 .app-update-primary,
@@ -136,6 +218,18 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  transition:
+    background 0.13s ease,
+    border-color 0.13s ease,
+    color 0.13s ease;
+}
+
+.app-update-primary:focus-visible,
+.app-update-secondary:focus-visible,
+.app-update-close:focus-visible,
+.app-update-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .app-update-primary {
@@ -164,16 +258,18 @@
 
 .app-update-secondary:hover {
   color: var(--text);
-  border-color: var(--border-light, var(--border));
+  border-color: var(--border-light);
+  background: var(--surface-hover);
 }
 
 .app-update-close {
-  padding: 5px;
-  border: 0;
-  color: var(--text-secondary);
+  padding: 6px;
+  border: 1px solid transparent;
+  color: var(--text-muted);
   background: transparent;
 }
 
 .app-update-close:hover {
   color: var(--text);
+  background: var(--surface-hover);
 }

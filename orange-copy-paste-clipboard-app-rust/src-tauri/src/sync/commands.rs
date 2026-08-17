@@ -280,6 +280,49 @@ pub fn sync_get_entry_shares(
         .unwrap_or_default()
 }
 
+/// Which account wrote each entry, keyed like `sync_get_entry_shares`.  Only
+/// entries received from another member appear; the Spaces feed resolves the
+/// id against the space's member list to name and picture the sender.
+#[tauri::command]
+pub fn sync_get_entry_owners(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, String> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.entry_owners())
+        .unwrap_or_default()
+}
+
+/// Items removed from a space, keyed like `sync_get_entry_shares`.  The Spaces
+/// feed renders these as placeholders so a removal is visible rather than a row
+/// quietly disappearing.
+#[tauri::command]
+pub fn sync_get_deleted_markers(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, crate::sync::id_map::DeletedMarker> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.deleted_markers())
+        .unwrap_or_default()
+}
+
+/// Drop the placeholders for one space.  They are a record of what went, not a
+/// queue, so clearing them loses nothing — but the items stay gone, because the
+/// markers also stop a pull re-merging what this device removed.
+#[tauri::command]
+pub fn space_clear_removed(space_id: String, state: State<'_, AppState>) -> usize {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.clear_removed_in_space(&space_id))
+        .unwrap_or(0)
+}
+
 /// Entry keys (`"clipboard:{id}"` / `"note:{id}"`) another member wrote.  The
 /// Spaces screen marks these as coming in and everything else as going out.
 #[tauri::command]
@@ -930,6 +973,23 @@ pub async fn space_remove_member(
 ) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
     http.remove_space_member(&space_id, &member_user_id).await
+}
+
+/// Take someone else's shared entry down from a space we own. The author keeps
+/// their personal copy; every member is told to drop theirs over the space
+/// channel, and we drop ours here so the action lands without a round trip.
+#[tauri::command]
+pub async fn space_remove_entry(
+    space_id: String,
+    client_id: String,
+    entry_type: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (sync, http) = sync_http(&state)?;
+    http.remove_space_entry(&space_id, &client_id, &entry_type)
+        .await?;
+    sync.drop_space_entry(&space_id, &client_id, &entry_type);
+    Ok(())
 }
 
 /// Delete a space we own (dissolves it for every member).

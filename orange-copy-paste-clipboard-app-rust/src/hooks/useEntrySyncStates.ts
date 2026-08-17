@@ -27,10 +27,15 @@ const REFRESH_ON = [
  *  so open screens drop or restore their badges without a remount. */
 export const SYNC_BADGE_SETTING_EVENT = "settings:sync-badges-changed";
 
-export function useEntrySyncStates(): Record<string, EntrySyncState> {
-  const [states, setStates] = useState<Record<string, EntrySyncState>>({});
-  // Device-local display choice: the entries are still synced, the card just
-  // stops saying so.
+/**
+ * Whether the card badges are switched on.
+ *
+ * Kept apart from the states themselves: hiding the badge is a display choice,
+ * and the menu's cloud actions and the sync filters still need to know what is
+ * actually on the server. Folding the two together is what made the states
+ * unavailable to anything but the badge.
+ */
+export function useSyncBadgesVisible(): boolean {
   const [show, setShow] = useState(true);
 
   useEffect(() => {
@@ -46,6 +51,12 @@ export function useEntrySyncStates(): Record<string, EntrySyncState> {
     document.addEventListener(SYNC_BADGE_SETTING_EVENT, onChange);
     return () => document.removeEventListener(SYNC_BADGE_SETTING_EVENT, onChange);
   }, []);
+
+  return show;
+}
+
+export function useEntrySyncStates(): Record<string, EntrySyncState> {
+  const [states, setStates] = useState<Record<string, EntrySyncState>>({});
 
   const refresh = useCallback(() => {
     invoke<Record<string, EntrySyncState>>("sync_get_entry_states")
@@ -72,9 +83,5 @@ export function useEntrySyncStates(): Record<string, EntrySyncState> {
     };
   }, [refresh]);
 
-  return show ? states : EMPTY_STATES;
+  return states;
 }
-
-/** Stable identity, so hiding the badges does not rerender every card on each
- *  sync event. */
-const EMPTY_STATES: Record<string, EntrySyncState> = {};

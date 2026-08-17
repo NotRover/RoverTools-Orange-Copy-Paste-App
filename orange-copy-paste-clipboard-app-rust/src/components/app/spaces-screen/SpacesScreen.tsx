@@ -11,8 +11,10 @@ import type {
   ClipboardEntry,
   DisplayKind,
   Note,
+  DeletedMarker,
   SendFilter,
   Space,
+  SpaceMember,
   SyncInvite,
   SyncInviteList,
 } from "../../../types";
@@ -45,6 +47,7 @@ import {
   Copy,
   CaretRight,
   CaretDown,
+  Prohibit,
   Circle,
   Envelope,
   Note as NoteIcon,
@@ -71,7 +74,21 @@ import "./SpacesScreen.css";
 type FeedFilter = "all" | "clipboard" | "notes";
 type FeedItem =
   | { kind: "clipboard"; entry: ClipboardEntry }
-  | { kind: "note"; note: Note };
+  | { kind: "note"; note: Note }
+  /** A tombstone the feed still shows. Carries no content — that is the point. */
+  | { kind: "removed"; key: string; marker: DeletedMarker };
+
+/** A feed item that still has content, which is everything but a placeholder. */
+type ContentFeedItem = Exclude<FeedItem, { kind: "removed" }>;
+
+/** When a feed item happened. A placeholder is placed by when it was removed,
+ *  which is the only time it has. */
+const feedTimestamp = (item: FeedItem): number =>
+  item.kind === "clipboard"
+    ? item.entry.timestamp
+    : item.kind === "note"
+      ? item.note.updated_at
+      : item.marker.deleted_at;
 
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "text",
@@ -164,7 +181,8 @@ function dayLabel(ts: number): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function matchesSearch(item: FeedItem, q: string): boolean {
+/** Placeholders are excluded by the caller: there is no content to match. */
+function matchesSearch(item: ContentFeedItem, q: string): boolean {
   const lower = q.toLowerCase();
   if (item.kind === "clipboard") {
     const { entry } = item;
@@ -195,7 +213,9 @@ const FeedCardMenu: React.FC<{
   copied: boolean;
   onCopy?: () => void;
   onOpen: () => void;
-}> = ({ pos, onClose, copied, onCopy, onOpen }) => {
+  /** Owner-only takedown. Absent for members, who cannot moderate. */
+  onRemove?: () => void;
+}> = ({ pos, onClose, copied, onCopy, onOpen, onRemove }) => {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -255,6 +275,18 @@ const FeedCardMenu: React.FC<{
         <ArrowsOutSimple size={13} />
         <span>Open</span>
       </button>
+      {onRemove && (
+        <>
+          <div className="card-menu-separator" />
+          <button
+            className="card-menu-item card-menu-item--danger-soft"
+            onClick={closeAfter(onRemove)}
+          >
+            <Prohibit size={13} />
+            <span>Remove from space</span>
+          </button>
+        </>
+      )}
     </div>,
     document.body,
   );
@@ -492,6 +524,67 @@ const DirectionBadge: React.FC<{ incoming: boolean }> = ({ incoming }) => (
   </span>
 );
 
+/** Who put the item in the space.
+ *
+ * The direction arrow said an item came from "a member" without saying which
+ * one, so in a space with several people there was no way to tell whose item
+ * you were looking at. This names them.
+ */
+const OwnerBadge: React.FC<{
+  owner: SpaceMember | null;
+  incoming: boolean;
+}> = ({ owner, incoming }) => {
+  if (!incoming) {
+    return (
+      <span className="sp-owner sp-owner--self" data-tooltip="You shared this">
+        You
+      </span>
+    );
+  }
+  const name = owner?.display_name?.trim() || "A member";
+  return (
+    <span className="sp-owner" data-tooltip={`Shared by ${name}`}>
+      {owner?.avatar_url ? (
+        <img className="sp-owner-avatar" src={owner.avatar_url} alt="" />
+      ) : (
+        <span className="sp-owner-avatar sp-owner-avatar--initials">
+          {name.charAt(0).toUpperCase()}
+        </span>
+      )}
+      <span className="sp-owner-name">{name}</span>
+    </span>
+  );
+};
+
+/** What is left after an item is taken out of a space.
+ *
+ * Deliberately shows nothing of the content — it is gone from this device, and
+ * that is the point of removing it. What it does say is that a row used to be
+ * here, so the item does not seem to vanish under the other members. */
+const RemovedRow: React.FC<{
+  item: Extract<FeedItem, { kind: "removed" }>;
+  owner: SpaceMember | null;
+  isNote: boolean;
+}> = ({ item, owner, isNote }) => {
+  const who = owner?.display_name?.trim();
+  const what = isNote ? "note" : "item";
+  return (
+    <div className="sp-removed-row">
+      <span className="sp-removed-icon">
+        <Prohibit size={11} weight="bold" />
+      </span>
+      <span className="sp-removed-text">
+        {item.marker.by_author
+          ? who
+            ? `${who} removed a shared ${what}`
+            : `A shared ${what} was removed`
+          : `A space owner took down a shared ${what}`}
+      </span>
+      <span className="sp-removed-time">{timeAgo(item.marker.deleted_at)}</span>
+    </div>
+  );
+};
+
 // ── Clipboard feed card ───────────────────────────────────────────────
 
 const ClipFeedCard: React.FC<{
@@ -501,7 +594,20 @@ const ClipFeedCard: React.FC<{
   layout: ClipboardLayout;
   showSourceBadge?: boolean;
   incoming: boolean;
-}> = ({ entry, onCopy, onView, layout, showSourceBadge, incoming }) => {
+  /** Member who shared it, when it came from someone else. */
+  owner: SpaceMember | null;
+  /** Owner-only takedown, absent when we do not own the space. */
+  onRemove?: () => void;
+}> = ({
+  entry,
+  onCopy,
+  onView,
+  layout,
+  showSourceBadge,
+  incoming,
+  owner,
+  onRemove,
+}) => {
   const [copied, setCopied] = useState(false);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -538,33 +644,44 @@ const ClipFeedCard: React.FC<{
             ? filePaths(entry.content).map(fileNameFromPath).join(", ")
             : (entry.label ?? "");
     return (
-      <div
-        className="sp-list-card"
-        onClick={() => onView(entry)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setMenuPos({ x: e.clientX, y: e.clientY });
-        }}
-      >
-        <DirectionBadge incoming={incoming} />
-        {showSourceBadge && (
-          <span className="sp-list-source-badge sp-list-source-badge--clip">
-            <Clipboard size={10} />
-          </span>
-        )}
-        <span className="sp-list-type-wrap">
-          <EntryTypePill kind={dk} />
-        </span>
-        <span className="sp-list-text">{truncateText(text, 100)}</span>
-        <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
-        <button
-          className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
-          onClick={handleCopy}
+      <>
+        <div
+          className="sp-list-card"
+          onClick={() => onView(entry)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuPos({ x: e.clientX, y: e.clientY });
+          }}
         >
-          {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
-        </button>
-      </div>
+          <DirectionBadge incoming={incoming} />
+          <OwnerBadge owner={owner} incoming={incoming} />
+          {showSourceBadge && (
+            <span className="sp-list-source-badge sp-list-source-badge--clip">
+              <Clipboard size={10} />
+            </span>
+          )}
+          <span className="sp-list-type-wrap">
+            <EntryTypePill kind={dk} />
+          </span>
+          <span className="sp-list-text">{truncateText(text, 100)}</span>
+          <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
+          <button
+            className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
+            onClick={handleCopy}
+          >
+            {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
+          </button>
+        </div>
+        <FeedCardMenu
+          pos={menuPos}
+          onClose={() => setMenuPos(null)}
+          copied={copied}
+          onCopy={markCopied}
+          onOpen={() => onView(entry)}
+          onRemove={onRemove}
+        />
+      </>
     );
   }
 
@@ -638,6 +755,7 @@ const ClipFeedCard: React.FC<{
                 </span>
               )}
               <EntryTypePill kind={dk} />
+              <OwnerBadge owner={owner} incoming={incoming} />
             </div>
             {copied ? (
               <span className="card-time card-time--copied">
@@ -664,6 +782,7 @@ const ClipFeedCard: React.FC<{
         copied={copied}
         onCopy={markCopied}
         onOpen={() => onView(entry)}
+        onRemove={onRemove}
       />
     </>
   );
@@ -678,7 +797,20 @@ const NoteFeedCard: React.FC<{
   layout: ClipboardLayout;
   showSourceBadge?: boolean;
   incoming: boolean;
-}> = ({ note, entries, onView, layout, showSourceBadge, incoming }) => {
+  /** Member who shared it, when it came from someone else. */
+  owner: SpaceMember | null;
+  /** Owner-only takedown, absent when we do not own the space. */
+  onRemove?: () => void;
+}> = ({
+  note,
+  entries,
+  onView,
+  layout,
+  showSourceBadge,
+  incoming,
+  owner,
+  onRemove,
+}) => {
   const plain = extractNoteText(note.content);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const openMenu = useCallback((e: React.MouseEvent) => {
@@ -697,6 +829,7 @@ const NoteFeedCard: React.FC<{
           onContextMenu={openMenu}
         >
           <DirectionBadge incoming={incoming} />
+          <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-note-badge">
             <NoteIcon size={12} />
           </span>
@@ -715,6 +848,7 @@ const NoteFeedCard: React.FC<{
           onClose={() => setMenuPos(null)}
           copied={false}
           onOpen={() => onView(note)}
+          onRemove={onRemove}
         />
       </>
     );
@@ -750,6 +884,7 @@ const NoteFeedCard: React.FC<{
                   <span className="card-type-label">Note</span>
                 </span>
               )}
+              <OwnerBadge owner={owner} incoming={incoming} />
               {note.groups.map((g) => {
                 const c = groupColor(g);
                 return (
@@ -778,6 +913,7 @@ const NoteFeedCard: React.FC<{
         onClose={() => setMenuPos(null)}
         copied={false}
         onOpen={() => onView(note)}
+        onRemove={onRemove}
       />
     </>
   );
@@ -1439,6 +1575,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [remoteKeys, setRemoteKeys] = useState<Set<string>>(
     () => new Set(cache.remote),
   );
+  // Same keys again, mapping to the account that wrote the item. Only received
+  // items are recorded, so a miss means this account shared it.
+  const [entryOwners, setEntryOwners] = useState<Record<string, string>>({});
+  // Items that were taken out of a space. Same keys again; the feed shows these
+  // as placeholders so a removal is visible to everyone who saw the item.
+  const [deletedMarkers, setDeletedMarkers] = useState<
+    Record<string, DeletedMarker>
+  >({});
   // Reopens on the space you left, which is usually the one you want again.
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     localStorage.getItem(SELECTED_KEY),
@@ -1459,7 +1603,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [layout, setLayout] = useState<ClipboardLayout>(
     () => (localStorage.getItem("spaces-layout") as ClipboardLayout) ?? "tiles",
   );
-  const [detailItem, setDetailItem] = useState<FeedItem | null>(null);
+  // Never a placeholder: there is nothing to open.
+  const [detailItem, setDetailItem] = useState<ContentFeedItem | null>(null);
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -1481,6 +1626,62 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const selected = useMemo(
     () => spaces.find((s) => s.id === selectedId) ?? null,
     [spaces, selectedId],
+  );
+
+  const removedCount = useMemo(
+    () =>
+      selected
+        ? Object.values(deletedMarkers).filter((m) =>
+            m.space_ids.includes(selected.id),
+          ).length
+        : 0,
+    [deletedMarkers, selected],
+  );
+
+  // Clearing forgets the placeholders only. The items stay gone: the same
+  // markers are what stop a pull re-merging something removed here, so this
+  // drops them for spaces the user has finished reviewing.
+  const handleClearRemoved = useCallback(() => {
+    if (!selected) return;
+    const spaceId = selected.id;
+    invoke<number>("space_clear_removed", { spaceId })
+      .then(() =>
+        setDeletedMarkers((prev) =>
+          Object.fromEntries(
+            Object.entries(prev).filter(
+              ([, m]) => !m.space_ids.includes(spaceId),
+            ),
+          ),
+        ),
+      )
+      .catch(() => {});
+  }, [selected]);
+
+  // Take someone else's item out of a space we own. Moderation, not deletion:
+  // the member who shared it keeps their own copy, the space stops carrying it,
+  // and everyone here gets a placeholder in its place.
+  const handleRemoveFromSpace = useCallback(
+    (clientId: string, entryType: "clipboard" | "note") => {
+      if (!selected?.is_owner) return;
+      invoke("space_remove_entry", {
+        spaceId: selected.id,
+        clientId,
+        entryType,
+      }).catch((e) => setSpaceError(String(e)));
+    },
+    [selected],
+  );
+
+  // Resolve an item to the member who shared it. A member who has since left
+  // the space is no longer in the list, so this can return null for an item
+  // that is genuinely incoming - the badge falls back to "A member".
+  const ownerFor = useCallback(
+    (key: string): SpaceMember | null => {
+      const userId = entryOwners[key];
+      if (!userId || !selected) return null;
+      return selected.members.find((m) => m.user_id === userId) ?? null;
+    },
+    [entryOwners, selected],
   );
 
   // How much is in each space, counted from the share map rather than the feed
@@ -1626,6 +1827,12 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch(() => {});
     invoke<string[]>("sync_get_remote_entries")
       .then((keys) => setRemoteKeys(new Set(keys)))
+      .catch(() => {});
+    invoke<Record<string, string>>("sync_get_entry_owners")
+      .then(setEntryOwners)
+      .catch(() => {});
+    invoke<Record<string, DeletedMarker>>("sync_get_deleted_markers")
+      .then(setDeletedMarkers)
       .catch(() => {});
   }, []);
 
@@ -1794,45 +2001,50 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     if (feedFilter !== "clipboard")
       for (const note of notes)
         if (inSpace(`note:${note.id}`)) items.push({ kind: "note", note });
+    // Placeholders for what was taken out. Filtered by the same kind segment as
+    // real items, off the key rather than the content it no longer has.
+    for (const [key, marker] of Object.entries(deletedMarkers)) {
+      if (!marker.space_ids.includes(selected.id)) continue;
+      const isNote = key.startsWith("note:");
+      if (feedFilter === "notes" && !isNote) continue;
+      if (feedFilter === "clipboard" && isNote) continue;
+      items.push({ kind: "removed", key, marker });
+    }
     return items;
-  }, [selected, feedFilter, entries, notes, entryShares]);
+  }, [selected, feedFilter, entries, notes, entryShares, deletedMarkers]);
 
   const feedItems = useMemo((): FeedItem[] => {
     let pool = allFeedItems;
+    // A placeholder has no content, so a type filter or a search can only ever
+    // exclude it. Both drop it rather than showing a row that matches nothing.
     if (selectedKinds.size > 0)
       pool = pool.filter(
         (item) =>
           item.kind === "note" ||
-          selectedKinds.has(deriveDisplayKind(item.entry)),
+          (item.kind === "clipboard" &&
+            selectedKinds.has(deriveDisplayKind(item.entry))),
       );
     if (dateAfter) {
       const ts = new Date(dateAfter + "T00:00:00").getTime();
-      pool = pool.filter(
-        (item) =>
-          (item.kind === "clipboard"
-            ? item.entry.timestamp
-            : item.note.updated_at) >= ts,
-      );
+      pool = pool.filter((item) => feedTimestamp(item) >= ts);
     }
     if (dateBefore) {
       const ts = new Date(dateBefore + "T23:59:59.999").getTime();
-      pool = pool.filter(
-        (item) =>
-          (item.kind === "clipboard"
-            ? item.entry.timestamp
-            : item.note.updated_at) <= ts,
-      );
+      pool = pool.filter((item) => feedTimestamp(item) <= ts);
     }
     if (search.trim())
-      pool = pool.filter((item) => matchesSearch(item, search.trim()));
+      pool = pool.filter(
+        (item) => item.kind !== "removed" && matchesSearch(item, search.trim()),
+      );
 
     const sorted = [...pool];
-    const getTs = (item: FeedItem) =>
-      item.kind === "clipboard" ? item.entry.timestamp : item.note.updated_at;
+    const getTs = feedTimestamp;
     const getText = (item: FeedItem) =>
       item.kind === "clipboard"
         ? extractNoteText(item.entry.content)
-        : item.note.title || "";
+        : item.kind === "note"
+          ? item.note.title || ""
+          : "";
     switch (sort) {
       case "oldest":
         sorted.sort((a, b) => getTs(a) - getTs(b));
@@ -1845,11 +2057,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         break;
       case "type":
         sorted.sort((a, b) => {
-          const ka =
-            a.kind === "note" ? "zzz-note" : deriveDisplayKind(a.entry);
-          const kb =
-            b.kind === "note" ? "zzz-note" : deriveDisplayKind(b.entry);
-          return ka.localeCompare(kb);
+          const kindKey = (i: FeedItem) =>
+            i.kind === "note"
+              ? "zzz-note"
+              : i.kind === "removed"
+                ? "zzz-removed"
+                : deriveDisplayKind(i.entry);
+          return kindKey(a).localeCompare(kindKey(b));
         });
         break;
       default:
@@ -1862,9 +2076,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     const days: { label: string; items: FeedItem[] }[] = [];
     let current: { label: string; items: FeedItem[] } | null = null;
     for (const item of feedItems) {
-      const ts =
-        item.kind === "clipboard" ? item.entry.timestamp : item.note.updated_at;
-      const label = dayLabel(ts);
+      const label = dayLabel(feedTimestamp(item));
       if (!current || current.label !== label) {
         current = { label, items: [] };
         days.push(current);
@@ -2137,6 +2349,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                     </span>
                   )}
                 </span>
+                {removedCount > 0 && (
+                  <button
+                    className="sp-feed-clear-removed"
+                    onClick={handleClearRemoved}
+                    data-tooltip="Hide the placeholders. The items stay removed."
+                    data-tooltip-pos="below"
+                  >
+                    <Prohibit size={9} weight="bold" />
+                    clear {removedCount} removed
+                  </button>
+                )}
                 {autocopy[selected.id] && (
                   <span className="sp-feed-flag">
                     <Clipboard size={9} />
@@ -2237,7 +2460,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                 }
                               >
                                 {items.map((item) =>
-                                  item.kind === "clipboard" ? (
+                                  item.kind === "removed" ? (
+                                    <RemovedRow
+                                      key={item.key}
+                                      item={item}
+                                      owner={ownerFor(item.key)}
+                                      isNote={item.key.startsWith("note:")}
+                                    />
+                                  ) : item.kind === "clipboard" ? (
                                     <ClipFeedCard
                                       key={item.entry.id}
                                       entry={item.entry}
@@ -2253,6 +2483,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       incoming={remoteKeys.has(
                                         `clipboard:${item.entry.id}`,
                                       )}
+                                      owner={ownerFor(
+                                        `clipboard:${item.entry.id}`,
+                                      )}
+                                      onRemove={
+                                        selected.is_owner
+                                          ? () =>
+                                              handleRemoveFromSpace(
+                                                item.entry.id,
+                                                "clipboard",
+                                              )
+                                          : undefined
+                                      }
                                     />
                                   ) : (
                                     <NoteFeedCard
@@ -2267,6 +2509,16 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       incoming={remoteKeys.has(
                                         `note:${item.note.id}`,
                                       )}
+                                      owner={ownerFor(`note:${item.note.id}`)}
+                                      onRemove={
+                                        selected.is_owner
+                                          ? () =>
+                                              handleRemoveFromSpace(
+                                                item.note.id,
+                                                "note",
+                                              )
+                                          : undefined
+                                      }
                                     />
                                   ),
                                 )}
@@ -2457,59 +2709,63 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                     </div>
                   )}
                   {group.spaces.map((space) => {
-                const isActive = space.id === selectedId;
-                const online = space.members.filter((m) => m.online).length;
-                const rules = filterRuleCount(sendFilters[space.id]);
-                return (
-                  <button
-                    key={space.id}
-                    className={`sp-space-card${isActive ? " active" : ""}`}
-                    onClick={() => setSelectedId(space.id)}
-                  >
-                    <span
-                      className="sp-space-avatar"
-                      style={{ background: spaceAvatarColor(space.id) }}
-                    >
-                      {space.name.slice(0, 2).toUpperCase()}
-                    </span>
-                    <span className="sp-space-card-body">
-                      <span className="sp-space-card-name">{space.name}</span>
-                      {/* Two numbers that change, rather than one that does
+                    const isActive = space.id === selectedId;
+                    const online = space.members.filter((m) => m.online).length;
+                    const rules = filterRuleCount(sendFilters[space.id]);
+                    return (
+                      <button
+                        key={space.id}
+                        className={`sp-space-card${isActive ? " active" : ""}`}
+                        onClick={() => setSelectedId(space.id)}
+                      >
+                        <span
+                          className="sp-space-avatar"
+                          style={{ background: spaceAvatarColor(space.id) }}
+                        >
+                          {space.name.slice(0, 2).toUpperCase()}
+                        </span>
+                        <span className="sp-space-card-body">
+                          <span className="sp-space-card-name">
+                            {space.name}
+                          </span>
+                          {/* Two numbers that change, rather than one that does
                           not: who is around, and how much is in here. */}
-                      <span className="sp-space-card-meta">
-                        {space.members.length > 0
-                          ? `${online}/${space.member_count} online`
-                          : `${space.member_count} member${space.member_count === 1 ? "" : "s"}`}
-                        {" - "}
-                        {itemCounts[space.id] ?? 0} item
-                        {(itemCounts[space.id] ?? 0) === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                    <span className="sp-space-card-flags">
-                      {space.is_owner && (
-                        <span className="sp-badge sp-badge--owner">owner</span>
-                      )}
-                      {autocopy[space.id] && (
-                        <span
-                          className="sp-flag-dot"
-                          data-tooltip="Copies new items to your clipboard"
-                          data-tooltip-pos="left"
-                        >
-                          <Clipboard size={9} />
+                          <span className="sp-space-card-meta">
+                            {space.members.length > 0
+                              ? `${online}/${space.member_count} online`
+                              : `${space.member_count} member${space.member_count === 1 ? "" : "s"}`}
+                            {" - "}
+                            {itemCounts[space.id] ?? 0} item
+                            {(itemCounts[space.id] ?? 0) === 1 ? "" : "s"}
+                          </span>
                         </span>
-                      )}
-                      {rules > 0 && (
-                        <span
-                          className="sp-flag-dot"
-                          data-tooltip="Shares matching new items automatically"
-                          data-tooltip-pos="left"
-                        >
-                          <Funnel size={9} />
+                        <span className="sp-space-card-flags">
+                          {space.is_owner && (
+                            <span className="sp-badge sp-badge--owner">
+                              owner
+                            </span>
+                          )}
+                          {autocopy[space.id] && (
+                            <span
+                              className="sp-flag-dot"
+                              data-tooltip="Copies new items to your clipboard"
+                              data-tooltip-pos="left"
+                            >
+                              <Clipboard size={9} />
+                            </span>
+                          )}
+                          {rules > 0 && (
+                            <span
+                              className="sp-flag-dot"
+                              data-tooltip="Shares matching new items automatically"
+                              data-tooltip-pos="left"
+                            >
+                              <Funnel size={9} />
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
-                  </button>
-                );
+                      </button>
+                    );
                   })}
                 </React.Fragment>
               ))}

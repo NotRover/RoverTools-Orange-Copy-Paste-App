@@ -3,8 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
-import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
-import { useSpaceShares } from "../../../hooks/useSpaceShares";
+import { useEntrySyncStates, useSyncBadgesVisible } from "../../../hooks/useEntrySyncStates";
+import { useSpaceShares, useRemoteEntryKeys } from "../../../hooks/useSpaceShares";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
@@ -172,15 +172,40 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const viewportRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Search & filter (delegated to sub-component)
-  const sf = useSearchFilter(entries);
+  // Search & filter (delegated to sub-component). The cloud context is built
+  // below, after the sync hooks — see `cloudFilterContext`.
 
   // Multi-select state
   const multiSelect = useMultiSelect();
 
-  // Cloud badge state, keyed "clipboard:{id}". Kept out of the entry model.
+  // Per-entry sync state, keyed "clipboard:{id}". Kept out of the entry model.
+  // The badge preference only hides the badge; the menu and the filters still
+  // need to know what is actually on the server.
   const entrySyncStates = useEntrySyncStates();
+  const syncBadgesVisible = useSyncBadgesVisible();
   const spaceShares = useSpaceShares();
+
+  const remoteKeys = useRemoteEntryKeys();
+
+  const toggleEntryCloud = useCallback((entryId: string, upload: boolean) => {
+    invoke(upload ? "sync_push_entries" : "sync_unpush_entries", {
+      clientIds: [entryId],
+      entryType: "clipboard",
+    }).catch(() => {});
+  }, []);
+
+  const cloudFilterContext = useMemo(
+    () => ({
+      syncStates: entrySyncStates,
+      shares: spaceShares.shares,
+      remoteKeys,
+      spaces: spaceShares.spaces,
+      signedIn: spaceShares.signedIn,
+    }),
+    [entrySyncStates, spaceShares.shares, remoteKeys, spaceShares.spaces, spaceShares.signedIn],
+  );
+
+  const sf = useSearchFilter(entries, cloudFilterContext);
 
   // Day groups: entries sorted within each day, and the day buckets themselves
   // ordered by date — oldest-first only for the "oldest" sort, newest-first for
@@ -554,7 +579,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onToggleSelect={multiSelect.toggleSelect}
                           onRangeSelect={handleRangeSelect}
                           isInClipboard={entry.id === activeClipboardId}
-                          syncState={entrySyncStates[`clipboard:${entry.id}`]}
+                          syncState={
+                            syncBadgesVisible
+                              ? entrySyncStates[`clipboard:${entry.id}`]
+                              : undefined
+                          }
                           spaces={spaceShares.spaces}
                           signedIn={spaceShares.signedIn}
                           itemSpaceIds={spaceShares.shares[`clipboard:${entry.id}`]}
@@ -562,6 +591,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                           onToggleSpace={(entryId, spaceId) =>
                             spaceShares.toggle("clipboard", entryId, spaceId)
                           }
+                          inCloud={!!entrySyncStates[`clipboard:${entry.id}`]}
+                          onToggleCloud={toggleEntryCloud}
                         />
                       ))}
                     </div>
