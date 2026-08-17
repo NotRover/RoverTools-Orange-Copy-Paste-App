@@ -63,6 +63,7 @@ import {
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
+import { showToast, toastError } from "../toast/toastBus";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
@@ -1645,16 +1646,22 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     if (!selected) return;
     const spaceId = selected.id;
     invoke<number>("space_clear_removed", { spaceId })
-      .then(() =>
+      .then((count) => {
+        showToast(
+          count === 1
+            ? "Cleared 1 placeholder"
+            : `Cleared ${count} placeholders`,
+          "info",
+        );
         setDeletedMarkers((prev) =>
           Object.fromEntries(
             Object.entries(prev).filter(
               ([, m]) => !m.space_ids.includes(spaceId),
             ),
           ),
-        ),
-      )
-      .catch(() => {});
+        );
+      })
+      .catch((e) => toastError("Could not clear the placeholders", e));
   }, [selected]);
 
   // Take someone else's item out of a space we own. Moderation, not deletion:
@@ -1667,7 +1674,12 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         spaceId: selected.id,
         clientId,
         entryType,
-      }).catch((e) => setSpaceError(String(e)));
+      })
+        .then(() => showToast("Removed from the space", "info"))
+        .catch((e) => {
+          setSpaceError(String(e));
+          toastError("Could not remove from the space", e);
+        });
     },
     [selected],
   );

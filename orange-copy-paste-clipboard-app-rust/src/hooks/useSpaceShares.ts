@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { showToast, toastError } from "../components/app/toast/toastBus";
 import { listen } from "@tauri-apps/api/event";
 import type { Space } from "../types";
 
@@ -81,9 +82,25 @@ export function useSpaceShares(): SpaceShares {
   const [shares, setShares] = useState<Record<string, string[]>>({});
   const [signedIn, setSignedIn] = useState(false);
 
+  // Items whose share command has not come back yet. A push emits merge events
+  // of its own, so a refresh can land on a snapshot taken before the click and
+  // uncheck what the user just checked; these values stay on top until the
+  // command settles.
+  const pending = useRef(new Map<string, string[]>());
+
+  const overlayPending = useCallback((map: Record<string, string[]>) => {
+    if (pending.current.size === 0) return map;
+    const next = { ...map };
+    for (const [key, ids] of pending.current) {
+      if (ids.length === 0) delete next[key];
+      else next[key] = ids;
+    }
+    return next;
+  }, []);
+
   const refresh = useCallback(() => {
     invoke<Record<string, string[]>>("sync_get_entry_shares")
-      .then(setShares)
+      .then((map) => setShares(overlayPending(map)))
       .catch(() => setShares({}));
     invoke<Space[]>("spaces_cached")
       .then(setSpaces)
@@ -91,7 +108,7 @@ export function useSpaceShares(): SpaceShares {
     invoke<{ user_id: string } | null>("sync_get_user")
       .then((u) => setSignedIn(!!u))
       .catch(() => setSignedIn(false));
-  }, []);
+  }, [overlayPending]);
 
   useEffect(() => {
     refresh();
@@ -110,11 +127,12 @@ export function useSpaceShares(): SpaceShares {
   }, [refresh]);
 
   // Applied locally first so the chip and the checkmark move with the click;
-  // a failed command puts the old set back.
+  // a failed command puts the old set back and says so.
   const apply = useCallback(
     (kind: ShareKind, id: string, spaceIds: string[]) => {
       const key = `${kind}:${id}`;
       const previous = shares[key];
+      pending.current.set(key, spaceIds);
       setShares((prev) => {
         const next = { ...prev };
         if (spaceIds.length === 0) delete next[key];
@@ -125,48 +143,83 @@ export function useSpaceShares(): SpaceShares {
         entryId: id,
         entryType: kind,
         spaceIds,
-      }).catch(() => {
-        setShares((prev) => {
-          const next = { ...prev };
-          if (previous) next[key] = previous;
-          else delete next[key];
-          return next;
+      })
+        .catch((e) => {
+          setShares((prev) => {
+            const next = { ...prev };
+            if (previous) next[key] = previous;
+            else delete next[key];
+            return next;
+          });
+          toastError("Could not change sharing", e);
+        })
+        .finally(() => {
+          pending.current.delete(key);
         });
-      });
     },
     [shares],
+  );
+
+  const spaceName = useCallback(
+    (spaceId: string) => spaces.find((s) => s.id === spaceId)?.name ?? "space",
+    [spaces],
   );
 
   const toggle = useCallback(
     (kind: ShareKind, id: string, spaceId: string) => {
       const current = shares[`${kind}:${id}`] ?? [];
+      const sharing = !current.includes(spaceId);
       apply(
         kind,
         id,
-        current.includes(spaceId)
-          ? current.filter((s) => s !== spaceId)
-          : [...current, spaceId],
+        sharing ? [...current, spaceId] : current.filter((s) => s !== spaceId),
+      );
+      showToast(
+        sharing
+          ? `Shared in ${spaceName(spaceId)}`
+          : `Removed from ${spaceName(spaceId)}`,
+        "info",
+        { key: "space-share" },
       );
     },
-    [shares, apply],
+    [shares, apply, spaceName],
   );
 
   const bulkToggle = useCallback(
     (kind: ShareKind, ids: string[], spaceId: string, share: boolean) => {
+      let changed = 0;
       for (const id of ids) {
         const current = shares[`${kind}:${id}`] ?? [];
         if (share) {
-          if (!current.includes(spaceId)) apply(kind, id, [...current, spaceId]);
+          if (!current.includes(spaceId)) {
+            apply(kind, id, [...current, spaceId]);
+            changed += 1;
+          }
         } else if (current.includes(spaceId)) {
           apply(
             kind,
             id,
             current.filter((s) => s !== spaceId),
           );
+          changed += 1;
         }
       }
+      // A bulk action that changed nothing (every item was already there) is
+      // worth saying out loud - silence reads as a failure.
+      const name = spaceName(spaceId);
+      showToast(
+        changed === 0
+          ? share
+            ? `Already shared in ${name}`
+            : `Not shared in ${name}`
+          : share
+            ? `${changed} shared in ${name}`
+            : `${changed} removed from ${name}`,
+        "info",
+        { key: "space-share" },
+      );
     },
-    [shares, apply],
+    [shares, apply, spaceName],
   );
 
   const namesFor = useCallback(

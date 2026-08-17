@@ -3,7 +3,14 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ClipboardEntry, Note, AppScreen, AppTheme, SyncIndicator, SyncInviteList } from "../../types";
+import type {
+  ClipboardEntry,
+  Note,
+  AppScreen,
+  AppTheme,
+  SyncIndicator,
+  SyncInviteList,
+} from "../../types";
 import {
   classifyFileEntry,
   removeGroupColor,
@@ -19,6 +26,8 @@ import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import NotesScreen from "./notes-screen/NotesScreen";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
+import { APP_TOAST_EVENT, type ToastRequest } from "./toast/toastBus";
+import { Cloud, CloudWarning } from "@phosphor-icons/react";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import UpdateBanner from "./update-banner/UpdateBanner";
 import { useHealthWarning } from "../../hooks/useHealthWarning";
@@ -32,7 +41,6 @@ import {
   MaximizeIcon,
   RestoreIcon,
   WindowCloseIcon,
-  CloudSyncIcon,
   WarningIcon,
 } from "../icons";
 import "./App.css";
@@ -135,7 +143,9 @@ const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [screen, setScreen] = useState<AppScreen>(() => {
     const saved = localStorage.getItem("sc-last-screen") as AppScreen | null;
-    return saved === "notes" || saved === "clipboard" || saved === "spaces" ? saved : "clipboard";
+    return saved === "notes" || saved === "clipboard" || saved === "spaces"
+      ? saved
+      : "clipboard";
   });
   const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
     null,
@@ -165,7 +175,9 @@ const App: React.FC = () => {
 
   // Undo state for single-entry deletion
   const [deletedEntry, setDeletedEntry] = useState<ClipboardEntry | null>(null);
-  const deleteEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Undo state for single-note deletion
   const [deletedNote, setDeletedNote] = useState<Note | null>(null);
@@ -173,7 +185,9 @@ const App: React.FC = () => {
 
   // Undo state for bulk note deletion
   const [bulkDeletedNotes, setBulkDeletedNotes] = useState<Note[] | null>(null);
-  const bulkDeleteNotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bulkDeleteNotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Toast: max pins reached
   const [pinLimitReached, setPinLimitReached] = useState(false);
@@ -605,7 +619,9 @@ const App: React.FC = () => {
             if (Array.isArray(groups)) {
               setAvailableGroups(groups.filter((g) => typeof g === "string"));
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
       } catch (e) {
         console.error("[sync:settings] apply failed", e);
@@ -620,13 +636,35 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Toasts raised by the screens (cloud uploads, sharing, takedowns). Screens
+  // cannot reach App's state, so they fire a document event and this renders
+  // whatever arrives. A repeat of the same `key` replaces the toast in place,
+  // which is what keeps a ten-item bulk action from stacking ten near-copies.
+  const [screenToast, setScreenToast] = useState<
+    (ToastRequest & { seq: number }) | null
+  >(null);
+  const toastSeqRef = useRef(0);
+
+  useEffect(() => {
+    const onToast = (e: Event) => {
+      const detail = (e as CustomEvent<ToastRequest>).detail;
+      if (!detail?.message) return;
+      toastSeqRef.current += 1;
+      setScreenToast({ ...detail, seq: toastSeqRef.current });
+    };
+    document.addEventListener(APP_TOAST_EVENT, onToast);
+    return () => document.removeEventListener(APP_TOAST_EVENT, onToast);
+  }, []);
+
   // An entry sync refused to send. The reason comes from Rust so the toast can
   // say what actually happened instead of guessing at the file-size case.
   const [syncSkip, setSyncSkip] = useState<{
     label: string;
     reason: string;
   } | null>(null);
-  const fileSyncSkippedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileSyncSkippedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   // Skips arrive one per entry. A bulk upload can refuse hundreds, and naming
   // each one in its own toast buries the screen in near-identical messages, so
   // a burst collapses into a single count.
@@ -635,28 +673,31 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<{ client_id: string; label: string; reason: string }>("sync:entry-skipped", (event) => {
-      if (cancelled) return;
-      if (fileSyncSkippedTimerRef.current !== null)
-        clearTimeout(fileSyncSkippedTimerRef.current);
-      skipBurstRef.current += 1;
-      setSyncSkip(
-        skipBurstRef.current === 1
-          ? {
-              label: event.payload.label || "Item",
-              reason: event.payload.reason || "could not be synced",
-            }
-          : {
-              label: `${skipBurstRef.current} items`,
-              reason: "See the Account screen for what failed and why.",
-            },
-      );
-      fileSyncSkippedTimerRef.current = setTimeout(() => {
-        fileSyncSkippedTimerRef.current = null;
-        skipBurstRef.current = 0;
-        setSyncSkip(null);
-      }, 5000);
-    }).then((fn) => {
+    listen<{ client_id: string; label: string; reason: string }>(
+      "sync:entry-skipped",
+      (event) => {
+        if (cancelled) return;
+        if (fileSyncSkippedTimerRef.current !== null)
+          clearTimeout(fileSyncSkippedTimerRef.current);
+        skipBurstRef.current += 1;
+        setSyncSkip(
+          skipBurstRef.current === 1
+            ? {
+                label: event.payload.label || "Item",
+                reason: event.payload.reason || "could not be synced",
+              }
+            : {
+                label: `${skipBurstRef.current} items`,
+                reason: "See the Account screen for what failed and why.",
+              },
+        );
+        fileSyncSkippedTimerRef.current = setTimeout(() => {
+          fileSyncSkippedTimerRef.current = null;
+          skipBurstRef.current = 0;
+          setSyncSkip(null);
+        }, 5000);
+      },
+    ).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
     });
@@ -903,33 +944,30 @@ const App: React.FC = () => {
     setBulkDeletedEntries(null);
   }, [bulkDeletedEntries]);
 
-  const handleBulkPin = useCallback(
-    async (ids: string[]) => {
-      const changed = await invoke<number>("bulk_pin_entries", {
-        ids,
-        pin: true,
-      });
-      if (changed < ids.length) {
-        // Some were rejected (pin limit) — re-sync and show toast
-        const history = await invoke<ClipboardEntry[]>("get_history");
-        setEntries(history);
-        if (pinLimitTimerRef.current !== null)
-          clearTimeout(pinLimitTimerRef.current);
-        setPinLimitReached(true);
-        pinLimitTimerRef.current = setTimeout(() => {
-          setPinLimitReached(false);
-          pinLimitTimerRef.current = null;
-        }, 3000);
-      } else {
-        // All succeeded — update UI
-        const idSet = new Set(ids);
-        setEntries((prev) =>
-          prev.map((e) => (idSet.has(e.id) ? { ...e, pinned: true } : e)),
-        );
-      }
-    },
-    [],
-  );
+  const handleBulkPin = useCallback(async (ids: string[]) => {
+    const changed = await invoke<number>("bulk_pin_entries", {
+      ids,
+      pin: true,
+    });
+    if (changed < ids.length) {
+      // Some were rejected (pin limit) — re-sync and show toast
+      const history = await invoke<ClipboardEntry[]>("get_history");
+      setEntries(history);
+      if (pinLimitTimerRef.current !== null)
+        clearTimeout(pinLimitTimerRef.current);
+      setPinLimitReached(true);
+      pinLimitTimerRef.current = setTimeout(() => {
+        setPinLimitReached(false);
+        pinLimitTimerRef.current = null;
+      }, 3000);
+    } else {
+      // All succeeded — update UI
+      const idSet = new Set(ids);
+      setEntries((prev) =>
+        prev.map((e) => (idSet.has(e.id) ? { ...e, pinned: true } : e)),
+      );
+    }
+  }, []);
 
   const handleBulkUnpin = useCallback(async (ids: string[]) => {
     const idSet = new Set(ids);
@@ -939,18 +977,21 @@ const App: React.FC = () => {
     await invoke("bulk_pin_entries", { ids, pin: false });
   }, []);
 
-  const handleBulkAddGroup = useCallback(async (ids: string[], group: string) => {
-    // Optimistic update — add the group to each entry
-    const idSet = new Set(ids);
-    setEntries((prev) =>
-      prev.map((e) => {
-        if (!idSet.has(e.id)) return e;
-        if (e.groups.includes(group)) return e;
-        return { ...e, groups: [...e.groups, group] };
-      }),
-    );
-    await invoke("bulk_add_group", { ids, group });
-  }, []);
+  const handleBulkAddGroup = useCallback(
+    async (ids: string[], group: string) => {
+      // Optimistic update — add the group to each entry
+      const idSet = new Set(ids);
+      setEntries((prev) =>
+        prev.map((e) => {
+          if (!idSet.has(e.id)) return e;
+          if (e.groups.includes(group)) return e;
+          return { ...e, groups: [...e.groups, group] };
+        }),
+      );
+      await invoke("bulk_add_group", { ids, group });
+    },
+    [],
+  );
 
   const handleBulkRemoveGroup = useCallback(
     async (ids: string[], group: string) => {
@@ -1007,8 +1048,13 @@ const App: React.FC = () => {
     (acc, e) => {
       if (e.type === "text") acc.textCount++;
       else if (e.type === "html") acc.htmlCount++;
-      else if (e.type === "image" || (e.type === "file" && classifyFileEntry(e.content) === "image")) acc.imageCount++;
-      else if (e.type === "file" && classifyFileEntry(e.content) === "file") acc.fileCount++;
+      else if (
+        e.type === "image" ||
+        (e.type === "file" && classifyFileEntry(e.content) === "image")
+      )
+        acc.imageCount++;
+      else if (e.type === "file" && classifyFileEntry(e.content) === "file")
+        acc.fileCount++;
       return acc;
     },
     { textCount: 0, imageCount: 0, fileCount: 0, htmlCount: 0 },
@@ -1027,9 +1073,7 @@ const App: React.FC = () => {
       await invoke("update_note", { id, title, content });
       setNotes((prev) =>
         prev.map((n) =>
-          n.id === id
-            ? { ...n, title, content, updated_at: Date.now() }
-            : n,
+          n.id === id ? { ...n, title, content, updated_at: Date.now() } : n,
         ),
       );
     },
@@ -1077,21 +1121,16 @@ const App: React.FC = () => {
     setDeletedNote(null);
   }, [deletedNote]);
 
-  const handlePinNote = useCallback(
-    async (id: string, pin: boolean) => {
-      await invoke(pin ? "pin_note" : "unpin_note", { id });
-      setNotes((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, pinned: pin } : n)),
-      );
-    },
-    [],
-  );
+  const handlePinNote = useCallback(async (id: string, pin: boolean) => {
+    await invoke(pin ? "pin_note" : "unpin_note", { id });
+    setNotes((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, pinned: pin } : n)),
+    );
+  }, []);
 
   const handleSetNoteGroups = useCallback(
     async (id: string, groups: string[]) => {
-      setNotes((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, groups } : n)),
-      );
+      setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, groups } : n)));
       await invoke("set_note_groups", { id, groups });
     },
     [],
@@ -1147,40 +1186,60 @@ const App: React.FC = () => {
   }, [bulkDeletedNotes]);
 
   const handleBulkPinNotes = useCallback(async (ids: string[]) => {
-    setNotes((prev) => prev.map((n) => ids.includes(n.id) ? { ...n, pinned: true } : n));
+    setNotes((prev) =>
+      prev.map((n) => (ids.includes(n.id) ? { ...n, pinned: true } : n)),
+    );
     for (const id of ids) await invoke("pin_note", { id });
   }, []);
 
   const handleBulkUnpinNotes = useCallback(async (ids: string[]) => {
-    setNotes((prev) => prev.map((n) => ids.includes(n.id) ? { ...n, pinned: false } : n));
+    setNotes((prev) =>
+      prev.map((n) => (ids.includes(n.id) ? { ...n, pinned: false } : n)),
+    );
     for (const id of ids) await invoke("unpin_note", { id });
   }, []);
 
-  const handleBulkAddGroupNotes = useCallback(async (ids: string[], group: string) => {
-    setNotes((prev) => prev.map((n) =>
-      ids.includes(n.id) && !n.groups.includes(group)
-        ? { ...n, groups: [...n.groups, group] }
-        : n,
-    ));
-    for (const id of ids) {
-      const note = notes.find((n) => n.id === id);
-      if (note && !note.groups.includes(group))
-        await invoke("set_note_groups", { id, groups: [...note.groups, group] });
-    }
-  }, [notes]);
+  const handleBulkAddGroupNotes = useCallback(
+    async (ids: string[], group: string) => {
+      setNotes((prev) =>
+        prev.map((n) =>
+          ids.includes(n.id) && !n.groups.includes(group)
+            ? { ...n, groups: [...n.groups, group] }
+            : n,
+        ),
+      );
+      for (const id of ids) {
+        const note = notes.find((n) => n.id === id);
+        if (note && !note.groups.includes(group))
+          await invoke("set_note_groups", {
+            id,
+            groups: [...note.groups, group],
+          });
+      }
+    },
+    [notes],
+  );
 
-  const handleBulkRemoveGroupNotes = useCallback(async (ids: string[], group: string) => {
-    setNotes((prev) => prev.map((n) =>
-      ids.includes(n.id)
-        ? { ...n, groups: n.groups.filter((g) => g !== group) }
-        : n,
-    ));
-    for (const id of ids) {
-      const note = notes.find((n) => n.id === id);
-      if (note)
-        await invoke("set_note_groups", { id, groups: note.groups.filter((g: string) => g !== group) });
-    }
-  }, [notes]);
+  const handleBulkRemoveGroupNotes = useCallback(
+    async (ids: string[], group: string) => {
+      setNotes((prev) =>
+        prev.map((n) =>
+          ids.includes(n.id)
+            ? { ...n, groups: n.groups.filter((g) => g !== group) }
+            : n,
+        ),
+      );
+      for (const id of ids) {
+        const note = notes.find((n) => n.id === id);
+        if (note)
+          await invoke("set_note_groups", {
+            id,
+            groups: note.groups.filter((g: string) => g !== group),
+          });
+      }
+    },
+    [notes],
+  );
 
   const syncPill =
     syncConnected === true
@@ -1237,9 +1296,9 @@ const App: React.FC = () => {
               )}
               {health.kind === "stalled" && (
                 <>
-                  <strong>Saving has stopped responding.</strong> The part of the
-                  app that writes history and notes to disk has not finished a
-                  pass in a while, so anything captured recently may not be
+                  <strong>Saving has stopped responding.</strong> The part of
+                  the app that writes history and notes to disk has not finished
+                  a pass in a while, so anything captured recently may not be
                   saved. If it does not pick up again on its own, restart.
                 </>
               )}
@@ -1247,8 +1306,8 @@ const App: React.FC = () => {
                 <>
                   <strong>Your disk is refusing to save.</strong> The app is
                   working, but writing history and notes keeps failing. Usually
-                  a full drive, or antivirus holding the file open. Free up space
-                  or check the folder, and saving picks up on its own.
+                  a full drive, or antivirus holding the file open. Free up
+                  space or check the folder, and saving picks up on its own.
                 </>
               )}
               <span className="app-degraded-reason">{health.reason}</span>
@@ -1457,9 +1516,30 @@ const App: React.FC = () => {
         {syncSkip && (
           <ToastNotification
             message={`Not synced: ${syncSkip.label}. ${syncSkip.reason}`}
-            icon={<CloudSyncIcon size={13} />}
+            icon={<CloudWarning size={13} />}
             duration={5000}
             onDismiss={() => setSyncSkip(null)}
+          />
+        )}
+
+        {screenToast && (
+          <ToastNotification
+            /* Keyed by sequence so a replacement restarts the timer bar rather
+               than inheriting the old one's remaining time. */
+            key={screenToast.seq}
+            message={screenToast.message}
+            icon={
+              screenToast.tone === "error" ? (
+                <WarningIcon />
+              ) : (
+                <Cloud size={13} />
+              )
+            }
+            duration={
+              screenToast.duration ??
+              (screenToast.tone === "error" ? 6000 : 3000)
+            }
+            onDismiss={() => setScreenToast(null)}
           />
         )}
       </div>

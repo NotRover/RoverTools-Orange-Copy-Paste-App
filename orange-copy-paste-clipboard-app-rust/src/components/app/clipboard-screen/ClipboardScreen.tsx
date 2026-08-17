@@ -1,10 +1,26 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ClipboardEntry } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
-import { useSearchFilter, FilterDropdown, NoResults } from "./search-filter/SearchFilter";
-import { useEntrySyncStates, useSyncBadgesVisible } from "../../../hooks/useEntrySyncStates";
-import { useSpaceShares, useRemoteEntryKeys } from "../../../hooks/useSpaceShares";
+import {
+  useSearchFilter,
+  FilterDropdown,
+  NoResults,
+} from "./search-filter/SearchFilter";
+import {
+  useEntrySyncStates,
+  useSyncBadgesVisible,
+} from "../../../hooks/useEntrySyncStates";
+import { setCloudCopy } from "../../../hooks/cloudActions";
+import {
+  useSpaceShares,
+  useRemoteEntryKeys,
+} from "../../../hooks/useSpaceShares";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
@@ -12,7 +28,11 @@ import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "./bulk-actions/BulkActionsBar";
 import { sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
-import Topbar, { SortDropdown, LayoutSegment, GroupsButton } from "../topbar/Topbar";
+import Topbar, {
+  SortDropdown,
+  LayoutSegment,
+  GroupsButton,
+} from "../topbar/Topbar";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import {
   ClipboardIcon,
@@ -188,10 +208,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const remoteKeys = useRemoteEntryKeys();
 
   const toggleEntryCloud = useCallback((entryId: string, upload: boolean) => {
-    invoke(upload ? "sync_push_entries" : "sync_unpush_entries", {
-      clientIds: [entryId],
-      entryType: "clipboard",
-    }).catch(() => {});
+    void setCloudCopy([entryId], "clipboard", upload);
   }, []);
 
   const cloudFilterContext = useMemo(
@@ -202,7 +219,13 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
       spaces: spaceShares.spaces,
       signedIn: spaceShares.signedIn,
     }),
-    [entrySyncStates, spaceShares.shares, remoteKeys, spaceShares.spaces, spaceShares.signedIn],
+    [
+      entrySyncStates,
+      spaceShares.shares,
+      remoteKeys,
+      spaceShares.spaces,
+      spaceShares.signedIn,
+    ],
   );
 
   const sf = useSearchFilter(entries, cloudFilterContext);
@@ -384,7 +407,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         }
         rightSlot={
           <>
-            <LayoutSegment layout={layout} onLayoutChange={selectLayout} showSingle />
+            <LayoutSegment
+              layout={layout}
+              onLayoutChange={selectLayout}
+              showSingle
+            />
 
             <div className="cs-toolbar-sep" />
 
@@ -467,16 +494,18 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                     )
                   }
                   onBulkSync={() =>
-                    invoke("sync_push_entries", {
-                      clientIds: [...multiSelect.selectedIds],
-                      entryType: "clipboard",
-                    }).catch(() => {})
+                    void setCloudCopy(
+                      [...multiSelect.selectedIds],
+                      "clipboard",
+                      true,
+                    )
                   }
                   onBulkUnsync={() =>
-                    invoke("sync_unpush_entries", {
-                      clientIds: [...multiSelect.selectedIds],
-                      entryType: "clipboard",
-                    }).catch(() => {})
+                    void setCloudCopy(
+                      [...multiSelect.selectedIds],
+                      "clipboard",
+                      false,
+                    )
                   }
                 />
               )}
@@ -514,104 +543,113 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         {sf.isFiltering && sf.filteredEntries.length === 0 ? (
           <NoResults sf={sf} />
         ) : (
-        <div className="timeline-wrap">
-          <div className="timeline-groups">
-            {windowedGroups.map((group, idx) => (
-              <div
-                key={group.key}
-                className={`timeline-group${
-                  windowedGroups.length === 1
-                    ? " timeline-group--only"
-                    : idx === windowedGroups.length - 1
-                      ? " timeline-group--last"
-                      : ""
-                }`}
-              >
-                {/* Day marker — click to collapse/expand */}
-                <button
-                  className={`timeline-day-row${collapsed.has(group.key) ? " timeline-day-row--collapsed" : ""}`}
-                  onClick={() => toggleGroup(group.key)}
-                >
-                  <div className="timeline-day-dot" />
-                  <span className="timeline-day-label">{group.label}</span>
-                  {group.label !== group.subtitle && (
-                    <span className="timeline-day-subtitle">
-                      {group.subtitle}
-                    </span>
-                  )}
-                  {collapsed.has(group.key) && (
-                    <span className="timeline-day-count">
-                      {group.entries.length}
-                    </span>
-                  )}
-                  <ChevronDownIcon
-                    className="timeline-day-chevron"
-                    size={10}
-                    strokeWidth={2.5}
-                  />
-                </button>
-
-                {/* Cards for this day — collapses via grid-template-rows */}
+          <div className="timeline-wrap">
+            <div className="timeline-groups">
+              {windowedGroups.map((group, idx) => (
                 <div
-                  className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}
+                  key={group.key}
+                  className={`timeline-group${
+                    windowedGroups.length === 1
+                      ? " timeline-group--only"
+                      : idx === windowedGroups.length - 1
+                        ? " timeline-group--last"
+                        : ""
+                  }`}
                 >
-                  <div className="timeline-group-body__inner">
-                    <div
-                      className={
-                        layout === "tiles"
-                          ? "entry-grid"
-                          : layout === "single"
-                            ? "entry-single"
-                            : "entry-list"
-                      }
-                    >
-                      {group.entries.map((entry) => (
-                        <EntryCard
-                          key={entry.id}
-                          entry={entry}
-                          onCopy={onCopy}
-                          onDelete={onDelete}
-                          onPin={onPin}
-                          availableGroups={availableGroups}
-                          onSetGroups={onSetGroups}
-                          isSelecting={multiSelect.isSelecting}
-                          isSelected={multiSelect.selectedIds.has(entry.id)}
-                          onToggleSelect={multiSelect.toggleSelect}
-                          onRangeSelect={handleRangeSelect}
-                          isInClipboard={entry.id === activeClipboardId}
-                          syncState={
-                            syncBadgesVisible
-                              ? entrySyncStates[`clipboard:${entry.id}`]
-                              : undefined
-                          }
-                          spaces={spaceShares.spaces}
-                          signedIn={spaceShares.signedIn}
-                          itemSpaceIds={spaceShares.shares[`clipboard:${entry.id}`]}
-                          sharedSpaceNames={spaceShares.namesFor("clipboard", entry.id)}
-                          onToggleSpace={(entryId, spaceId) =>
-                            spaceShares.toggle("clipboard", entryId, spaceId)
-                          }
-                          inCloud={!!entrySyncStates[`clipboard:${entry.id}`]}
-                          onToggleCloud={toggleEntryCloud}
-                        />
-                      ))}
+                  {/* Day marker — click to collapse/expand */}
+                  <button
+                    className={`timeline-day-row${collapsed.has(group.key) ? " timeline-day-row--collapsed" : ""}`}
+                    onClick={() => toggleGroup(group.key)}
+                  >
+                    <div className="timeline-day-dot" />
+                    <span className="timeline-day-label">{group.label}</span>
+                    {group.label !== group.subtitle && (
+                      <span className="timeline-day-subtitle">
+                        {group.subtitle}
+                      </span>
+                    )}
+                    {collapsed.has(group.key) && (
+                      <span className="timeline-day-count">
+                        {group.entries.length}
+                      </span>
+                    )}
+                    <ChevronDownIcon
+                      className="timeline-day-chevron"
+                      size={10}
+                      strokeWidth={2.5}
+                    />
+                  </button>
+
+                  {/* Cards for this day — collapses via grid-template-rows */}
+                  <div
+                    className={`timeline-group-body${collapsed.has(group.key) ? " timeline-group-body--collapsed" : ""}`}
+                  >
+                    <div className="timeline-group-body__inner">
+                      <div
+                        className={
+                          layout === "tiles"
+                            ? "entry-grid"
+                            : layout === "single"
+                              ? "entry-single"
+                              : "entry-list"
+                        }
+                      >
+                        {group.entries.map((entry) => (
+                          <EntryCard
+                            key={entry.id}
+                            entry={entry}
+                            onCopy={onCopy}
+                            onDelete={onDelete}
+                            onPin={onPin}
+                            availableGroups={availableGroups}
+                            onSetGroups={onSetGroups}
+                            isSelecting={multiSelect.isSelecting}
+                            isSelected={multiSelect.selectedIds.has(entry.id)}
+                            onToggleSelect={multiSelect.toggleSelect}
+                            onRangeSelect={handleRangeSelect}
+                            isInClipboard={entry.id === activeClipboardId}
+                            syncState={
+                              syncBadgesVisible
+                                ? entrySyncStates[`clipboard:${entry.id}`]
+                                : undefined
+                            }
+                            spaces={spaceShares.spaces}
+                            signedIn={spaceShares.signedIn}
+                            itemSpaceIds={
+                              spaceShares.shares[`clipboard:${entry.id}`]
+                            }
+                            sharedSpaceNames={spaceShares.namesFor(
+                              "clipboard",
+                              entry.id,
+                            )}
+                            onToggleSpace={(entryId, spaceId) =>
+                              spaceShares.toggle("clipboard", entryId, spaceId)
+                            }
+                            inCloud={!!entrySyncStates[`clipboard:${entry.id}`]}
+                            onToggleCloud={toggleEntryCloud}
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            {/* Load-more sentinel while more entries remain, else the end marker */}
-            {hasMore ? (
-              <div ref={sentinelRef} className="timeline-sentinel" aria-hidden />
-            ) : (
-              <div className="timeline-end">
-                <span className="timeline-end-text">
-                  You&rsquo;re all caught up
-                </span>
-              </div>
-            )}
+              ))}
+              {/* Load-more sentinel while more entries remain, else the end marker */}
+              {hasMore ? (
+                <div
+                  ref={sentinelRef}
+                  className="timeline-sentinel"
+                  aria-hidden
+                />
+              ) : (
+                <div className="timeline-end">
+                  <span className="timeline-end-text">
+                    You&rsquo;re all caught up
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
         )}
       </div>
     </div>
