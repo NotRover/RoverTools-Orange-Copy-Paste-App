@@ -1366,24 +1366,36 @@ impl SyncClient {
 
             // Tombstone → remove locally.
             if e.deleted_at.is_some() {
-                if is_note {
-                    notes_changed |= state.notes.lock().delete(&e.client_id);
+                let had_local = if is_note {
+                    let gone = state.notes.lock().delete(&e.client_id);
+                    notes_changed |= gone;
+                    gone
                 } else {
-                    clip_changed |= state.history.lock().remove(&e.client_id);
-                }
+                    let gone = state.history.lock().remove(&e.client_id);
+                    clip_changed |= gone;
+                    gone
+                };
                 let mut id_map = self.id_map.lock();
                 // Spaces come off the id_map row rather than the tombstone: the
                 // payload carries them too, but the local record is what this
                 // device actually saw the item in.
-                let space_ids = {
-                    let local = id_map.shares_for(&key);
-                    if local.is_empty() {
-                        e.space_ids.clone()
-                    } else {
-                        local
-                    }
+                let local_spaces = id_map.shares_for(&key);
+                // A placeholder explains a row that disappeared from *this*
+                // device's feed. Someone who joins a space still gets served the
+                // tombstones of everything deleted before they arrived, and
+                // falling back to the payload's space list turned every one of
+                // those into a placeholder for an item they never saw - a new
+                // member's whole feed reading "Removed this item". No local trace
+                // of the item means there is nothing to explain.
+                let knew_it = had_local
+                    || !local_spaces.is_empty()
+                    || id_map.get_server_id(&key).is_some();
+                let space_ids = if local_spaces.is_empty() {
+                    e.space_ids.clone()
+                } else {
+                    local_spaces
                 };
-                if !space_ids.is_empty() {
+                if knew_it && !space_ids.is_empty() {
                     let owner_id = id_map.owner_of(&key);
                     id_map.mark_deleted(
                         &key,
