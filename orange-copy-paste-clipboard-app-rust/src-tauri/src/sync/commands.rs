@@ -1048,6 +1048,21 @@ pub async fn space_delete(space_id: String, state: State<'_, AppState>) -> Resul
     http.delete_space(&space_id).await
 }
 
+/// Owner action: let (or stop letting) members read what was shared before they
+/// joined. Turning it on applies to the members already here, not just the next
+/// one - the server clears their history floor and tells them to go back for the
+/// entries they were never served. Returns the refreshed space list.
+#[tauri::command]
+pub async fn space_set_share_history(
+    space_id: String,
+    share_history: bool,
+    state: State<'_, AppState>,
+) -> Result<Vec<Space>, String> {
+    let (sync, http) = sync_http(&state)?;
+    http.set_share_history(&space_id, share_history).await?;
+    Ok(sync.reconcile_spaces().await)
+}
+
 #[tauri::command]
 pub async fn sync_revoke_device(
     device_id: String,

@@ -560,6 +560,7 @@ pub fn run() {
             crate::sync::commands::space_remove_entry,
             crate::sync::commands::space_set_entry_shares,
             crate::sync::commands::space_set_autocopy,
+            crate::sync::commands::space_set_share_history,
             crate::sync::commands::space_set_send_filter,
             crate::sync::commands::space_get_send_filters,
             crate::sync::commands::sync_set_mode,

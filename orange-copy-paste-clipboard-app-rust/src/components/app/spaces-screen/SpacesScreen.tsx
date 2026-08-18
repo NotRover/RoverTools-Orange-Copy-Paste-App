@@ -1052,6 +1052,7 @@ const SpaceSettings: React.FC<{
   onAutocopy: (enabled: boolean) => void;
   showRemoved: boolean;
   onShowRemoved: (enabled: boolean) => void;
+  onShareHistory: (enabled: boolean) => void;
   filter: SendFilter;
   onFilter: (next: SendFilter) => void;
   availableGroups: string[];
@@ -1067,6 +1068,7 @@ const SpaceSettings: React.FC<{
   onAutocopy,
   showRemoved,
   onShowRemoved,
+  onShareHistory,
   filter,
   onFilter,
   availableGroups,
@@ -1316,6 +1318,25 @@ const SpaceSettings: React.FC<{
             </div>
           )}
 
+          {space.is_owner && (
+            <label className="sp-toggle-row">
+              <span className="sp-toggle-text">
+                <span className="sp-toggle-title">Share earlier items</span>
+                <span className="sp-toggle-desc">
+                  {space.share_history
+                    ? "Everyone here can read what was shared before they joined."
+                    : "Members only see items shared after they joined. Turn this on to open the rest to them."}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                className="sp-switch"
+                checked={space.share_history}
+                onChange={(e) => onShareHistory(e.target.checked)}
+              />
+            </label>
+          )}
+
           <label className="sp-toggle-row">
             <span className="sp-toggle-text">
               <span className="sp-toggle-title">Show removed items</span>
@@ -1361,7 +1382,11 @@ const SpaceSettings: React.FC<{
                     <span className="sp-badge sp-badge--owner">owner</span>
                   )}
                   {!m.has_space_key && (
-                    <span className="sp-badge sp-badge--warn">
+                    <span
+                      className="sp-badge sp-badge--warn"
+                      data-tooltip="They cannot read this space yet. The owner's app hands over the key and keeps retrying until it lands."
+                      data-tooltip-pos="below"
+                    >
                       waiting for key
                     </span>
                   )}
@@ -2339,6 +2364,31 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [],
   );
 
+  // Owner action, and a server one: the space policy and every current member's
+  // history floor live there. The reply is the refreshed list, so the toggle
+  // reflects what the server actually stored rather than what was clicked.
+  const handleSetShareHistory = useCallback(
+    async (spaceId: string, enabled: boolean) => {
+      try {
+        const next = await invoke<Space[]>("space_set_share_history", {
+          spaceId,
+          shareHistory: enabled,
+        });
+        setSpaces(next);
+        showToast(
+          enabled
+            ? "Everyone here can now read earlier items"
+            : "New members will only see items from after they join",
+          "info",
+        );
+      } catch (e) {
+        setSpaceError(errMsg(e, "Could not change history sharing."));
+        toastError("Could not change history sharing", e);
+      }
+    },
+    [],
+  );
+
   const handleSetFilter = useCallback(
     async (spaceId: string, filter: SendFilter) => {
       const previous = sendFilters[spaceId];
@@ -2749,6 +2799,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             showRemoved={placeholdersOn}
             onShowRemoved={(enabled) =>
               handleSetShowRemoved(selected.id, enabled)
+            }
+            onShareHistory={(enabled) =>
+              handleSetShareHistory(selected.id, enabled)
             }
             filter={selectedFilter}
             onFilter={(next) => handleSetFilter(selected.id, next)}

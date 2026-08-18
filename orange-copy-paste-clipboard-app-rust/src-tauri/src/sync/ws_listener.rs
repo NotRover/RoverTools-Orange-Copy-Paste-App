@@ -133,6 +133,16 @@ impl WsListener {
         eprintln!("[sync:ws] connected to {endpoint} as device {device_id}");
         self.set_connected(true);
 
+        // Anything that happened while the socket was down was never delivered
+        // - including the membership change that tells an owner to hand a new
+        // member their Space Key. Reconcile once on connect so a reconnect
+        // catches up instead of waiting for the next event.
+        if let Some(sync) = self.sync_client() {
+            tokio::runtime::Handle::current().spawn(async move {
+                sync.reconcile_spaces().await;
+            });
+        }
+
         let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
@@ -266,6 +276,17 @@ impl WsListener {
                 if let Some(sync) = self.sync_client() {
                     let handle = tokio::runtime::Handle::current();
                     handle.spawn(async move {
+                        sync.reconcile_spaces().await;
+                    });
+                }
+            }
+            // The owner opened this space's back catalogue. Reconcile rather than
+            // backfilling straight away: it refreshes the policy this space
+            // reports and then owes itself the sweep, so the live path and the
+            // one that catches up at sign-in stay a single mechanism.
+            "space:history_opened" => {
+                if let Some(sync) = self.sync_client() {
+                    tokio::runtime::Handle::current().spawn(async move {
                         sync.reconcile_spaces().await;
                     });
                 }

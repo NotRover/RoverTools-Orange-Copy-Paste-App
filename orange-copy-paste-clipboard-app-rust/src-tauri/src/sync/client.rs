@@ -958,6 +958,21 @@ impl SyncHttpClient {
         .await
     }
 
+    /// Change a space's history policy (owner only). Returns the updated space,
+    /// so the caller does not need a second round trip to refresh its list.
+    pub async fn set_share_history(
+        &self,
+        space_id: &str,
+        share_history: bool,
+    ) -> Result<SpaceOut, String> {
+        self.get_json("update space", || {
+            Ok(self
+                .authed(Method::PATCH, &format!("/api/v1/spaces/{space_id}"))?
+                .json(&serde_json::json!({ "share_history": share_history })))
+        })
+        .await
+    }
+
     pub async fn join_space(&self, req: JoinSpaceRequest) -> Result<JoinSpaceResponse, String> {
         self.get_json("join space", || {
             Ok(self.authed(Method::POST, "/api/v1/spaces/join")?.json(&req))
