@@ -2044,3 +2044,41 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* The chip is the way into a thread, so it is a button. Cards select on
+   click, so it stops the event before the card sees it. */
+.sp-cmt-chip {
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.sp-cmt-chip:hover {
+  border-color: var(--border-light);
+  color: var(--text);
+}
+
+/* Nothing said yet. Quiet enough not to read as data on a row of chips that
+   are all counts, present enough to be found without opening the entry. */
+.sp-cmt-chip--empty {
+  border-color: transparent;
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.sp-cmt-chip--empty:hover {
+  opacity: 1;
+  border-color: var(--border-light);
+}
+
+/* Last, so an open thread reads as open even when it also has unread. */
+.sp-cmt-chip--open {
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
