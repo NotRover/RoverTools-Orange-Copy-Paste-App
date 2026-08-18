@@ -50,14 +50,13 @@ fn system_boot_epoch_secs() -> u64 {
     0
 }
 
-fn read_bool_setting(path: &std::path::Path, key: &str, default: bool) -> bool {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|data| {
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data).ok()
-        })
-        .and_then(|map| map.get(key)?.as_bool())
-        .unwrap_or(default)
+/// Read every boolean flag from one already-loaded settings map.
+///
+/// One read for the whole startup rather than one per key: nine reads of the
+/// same file gave nine chances to hit a transient failure, and a missed
+/// `keep_history` costs the user their restored history.
+fn bool_setting(map: Option<&crate::settings_file::Map>, key: &str, default: bool) -> bool {
+    map.and_then(|m| m.get(key)?.as_bool()).unwrap_or(default)
 }
 
 /// Kill any other running instance of this executable before we start.
@@ -169,11 +168,22 @@ fn setup_runtime(
         history.lock().set_images_dir(dir.clone());
     }
 
-    // Seed the cached keep_history flag from disk (one-time read at boot).
-    let keep_enabled = settings_file
-        .as_deref()
-        .map(|p| read_bool_setting(p, "keep_history", false))
-        .unwrap_or(false);
+    // One read of settings.json for every flag below.
+    let settings = settings_file.as_deref().and_then(|p| {
+        match crate::settings_file::read_map(p) {
+            Ok(map) => Some(map),
+            Err(crate::settings_file::ReadError::Absent) => None,
+            Err(crate::settings_file::ReadError::Unreadable(e))
+            | Err(crate::settings_file::ReadError::Malformed(e)) => {
+                crate::health::note(
+                    "startup: settings.json could not be read",
+                    &format!("{e} - every preference falls back to its default this launch"),
+                );
+                None
+            }
+        }
+    });
+    let keep_enabled = bool_setting(settings.as_ref(), "keep_history", false);
 
     // Adopt anything a degraded session had to set aside before its restart, so
     // what the user captured after the fault is not stranded on disk. A file-level
@@ -240,11 +250,7 @@ fn setup_runtime(
         ("notif_copy", &state_ref.notif_copy, true),
         ("notif_paste", &state_ref.notif_paste, true),
     ] {
-        let val = settings_file
-            .as_deref()
-            .map(|p| read_bool_setting(p, key, default))
-            .unwrap_or(default);
-        flag.store(val, Ordering::Relaxed);
+        flag.store(bool_setting(settings.as_ref(), key, default), Ordering::Relaxed);
     }
 
     // Set up system tray icon and menu.

@@ -183,9 +183,21 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
 #[tauri::command]
 pub fn get_setting(key: String, app: tauri::AppHandle) -> Option<serde_json::Value> {
     let path = get_settings_file_path(&app)?;
-    let data = std::fs::read_to_string(&path).ok()?;
-    let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&data).ok()?;
-    map.get(&key).cloned()
+    read_settings(&path)?.get(&key).cloned()
+}
+
+/// Load `settings.json`, recording a read that failed rather than letting it
+/// pass for "no settings saved". `None` means genuinely nothing to read.
+fn read_settings(path: &std::path::Path) -> Option<crate::settings_file::Map> {
+    match crate::settings_file::read_map(path) {
+        Ok(map) => Some(map),
+        Err(crate::settings_file::ReadError::Absent) => None,
+        Err(crate::settings_file::ReadError::Unreadable(e))
+        | Err(crate::settings_file::ReadError::Malformed(e)) => {
+            crate::health::note("settings.json could not be read", &e);
+            None
+        }
+    }
 }
 
 /// Write a user setting to `settings.json`.
@@ -214,10 +226,21 @@ pub fn set_setting(
     let Some(path) = get_settings_file_path(&app) else {
         return false;
     };
-    let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|d| serde_json::from_str(&d).ok())
-        .unwrap_or_default();
+    // Read-modify-write of the whole file, so a failed read must not become an
+    // empty map: writing that back erases every other preference, sync_enabled
+    // included. Only a genuinely absent file starts from empty.
+    let mut map = match crate::settings_file::read_map(&path) {
+        Ok(map) => map,
+        Err(crate::settings_file::ReadError::Absent) => crate::settings_file::Map::new(),
+        Err(crate::settings_file::ReadError::Unreadable(e))
+        | Err(crate::settings_file::ReadError::Malformed(e)) => {
+            crate::health::note(
+                "settings write skipped: settings.json could not be read",
+                &format!("{e} - refusing to overwrite it with a blank file"),
+            );
+            return false;
+        }
+    };
     map.insert(key.clone(), value);
     // Read-modify-write of the whole preferences file, so a torn write loses
     // every setting rather than one key.

@@ -159,10 +159,7 @@ struct ImageMergeMeta {
 /// Read the send-filter map and sync mode from `settings.json` (both default
 /// to "off"/Realtime when absent or unreadable — the safe interpretations).
 fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFilter>, SyncMode) {
-    let map = std::fs::read_to_string(app_data.join("settings.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&s).ok())
-        .unwrap_or_default();
+    let map = crate::settings_file::read_map(&app_data.join("settings.json")).unwrap_or_default();
     let filters = map
         .get(SEND_FILTERS_KEY)
         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -2222,11 +2219,7 @@ impl SyncClient {
         if space_ids.is_empty() {
             return false;
         }
-        let Ok(data) = std::fs::read_to_string(self.app_data.join("settings.json")) else {
-            return false;
-        };
-        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data)
-        else {
+        let Ok(map) = crate::settings_file::read_map(&self.app_data.join("settings.json")) else {
             return false;
         };
         space_ids.iter().any(|sid| {
