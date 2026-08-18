@@ -159,10 +159,7 @@ struct ImageMergeMeta {
 /// Read the send-filter map and sync mode from `settings.json` (both default
 /// to "off"/Realtime when absent or unreadable — the safe interpretations).
 fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFilter>, SyncMode) {
-    let map = std::fs::read_to_string(app_data.join("settings.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&s).ok())
-        .unwrap_or_default();
+    let map = crate::settings_file::read_map(&app_data.join("settings.json")).unwrap_or_default();
     let filters = map
         .get(SEND_FILTERS_KEY)
         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -248,6 +245,22 @@ const RESTORE_TIMEOUT_SECS: u64 = 30;
 /// itself the moment the network returns, and one poll a minute is cheap.
 const RESTORE_RETRY_BACKOFF_SECS: [u64; 5] = [3, 10, 30, 60, 60];
 
+/// How many passes an unreadable OS credential store gets before the restore
+/// loop stops and leaves the login screen up.
+///
+/// With the backoff above that is a little over three minutes - long enough to
+/// cover a launch that outran the credential store after an update or a reboot,
+/// short enough that a store which is simply broken does not get polled forever.
+const UNAVAILABLE_RETRY_LIMIT: usize = 6;
+
+/// Backoff schedule for re-uploading this device's wrapped UMK, in seconds.
+///
+/// That wrap is what lets a launch restore the session without a password. If it
+/// never reaches the server, every launch from then on lands on the login
+/// screen, so a failure here is worth chasing for a few minutes rather than
+/// waiting for the user to sign in again.
+const DEVICE_WRAP_RETRY_BACKOFF_SECS: [u64; 5] = [2, 5, 15, 30, 60];
+
 /// Backoff schedule for the space-key distribution retry, in seconds.
 ///
 /// Handing a new member their copy of the Space Key is the owner's job, and it
@@ -266,8 +279,10 @@ const KEY_RETRY_MAX_ATTEMPTS: usize = 8;
 
 /// Why a silent session restore did not produce a session.
 ///
-/// Only [`RestoreError::Transient`] is worth retrying; the other two mean the
-/// user genuinely has to sign in, and retrying would just burn requests.
+/// Each variant carries its own retry budget - see [`RestoreError::retry`].
+/// Getting that classification wrong in either direction is what users feel:
+/// retrying a dead credential burns requests forever, and giving up on a
+/// reachable one signs them out for no reason.
 #[derive(Debug)]
 pub enum RestoreError {
     /// Nothing was stored to restore from (first run, or after a logout).
@@ -278,6 +293,24 @@ pub enum RestoreError {
     /// The server or Supabase could not be reached, or answered 5xx. The stored
     /// credentials are still good; this should be retried.
     Transient(String),
+    /// A local facility the restore needs - the OS credential store - would not
+    /// answer. Also retryable, but unlike a network outage it will not fix
+    /// itself given long enough, so the retry loop caps this class rather than
+    /// polling a broken keychain for the life of the process.
+    Unavailable(String),
+}
+
+/// How hard to keep trying a failed restore.
+pub enum Retry {
+    /// Never; the user has to sign in.
+    No,
+    /// For as long as it takes. An outage ends on its own, and the app is
+    /// already running - one poll a minute costs nothing.
+    Unbounded,
+    /// This many passes, then give up. For a local facility that is not going
+    /// to start working on its own, where polling forever would only hide the
+    /// problem.
+    Capped(usize),
 }
 
 impl RestoreError {
@@ -297,13 +330,21 @@ impl RestoreError {
         }
     }
 
+    pub fn retry(&self) -> Retry {
+        match self {
+            Self::NoSession(_) | Self::Terminal(_) => Retry::No,
+            Self::Transient(_) => Retry::Unbounded,
+            Self::Unavailable(_) => Retry::Capped(UNAVAILABLE_RETRY_LIMIT),
+        }
+    }
+
     pub fn is_transient(&self) -> bool {
-        matches!(self, Self::Transient(_))
+        !matches!(self.retry(), Retry::No)
     }
 
     pub fn message(&self) -> &str {
         match self {
-            Self::NoSession(m) | Self::Terminal(m) | Self::Transient(m) => m,
+            Self::NoSession(m) | Self::Terminal(m) | Self::Transient(m) | Self::Unavailable(m) => m,
         }
     }
 }
@@ -332,6 +373,10 @@ pub struct SyncClient {
     /// An OAuth session that has authenticated but is awaiting the account
     /// password (the E2E secret) from the user before it can be finalized.
     pending_oauth: Mutex<Option<PendingOAuth>>,
+    /// Cancel flag for the loopback capture of the in-flight OAuth attempt.
+    /// Tripping it lets the blocking accept loop drop its listener early, so a
+    /// retry can bind the same port instead of waiting out the capture deadline.
+    oauth_cancel: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
 
     /// Pending offline operation queue.
     pending_queue: Arc<Mutex<PendingQueue>>,
@@ -403,6 +448,28 @@ impl Drop for SyncClient {
             runtime.shutdown_background();
         }
     }
+}
+
+/// Upload this device's wrapped UMK, retrying on the schedule above.
+///
+/// Free-standing and holding only what it needs, so a retry that outlives the
+/// login cannot pin the whole `SyncClient` (and its runtime) alive.
+async fn store_device_wrap(http: Arc<SyncHttpClient>, device_id: String, wrapped: String) {
+    // A leading zero so the first attempt runs immediately and the schedule
+    // below describes only the waits after it.
+    for delay in std::iter::once(0).chain(DEVICE_WRAP_RETRY_BACKOFF_SECS) {
+        if delay > 0 {
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+        }
+        match http.store_device_wrapped_umk(&device_id, wrapped.clone()).await {
+            Ok(()) => return,
+            Err(e) => eprintln!("[sync] store device umk failed: {e}"),
+        }
+    }
+    crate::health::note(
+        "sync: device key wrap never stored",
+        "silent restore is off for this device until the next sign-in",
+    );
 }
 
 impl SyncClient {
@@ -482,6 +549,7 @@ impl SyncClient {
             user: Mutex::new(None),
             http: Mutex::new(None),
             pending_oauth: Mutex::new(None),
+            oauth_cancel: Mutex::new(None),
             pending_queue,
             push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
             blob_budget: Arc::new(Mutex::new(None)),
@@ -556,6 +624,12 @@ impl SyncClient {
         provider: String,
         device_name: String,
     ) -> Result<OAuthBegin, String> {
+        // Abandon whatever a previous attempt left listening, so this one can
+        // take the port back.
+        self.trip_oauth_cancel();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        *self.oauth_cancel.lock() = Some(Arc::clone(&cancel));
+
         let (verifier, challenge) = crypto::pkce_pair();
 
         // Bind the loopback redirect target *before* building the URL so the
@@ -569,7 +643,7 @@ impl SyncClient {
         // The accept loop is blocking; run it off the async worker.
         let code = self
             .handle
-            .spawn_blocking(move || loopback.wait_for_code())
+            .spawn_blocking(move || loopback.wait_for_code(cancel))
             .await
             .map_err(|e| format!("oauth capture task: {e}"))??;
 
@@ -591,7 +665,12 @@ impl SyncClient {
             is_new,
         });
 
-        Ok(OAuthBegin { email, is_new })
+        let begin = OAuthBegin { email, is_new };
+        // Also announce it: the command's reply can be missed if the window was
+        // hidden or reloaded during the browser handshake, and the event lets
+        // the UI move on to the password step anyway.
+        let _ = self.app.emit("sync:oauth-ready", &begin);
+        Ok(begin)
     }
 
     /// Phase 2 of OAuth sign-in: take the stashed session plus the account
@@ -621,9 +700,28 @@ impl SyncClient {
         .await
     }
 
-    /// Discard a stashed OAuth session (user cancelled the password step).
+    /// The stashed OAuth attempt, if the browser handshake already landed.
+    /// Lets a freshly mounted UI pick up a step it may have missed.
+    pub fn pending_oauth(&self) -> Option<OAuthBegin> {
+        self.pending_oauth.lock().as_ref().map(|p| OAuthBegin {
+            email: p.email.clone(),
+            is_new: p.is_new,
+        })
+    }
+
+    /// Discard a stashed OAuth session (user cancelled the password step) and
+    /// stop any loopback capture still waiting on the browser.
     pub fn cancel_oauth(&self) {
         *self.pending_oauth.lock() = None;
+        self.trip_oauth_cancel();
+    }
+
+    /// Signal the in-flight loopback capture, if any, to give up.
+    fn trip_oauth_cancel(&self) {
+        let flag = self.oauth_cancel.lock().take();
+        if let Some(flag) = flag {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Send a Supabase password-reset email.  Restores account *access*; note
@@ -693,7 +791,7 @@ impl SyncClient {
         };
         let mut reused: Option<(Zeroizing<[u8; 32]>, [u8; 32], String)> = None;
         if stored.0 == user_id && !stored.1.is_empty() {
-            if let Ok(privk) = crypto::load_device_private_key(&user_id) {
+            if let Ok(Some(privk)) = crypto::load_device_private_key(&user_id) {
                 if let Ok(devices) = http.list_devices().await {
                     if devices.iter().any(|d| d.id == stored.1) {
                         let pubk = crypto::device_public_key(&privk);
@@ -733,21 +831,28 @@ impl SyncClient {
         }
 
         // 7. Persist secrets to the OS keychain.
-        crypto::store_device_private_key(&user_id, &device_priv)?;
-        crypto::store_refresh_token(&user_id, &session.refresh_token)?;
+        crypto::store_device_private_key(&user_id, &device_priv).await?;
+        crypto::store_refresh_token(&user_id, &session.refresh_token).await?;
 
         // 7b. Store the UMK wrapped for this device so future launches can
         //     restore the session without the password (see
         //     [`Self::try_restore_session`]). X25519 with our own public half
         //     is a valid self-shared secret, same pattern as group keys.
         //     Best-effort: failure only means the next launch asks to log in.
+        //     Not best-effort in practice: until this lands, every later launch
+        //     finds no wrap and has to ask for a password again, which is the
+        //     sign-out users see repeat. A network blip in the seconds after a
+        //     login is enough to cause it, so retry in the background rather
+        //     than leaving it to the next login to fix.
         {
             let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
             match crypto::wrap_key(&shared, &umk) {
                 Ok(wrapped) => {
-                    if let Err(e) = http.store_device_wrapped_umk(&device_id, wrapped).await {
-                        eprintln!("[sync] store device umk failed (no silent restore): {e}");
-                    }
+                    self.handle.spawn(store_device_wrap(
+                        Arc::clone(&http),
+                        device_id.clone(),
+                        wrapped,
+                    ));
                 }
                 Err(e) => eprintln!("[sync] wrap device umk failed: {e}"),
             }
@@ -806,17 +911,26 @@ impl SyncClient {
         if stored_user.is_empty() || stored_device.is_empty() {
             return Err(RestoreError::NoSession("no previous session".into()));
         }
-        // Keep the underlying keychain error: "not found" and "found but
-        // unreadable" are different problems, and collapsing both into one
-        // message makes a failed restore impossible to diagnose from a log.
-        // Either way the keychain is not going to start answering differently
-        // on a retry, so these are terminal.
-        let refresh = crypto::load_refresh_token(&stored_user).map_err(|e| {
-            RestoreError::Terminal(format!("no stored credentials for user {stored_user}: {e}"))
-        })?;
-        let device_priv = crypto::load_device_private_key(&stored_user).map_err(|e| {
-            RestoreError::Terminal(format!("no stored device key for user {stored_user}: {e}"))
-        })?;
+        // An absent entry and an unreachable store are different problems and
+        // must not be collapsed. Nothing stored means the user really does have
+        // to sign in. A store that would not answer usually means this launch
+        // raced the OS - an in-app update relaunches the app immediately, and an
+        // autostart entry runs while the user profile is still coming up - so it
+        // is transient, and the retry loop gets the session back on its own.
+        // Treating that as a dead credential is what made a working login look
+        // like a logout, permanently, until the user retyped a password.
+        let unreachable =
+            |e: String| RestoreError::Unavailable(format!("keychain unavailable: {e}"));
+        let refresh = crypto::load_refresh_token(&stored_user)
+            .map_err(unreachable)?
+            .ok_or_else(|| {
+                RestoreError::Terminal(format!("no stored credentials for user {stored_user}"))
+            })?;
+        let device_priv = crypto::load_device_private_key(&stored_user)
+            .map_err(unreachable)?
+            .ok_or_else(|| {
+                RestoreError::Terminal(format!("no stored device key for user {stored_user}"))
+            })?;
 
         // Fresh tokens from Supabase; the refresh token rotates, so persist it.
         let session = self
@@ -824,8 +938,19 @@ impl SyncClient {
             .refresh(&refresh)
             .await
             .map_err(RestoreError::from_auth)?;
-        crypto::store_refresh_token(&stored_user, &session.refresh_token)
-            .map_err(RestoreError::Terminal)?;
+        // The refresh token has now been spent and rotated. Aborting here would
+        // be the worst of both outcomes: no session now, and a stored token that
+        // is already dead for the next launch. So carry on with the session we
+        // just earned and record that the next launch may have to ask for a
+        // password.
+        if let Err(e) =
+            crypto::store_refresh_token(&stored_user, &session.refresh_token).await
+        {
+            crate::health::note(
+                "sync restore: rotated refresh token not stored",
+                &format!("{e} - the next launch may have to sign in again"),
+            );
+        }
 
         let http = SyncHttpClient::with_timeout(
             self.server_url.clone(),
@@ -892,6 +1017,10 @@ impl SyncClient {
         let handle = self.handle.clone();
         handle.spawn(async move {
             let mut attempt = 0usize;
+            // Counted apart from `attempt`, so a long network outage does not
+            // spend a capped class's budget. Reset when an unbounded class
+            // answers instead, since that is evidence the earlier fault cleared.
+            let mut capped = 0usize;
             loop {
                 let delay = RESTORE_RETRY_BACKOFF_SECS
                     [attempt.min(RESTORE_RETRY_BACKOFF_SECS.len() - 1)];
@@ -910,13 +1039,37 @@ impl SyncClient {
                         let _ = self.app.emit("sync:session-restored", &user);
                         break;
                     }
-                    Err(e) if e.is_transient() => {
-                        eprintln!("[sync] session restore retry {attempt} failed: {e}");
-                    }
                     Err(e) => {
-                        // Credentials are genuinely dead — stop and leave the
-                        // login screen up.
+                        // A capped class is one that will not fix itself: a
+                        // launch can outrun the credential store, but a store
+                        // that is simply broken would otherwise be polled for the
+                        // life of the process, never telling the user, and
+                        // pinning the client (and its runtime) alive through the
+                        // `Arc` this task holds.
+                        let budget = e.retry();
+                        capped = match budget {
+                            Retry::Capped(_) => capped + 1,
+                            Retry::Unbounded => 0,
+                            Retry::No => capped,
+                        };
+                        let done = match budget {
+                            Retry::No => true,
+                            Retry::Capped(limit) => capped >= limit,
+                            Retry::Unbounded => false,
+                        };
+                        if !done {
+                            eprintln!("[sync] session restore retry {attempt} failed: {e}");
+                            continue;
+                        }
+                        // Recorded durably: a release build is a Windows GUI
+                        // binary, so nothing printed here reaches a user machine,
+                        // and this is the one line that says why they were
+                        // signed out.
                         eprintln!("[sync] session restore gave up: {e}");
+                        crate::health::note(
+                            "sync restore: gave up",
+                            &format!("after {attempt} retries: {e}"),
+                        );
                         break;
                     }
                 }
@@ -2101,11 +2254,7 @@ impl SyncClient {
         if space_ids.is_empty() {
             return false;
         }
-        let Ok(data) = std::fs::read_to_string(self.app_data.join("settings.json")) else {
-            return false;
-        };
-        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data)
-        else {
+        let Ok(map) = crate::settings_file::read_map(&self.app_data.join("settings.json")) else {
             return false;
         };
         space_ids.iter().any(|sid| {

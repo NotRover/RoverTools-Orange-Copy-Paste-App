@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -34,6 +34,9 @@ import {
   trackBulk,
   type BulkState,
 } from "./bulkProgress";
+
+/** How long the sign-in screen waits on the browser before offering a retry. */
+const OAUTH_WAIT_MS = 120_000;
 
 /** What a bulk upload would cost, measured before it starts. */
 type UnsyncedPreview = {
@@ -100,6 +103,7 @@ const AccountScreen: React.FC = () => {
   const [oauthIsNew, setOauthIsNew] = useState(false);
   const [oauthPassword, setOauthPassword] = useState("");
   const [oauthConfirm, setOauthConfirm] = useState("");
+  const oauthTimer = useRef<number | null>(null);
 
   // Connection — endpoints baked in at build time (see src-tauri/build.rs).
   // Only used to detect a build compiled without them, so sign-in can say so
@@ -233,7 +237,50 @@ const AccountScreen: React.FC = () => {
       .catch(() => {});
   }, []);
 
+  const clearOauthTimer = () => {
+    if (oauthTimer.current !== null) {
+      window.clearTimeout(oauthTimer.current);
+      oauthTimer.current = null;
+    }
+  };
+
+  // Move to the password step. Called from the command's reply and from the
+  // sync:oauth-ready event, whichever lands first.
+  const openOauthPasswordStep = useCallback(
+    (res: { email: string; is_new: boolean }) => {
+      clearOauthTimer();
+      setOauthEmail(res.email);
+      setOauthIsNew(res.is_new);
+      setOauthStage("password");
+      setOauthLoading(false);
+      setLoginError(null);
+    },
+    [],
+  );
+
+  // The handshake can finish while this screen is unmounted or the window is
+  // hidden, in which case neither the reply nor the event reaches us. Ask on
+  // mount so the password step is not lost.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ email: string; is_new: boolean }>("sync:oauth-ready", (event) => {
+      openOauthPasswordStep(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    invoke<{ email: string; is_new: boolean } | null>("sync_oauth_pending")
+      .then((res) => {
+        if (res) openOauthPasswordStep(res);
+      })
+      .catch(() => {});
+    return () => {
+      unlisten?.();
+      clearOauthTimer();
+    };
+  }, [openOauthPasswordStep]);
+
   const resetOauth = () => {
+    clearOauthTimer();
     setOauthStage(null);
     setOauthEmail("");
     setOauthIsNew(false);
@@ -246,6 +293,17 @@ const AccountScreen: React.FC = () => {
     setOauthLoading(true);
     setLoginError(null);
     setAuthNotice(null);
+    // Stop waiting after two minutes so the button comes back. The handshake
+    // keeps running in the background, and sync:oauth-ready still moves the
+    // screen on if the user finishes in the browser after this fires.
+    clearOauthTimer();
+    oauthTimer.current = window.setTimeout(() => {
+      oauthTimer.current = null;
+      setOauthLoading(false);
+      setLoginError(
+        "Still waiting on Google. Finish sign-in in your browser, or try again.",
+      );
+    }, OAUTH_WAIT_MS);
     try {
       const res = await invoke<{ email: string; is_new: boolean }>(
         "sync_oauth_begin",
@@ -254,13 +312,11 @@ const AccountScreen: React.FC = () => {
           deviceName: `Orange CP - ${navigator.platform || "Desktop"}`,
         },
       );
-      setOauthEmail(res.email);
-      setOauthIsNew(res.is_new);
-      setOauthStage("password");
+      openOauthPasswordStep(res);
     } catch (e) {
-      setLoginError(typeof e === "string" ? e : "Google sign-in failed.");
-    } finally {
+      clearOauthTimer();
       setOauthLoading(false);
+      setLoginError(typeof e === "string" ? e : "Google sign-in failed.");
     }
   };
 

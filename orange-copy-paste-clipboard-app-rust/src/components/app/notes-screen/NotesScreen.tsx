@@ -37,6 +37,7 @@ import {
   useEntrySyncStates,
   useSyncBadgesVisible,
 } from "../../../hooks/useEntrySyncStates";
+import { useEntryOwners } from "../../../hooks/useEntryOwners";
 import { setCloudCopy } from "../../../hooks/cloudActions";
 import NoteEditor from "./note-editor/NoteEditor";
 import NoteCard from "./note-card/NoteCard";
@@ -102,6 +103,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   // The menu needs these to say whether the note already has a server copy,
   // and the filters need them to answer "which notes have I not uploaded".
   const noteSyncStates = useEntrySyncStates();
+  const noteOwners = useEntryOwners();
   const syncBadgesVisible = useSyncBadgesVisible();
   const remoteKeys = useRemoteEntryKeys();
 
@@ -562,6 +564,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                             spaceShares.spaces.find((sp) => sp.id === id)?.name,
                         )
                         .filter((name): name is string => !!name)}
+                      owner={noteOwners[`note:${n.id}`]}
                     />
                   )}
                 </React.Fragment>

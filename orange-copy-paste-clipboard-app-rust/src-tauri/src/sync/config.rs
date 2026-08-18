@@ -69,12 +69,23 @@ impl SyncConfig {
         else {
             return defaults;
         };
-        let Ok(data) = std::fs::read_to_string(&path) else {
-            return defaults;
-        };
-        let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data)
-        else {
-            return defaults;
+        // A read that fails is not "sync is off", and the startup path acts on
+        // the difference immediately: reporting off puts up the login screen
+        // with no retry until the app is restarted.
+        let map = match crate::settings_file::read_map(&path) {
+            Ok(map) => map,
+            Err(crate::settings_file::ReadError::Absent) => return defaults,
+            Err(crate::settings_file::ReadError::Malformed(e)) => {
+                crate::health::note("sync config: settings.json unparseable", &e);
+                return defaults;
+            }
+            Err(crate::settings_file::ReadError::Unreadable(e)) => {
+                crate::health::note(
+                    "sync config: settings.json unreadable",
+                    &format!("{e} - sync will report as off until the next launch"),
+                );
+                return defaults;
+            }
         };
 
         let str_or = |key: &str, fallback: &str| -> String {

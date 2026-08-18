@@ -1,0 +1,51 @@
+/* Who sent an entry that came from someone else.
+   Its own file because both the clipboard card and the note card render it,
+   and neither should have to pull in the other screen's stylesheet for it. */
+.card-owner-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 120px;
+  padding: 2px 7px 2px 2px;
+  border: 1px solid var(--border);
+  /* Squircle, matching the member chip on the Spaces screen. */
+  border-radius: 8px;
+  background: var(--surface-hover);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.card-owner-avatar {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.card-owner-avatar--initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.card-owner-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Wrapper the chip row measures around, so the owner chip keeps its width and
+   the overflow fitting works off what is left. */
+.card-owner-slot {
+  display: inline-flex;
+  flex: 0 0 auto;
+}

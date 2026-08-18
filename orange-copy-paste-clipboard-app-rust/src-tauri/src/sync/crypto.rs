@@ -271,54 +271,112 @@ pub fn unwrap_key(
 
 const KEYRING_SERVICE: &str = "orange-clipboard";
 
-fn keyring_user_for(purpose: &str, user_id: &str) -> String {
-    format!("{purpose}:{user_id}")
+/// The one place a `keyring::Entry` is constructed, so the service/user naming
+/// cannot drift between the read, write and delete paths - a mismatch there
+/// reads as "you were never signed in".
+fn entry_for(purpose: &str, user_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE, &format!("{purpose}:{user_id}")).map_err(|e| e.to_string())
+}
+
+/// Attempts for a keychain write, and the pause between them.
+///
+/// The credential store is not always ready the instant the app is: an in-app
+/// update relaunches immediately, and an autostart entry runs while the user
+/// profile is still coming up. A write that is dropped here is not a cosmetic
+/// failure - it leaves a rotated refresh token spent with nothing on disk, which
+/// signs the user out on the next launch.
+const KEYCHAIN_WRITE_ATTEMPTS: u32 = 3;
+const KEYCHAIN_WRITE_BACKOFF_MS: u64 = 40;
+
+/// Read one secret, telling "there is no such entry" apart from "the store would
+/// not answer".
+///
+/// The distinction is the whole point: an absent entry means the user really has
+/// to sign in, while an unreachable store on a launch that raced the OS is worth
+/// retrying a few seconds later. Collapsing both into an error is what turns a
+/// working login into what looks like a logout.
+fn read_secret(purpose: &str, user_id: &str) -> Result<Option<String>, String> {
+    match entry_for(purpose, user_id)?.get_password() {
+        Ok(secret) => Ok(Some(secret)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Write one secret, retrying a store that is briefly unavailable.
+///
+/// Async because every caller is, and the retry parks its thread: the sync
+/// runtime has two workers, so parking one (usually with the refresh lock held)
+/// stalls every other sync task for the duration. `spawn_blocking` belongs here
+/// rather than at each call site, so no writer can forget it.
+async fn write_secret(purpose: &'static str, user_id: &str, secret: &str) -> Result<(), String> {
+    let user_id = user_id.to_string();
+    let secret = secret.to_string();
+    tokio::task::spawn_blocking(move || {
+        let mut last = String::new();
+        for attempt in 0..KEYCHAIN_WRITE_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(KEYCHAIN_WRITE_BACKOFF_MS));
+            }
+            match entry_for(purpose, &user_id)
+                .and_then(|entry| entry.set_password(&secret).map_err(|e| e.to_string()))
+            {
+                Ok(()) => return Ok(()),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("keychain task: {e}")))
+}
+
+/// Delete one secret. Absent is success - the caller wanted it gone.
+fn delete_secret(purpose: &str, user_id: &str) {
+    if let Ok(entry) = entry_for(purpose, user_id) {
+        let _ = entry.delete_password();
+    }
 }
 
 /// Store the device private key in the OS keychain for `user_id`.
-pub fn store_device_private_key(user_id: &str, privkey: &[u8; 32]) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_user_for("device_key", user_id))
-        .map_err(|e| e.to_string())?;
-    let encoded = B64.encode(privkey);
-    entry.set_password(&encoded).map_err(|e| e.to_string())
+pub async fn store_device_private_key(user_id: &str, privkey: &[u8; 32]) -> Result<(), String> {
+    write_secret("device_key", user_id, &B64.encode(privkey)).await
 }
 
 /// Retrieve the device private key from the OS keychain for `user_id`.
-pub fn load_device_private_key(user_id: &str) -> Result<Zeroizing<[u8; 32]>, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_user_for("device_key", user_id))
-        .map_err(|e| e.to_string())?;
-    let encoded = entry.get_password().map_err(|e| e.to_string())?;
+///
+/// `Ok(None)` means there is no stored key; `Err` means the store would not
+/// answer, which is worth retrying (see [`read_secret`]).
+pub fn load_device_private_key(user_id: &str) -> Result<Option<Zeroizing<[u8; 32]>>, String> {
+    let Some(encoded) = read_secret("device_key", user_id)? else {
+        return Ok(None);
+    };
     let bytes = B64.decode(&encoded).map_err(|e| format!("base64: {e}"))?;
     if bytes.len() != 32 {
         return Err(format!("expected 32-byte key, got {} bytes", bytes.len()));
     }
     let mut key = Zeroizing::new([0u8; 32]);
     key.copy_from_slice(&bytes);
-    Ok(key)
+    Ok(Some(key))
 }
 
 /// Store the refresh token in the OS keychain.
-pub fn store_refresh_token(user_id: &str, token: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_user_for("refresh_token", user_id))
-        .map_err(|e| e.to_string())?;
-    entry.set_password(token).map_err(|e| e.to_string())
+pub async fn store_refresh_token(user_id: &str, token: &str) -> Result<(), String> {
+    write_secret("refresh_token", user_id, token).await
 }
 
 /// Load the refresh token from the OS keychain.
-pub fn load_refresh_token(user_id: &str) -> Result<String, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_user_for("refresh_token", user_id))
-        .map_err(|e| e.to_string())?;
-    entry.get_password().map_err(|e| e.to_string())
+///
+/// `Ok(None)` means there is nothing stored; `Err` means the store would not
+/// answer (see [`read_secret`]).
+pub fn load_refresh_token(user_id: &str) -> Result<Option<String>, String> {
+    read_secret("refresh_token", user_id)
 }
 
 /// Delete the refresh token and device key from the OS keychain.
 pub fn delete_keychain_entries(user_id: &str) {
-    if let Ok(rt) = keyring::Entry::new(KEYRING_SERVICE, &keyring_user_for("refresh_token", user_id)) {
-        let _ = rt.delete_password();
-    }
-    if let Ok(dk) = keyring::Entry::new(KEYRING_SERVICE, &keyring_user_for("device_key", user_id)) {
-        let _ = dk.delete_password();
-    }
+    delete_secret("refresh_token", user_id);
+    delete_secret("device_key", user_id);
 }
 
 #[cfg(test)]

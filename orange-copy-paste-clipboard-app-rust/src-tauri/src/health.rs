@@ -53,6 +53,27 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 const RENAME_ATTEMPTS: u32 = 4;
 const RENAME_BACKOFF_MS: u64 = 25;
 
+/// Where `note` writes. Set once at startup; `None` until then, and on the rare
+/// platform where the app data directory cannot be resolved at all.
+static DIAG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Point `note` at the app data directory. Called once from startup.
+pub fn set_diag_dir(dir: Option<PathBuf>) {
+    *DIAG_DIR.lock() = dir;
+}
+
+/// Append a diagnostic to `crash.log` from anywhere in the process.
+///
+/// The release profile is a Windows GUI build, so `eprintln!` goes nowhere: a
+/// failure that only prints is a failure nobody can diagnose from a user's
+/// machine. Use this for the handful of faults whose cause has to survive the
+/// process - a session restore that decided the credentials were dead, a
+/// keychain write that did not land - not for ordinary logging.
+pub fn note(headline: &str, detail: &str) {
+    let dir = DIAG_DIR.lock().clone();
+    record(dir.as_deref(), headline, detail);
+}
+
 /// Latch the process as degraded. Idempotent; the first reason wins, since it is
 /// the one that describes the original fault rather than its consequences.
 pub fn mark_degraded(reason: impl Into<String>) {
@@ -71,9 +92,14 @@ pub fn degraded_reason() -> Option<String> {
     REASON.lock().clone()
 }
 
-/// Append a diagnostic to `crash.log`. Both callers are last-resort paths — a
-/// thread already unwinding, or a watchdog reporting one that stopped — so every
-/// failure in here is swallowed. There is nothing better to fall back to.
+/// Append a diagnostic to `crash.log`. Reached from last-resort paths — a thread
+/// already unwinding, a watchdog reporting one that stopped — and from `note`,
+/// so every failure in here is swallowed. There is nothing better to fall back
+/// to, and a diagnostic that panics is worse than one that is lost.
+///
+/// Takes the directory explicitly because [`recover_quarantined`] deliberately
+/// writes beside the file it recovered. Everything logging the process-wide
+/// diagnostic goes through [`note`] instead of carrying its own copy of the path.
 fn record(app_data: Option<&Path>, headline: &str, detail: &str) {
     let Some(dir) = app_data else {
         return;
@@ -312,7 +338,7 @@ fn set_trouble(next: Option<Trouble>) -> Option<Option<Trouble>> {
 /// Deliberately does **not** latch [`mark_degraded`]: neither a wedged thread nor
 /// a refused write is evidence that memory was torn, and refusing to save forever
 /// over a problem that usually clears would cost more than it saves.
-pub fn start_stall_watchdog(app_data: Option<PathBuf>, app: tauri::AppHandle) {
+pub fn start_stall_watchdog(app: tauri::AppHandle) {
     use tauri::Emitter;
 
     std::thread::spawn(move || {
@@ -358,8 +384,7 @@ pub fn start_stall_watchdog(app_data: Option<PathBuf>, app: tauri::AppHandle) {
                     } else {
                         "  the flush loop is running; the disk is refusing it\n"
                     };
-                    record(
-                        app_data.as_deref(),
+                    note(
                         t.kind,
                         &format!("  {}\n{detail}", t.reason),
                     );
@@ -495,7 +520,7 @@ pub fn write_state(path: &Path, data: &[u8]) -> io::Result<()> {
 /// thread dies, the app keeps running, and there is nothing left to diagnose.
 /// Appending (never truncating) keeps a repeating crash's history, and each
 /// entry carries the location plus the backtrace when `RUST_BACKTRACE` is set.
-pub fn install_panic_hook(app_data: Option<PathBuf>, app: tauri::AppHandle) {
+pub fn install_panic_hook(app: tauri::AppHandle) {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         // Latch first, before anything below can fail: from here on the flush
@@ -514,8 +539,7 @@ pub fn install_panic_hook(app_data: Option<PathBuf>, app: tauri::AppHandle) {
             .name()
             .unwrap_or("unnamed")
             .to_string();
-        record(
-            app_data.as_deref(),
+        note(
             "panic",
             &format!("  thread:   {thread}\n  location: {location}\n  message:  {info}\n"),
         );

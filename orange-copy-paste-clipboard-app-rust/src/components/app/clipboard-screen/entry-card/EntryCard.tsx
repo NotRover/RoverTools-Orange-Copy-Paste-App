@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ClipboardEntry, Space } from "../../../../types";
 import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
+import type { EntryOwner } from "../../../../hooks/useEntryOwners";
 import {
   fileNameFromPath,
   filePaths,
@@ -229,6 +230,8 @@ interface EntryCardProps {
   itemSpaceIds?: string[];
   /** Names of those spaces, for the shared indicator's tooltip. */
   sharedSpaceNames?: string[];
+  /** Set only when the entry arrived from another member of a space. */
+  owner?: EntryOwner;
   /** Share this entry into a space, or stop sharing it there. */
   onToggleSpace?: (entryId: string, spaceId: string) => void;
   /** Whether a copy of this entry exists on the server. Read separately from
@@ -255,6 +258,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   signedIn,
   itemSpaceIds,
   sharedSpaceNames,
+  owner,
   onToggleSpace,
   inCloud,
   onToggleCloud,
@@ -667,6 +671,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
           copied={copied}
           relTime={relTime}
           sharedSpaceNames={sharedSpaceNames}
+          owner={owner}
         />
       </div>
 

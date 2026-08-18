@@ -17,6 +17,7 @@ import {
   useEntrySyncStates,
   useSyncBadgesVisible,
 } from "../../../hooks/useEntrySyncStates";
+import { useEntryOwners } from "../../../hooks/useEntryOwners";
 import { setCloudCopy } from "../../../hooks/cloudActions";
 import {
   useSpaceShares,
@@ -203,6 +204,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   // The badge preference only hides the badge; the menu and the filters still
   // need to know what is actually on the server.
   const entrySyncStates = useEntrySyncStates();
+  const entryOwners = useEntryOwners();
   const syncBadgesVisible = useSyncBadgesVisible();
   const spaceShares = useSpaceShares();
 
@@ -631,6 +633,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                               "clipboard",
                               entry.id,
                             )}
+                            owner={entryOwners[`clipboard:${entry.id}`]}
                             onToggleSpace={(entryId, spaceId) =>
                               spaceShares.toggle("clipboard", entryId, spaceId)
                             }

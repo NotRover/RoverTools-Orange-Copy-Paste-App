@@ -170,9 +170,18 @@ impl WsListener {
     /// and the UI event bus, so neither can claim "Synced" while the socket is
     /// down.
     fn set_connected(&self, connected: bool) {
-        if let Some(sync) = self.sync_client() {
-            sync.set_connected(connected);
+        let Some(sync) = self.sync_client() else {
+            return;
+        };
+        // `disconnect()` aborts this task, and an abort only lands at the next
+        // await - so a listener that just finished its handshake can still run
+        // this line after a sign-out, republishing "connected" over it and
+        // leaving the sidebar green with no account behind it. The session is
+        // already cleared by then, which is what makes it the reliable check.
+        if connected && sync.current_user().is_none() {
+            return;
         }
+        sync.set_connected(connected);
         let _ = self
             .app
             .emit("sync:status-changed", serde_json::json!({ "connected": connected }));
