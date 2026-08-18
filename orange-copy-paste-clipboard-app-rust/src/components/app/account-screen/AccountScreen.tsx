@@ -23,6 +23,8 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { GoogleIcon } from "../../icons";
+import { deferDestructive } from "../toast/toastBus";
+import { usePendingRemovals } from "../../../hooks/pendingRemoval";
 import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
@@ -88,6 +90,13 @@ const AccountScreen: React.FC = () => {
   const [presenceOverrides, setPresenceOverrides] = useState<
     Record<string, boolean>
   >({});
+
+  // A device removed a moment ago is off the list while the Undo toast is up,
+  // even though the server has not been told yet and still returns it.
+  const pendingGone = usePendingRemovals();
+  const shownDevices = devices.filter(
+    (d) => !pendingGone.has(`device:${d.id}`),
+  );
 
   // Every device list lands through here so the overrides never outlive the
   // rows they describe. A revoked device keeps its id when it registers again,
@@ -495,16 +504,30 @@ const AccountScreen: React.FC = () => {
   const errMsg = (e: unknown, fallback: string) =>
     typeof e === "string" ? e : fallback;
 
-  const handleRevokeDevice = async (deviceId: string) => {
+  // A removed device has to sign in and register again before it syncs, so the
+  // call waits out the Undo toast instead of going the moment Remove is hit.
+  const handleRevokeDevice = (deviceId: string) => {
     setDeviceError(null);
-    try {
-      // The Rust command refuses to revoke the current device with a clear
-      // message, so Remove is shown on every row and the error surfaces here.
-      await invoke("sync_revoke_device", { deviceId });
-      applyDevices(await invoke<SyncDevice[]>("sync_list_devices"));
-    } catch (e) {
-      setDeviceError(errMsg(e, "Could not remove the device."));
-    }
+    deferDestructive(
+      "Device removed",
+      async () => {
+        try {
+          // The Rust command refuses to revoke the current device with a clear
+          // message, so Remove is shown on every row and the error surfaces here.
+          await invoke("sync_revoke_device", { deviceId });
+        } catch (e) {
+          setDeviceError(errMsg(e, "Could not remove the device."));
+          throw e;
+        } finally {
+          applyDevices(await invoke<SyncDevice[]>("sync_list_devices"));
+        }
+      },
+      {
+        key: "device-revoke",
+        hides: [`device:${deviceId}`],
+        errorPrefix: "Could not remove the device",
+      },
+    );
   };
 
   // ── Helpers ─────────────────────────────────────────────────────
@@ -1314,8 +1337,8 @@ const AccountScreen: React.FC = () => {
 
               <div className="acct-card acct-card--rows">
                 <div className="acct-list">
-                  {devices.length > 0 ? (
-                    devices.map((d) => {
+                  {shownDevices.length > 0 ? (
+                    shownDevices.map((d) => {
                       const online = isDeviceOnline(d);
                       const DeviceGlyph = deviceIcon(d.platform);
                       const seen = formatLastSynced(d.last_seen_at);

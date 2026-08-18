@@ -19,6 +19,7 @@ import {
 } from "../../../hooks/useEntrySyncStates";
 import { useEntryOwners } from "../../../hooks/useEntryOwners";
 import { setCloudCopy } from "../../../hooks/cloudActions";
+import { useStickySet } from "../../../hooks/useSticky";
 import {
   useSpaceShares,
   useRemoteEntryKeys,
@@ -187,7 +188,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const [sort, setSort] = useState<SortMode>(() => {
     return (localStorage.getItem("sc-sort") as SortMode) ?? "newest";
   });
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Which day sections are rolled up, kept across screen switches.
+  const [collapsed, setCollapsed] = useStickySet("sc-collapsed-days");
 
   // Progressive rendering window (see RENDER_INITIAL_COUNT / RENDER_PAGE_SIZE).
   const [visibleCount, setVisibleCount] = useState(RENDER_INITIAL_COUNT);
@@ -249,6 +251,14 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   // Flat list of all filtered entry IDs (respecting sort order) for range /
   // select-all. Covers the whole filtered set, not just the rendered window.
+  // What a clear would actually take out: pinned and Saved entries survive it,
+  // so counting the whole list would promise more than the button delivers.
+  const clearableCount = useMemo(
+    () =>
+      entries.filter((e) => !e.pinned && !e.groups.includes("Saved")).length,
+    [entries],
+  );
+
   const allVisibleIds = useMemo(
     () => dayGroups.flatMap((g) => g.entries.map((e) => e.id)),
     [dayGroups],
@@ -527,15 +537,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
             />
 
             {/* Clear history */}
-            {onClearAll && (
+            {onClearAll && clearableCount > 0 && (
               <button
                 className="cs-tb-btn cs-tb-btn--danger"
                 onClick={onClearAll}
                 disabled={multiSelect.isSelecting}
+                aria-label={`Clear ${clearableCount} entr${clearableCount === 1 ? "y" : "ies"}`}
                 data-tooltip="Clear history"
                 data-tooltip-pos="below"
               >
                 <TrashIcon size={13} />
+                <span className="cs-tb-n">{clearableCount}</span>
               </button>
             )}
           </>

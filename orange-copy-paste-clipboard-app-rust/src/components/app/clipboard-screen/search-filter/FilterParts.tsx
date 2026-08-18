@@ -481,7 +481,7 @@ export const ActiveFilterStrip: React.FC<ActiveFilterStripProps> = ({
   if (names.length === 0) return null;
   return (
     <div className="cs-filter-strip">
-      <FilterIcon size={11} className="cs-filter-strip-icon" />
+      <FilterIcon size={10} className="cs-filter-strip-icon" />
       <span>
         Showing{" "}
         <span className="cs-filter-strip-count">

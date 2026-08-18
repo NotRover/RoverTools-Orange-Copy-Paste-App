@@ -130,6 +130,17 @@
   box-shadow: 0 2px 6px rgba(0,0,0,.12);
 }
 
+/* Inline count beside a glyph, for buttons where the number is part of what
+   the button says (how many things it clears). .cs-tb-btn zeroes its
+   font-size so icon-only buttons collapse cleanly, so text inside sets its
+   own. Distinct from .cs-tb-badge, which is a floating accent pill. */
+
+.cs-tb-n {
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Badge on icon buttons */
 
 .cs-tb-badge {

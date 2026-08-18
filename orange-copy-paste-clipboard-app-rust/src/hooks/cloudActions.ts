@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { showToast, toastError } from "../components/app/toast/toastBus";
+import { clearPending, markPending } from "./pendingRemoval";
+import {
+  deferDestructive,
+  showToast,
+  toastError,
+} from "../components/app/toast/toastBus";
 
 /**
  * Put items on the account, or take the server copies back off.
@@ -19,6 +24,43 @@ export async function setCloudCopy(
   const noun = entryType === "note" ? "note" : "item";
   const plural = clientIds.length === 1 ? noun : `${clientIds.length} ${noun}s`;
 
+  const badges = clientIds.map((id) => `cloud:${entryType}:${id}`);
+
+  // Taking the server copies down cannot be walked back - the next device to
+  // pull sees them gone - so the removal waits out an Undo toast. Uploading is
+  // additive and goes straight away.
+  if (!upload) {
+    // The badge clears as the menu closes rather than when the toast runs out.
+    // It stays cleared afterwards: what draws it is Rust state that only
+    // catches up once the tombstone has synced, which on a manual or offline
+    // device is not soon. Uploading the item again is what puts it back.
+    const unhide = markPending(badges);
+    deferDestructive(
+      `Removing ${plural} from your account`,
+      async () => {
+        // Nothing was taken down - every item was another member's, or the
+        // command failed - so the badges were telling the truth.
+        if (!(await runCloudCopy(clientIds, entryType, false, plural))) unhide();
+      },
+      {
+        key: "cloud-copy",
+        onUndo: unhide,
+        errorPrefix: "Could not remove from your account",
+      },
+    );
+    return;
+  }
+  clearPending(badges);
+  await runCloudCopy(clientIds, entryType, true, plural);
+}
+
+/** True when the server copies actually changed. */
+async function runCloudCopy(
+  clientIds: string[],
+  entryType: "clipboard" | "note",
+  upload: boolean,
+  plural: string,
+): Promise<boolean> {
   try {
     const count = await invoke<number>(
       upload ? "sync_push_entries" : "sync_unpush_entries",
@@ -28,19 +70,19 @@ export async function setCloudCopy(
       showToast(`Nothing to ${upload ? "upload" : "remove"}`, "error", {
         key: "cloud-copy",
       });
-      return;
+      return false;
     }
-    showToast(
-      upload
-        ? `Uploading ${plural} to your account`
-        : `Removing ${plural} from your account`,
-      "info",
-      { key: "cloud-copy" },
-    );
+    if (upload) {
+      showToast(`Uploading ${plural} to your account`, "info", {
+        key: "cloud-copy",
+      });
+    }
+    return true;
   } catch (e) {
     toastError(
       upload ? "Could not upload" : "Could not remove from your account",
       e,
     );
+    return false;
   }
 }

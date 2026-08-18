@@ -30,13 +30,21 @@ import {
   groupColor,
 } from "../../../types";
 import { UserAvatar } from "../../UserAvatar";
-import { EntryTypePill } from "../../entry-types/EntryTypePill";
+import { EntryTypePill, TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import Topbar, { SortDropdown, LayoutSegment } from "../topbar/Topbar";
-import { RowsIcon } from "../../icons";
+import {
+  CheckIcon,
+  MultiSelectIcon,
+  RowsIcon,
+  TrashIcon,
+} from "../../icons";
+import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import {
+  ActiveFilterStrip,
   CardDivider,
   DateSection,
   FilterCardShell,
@@ -76,7 +84,13 @@ import {
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
-import { showToast, toastError } from "../toast/toastBus";
+import {
+  deferDestructive,
+  showToast,
+  toastError,
+} from "../toast/toastBus";
+import { usePendingRemovals } from "../../../hooks/pendingRemoval";
+import { useSticky, useStickySet } from "../../../hooks/useSticky";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
@@ -97,6 +111,12 @@ type ContentFeedItem = Exclude<FeedItem, { kind: "removed" }>;
 
 /** When a feed item happened. A placeholder is placed by when it was removed,
  *  which is the only time it has. */
+/** A feed key ("clipboard:<id>") back into the pair the commands take. */
+function splitFeedKey(key: string): ["clipboard" | "note", string] {
+  const at = key.indexOf(":");
+  return [key.slice(0, at) as "clipboard" | "note", key.slice(at + 1)];
+}
+
 const feedTimestamp = (item: FeedItem): number =>
   item.kind === "clipboard"
     ? item.entry.timestamp
@@ -593,6 +613,14 @@ const RemovedRow: React.FC<{
 
 // ── Clipboard feed card ───────────────────────────────────────────────
 
+/* The same box the clipboard cards draw, so a selection reads identically on
+   both screens. Every feed card shape gets it. */
+const SelectBox: React.FC = () => (
+  <div className="entry-card-checkbox">
+    <CheckIcon size={10} strokeWidth={3} />
+  </div>
+);
+
 const ClipFeedCard: React.FC<{
   entry: ClipboardEntry;
   onCopy: (id: string) => void;
@@ -604,6 +632,11 @@ const ClipFeedCard: React.FC<{
   owner: SpaceMember | null;
   /** Owner-only takedown, absent when we do not own the space. */
   onRemove?: () => void;
+  /** Bulk selection: on while the feed is in select mode. */
+  selecting?: boolean;
+  selected?: boolean;
+  /** Toggle this card. `range` is true for a shift-click. */
+  onSelect?: (range: boolean) => void;
 }> = ({
   entry,
   onCopy,
@@ -613,6 +646,9 @@ const ClipFeedCard: React.FC<{
   incoming,
   owner,
   onRemove,
+  selecting = false,
+  selected = false,
+  onSelect,
 }) => {
   const [copied, setCopied] = useState(false);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
@@ -637,6 +673,23 @@ const ClipFeedCard: React.FC<{
     [],
   );
 
+  // In select mode the card is a checkbox: a click picks it rather than
+  // opening it, and the right-click menu would offer actions that only make
+  // sense one at a time.
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (selecting && onSelect) {
+      onSelect(e.shiftKey);
+      return;
+    }
+    onView(entry);
+  };
+  const handleContext = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (selecting) return;
+    setMenuPos({ x: e.clientX, y: e.clientY });
+  };
+
   const dk = deriveDisplayKind(entry);
 
   // ── List mode ──────────────────────────────────────────────────────
@@ -652,14 +705,11 @@ const ClipFeedCard: React.FC<{
     return (
       <>
         <div
-          className="sp-list-card"
-          onClick={() => onView(entry)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setMenuPos({ x: e.clientX, y: e.clientY });
-          }}
+          className={`sp-list-card${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+          onClick={handleCardClick}
+          onContextMenu={handleContext}
         >
+          {selecting && <SelectBox />}
           <DirectionBadge incoming={incoming} />
           {showSourceBadge && (
             <span className="sp-list-source-badge sp-list-source-badge--clip">
@@ -672,12 +722,14 @@ const ClipFeedCard: React.FC<{
           <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-text">{truncateText(text, 100)}</span>
           <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
-          <button
-            className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
-            onClick={handleCopy}
-          >
-            {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
-          </button>
+          {!selecting && (
+            <button
+              className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
+              onClick={handleCopy}
+            >
+              {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
+            </button>
+          )}
         </div>
         <FeedCardMenu
           pos={menuPos}
@@ -741,14 +793,11 @@ const ClipFeedCard: React.FC<{
   return (
     <>
       <div
-        className="entry-card sp-feed-entry-card"
-        onClick={() => onView(entry)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setMenuPos({ x: e.clientX, y: e.clientY });
-        }}
+        className={`entry-card sp-feed-entry-card${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+        onClick={handleCardClick}
+        onContextMenu={handleContext}
       >
+        {selecting && <SelectBox />}
         {mediaSection}
         <div className="card-body">
           {preview}
@@ -771,14 +820,16 @@ const ClipFeedCard: React.FC<{
             ) : (
               <span className="card-time">{timeAgo(entry.timestamp)}</span>
             )}
-            <button
-              className="sp-card-copy-btn"
-              onClick={handleCopy}
-              data-tooltip="Copy"
-              data-tooltip-pos="top"
-            >
-              <Copy size={10} />
-            </button>
+            {!selecting && (
+              <button
+                className="sp-card-copy-btn"
+                onClick={handleCopy}
+                data-tooltip="Copy"
+                data-tooltip-pos="top"
+              >
+                <Copy size={10} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -807,6 +858,11 @@ const NoteFeedCard: React.FC<{
   owner: SpaceMember | null;
   /** Owner-only takedown, absent when we do not own the space. */
   onRemove?: () => void;
+  /** Bulk selection: on while the feed is in select mode. */
+  selecting?: boolean;
+  selected?: boolean;
+  /** Toggle this card. `range` is true for a shift-click. */
+  onSelect?: (range: boolean) => void;
 }> = ({
   note,
   entries,
@@ -816,24 +872,39 @@ const NoteFeedCard: React.FC<{
   incoming,
   owner,
   onRemove,
+  selecting = false,
+  selected = false,
+  onSelect,
 }) => {
   const plain = extractNoteText(note.content);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
-  const openMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-  }, []);
+  const openMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (selecting) return;
+      setMenuPos({ x: e.clientX, y: e.clientY });
+    },
+    [selecting],
+  );
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (selecting && onSelect) {
+      onSelect(e.shiftKey);
+      return;
+    }
+    onView(note);
+  };
 
   // ── List mode ──────────────────────────────────────────────────────
   if (layout === "list") {
     return (
       <>
         <div
-          className="sp-list-card sp-list-card--note"
-          onClick={() => onView(note)}
+          className={`sp-list-card sp-list-card--note${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+          onClick={handleCardClick}
           onContextMenu={openMenu}
         >
+          {selecting && <SelectBox />}
           <DirectionBadge incoming={incoming} />
           <span className="sp-list-note-badge">
             <NoteIcon size={12} />
@@ -865,10 +936,11 @@ const NoteFeedCard: React.FC<{
   return (
     <>
       <div
-        className="ns-card"
-        onClick={() => onView(note)}
+        className={`ns-card${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+        onClick={handleCardClick}
         onContextMenu={openMenu}
       >
+        {selecting && <SelectBox />}
         <div className="ns-card-body">
           <div className="ns-card-title">
             {deriveNoteTitle(note.title, note.content)}
@@ -1085,6 +1157,12 @@ const SpaceSettings: React.FC<{
   const [armed, setArmed] = useState(false);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Somebody removed a moment ago is off the list while the Undo toast is up,
+  // even though the server has not been told yet and still lists them.
+  const pendingGone = usePendingRemovals();
+  const shownMembers = space.members.filter(
+    (m) => !pendingGone.has(`member:${space.id}:${m.user_id}`),
+  );
 
   useEffect(
     () => () => {
@@ -1360,13 +1438,15 @@ const SpaceSettings: React.FC<{
         <div className="sp-settings-block">
           <div className="sp-settings-label">
             People
-            <span className="sp-settings-count">{space.member_count}</span>
+            <span className="sp-settings-count">
+              {space.member_count - (space.members.length - shownMembers.length)}
+            </span>
           </div>
           <div className="sp-member-list">
-            {space.members.length === 0 ? (
+            {shownMembers.length === 0 ? (
               <p className="sp-filter-empty">Just you so far.</p>
             ) : (
-              space.members.map((m) => (
+              shownMembers.map((m) => (
                 <div key={m.user_id} className="sp-member-row">
                   <UserAvatar
                     className="sp-member-pic"
@@ -1672,6 +1752,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [deletedMarkers, setDeletedMarkers] = useState<
     Record<string, DeletedMarker>
   >({});
+  // Keys whose removal is waiting out an Undo toast. Everything below subtracts
+  // them from what it draws, so a click takes the row away at once while the
+  // call itself is still pending, and a refresh landing mid-toast cannot put it
+  // back - the hint lives outside the maps being refreshed.
+  const pendingGone = usePendingRemovals();
   // Reopens on the space you left, which is usually the one you want again.
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     localStorage.getItem(SELECTED_KEY),
@@ -1689,8 +1774,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     cache.showRemoved,
   );
   const [spaceError, setSpaceError] = useState<string | null>(null);
-  const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
-  const [search, setSearch] = useState("");
+  // Sticky, like the clipboard and notes filters: this screen unmounts on a
+  // switch, and coming back to an unfiltered feed with every day expanded
+  // undoes work the user did on purpose.
+  const [feedFilter, setFeedFilter] = useSticky<FeedFilter>("sp-f-kind", "all");
+  const [search, setSearch] = useSticky("sp-f-search", "");
   const [sort, setSort] = useState<SortMode>(
     () => (localStorage.getItem("spaces-sort") as SortMode) ?? "newest",
   );
@@ -1699,19 +1787,20 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
   // Never a placeholder: there is nothing to open.
   const [detailItem, setDetailItem] = useState<ContentFeedItem | null>(null);
-  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+  const [collapsedDays, setCollapsedDays] = useStickySet("sp-collapsed-days");
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Feed filter state
-  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
-    new Set(),
+  // Feed filter state. The dropdown being open is the one thing that is not
+  // remembered - it would reopen itself on every return visit.
+  const [selectedKinds, setSelectedKinds] = useStickySet<DisplayKind>(
+    "sp-f-kinds",
   );
-  const [datePreset, setDatePreset] = useState<DatePreset>("any");
-  const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState("");
+  const [datePreset, setDatePreset] = useSticky<DatePreset>("sp-f-date", "any");
+  const [dateAfter, setDateAfter] = useSticky("sp-f-date-after", "");
+  const [dateBefore, setDateBefore] = useSticky("sp-f-date-before", "");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -1732,6 +1821,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           ).length
         : 0,
     [deletedMarkers, selected, placeholdersOn],
+  );
+
+  const multiSelect = useMultiSelect();
+
+  // Removing is the only bulk action here, so only what this account may
+  // remove can be picked: the space owner moderates anything, a member takes
+  // out what they shared. Same rule as the card menu, and the backend narrows
+  // to the caller's own rows for non-owners regardless.
+  const canRemoveKey = useCallback(
+    (key: string) =>
+      !!selected && (selected.is_owner || !remoteKeys.has(key)),
+    [selected, remoteKeys],
   );
 
   // Clearing forgets the placeholders only. The items stay gone: the same
@@ -1758,27 +1859,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       })
       .catch((e) => toastError("Could not clear the placeholders", e));
   }, [selected]);
-
-  // Take an item out of a space. Two callers: the space owner moderating
-  // anything here, and a member unsharing something they posted. Neither is a
-  // deletion - whoever shared it keeps their own copy, the space stops carrying
-  // it, and everyone here gets a placeholder in its place.
-  const handleRemoveFromSpace = useCallback(
-    (clientId: string, entryType: "clipboard" | "note") => {
-      if (!selected) return;
-      invoke("space_remove_entry", {
-        spaceId: selected.id,
-        clientId,
-        entryType,
-      })
-        .then(() => showToast("Removed from the space", "info"))
-        .catch((e) => {
-          setSpaceError(String(e));
-          toastError("Could not remove from the space", e);
-        });
-    },
-    [selected],
-  );
 
   // Resolve an item to the member who shared it. A member who has since left
   // the space is no longer in the list, so this can return null for an item
@@ -1817,17 +1897,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   // else online anywhere, and one "Quiet" header over the whole list says
   // nothing. Your own presence does not count - it is true everywhere.
   const spaceGroups = useMemo(() => {
+    const shown = spaces.filter((s) => !pendingGone.has(`space:${s.id}`));
     const live = (s: Space) =>
       s.members.some((m) => m.online && m.user_id !== selfUserId);
-    const active = spaces.filter(live);
-    const quiet = spaces.filter((s) => !live(s));
+    const active = shown.filter(live);
+    const quiet = shown.filter((s) => !live(s));
     if (active.length === 0 || quiet.length === 0)
-      return [{ title: "All", spaces }];
+      return [{ title: "All", spaces: shown }];
     return [
       { title: "Active now", spaces: active },
       { title: "Quiet", spaces: quiet },
     ];
-  }, [spaces, selfUserId]);
+  }, [spaces, selfUserId, pendingGone]);
 
   // Panel drag. Widths are measured off the screen box rather than the panel
   // so a fast drag that outruns the pointer still tracks it.
@@ -1884,6 +1965,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [selectedKinds, datePreset],
   );
 
+  // What the badge on the funnel cannot say: which filters are on. Same strip
+  // and same wording as the clipboard and notes screens.
+  const filterNames = useMemo(() => {
+    const out = ALL_DISPLAY_KINDS.filter((k) => selectedKinds.has(k)).map(
+      (k) => TYPE_LABELS[k],
+    );
+    if (datePreset === "today") out.push("Today");
+    if (datePreset === "7d") out.push("Last 7 days");
+    if (datePreset === "range") out.push("Date range");
+    return out;
+  }, [selectedKinds, datePreset]);
+
   const clearAllFilters = useCallback(() => {
     setSelectedKinds(new Set());
     setDatePreset("any");
@@ -1921,20 +2014,64 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
   // Both maps move together - a merge changes where an item is and where it
   // came from - so they share one refresh and one set of listeners.
-  const refreshShares = useCallback(() => {
-    invoke<Record<string, string[]>>("sync_get_entry_shares")
-      .then(setEntryShares)
-      .catch(() => {});
-    invoke<string[]>("sync_get_remote_entries")
-      .then((keys) => setRemoteKeys(new Set(keys)))
-      .catch(() => {});
-    invoke<Record<string, string>>("sync_get_entry_owners")
-      .then(setEntryOwners)
-      .catch(() => {});
-    invoke<Record<string, DeletedMarker>>("sync_get_deleted_markers")
-      .then(setDeletedMarkers)
-      .catch(() => {});
-  }, []);
+  const refreshShares = useCallback(
+    () =>
+      Promise.all([
+        invoke<Record<string, string[]>>("sync_get_entry_shares")
+          .then(setEntryShares)
+          .catch(() => {}),
+        invoke<string[]>("sync_get_remote_entries")
+          .then((keys) => setRemoteKeys(new Set(keys)))
+          .catch(() => {}),
+        invoke<Record<string, string>>("sync_get_entry_owners")
+          .then(setEntryOwners)
+          .catch(() => {}),
+        invoke<Record<string, DeletedMarker>>("sync_get_deleted_markers")
+          .then(setDeletedMarkers)
+          .catch(() => {}),
+      ]).then(() => {}),
+    [],
+  );
+
+  // Take an item out of a space. Two callers: the space owner moderating
+  // anything here, and a member unsharing something they posted. Neither is a
+  // deletion - whoever shared it keeps their own copy, the space stops carrying
+  // it, and everyone here gets a placeholder in its place.
+  //
+  // Sits below `refreshShares` because it needs it: the row leaves the feed on
+  // the click and the call itself waits out the Undo toast, so Undo has to put
+  // the feed back.
+  const handleRemoveFromSpace = useCallback(
+    (clientId: string, entryType: "clipboard" | "note") => {
+      if (!selected) return;
+      const spaceId = selected.id;
+      deferDestructive(
+        "Removed from the space",
+        async () => {
+          try {
+            await invoke("space_remove_entry", {
+              spaceId,
+              clientId,
+              entryType,
+            });
+          } catch (e) {
+            setSpaceError(String(e));
+            throw e;
+          } finally {
+            // Re-read before returning: the hint is released the moment this
+            // resolves, and the feed goes back to reading the share map.
+            await refreshShares();
+          }
+        },
+        {
+          key: "space-remove-entry",
+          hides: [`share:${entryType}:${clientId}:${spaceId}`],
+          errorPrefix: "Could not remove from the space",
+        },
+      );
+    },
+    [selected, refreshShares],
+  );
 
   const refreshInvites = useCallback(() => {
     invoke<SyncInviteList>("sync_list_invites")
@@ -2105,7 +2242,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const allFeedItems = useMemo((): FeedItem[] => {
     if (!selected) return [];
     const inSpace = (shareKey: string) =>
-      !!entryShares[shareKey]?.includes(selected.id);
+      !!entryShares[shareKey]?.includes(selected.id) &&
+      !pendingGone.has(`share:${shareKey}:${selected.id}`);
     const items: FeedItem[] = [];
     if (feedFilter !== "notes")
       for (const entry of entries)
@@ -2132,6 +2270,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     entries,
     notes,
     entryShares,
+    pendingGone,
     deletedMarkers,
     placeholdersOn,
   ]);
@@ -2201,6 +2340,77 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     search,
     sort,
   ]);
+
+  // Every key in the feed this account may remove, in the order they are on
+  // screen, so shift-click picks the range the user sees.
+  const selectableKeys = useMemo(
+    () =>
+      feedItems
+        .filter((i) => i.kind !== "removed")
+        .map((i) =>
+          i.kind === "clipboard" ? `clipboard:${i.entry.id}` : `note:${i.note.id}`,
+        )
+        .filter(canRemoveKey),
+    [feedItems, canRemoveKey],
+  );
+
+  // The bulk half of handleRemoveFromSpace: one toast and one grace period for
+  // the whole selection, and every row leaves the feed on the click.
+  const handleBulkRemoveFromSpace = useCallback(() => {
+    if (!selected) return;
+    const spaceId = selected.id;
+    const keys = [...multiSelect.selectedIds].filter(canRemoveKey);
+    if (keys.length === 0) return;
+    multiSelect.exitSelectMode();
+    deferDestructive(
+      keys.length === 1
+        ? "Removed from the space"
+        : `Removed ${keys.length} items from the space`,
+      async () => {
+        try {
+          for (const key of keys) {
+            const [entryType, clientId] = splitFeedKey(key);
+            await invoke("space_remove_entry", {
+              spaceId,
+              clientId,
+              entryType,
+            });
+          }
+        } catch (e) {
+          setSpaceError(String(e));
+          throw e;
+        } finally {
+          // Re-read before returning: the hints are released the moment this
+          // resolves, and the feed goes back to reading the share map.
+          await refreshShares();
+        }
+      },
+      {
+        key: "space-remove-entry",
+        hides: keys.map((k) => `share:${k}:${spaceId}`),
+        errorPrefix: "Could not remove from the space",
+      },
+    );
+  }, [selected, multiSelect, canRemoveKey, refreshShares]);
+
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    multiSelect.pruneStaleIds(new Set(selectableKeys));
+  }, [selectableKeys, multiSelect.isSelecting]);
+
+  // A selection is about one space. Switching spaces makes it meaningless.
+  useEffect(() => {
+    multiSelect.exitSelectMode();
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") multiSelect.exitSelectMode();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [multiSelect.isSelecting]);
 
   /** What each type would leave you with: date and search applied, the type
    *  filter itself excluded. Placeholders have no type, so they sit outside. */
@@ -2293,37 +2503,87 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [reloadSpaces],
   );
 
-  const handleLeave = useCallback(async (spaceId: string) => {
-    setSpaceError(null);
-    try {
-      await invoke("space_leave", { spaceId });
-      setSpaces((prev) => prev.filter((s) => s.id !== spaceId));
+  // Leaving, deleting and removing a member all reach the server and none of
+  // them can be taken back once they have, so the row goes on the click and the
+  // call waits out the Undo toast. The space list itself is left alone: hiding
+  // it is the pending hint job, which is what makes Undo a no-op and stops a
+  // reload landing mid-toast from putting the row back.
+  const handleLeave = useCallback(
+    (spaceId: string) => {
+      setSpaceError(null);
       setSelectedId((cur) => (cur === spaceId ? null : cur));
-    } catch (e) {
-      setSpaceError(errMsg(e, "Could not leave the space."));
-    }
-  }, []);
+      deferDestructive(
+        "Left the space",
+        async () => {
+          try {
+            await invoke("space_leave", { spaceId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not leave the space."));
+            throw e;
+          } finally {
+            await reloadSpaces();
+          }
+        },
+        {
+          key: "space-membership",
+          hides: [`space:${spaceId}`],
+          // Reopen it, unless another space was picked while the toast was up.
+          onUndo: () => setSelectedId((cur) => cur ?? spaceId),
+          errorPrefix: "Could not leave the space",
+        },
+      );
+    },
+    [reloadSpaces],
+  );
 
-  const handleDelete = useCallback(async (spaceId: string) => {
-    setSpaceError(null);
-    try {
-      await invoke("space_delete", { spaceId });
-      setSpaces((prev) => prev.filter((s) => s.id !== spaceId));
+  const handleDelete = useCallback(
+    (spaceId: string) => {
+      setSpaceError(null);
       setSelectedId((cur) => (cur === spaceId ? null : cur));
-    } catch (e) {
-      setSpaceError(errMsg(e, "Could not delete the space."));
-    }
-  }, []);
+      deferDestructive(
+        "Space deleted",
+        async () => {
+          try {
+            await invoke("space_delete", { spaceId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not delete the space."));
+            throw e;
+          } finally {
+            await reloadSpaces();
+          }
+        },
+        {
+          key: "space-membership",
+          hides: [`space:${spaceId}`],
+          onUndo: () => setSelectedId((cur) => cur ?? spaceId),
+          errorPrefix: "Could not delete the space",
+        },
+      );
+    },
+    [reloadSpaces],
+  );
 
   const handleRemoveMember = useCallback(
-    async (spaceId: string, memberUserId: string) => {
+    (spaceId: string, memberUserId: string) => {
       setSpaceError(null);
-      try {
-        await invoke("space_remove_member", { spaceId, memberUserId });
-        reloadSpaces();
-      } catch (e) {
-        setSpaceError(errMsg(e, "Could not remove the member."));
-      }
+      deferDestructive(
+        "Member removed",
+        async () => {
+          try {
+            await invoke("space_remove_member", { spaceId, memberUserId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not remove the member."));
+            throw e;
+          } finally {
+            await reloadSpaces();
+          }
+        },
+        {
+          key: "space-member",
+          hides: [`member:${spaceId}:${memberUserId}`],
+          errorPrefix: "Could not remove the member",
+        },
+      );
     },
     [reloadSpaces],
   );
@@ -2424,26 +2684,52 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [refreshInvites, reloadSpaces],
   );
 
+  // An invite that is turned down or pulled back is gone for good - the only
+  // way back is a fresh one - so both wait out the Undo toast before going.
   const handleDeclineInvite = useCallback(
-    async (inviteId: string) => {
-      try {
-        await invoke("sync_decline_invite", { inviteId });
-        refreshInvites();
-      } catch (e) {
-        setSpaceError(errMsg(e, "Could not decline the invite."));
-      }
+    (inviteId: string) => {
+      deferDestructive(
+        "Invite declined",
+        async () => {
+          try {
+            await invoke("sync_decline_invite", { inviteId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not decline the invite."));
+            throw e;
+          } finally {
+            await refreshInvites();
+          }
+        },
+        {
+          key: "space-invite",
+          hides: [`invite:${inviteId}`],
+          errorPrefix: "Could not decline the invite",
+        },
+      );
     },
     [refreshInvites],
   );
 
   const handleRevokeInvite = useCallback(
-    async (inviteId: string) => {
-      try {
-        await invoke("sync_revoke_invite", { inviteId });
-        refreshInvites();
-      } catch (e) {
-        setSpaceError(errMsg(e, "Could not revoke the invite."));
-      }
+    (inviteId: string) => {
+      deferDestructive(
+        "Invite revoked",
+        async () => {
+          try {
+            await invoke("sync_revoke_invite", { inviteId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not revoke the invite."));
+            throw e;
+          } finally {
+            await refreshInvites();
+          }
+        },
+        {
+          key: "space-invite",
+          hides: [`invite:${inviteId}`],
+          errorPrefix: "Could not revoke the invite",
+        },
+      );
     },
     [refreshInvites],
   );
@@ -2459,9 +2745,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   }, [joinCode, handleJoin, onJoinCodeConsumed]);
 
   const receivedPending = invites.received.filter(
-    (i) => i.status === "pending",
+    (i) => i.status === "pending" && !pendingGone.has(`invite:${i.id}`),
   );
-  const sentPending = invites.sent.filter((i) => i.status === "pending");
+  const sentPending = invites.sent.filter(
+    (i) => i.status === "pending" && !pendingGone.has(`invite:${i.id}`),
+  );
 
   const isFiltering = search.trim().length > 0 || activeFilterCount > 0;
   const feedFilterIndex =
@@ -2470,7 +2758,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const selectedFilter = selected
     ? (sendFilters[selected.id] ?? DEFAULT_FILTER)
     : DEFAULT_FILTER;
-  const selectedRules = filterRuleCount(sendFilters[selected?.id ?? ""]);
 
   const leftSlot = (
     <div className="sp-filter-tabs">
@@ -2517,16 +2804,78 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
 
   const rightSlot = (
-    <LayoutSegment
-      layout={layout}
-      onLayoutChange={(l) => {
-        setLayout(l);
-        localStorage.setItem("spaces-layout", l);
-      }}
-      tilesLabel="Cards"
-      listLabel="Rows"
-      listIcon={<RowsIcon size={12} />}
-    />
+    <>
+      <LayoutSegment
+        layout={layout}
+        onLayoutChange={(l) => {
+          setLayout(l);
+          localStorage.setItem("spaces-layout", l);
+        }}
+        tilesLabel="Cards"
+        listLabel="Rows"
+        listIcon={<RowsIcon size={12} />}
+      />
+      {/* Nothing to select in an empty feed, and nothing removable in one
+          where everything belongs to other members. */}
+      {selectableKeys.length > 0 && (
+        <>
+          <div className="cs-toolbar-sep" />
+          <div className="bulk-select-wrap">
+            <button
+              className={`cs-tb-btn${multiSelect.isSelecting ? " cs-tb-btn--active" : ""}`}
+              onClick={() => {
+                document.dispatchEvent(new Event("tooltip:hide"));
+                multiSelect.isSelecting
+                  ? multiSelect.exitSelectMode()
+                  : multiSelect.enterSelectMode();
+              }}
+              data-tooltip={
+                multiSelect.isSelecting
+                  ? multiSelect.selectedCount > 0
+                    ? `${multiSelect.selectedCount} selected`
+                    : "Exit selection"
+                  : "Select items"
+              }
+              data-tooltip-pos="below"
+            >
+              <MultiSelectIcon size={13} />
+              {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
+                <span className="cs-tb-badge">{multiSelect.selectedCount}</span>
+              )}
+            </button>
+
+            {multiSelect.isSelecting && (
+              <BulkActionsBar
+                selectedCount={multiSelect.selectedCount}
+                totalCount={selectableKeys.length}
+                onSelectAll={() => multiSelect.selectAll(selectableKeys)}
+                onDeselectAll={multiSelect.deselectAll}
+                onExitSelectMode={multiSelect.exitSelectMode}
+                onBulkRemoveFromSpace={handleBulkRemoveFromSpace}
+              />
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Only while this space has placeholders to clear, so the corner does
+          not carry a permanently dead button. */}
+      {removedCount > 0 && (
+        <>
+          <div className="cs-toolbar-sep" />
+          <button
+            className="cs-tb-btn cs-tb-btn--danger"
+            onClick={handleClearRemoved}
+            aria-label={`Clear ${removedCount} placeholder${removedCount === 1 ? "" : "s"}`}
+            data-tooltip="Clear placeholders"
+            data-tooltip-pos="below"
+          >
+            <TrashIcon size={13} />
+            <span className="cs-tb-n">{removedCount}</span>
+          </button>
+        </>
+      )}
+    </>
   );
 
   return (
@@ -2546,48 +2895,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
         {selected ? (
           <>
-            <div className="sp-feed-header">
-              <div className="sp-feed-header-left">
-                <span className="sp-feed-space-name">{selected.name}</span>
-                <span className="sp-feed-member-count">
-                  <Users size={10} />
-                  {selected.member_count} member
-                  {selected.member_count === 1 ? "" : "s"}
-                </span>
-                <span className="sp-feed-item-count">
-                  {feedItems.length} item{feedItems.length === 1 ? "" : "s"}
-                  {isFiltering && allFeedItems.length !== feedItems.length && (
-                    <span className="sp-feed-filtered-hint">
-                      {" "}
-                      of {allFeedItems.length}
-                    </span>
-                  )}
-                </span>
-                {removedCount > 0 && (
-                  <button
-                    className="sp-feed-clear-removed"
-                    onClick={handleClearRemoved}
-                    data-tooltip="Hide the placeholders. The items stay removed."
-                    data-tooltip-pos="below"
-                  >
-                    <Prohibit size={9} weight="bold" />
-                    clear {removedCount} removed
-                  </button>
-                )}
-                {autocopy[selected.id] && (
-                  <span className="sp-feed-flag">
-                    <Clipboard size={9} />
-                    auto-copy on
-                  </span>
-                )}
-                {selectedRules > 0 && (
-                  <span className="sp-feed-flag">
-                    <Funnel size={9} />
-                    auto-share on
-                  </span>
-                )}
-              </div>
-            </div>
+            {/* The name, member count and the rules are all on the panel to
+                the right, so the only thing worth a line here is what the
+                filters left. */}
+            <ActiveFilterStrip
+              names={filterNames}
+              matched={feedItems.length}
+              total={allFeedItems.length}
+              onClear={clearAllFilters}
+            />
 
             {detailItem ? (
               detailItem.kind === "note" ? (
@@ -2701,8 +3017,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                         `clipboard:${item.entry.id}`,
                                       )}
                                       onRemove={
-                                        selected.is_owner ||
-                                        !remoteKeys.has(
+                                        canRemoveKey(
                                           `clipboard:${item.entry.id}`,
                                         )
                                           ? () =>
@@ -2711,6 +3026,25 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                                 "clipboard",
                                               )
                                           : undefined
+                                      }
+                                      selecting={
+                                        multiSelect.isSelecting &&
+                                        canRemoveKey(
+                                          `clipboard:${item.entry.id}`,
+                                        )
+                                      }
+                                      selected={multiSelect.selectedIds.has(
+                                        `clipboard:${item.entry.id}`,
+                                      )}
+                                      onSelect={(range) =>
+                                        range
+                                          ? multiSelect.selectRange(
+                                              `clipboard:${item.entry.id}`,
+                                              selectableKeys,
+                                            )
+                                          : multiSelect.toggleSelect(
+                                              `clipboard:${item.entry.id}`,
+                                            )
                                       }
                                     />
                                   ) : (
@@ -2728,14 +3062,30 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       )}
                                       owner={ownerFor(`note:${item.note.id}`)}
                                       onRemove={
-                                        selected.is_owner ||
-                                        !remoteKeys.has(`note:${item.note.id}`)
+                                        canRemoveKey(`note:${item.note.id}`)
                                           ? () =>
                                               handleRemoveFromSpace(
                                                 item.note.id,
                                                 "note",
                                               )
                                           : undefined
+                                      }
+                                      selecting={
+                                        multiSelect.isSelecting &&
+                                        canRemoveKey(`note:${item.note.id}`)
+                                      }
+                                      selected={multiSelect.selectedIds.has(
+                                        `note:${item.note.id}`,
+                                      )}
+                                      onSelect={(range) =>
+                                        range
+                                          ? multiSelect.selectRange(
+                                              `note:${item.note.id}`,
+                                              selectableKeys,
+                                            )
+                                          : multiSelect.toggleSelect(
+                                              `note:${item.note.id}`,
+                                            )
                                       }
                                     />
                                   ),

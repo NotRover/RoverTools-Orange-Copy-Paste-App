@@ -34,7 +34,7 @@ space (`id_map.is_remote`, surfaced to the UI as `useRemoteEntryKeys`).
 | Upload to cloud | card menu, bulk bar | yes | **hidden** | `sync_push_entries` skips |
 | Remove from cloud | card menu, bulk bar | yes | **hidden** | `sync_unpush_entries` skips |
 | Share to a space | card menu, bulk bar | yes | **hidden** | push guard |
-| Remove from a space | Spaces feed | yes (unshare) | owner only | backend `remove_entry_from_space` |
+| Remove from a space | Spaces feed, bulk bar | yes (unshare) | owner only | backend `remove_entry_from_space` |
 
 **Local only** means the change lives on this device and is never pushed. Your
 groups and pins are your filing system; they are not part of the entry as its
@@ -79,7 +79,8 @@ Client, React — hides what is not allowed, so nothing dead is on screen:
 - `ClipboardScreen.tsx`, `NotesScreen.tsx` — pass `undefined` for the cloud and
   share callbacks on others' entries; bulk actions filter to `selectedOwnIds`.
 - `NoteEditor.tsx` — `readOnly` + `ownerName`.
-- `SpacesScreen.tsx` — the feed's remove item, gated `is_owner || !remote`.
+- `SpacesScreen.tsx` — `canRemoveKey` (`is_owner || !remote`) gates both the
+  feed's remove item and what bulk select will act on.
 
 Backend — the only place a rule survives a modified client:
 

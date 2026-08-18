@@ -1722,10 +1722,22 @@ impl SyncClient {
                 .and_then(|m| crypto::decrypt(&content_key, m, &e.client_id).ok())
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or(serde_json::Value::Null);
-            let groups: Vec<String> = meta
+            let mut groups: Vec<String> = meta
                 .get("groups")
                 .and_then(|g| serde_json::from_value(g.clone()).ok())
                 .unwrap_or_default();
+            // Autosave marks what arrives, not only what this device copies:
+            // an entry from another member is the one thing here nobody can
+            // get back, and a clear takes out everything not Saved. The
+            // sender's own group list is theirs, so "Saved" may already be in
+            // it.
+            if !is_note
+                && from_space
+                && state.autosave.load(Ordering::Relaxed)
+                && !groups.iter().any(|g| g == "Saved")
+            {
+                groups.push("Saved".to_string());
+            }
 
             if is_note {
                 let title = meta

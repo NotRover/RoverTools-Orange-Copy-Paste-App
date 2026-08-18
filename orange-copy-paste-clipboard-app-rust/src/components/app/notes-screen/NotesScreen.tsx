@@ -25,6 +25,7 @@ import {
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
+import { useSticky } from "../../../hooks/useSticky";
 import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import CardMenu from "../card-menu/CardMenu";
@@ -95,7 +96,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   onBulkRemoveGroup,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useSticky("ns-f-search", "");
   const searchRef = useRef<HTMLInputElement>(null);
 
   const multiSelect = useMultiSelect();
@@ -133,10 +134,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     "ns-layout",
     "tiles",
   );
-  const [collapsedSections, setCollapsedSections] = useState({
-    pinned: false,
-    notes: false,
-  });
+  const [collapsedSections, setCollapsedSections] = useSticky(
+    "ns-collapsed-sections",
+    { pinned: false, notes: false },
+  );
   const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(
     new Set(),
   );
