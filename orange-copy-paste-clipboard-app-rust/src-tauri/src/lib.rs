@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod health;
 pub mod notes;
 pub mod runtime;
+pub mod settings_file;
 pub mod state;
 pub mod sync;
 pub mod updater;
@@ -288,7 +289,7 @@ fn setup_runtime(
             crate::health::beat();
         });
 
-        crate::health::start_stall_watchdog(app.path().app_data_dir().ok(), app.handle().clone());
+        crate::health::start_stall_watchdog(app.handle().clone());
     }
 
     crate::runtime::popup_windows::setup_popup_windows(app)?;
@@ -599,10 +600,8 @@ pub fn run() {
         .setup(move |app| {
             // Installed before any other setup work, so a panic inside it lands
             // in the log too.
-            crate::health::install_panic_hook(
-                app.path().app_data_dir().ok(),
-                app.handle().clone(),
-            );
+            crate::health::set_diag_dir(app.path().app_data_dir().ok());
+            crate::health::install_panic_hook(app.handle().clone());
             setup_runtime(app, &history, &suppress)?;
             {
                 use tauri_plugin_deep_link::DeepLinkExt;

@@ -655,9 +655,25 @@ impl SyncHttpClient {
         // generation bump in set_access_token is what releases queued callers,
         // and they must never observe the spent refresh token.
         *self.refresh_token.lock() = Some(session.refresh_token.clone());
+        // This write is not best-effort, whatever its return type suggests: the
+        // token just handed back replaces one that is now spent, so a dropped
+        // write leaves the keychain holding a dead token and signs the user out
+        // on the next launch. It cannot be undone from here - the old token is
+        // already gone - so record it instead of discarding it silently.
         let user_id = self.user_id.lock().clone();
         if let Some(user_id) = user_id {
-            let _ = crate::sync::crypto::store_refresh_token(&user_id, &session.refresh_token);
+            if let Err(e) =
+                crate::sync::crypto::store_refresh_token(&user_id, &session.refresh_token)
+                    .await
+            {
+                eprintln!("[sync] rotated refresh token not stored: {e}");
+                let detail = format!("{e} - the next launch may have to sign in again");
+                // Off the worker too: this runs with the refresh lock held, and
+                // appending to the log is disk I/O like any other.
+                tokio::task::spawn_blocking(move || {
+                    crate::health::note("sync: rotated refresh token not stored", &detail)
+                });
+            }
         }
         self.set_access_token(session.access_token, session.expires_in);
         Ok(())

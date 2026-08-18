@@ -72,10 +72,22 @@ fn update_settings(
         return;
     };
     let path = dir.join("settings.json");
-    let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    // Read-modify-write, so a read that failed must not become an empty map:
+    // writing that back erases every preference in the file, sync_enabled
+    // included, which is a sign-out the user never asked for and cannot undo.
+    // Only a genuinely absent file starts from empty.
+    let mut map = match crate::settings_file::read_map(&path) {
+        Ok(map) => map,
+        Err(crate::settings_file::ReadError::Absent) => crate::settings_file::Map::new(),
+        Err(crate::settings_file::ReadError::Unreadable(e))
+        | Err(crate::settings_file::ReadError::Malformed(e)) => {
+            crate::health::note(
+                "settings write skipped: settings.json could not be read",
+                &format!("{e} - refusing to overwrite it with a blank file"),
+            );
+            return;
+        }
+    };
     f(&mut map);
     if let Ok(json) = serde_json::to_string_pretty(&map) {
         // Read-modify-write of the whole settings file: a truncated write here
@@ -205,9 +217,16 @@ pub async fn sync_restore_session(
             Ok(None)
         }
         Err(e) => {
-            // Expected on first run / after logout / after revocation — the UI
-            // just shows the login screen.
+            // Expected on first run / after logout, and the UI just shows the
+            // login screen. A `Terminal` failure is different: the app had a
+            // session and decided it was dead, which is the sign-out the user
+            // sees. Record that one durably - a release build prints nowhere, so
+            // this is the only way to tell a revoked device from an empty
+            // keychain after the fact.
             eprintln!("[sync] session restore skipped: {e}");
+            if let crate::sync::RestoreError::Terminal(reason) = &e {
+                crate::health::note("sync restore: credentials rejected", reason);
+            }
             Ok(None)
         }
     }
@@ -720,8 +739,10 @@ pub struct SyncConnection {
     pub configured: bool,
 }
 
+// Async so the settings read lands on a worker: this is called from the Account
+// screen's mount effect, and a non-async command runs on the UI thread.
 #[tauri::command]
-pub fn sync_get_connection(app: tauri::AppHandle) -> SyncConnection {
+pub async fn sync_get_connection(app: tauri::AppHandle) -> SyncConnection {
     SyncConnection {
         configured: SyncConfig::load(&app).is_configured(),
     }
