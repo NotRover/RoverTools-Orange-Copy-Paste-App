@@ -356,7 +356,7 @@ User preferences are synced as a single encrypted blob, separate from the entry 
 
 - `sync_enabled` — each device decides independently whether sync is on
 - `sync_server_url` — device may point to a self-hosted instance
-- `sync_mode` (`realtime` | `passive`) — a per-device choice about personal entries
+- `sync_mode` (`realtime` | `passive` | `manual`) — a per-device choice about personal entries
 - `space_autocopy:{space_id}` — writing incoming entries to the clipboard is per-device
 - Window geometry (`window-state.json`)
 - Autostart (OS-specific registry/startup entry)
@@ -429,7 +429,7 @@ Device A (clipboard capture)
 
 **Size gate:** file and image entries ride in a blob and are pushed only if ≤ 5 MB. Larger entries are skipped, and each skip records the entry and a reason the sync status UI shows verbatim.
 
-**Personal sync mode** is independent of all this: `realtime` applies WebSocket-delivered personal entries as they arrive, `passive` skips live application and lets a periodic pull (or "Sync now") collect them. Pushes are immediate in both modes, and **spaces are always realtime** regardless of the setting.
+**Personal sync mode** is independent of all this: `realtime` applies WebSocket-delivered personal entries as they arrive, `passive` skips live application and lets a periodic pull (or "Sync now") collect them, and `manual` does neither - captures, edits and deletes queue instead of uploading, nothing is pulled on a timer or at sign-in, and "Sync now" is what moves anything. **Spaces are always realtime** regardless of the setting: an entry addressed to a space is sent even in manual mode, and what other members share still arrives live.
 
 ---
 
@@ -618,7 +618,7 @@ sync_set_enabled(enabled: bool)
 sync_get_quota()                         → blob quota usage
 sync_list_devices() / sync_revoke_device(device_id)
 sync_get_entry_states() / sync_get_entry_shares() / sync_clear_skipped()
-sync_set_mode(mode) / sync_get_mode()    // "realtime" | "passive"; personal entries only
+sync_set_mode(mode) / sync_get_mode()    // "realtime" | "passive" | "manual"; personal entries only
 spaces_list()                            → Vec<Space>   // refetch + reconcile keys
 spaces_cached()                          → Vec<Space>   // last known, no network
 space_create(name, share_history)        → Space

@@ -79,7 +79,7 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `components/app/clipboard-screen/entry-card/EntryCard.tsx` — per-entry rendering/interactions.
 - `components/app/notes-screen/NotesScreen.tsx` — notes CRUD/editor, grouping, bulk actions.
 - `components/app/spaces-screen/SpacesScreen.tsx` — Spaces: shared feed, create/join, invites, members, per-space auto-copy and send filters.
-- `components/app/account-screen/AccountScreen.tsx` — sync auth (login/signup/Google), cloud sync mode (realtime/passive), devices/presence, storage. No sharing UI - that lives on the Spaces screen.
+- `components/app/account-screen/AccountScreen.tsx` — sync auth (login/signup/Google), cloud sync mode (realtime/passive/manual), devices/presence, storage. No sharing UI - that lives on the Spaces screen.
 - `components/app/settings-screen/SettingsScreen.tsx` — app preferences (slots, storage folder, history behavior); owns the shared `scr-*`/`set-section-*` styles other screens reuse.
 - `components/app/shortcuts-screen/ShortcutsScreen.tsx` — hotkey reference.
 - `components/paste-popup/PastePopup.tsx`, `components/copy-popup/CopyPopup.tsx` — quick-paste + capture popups.

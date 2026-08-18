@@ -970,3 +970,24 @@
   line-height: 1.4;
   color: var(--text-muted);
 }
+/* ── Backing out of the enable hero ────────────────────────────────── */
+
+/* The way back out of the auth card. Quiet on purpose: signing in is the
+   expected path from here, and this is the door for everyone else. */
+.acct-off-link {
+  align-self: center;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-muted, #909090);
+  cursor: pointer;
+  transition: color .12s ease, background .12s ease;
+}
+
+.acct-off-link:hover {
+  color: var(--text, #e8e8e8);
+  background: var(--surface-hover, rgba(255, 255, 255, .06));
+}

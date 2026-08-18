@@ -105,7 +105,7 @@ export interface SendFilter {
 }
 
 /** How personal entries from other devices are applied on this device. */
-export type SyncMode = "realtime" | "passive";
+export type SyncMode = "realtime" | "passive" | "manual";
 
 export interface SyncInvite {
   id: string;

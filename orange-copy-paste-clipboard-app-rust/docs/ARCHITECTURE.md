@@ -564,7 +564,7 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
 | `sync_set_enabled`     | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                                 |
 | `sync_set_server_url`  | `(url: String) → ()`                                | Override default server URL (self-hosted)                                                |
-| `sync_set_mode`        | `(mode: String) → ()`                               | Cloud sync mode for this device, `realtime` or `passive`; persists to `settings.json`     |
+| `sync_set_mode`        | `(mode: String) → ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
 | `sync_get_mode`        | `() → String`                                       | Current cloud sync mode                                                                  |
 | `sync_push_settings`   | `() → ()`                                           | Encrypt current settings blob and `PUT /settings`; internally debounced (2s)             |
 | `sync_pull_settings`          | `() → ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
@@ -686,7 +686,7 @@ Sync adds these keys to the existing `settings.json` store:
 | `sync_server_url`   | string | `"https://api.orangeclipboard.app"` | Backend API base URL (self-hosted override)                                |
 | `supabase_url`      | string | `""`                                | Supabase project URL — used for auth (GoTrue)                              |
 | `supabase_anon_key` | string | `""`                                | Supabase anon (publishable) key — client-side auth only                    |
-| `sync_mode`         | string | `"realtime"`                        | `realtime` or `passive` — how personal cloud-sync entries arrive on this device |
+| `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` — how personal cloud-sync entries move on this device |
 | `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
 | `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
 
@@ -1294,7 +1294,7 @@ gone because they had drifted — verify anything load-bearing in the source.
 - **Spaces UI** — create, join by code, invite by email, accept/decline, member list with
   presence, remove (rekeys), leave, delete, per-space auto-copy and send filters, driven by
   the `space:*` WebSocket events. Device list with revoke lives in the account screen.
-- **Cloud sync modes** — realtime or passive per device, with a 5-minute pull loop backing
+- **Cloud sync modes** — realtime, passive or manual per device, with a 5-minute pull loop backing
   passive mode.
 
 **Known gaps**

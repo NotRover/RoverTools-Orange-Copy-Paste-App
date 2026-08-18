@@ -85,6 +85,9 @@ struct PushCtx {
     budget: BlobBudget,
     /// Pushes running right now, so the UI can show them as pending.
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// Manual mode: hold personal pushes in the queue instead of sending them.
+    /// Anything addressed to a space ignores this — see [`SyncMode::Manual`].
+    hold_personal: bool,
 }
 
 /// Bytes of blob storage left on the account, as last known.
@@ -1256,6 +1259,7 @@ impl SyncClient {
             gate: Arc::clone(&self.push_gate),
             budget: Arc::clone(&self.blob_budget),
             in_flight: Arc::clone(&self.in_flight),
+            hold_personal: *self.sync_mode.lock() == SyncMode::Manual,
         }
     }
 
@@ -1433,6 +1437,7 @@ impl SyncClient {
         let id_map = Arc::clone(&self.id_map);
         let status = Arc::clone(&self.status);
         let gate = Arc::clone(&self.push_gate);
+        let hold_personal = *self.sync_mode.lock() == SyncMode::Manual;
         let type_str = entry_type.as_str().to_string();
         let map_key = format!("{type_str}:{client_id}");
         // The tombstone must reach the same spaces the entry did, so members
@@ -1496,9 +1501,15 @@ impl SyncClient {
             let _permit = gate.acquire_owned().await;
             // Always tombstone — even if offline (invariant #5).  A tombstone is
             // a push with deleted_at set, keyed by client_id (no server_id).
-            if let (Some(http), Some(umk)) =
-                (http.as_ref().filter(|h| h.is_authenticated()), umk.as_ref())
-            {
+            //
+            // Manual mode queues it rather than sending, same rule as a push:
+            // held while it is only our own copy, sent when the deletion has to
+            // reach a space's other members.
+            let hold = hold_personal && space_ids.is_empty();
+            if let (Some(http), Some(umk)) = (
+                http.as_ref().filter(|h| !hold && h.is_authenticated()),
+                umk.as_ref(),
+            ) {
                 if let Some(req) = tombstone_req(umk, &client_id, &type_str, space_ids) {
                     match http.push_entries(vec![req]).await {
                         Ok(_) => {
@@ -1539,7 +1550,9 @@ impl SyncClient {
         };
         let state = self.app.state::<crate::state::AppState>();
         let my_device = self.sync_state.lock().data.device_id.clone();
-        let passive = *self.sync_mode.lock() == SyncMode::Passive;
+        // Both non-realtime modes hold personal entries back from live
+        // application; they differ in whether anything fetches them later.
+        let passive = *self.sync_mode.lock() != SyncMode::Realtime;
 
         let mut clip_changed = false;
         let mut notes_changed = false;
@@ -1550,7 +1563,7 @@ impl SyncClient {
             if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
                 continue;
             }
-            // Passive mode: personal entries are not applied live. Space
+            // Passive and manual: personal entries are not applied live. Space
             // entries always are — spaces are realtime by definition.
             if live && passive && e.space_ids.is_empty() {
                 continue;
@@ -2258,6 +2271,12 @@ impl SyncClient {
             // without this the first pull after a restart could not decrypt any
             // shared entry.
             self.reconcile_spaces().await;
+            // Spaces are recovered either way — they are not what manual mode
+            // holds. The personal half is: flushing here would send the very
+            // queue the mode exists to keep, so it waits for Sync now.
+            if *self.sync_mode.lock() == SyncMode::Manual {
+                return;
+            }
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
             }
@@ -3109,7 +3128,16 @@ async fn push_entry_task(
         wrapped_keys,
     };
 
-    if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {
+    // Manual mode sends nothing of its own accord, so this takes the queue path
+    // below and the entry waits for Sync now. An entry going to a space is not
+    // "of its own accord": someone is publishing it to other people, and holding
+    // it would leave them looking at a space that silently lost an item.
+    let hold = ctx.hold_personal && push_req.space_ids.is_empty();
+    if let Some(http) = ctx
+        .http
+        .as_ref()
+        .filter(|h| !hold && h.is_authenticated())
+    {
         match http.push_entries(vec![push_req.clone()]).await {
             Ok(result) => {
                 if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
@@ -3149,7 +3177,7 @@ async fn push_entry_task(
         }
     }
 
-    // Offline / unauthenticated — queue
+    // Offline, unauthenticated, or held by manual mode — queue
     let entry_json = match serde_json::to_string(&push_req) {
         Ok(j) => j,
         Err(e) => {
