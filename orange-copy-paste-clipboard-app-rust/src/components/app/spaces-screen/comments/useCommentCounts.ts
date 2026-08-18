@@ -18,11 +18,15 @@ export interface CommentMark {
 
 const SEEN_STORAGE_KEY = "rovertools.space-comments-seen";
 
-/** When this device last read each thread, so the dot means something.
+/** The newest comment this device has actually seen in each thread.
  *
- *  Kept on the device rather than the server: "have I read this" is about this
- *  screen in front of this person, and putting it in the account would make a
- *  thread read on a laptop look read on a phone that never showed it. */
+ *  A server timestamp, not a local one. Storing `Date.now()` here compared this
+ *  machine's clock against the server's, so a few seconds of skew either way
+ *  left every thread permanently unread however many times it was opened.
+ *
+ *  Kept on the device rather than in the account: "have I read this" is about
+ *  this screen in front of this person, and syncing it would make a thread read
+ *  on a laptop look read on a phone that never showed it. */
 function readSeen(): Record<string, number> {
   try {
     const raw = localStorage.getItem(SEEN_STORAGE_KEY);
@@ -101,19 +105,30 @@ export function useCommentCounts(spaceId: string | null) {
     return out;
   }, [counts, seen, spaceId]);
 
-  /** Called when a thread is opened: everything in it counts as read. */
+  /** Everything up to `latestAt` in this thread has now been seen.
+   *
+   *  The caller passes the newest timestamp it drew, so what gets stored is a
+   *  server value that can be compared with the next server value. */
   const markRead = useCallback(
-    (entryType: string, clientId: string) => {
+    (entryType: string, clientId: string, latestAt: number) => {
       if (!spaceId) return;
       const key = `${spaceId}:${commentKey(entryType, clientId)}`;
       setSeen((prev) => {
-        const next = { ...prev, [key]: Date.now() };
-        writeSeen(next);
-        return next;
+        // Never walk the watermark backwards: a deletion lowers the thread's
+        // newest timestamp, and that is not a reason to re-flag older
+        // comments as unread.
+        if ((prev[key] ?? 0) >= latestAt) return prev;
+        return { ...prev, [key]: latestAt };
       });
     },
     [spaceId],
   );
+
+  // Written from an effect rather than from inside the updater above: an
+  // updater has to be pure, and React is free to run it more than once.
+  useEffect(() => {
+    writeSeen(seen);
+  }, [seen]);
 
   return { marks, refresh, markRead };
 }

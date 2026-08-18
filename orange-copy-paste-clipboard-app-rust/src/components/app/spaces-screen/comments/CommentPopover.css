@@ -1,0 +1,36 @@
+/* The floating thread, hung off an entry's comment chip.
+
+   Fixed rather than absolute: it is portalled to the body so no card's
+   overflow can clip it, and its position is measured from the chip in the
+   viewport. Anything that moves the chip closes it. */
+
+.cmt-pop {
+  position: fixed;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  /* Not hidden: the mention picker floats above the composer and is allowed
+     to reach past the panel's own edge. The list clips itself instead. */
+  overflow: visible;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+/* Inside the panel the thread owns the whole box, so it drops the rule and
+   the top margin it wears when it sits under an entry's content. */
+.cmt-pop .cmt-thread {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 10px 11px;
+  border-top: none;
+}
+
+/* Free of the panel, so a picker taller than the room above the composer is
+   not sliced off by the panel's top edge. */
+.cmt-pop .cmt-picker {
+  z-index: 30;
+  max-height: 152px;
+}

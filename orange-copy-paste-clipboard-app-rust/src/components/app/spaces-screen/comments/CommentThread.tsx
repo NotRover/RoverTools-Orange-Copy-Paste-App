@@ -7,7 +7,9 @@ import React, {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { PaperPlaneRight, Trash } from "@phosphor-icons/react";
+import { PaperPlaneRight, X } from "@phosphor-icons/react";
+
+import { TrashIcon } from "../../../icons";
 
 import type { SpaceComment, SpaceMember } from "../../../../types";
 import { timeAgo } from "../../../../types";
@@ -20,6 +22,29 @@ import "./CommentThread.css";
  *  The name travels with the id on purpose - a comment records what was said,
  *  so it keeps the name that was used even after the person renames. */
 const MENTION_RE = /@\[([^\]]+)\]\(([^)]+)\)/g;
+
+/** How long one comment may be, counted in what the writer typed rather than
+ *  in what gets stored - a mention costs a uuid on the wire that the writer
+ *  never sees, and charging them for it would be arbitrary. */
+const MAX_LEN = 500;
+
+/** Comments are read a page at a time, newest last, the way a chat reads. */
+const PAGE = 20;
+
+/** Threads already read, kept for as long as the app runs.
+ *
+ *  Reopening a thread showed a spinner and then the same comments it showed a
+ *  second ago. The cache is what the panel draws immediately; the request
+ *  still goes out behind it, so a thread another device changed while this one
+ *  had it closed corrects itself without anyone waiting. Live events keep
+ *  entries current while a thread is shut, which is why this can be trusted
+ *  enough to show first.
+ *
+ *  Plaintext, so it is memory only - nothing here reaches disk. */
+const cache = new Map<string, SpaceComment[]>();
+
+const cacheKey = (spaceId: string, entryType: string, clientId: string) =>
+  `${spaceId}:${entryType}:${clientId}`;
 
 type Segment =
   | { kind: "text"; text: string }
@@ -364,6 +389,7 @@ const Composer: React.FC<{
             className="cmt-input"
             rows={1}
             value={text}
+            maxLength={MAX_LEN}
             placeholder="Write a comment, @ to tag someone"
             onChange={(e) => sync(e.currentTarget)}
             onKeyDown={onKeyDown}
@@ -385,6 +411,15 @@ const Composer: React.FC<{
           <PaperPlaneRight size={12} weight="fill" />
         </button>
       </div>
+      {/* Silent until the limit is close enough to matter - a counter sitting
+          under an empty box only says the box is small. */}
+      {text.length >= MAX_LEN - 80 && (
+        <div
+          className={`cmt-count${text.length >= MAX_LEN ? " cmt-count--full" : ""}`}
+        >
+          {MAX_LEN - text.length} left
+        </div>
+      )}
     </div>
   );
 };
@@ -399,9 +434,13 @@ const CommentThread: React.FC<{
   selfUserId: string;
   /** Space owners moderate, so they may delete anyone's comment. */
   isOwner: boolean;
-  /** Fires whenever the thread's length changes, so the feed's chip and the
-   *  unread mark stay honest without a second request. */
-  onCountChange?: (count: number) => void;
+  /** Fires whenever the thread changes, so the feed's chip and the unread mark
+   *  stay honest without a second request. `latestAt` is the newest comment
+   *  drawn, which is exactly what the reader has now seen. */
+  onCountChange?: (count: number, latestAt: number) => void;
+  /** Present when the thread is floating rather than inline, which is the only
+   *  case that owns a way to dismiss itself. */
+  onClose?: () => void;
 }> = ({
   spaceId,
   clientId,
@@ -410,10 +449,21 @@ const CommentThread: React.FC<{
   selfUserId,
   isOwner,
   onCountChange,
+  onClose,
 }) => {
-  const [comments, setComments] = useState<SpaceComment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const key = cacheKey(spaceId, entryType, clientId);
+  const [comments, setComments] = useState<SpaceComment[]>(
+    () => cache.get(key) ?? [],
+  );
+  // Only the first read of a thread is a wait. After that the panel opens on
+  // what it already has and refreshes underneath.
+  const [loading, setLoading] = useState(!cache.has(key));
   const [error, setError] = useState<string | null>(null);
+  // How many of the newest comments are on screen. Older ones are fetched
+  // already - the thread arrives whole - so a page here is about how much a
+  // reader is asked to take in at once, not about what the network carries.
+  const [limit, setLimit] = useState(PAGE);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const pending = usePendingRemovals();
 
   const byId = useMemo(
@@ -421,9 +471,15 @@ const CommentThread: React.FC<{
     [members],
   );
 
+  // Whatever is on screen is what the next open should start from, including
+  // comments that arrived over the socket while this thread was open.
+  useEffect(() => {
+    cache.set(key, comments);
+  }, [key, comments]);
+
   useEffect(() => {
     let live = true;
-    setLoading(true);
+    setLoading(!cache.has(key));
     setError(null);
     invoke<SpaceComment[]>("space_comments_list", {
       spaceId,
@@ -434,7 +490,9 @@ const CommentThread: React.FC<{
         if (live) setComments(rows);
       })
       .catch((e) => {
-        if (live) setError(String(e));
+        // A failed refresh of a thread already on screen is not worth
+        // replacing that thread with an error.
+        if (live && !cache.has(key)) setError(String(e));
       })
       .finally(() => {
         if (live) setLoading(false);
@@ -442,7 +500,7 @@ const CommentThread: React.FC<{
     return () => {
       live = false;
     };
-  }, [spaceId, clientId, entryType]);
+  }, [spaceId, clientId, entryType, key]);
 
   // Live updates. Both events reach every member of the space, so each one is
   // narrowed to this thread before it touches the list.
@@ -484,9 +542,30 @@ const CommentThread: React.FC<{
     [comments, pending],
   );
 
+  const latestAt = useMemo(
+    () => shown.reduce((max, c) => Math.max(max, c.created_at), 0),
+    [shown],
+  );
+
   useEffect(() => {
-    if (!loading) onCountChange?.(shown.length);
-  }, [shown.length, loading, onCountChange]);
+    if (!loading) onCountChange?.(shown.length, latestAt);
+  }, [shown.length, latestAt, loading, onCountChange]);
+
+  // The newest comments, the way a chat shows them.
+  const page = useMemo(
+    () => shown.slice(Math.max(0, shown.length - limit)),
+    [shown, limit],
+  );
+  const older = shown.length - page.length;
+
+  // Sit at the bottom when the thread opens and whenever something new lands.
+  // Keyed on the last id rather than on the count, so revealing older comments
+  // leaves the reader where they were instead of yanking them back down.
+  const lastId = page.length ? page[page.length - 1].id : null;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lastId, loading]);
 
   const handleSend = useCallback(
     async (body: string) => {
@@ -534,6 +613,11 @@ const CommentThread: React.FC<{
       <div className="cmt-head">
         <span className="cmt-head-title">Comments</span>
         {shown.length > 0 && <span className="cmt-head-n">{shown.length}</span>}
+        {onClose && (
+          <button className="cmt-close" onClick={onClose} aria-label="Close">
+            <X size={11} weight="bold" />
+          </button>
+        )}
       </div>
 
       {error ? (
@@ -543,8 +627,17 @@ const CommentThread: React.FC<{
       ) : shown.length === 0 ? (
         <p className="cmt-note">No comments yet. Say something about this one.</p>
       ) : (
-        <ul className="cmt-list">
-          {shown.map((c) => {
+        <div className="cmt-scroll" ref={scrollRef}>
+          {older > 0 && (
+            <button
+              className="cmt-more"
+              onClick={() => setLimit((n) => n + PAGE)}
+            >
+              Show {Math.min(older, PAGE)} older
+            </button>
+          )}
+          <ul className="cmt-list">
+            {page.map((c) => {
             const author = byId.get(c.author_id);
             const name =
               c.author_id === selfUserId
@@ -575,7 +668,7 @@ const CommentThread: React.FC<{
                         }
                         data-tooltip-pos="left"
                       >
-                        <Trash size={11} />
+                        <TrashIcon size={13} />
                       </button>
                     )}
                   </div>
@@ -583,8 +676,9 @@ const CommentThread: React.FC<{
                 </div>
               </li>
             );
-          })}
-        </ul>
+            })}
+          </ul>
+        </div>
       )}
 
       <Composer members={members} selfUserId={selfUserId} onSend={handleSend} />
