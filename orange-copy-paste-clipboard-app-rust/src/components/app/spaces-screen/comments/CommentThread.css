@@ -184,19 +184,54 @@
   border-color: var(--accent);
 }
 
-.cmt-input {
+.cmt-input-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
+  display: flex;
+}
+
+/* The box and the layer painting its mention backgrounds have to wrap text
+   identically, so every metric that affects wrapping is set on both at once. */
+.cmt-input,
+.cmt-mirror {
+  width: 100%;
+  min-width: 0;
   border: none;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 2px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cmt-input {
+  position: relative;
+  z-index: 1;
   outline: none;
   resize: none;
   background: transparent;
   color: var(--text);
-  font: inherit;
-  font-size: 12.5px;
-  line-height: 1.5;
   max-height: 132px;
-  padding: 2px 0;
+}
+
+.cmt-mirror {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Padded by a shadow rather than by padding: anything that took up space here
+   would push the highlight out of step with the text sitting above it. */
+.cmt-chip {
+  border-radius: 4px;
+  background: var(--accent-dim);
+  box-shadow: 0 0 0 1.5px var(--accent-dim);
 }
 
 .cmt-input::placeholder {

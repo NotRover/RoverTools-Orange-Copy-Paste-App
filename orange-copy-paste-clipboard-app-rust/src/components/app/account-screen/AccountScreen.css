@@ -825,7 +825,7 @@
   color: var(--text-muted, #909090);
   background: color-mix(in srgb, var(--text) 7%, transparent);
   padding: 1px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 

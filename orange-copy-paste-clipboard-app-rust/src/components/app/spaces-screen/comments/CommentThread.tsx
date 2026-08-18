@@ -80,6 +80,76 @@ function activeMentionQuery(
   return { at, query };
 }
 
+/** A stretch of what was typed: either loose text, or one whole mention. */
+type TypedSeg =
+  | { kind: "text"; text: string; start: number; end: number }
+  | {
+      kind: "mention";
+      label: string;
+      userId: string;
+      start: number;
+      end: number;
+    };
+
+/** Find the mentions inside what was typed.
+ *
+ *  The box holds `@Ada Lovelace`; the wire holds `@[Ada Lovelace](uuid)`. Only
+ *  names that were actually picked from the list count, so typing a name by
+ *  hand stays plain text rather than silently tagging someone.
+ *
+ *  Longest label first, so tagging both "Sam" and "Sam Smith" does not turn the
+ *  second into the first followed by a stray surname. */
+function scanTyped(text: string, tagged: Map<string, string>): TypedSeg[] {
+  const labels = [...tagged.keys()].sort((a, b) => b.length - a.length);
+  const out: TypedSeg[] = [];
+  let buf = "";
+  let bufStart = 0;
+  let i = 0;
+  const flush = (at: number) => {
+    if (buf) out.push({ kind: "text", text: buf, start: bufStart, end: at });
+    buf = "";
+  };
+  while (i < text.length) {
+    const boundary = i === 0 || /\s/.test(text[i - 1]);
+    const hit =
+      text[i] === "@" && boundary
+        ? labels.find((l) => {
+            if (!text.startsWith(l, i + 1)) return false;
+            // "@Sam" must not match inside "@Sammy".
+            const next = text[i + 1 + l.length];
+            return !next || !/[\p{L}\p{N}]/u.test(next);
+          })
+        : undefined;
+    if (hit) {
+      flush(i);
+      out.push({
+        kind: "mention",
+        label: hit,
+        userId: tagged.get(hit) as string,
+        start: i,
+        end: i + 1 + hit.length,
+      });
+      i += 1 + hit.length;
+      bufStart = i;
+      continue;
+    }
+    if (!buf) bufStart = i;
+    buf += text[i];
+    i += 1;
+  }
+  flush(text.length);
+  return out;
+}
+
+/** Turn what was typed into what gets stored. */
+function encodeMentions(text: string, tagged: Map<string, string>): string {
+  return scanTyped(text, tagged)
+    .map((s) =>
+      s.kind === "mention" ? `@[${s.label}](${s.userId})` : s.text,
+    )
+    .join("");
+}
+
 const Composer: React.FC<{
   members: SpaceMember[];
   selfUserId: string;
@@ -87,11 +157,18 @@ const Composer: React.FC<{
 }> = ({ members, selfUserId, onSend }) => {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // Which typed names stand for which member. A ref rather than state: it
+  // changes nothing on screen, and keeping it out of the deps stops every
+  // keystroke from rebinding the send handler.
+  const tagged = useRef(new Map<string, string>());
   const [mention, setMention] = useState<{ at: number; query: string } | null>(
     null,
   );
   const [highlight, setHighlight] = useState(0);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  // Draws the mention backgrounds behind the real text, which the textarea
+  // itself cannot do. Kept in step with the box character for character.
+  const mirrorRef = useRef<HTMLDivElement>(null);
 
   // Everyone but yourself: tagging yourself is a note to nobody.
   const candidates = useMemo(() => {
@@ -109,6 +186,9 @@ const Composer: React.FC<{
   // through to sending the moment the query stops matching anyone.
   const picking = !!mention && candidates.length > 0;
 
+  // What the highlight layer draws, and what the caret rules read.
+  const segs = useMemo(() => scanTyped(text, tagged.current), [text]);
+
   const grow = (el: HTMLTextAreaElement) => {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
@@ -120,14 +200,39 @@ const Composer: React.FC<{
     grow(el);
   };
 
+  /** Put the caret somewhere after React has redrawn the value. */
+  const caretTo = (pos: number) => {
+    requestAnimationFrame(() => {
+      const el = areaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+      grow(el);
+    });
+  };
+
+  /** Cut a whole mention out, leaving the caret where it stood. */
+  const dropSpan = (from: number, to: number, label: string) => {
+    const next = text.slice(0, from) + text.slice(to);
+    setText(next);
+    setMention(null);
+    // Once the last copy of a name is gone, so is the tag it stood for.
+    if (!next.includes(`@${label}`)) tagged.current.delete(label);
+    caretTo(from);
+  };
+
   const insert = useCallback(
     (m: SpaceMember) => {
       const el = areaRef.current;
       if (!el || !mention) return;
-      const label = m.display_name || "Member";
+      // The brackets are the storage format's delimiters, so a name carrying
+      // one would produce a token that cannot be parsed back.
+      const label = (m.display_name || "Member").replace(/[[\]()]/g, "").trim();
+      if (!label) return;
+      tagged.current.set(label, m.user_id);
       const before = text.slice(0, mention.at);
       const after = text.slice(el.selectionStart);
-      const token = `@[${label}](${m.user_id}) `;
+      const token = `@${label} `;
       const next = before + token + after;
       setText(next);
       setMention(null);
@@ -146,9 +251,10 @@ const Composer: React.FC<{
     if (!body || sending) return;
     setSending(true);
     try {
-      await onSend(body);
+      await onSend(encodeMentions(body, tagged.current));
       setText("");
       setMention(null);
+      tagged.current.clear();
       if (areaRef.current) areaRef.current.style.height = "auto";
     } finally {
       setSending(false);
@@ -181,6 +287,30 @@ const Composer: React.FC<{
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send();
+      return;
+    }
+
+    // A mention is one thing, not the words it is spelled with: the caret
+    // steps over it and a backspace takes all of it. Editing it halfway would
+    // leave a name that no longer tags anyone but still looks like it does.
+    const el = e.currentTarget;
+    if (el.selectionStart !== el.selectionEnd || e.shiftKey) return;
+    const caret = el.selectionStart;
+    const ends = segs.find((s) => s.kind === "mention" && s.end === caret);
+    const begins = segs.find((s) => s.kind === "mention" && s.start === caret);
+
+    if (e.key === "Backspace" && ends) {
+      e.preventDefault();
+      dropSpan(ends.start, ends.end, (ends as { label: string }).label);
+    } else if (e.key === "Delete" && begins) {
+      e.preventDefault();
+      dropSpan(begins.start, begins.end, (begins as { label: string }).label);
+    } else if (e.key === "ArrowLeft" && ends) {
+      e.preventDefault();
+      caretTo(ends.start);
+    } else if (e.key === "ArrowRight" && begins) {
+      e.preventDefault();
+      caretTo(begins.end);
     }
   };
 
@@ -216,16 +346,34 @@ const Composer: React.FC<{
         </div>
       )}
       <div className="cmt-input-row">
-        <textarea
-          ref={areaRef}
-          className="cmt-input"
-          rows={1}
-          value={text}
-          placeholder="Write a comment, @ to tag someone"
-          onChange={(e) => sync(e.currentTarget)}
-          onKeyDown={onKeyDown}
-          onClick={(e) => sync(e.currentTarget)}
-        />
+        <div className="cmt-input-wrap">
+          <div className="cmt-mirror" ref={mirrorRef} aria-hidden="true">
+            {segs.map((s, i) =>
+              s.kind === "mention" ? (
+                <span key={i} className="cmt-chip">
+                  @{s.label}
+                </span>
+              ) : (
+                <span key={i}>{s.text}</span>
+              ),
+            )}
+            {"\n"}
+          </div>
+          <textarea
+            ref={areaRef}
+            className="cmt-input"
+            rows={1}
+            value={text}
+            placeholder="Write a comment, @ to tag someone"
+            onChange={(e) => sync(e.currentTarget)}
+            onKeyDown={onKeyDown}
+            onClick={(e) => sync(e.currentTarget)}
+            onScroll={(e) => {
+              if (mirrorRef.current)
+                mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+            }}
+          />
+        </div>
         <button
           className="cmt-send"
           onClick={() => void send()}

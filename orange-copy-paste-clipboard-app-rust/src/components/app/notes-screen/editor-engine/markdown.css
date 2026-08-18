@@ -997,7 +997,7 @@
   align-items: center;
   gap: 5px;
   padding: 3px 5px 3px 7px;
-  border-radius: 7px;
+  border-radius: var(--radius-xs, 7px);
   font-size: 0.82em;
   font-weight: 600;
   line-height: 1.4;
