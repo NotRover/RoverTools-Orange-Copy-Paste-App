@@ -1724,6 +1724,20 @@ impl SyncClient {
                             );
                         }
                     }
+                    // Who wrote this is known now and has nothing to do with the
+                    // blob, so it is recorded before the download rather than
+                    // after it. Until this lands the entry looks like ours: the
+                    // ownership guards all read `is_remote`, so it could be
+                    // edited, pushed and shared, and a removal arriving mid
+                    // download rendered as "You stopped sharing this". A failed
+                    // download made that permanent.
+                    if from_space {
+                        let mut id_map = self.id_map.lock();
+                        id_map.mark_entry_remote(&key);
+                        if let Some(owner) = e.user_id.as_deref() {
+                            id_map.set_entry_owner(&key, owner);
+                        }
+                    }
                     continue;
                 }
                 // File-content sync is not wired (paths are machine-specific);
