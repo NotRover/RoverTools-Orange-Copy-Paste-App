@@ -76,7 +76,12 @@ import {
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
-import { showToast, toastError } from "../toast/toastBus";
+import {
+  deferDestructive,
+  showToast,
+  toastError,
+} from "../toast/toastBus";
+import { usePendingRemovals } from "../../../hooks/pendingRemoval";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
@@ -1085,6 +1090,12 @@ const SpaceSettings: React.FC<{
   const [armed, setArmed] = useState(false);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Somebody removed a moment ago is off the list while the Undo toast is up,
+  // even though the server has not been told yet and still lists them.
+  const pendingGone = usePendingRemovals();
+  const shownMembers = space.members.filter(
+    (m) => !pendingGone.has(`member:${space.id}:${m.user_id}`),
+  );
 
   useEffect(
     () => () => {
@@ -1360,13 +1371,15 @@ const SpaceSettings: React.FC<{
         <div className="sp-settings-block">
           <div className="sp-settings-label">
             People
-            <span className="sp-settings-count">{space.member_count}</span>
+            <span className="sp-settings-count">
+              {space.member_count - (space.members.length - shownMembers.length)}
+            </span>
           </div>
           <div className="sp-member-list">
-            {space.members.length === 0 ? (
+            {shownMembers.length === 0 ? (
               <p className="sp-filter-empty">Just you so far.</p>
             ) : (
-              space.members.map((m) => (
+              shownMembers.map((m) => (
                 <div key={m.user_id} className="sp-member-row">
                   <UserAvatar
                     className="sp-member-pic"
@@ -1672,6 +1685,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [deletedMarkers, setDeletedMarkers] = useState<
     Record<string, DeletedMarker>
   >({});
+  // Keys whose removal is waiting out an Undo toast. Everything below subtracts
+  // them from what it draws, so a click takes the row away at once while the
+  // call itself is still pending, and a refresh landing mid-toast cannot put it
+  // back - the hint lives outside the maps being refreshed.
+  const pendingGone = usePendingRemovals();
   // Reopens on the space you left, which is usually the one you want again.
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     localStorage.getItem(SELECTED_KEY),
@@ -1759,27 +1777,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch((e) => toastError("Could not clear the placeholders", e));
   }, [selected]);
 
-  // Take an item out of a space. Two callers: the space owner moderating
-  // anything here, and a member unsharing something they posted. Neither is a
-  // deletion - whoever shared it keeps their own copy, the space stops carrying
-  // it, and everyone here gets a placeholder in its place.
-  const handleRemoveFromSpace = useCallback(
-    (clientId: string, entryType: "clipboard" | "note") => {
-      if (!selected) return;
-      invoke("space_remove_entry", {
-        spaceId: selected.id,
-        clientId,
-        entryType,
-      })
-        .then(() => showToast("Removed from the space", "info"))
-        .catch((e) => {
-          setSpaceError(String(e));
-          toastError("Could not remove from the space", e);
-        });
-    },
-    [selected],
-  );
-
   // Resolve an item to the member who shared it. A member who has since left
   // the space is no longer in the list, so this can return null for an item
   // that is genuinely incoming - the badge falls back to "A member".
@@ -1817,17 +1814,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   // else online anywhere, and one "Quiet" header over the whole list says
   // nothing. Your own presence does not count - it is true everywhere.
   const spaceGroups = useMemo(() => {
+    const shown = spaces.filter((s) => !pendingGone.has(`space:${s.id}`));
     const live = (s: Space) =>
       s.members.some((m) => m.online && m.user_id !== selfUserId);
-    const active = spaces.filter(live);
-    const quiet = spaces.filter((s) => !live(s));
+    const active = shown.filter(live);
+    const quiet = shown.filter((s) => !live(s));
     if (active.length === 0 || quiet.length === 0)
-      return [{ title: "All", spaces }];
+      return [{ title: "All", spaces: shown }];
     return [
       { title: "Active now", spaces: active },
       { title: "Quiet", spaces: quiet },
     ];
-  }, [spaces, selfUserId]);
+  }, [spaces, selfUserId, pendingGone]);
 
   // Panel drag. Widths are measured off the screen box rather than the panel
   // so a fast drag that outruns the pointer still tracks it.
@@ -1921,20 +1919,64 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
   // Both maps move together - a merge changes where an item is and where it
   // came from - so they share one refresh and one set of listeners.
-  const refreshShares = useCallback(() => {
-    invoke<Record<string, string[]>>("sync_get_entry_shares")
-      .then(setEntryShares)
-      .catch(() => {});
-    invoke<string[]>("sync_get_remote_entries")
-      .then((keys) => setRemoteKeys(new Set(keys)))
-      .catch(() => {});
-    invoke<Record<string, string>>("sync_get_entry_owners")
-      .then(setEntryOwners)
-      .catch(() => {});
-    invoke<Record<string, DeletedMarker>>("sync_get_deleted_markers")
-      .then(setDeletedMarkers)
-      .catch(() => {});
-  }, []);
+  const refreshShares = useCallback(
+    () =>
+      Promise.all([
+        invoke<Record<string, string[]>>("sync_get_entry_shares")
+          .then(setEntryShares)
+          .catch(() => {}),
+        invoke<string[]>("sync_get_remote_entries")
+          .then((keys) => setRemoteKeys(new Set(keys)))
+          .catch(() => {}),
+        invoke<Record<string, string>>("sync_get_entry_owners")
+          .then(setEntryOwners)
+          .catch(() => {}),
+        invoke<Record<string, DeletedMarker>>("sync_get_deleted_markers")
+          .then(setDeletedMarkers)
+          .catch(() => {}),
+      ]).then(() => {}),
+    [],
+  );
+
+  // Take an item out of a space. Two callers: the space owner moderating
+  // anything here, and a member unsharing something they posted. Neither is a
+  // deletion - whoever shared it keeps their own copy, the space stops carrying
+  // it, and everyone here gets a placeholder in its place.
+  //
+  // Sits below `refreshShares` because it needs it: the row leaves the feed on
+  // the click and the call itself waits out the Undo toast, so Undo has to put
+  // the feed back.
+  const handleRemoveFromSpace = useCallback(
+    (clientId: string, entryType: "clipboard" | "note") => {
+      if (!selected) return;
+      const spaceId = selected.id;
+      deferDestructive(
+        "Removed from the space",
+        async () => {
+          try {
+            await invoke("space_remove_entry", {
+              spaceId,
+              clientId,
+              entryType,
+            });
+          } catch (e) {
+            setSpaceError(String(e));
+            throw e;
+          } finally {
+            // Re-read before returning: the hint is released the moment this
+            // resolves, and the feed goes back to reading the share map.
+            await refreshShares();
+          }
+        },
+        {
+          key: "space-remove-entry",
+          hides: [`share:${entryType}:${clientId}:${spaceId}`],
+          errorPrefix: "Could not remove from the space",
+        },
+      );
+    },
+    [selected, refreshShares],
+  );
 
   const refreshInvites = useCallback(() => {
     invoke<SyncInviteList>("sync_list_invites")
@@ -2105,7 +2147,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const allFeedItems = useMemo((): FeedItem[] => {
     if (!selected) return [];
     const inSpace = (shareKey: string) =>
-      !!entryShares[shareKey]?.includes(selected.id);
+      !!entryShares[shareKey]?.includes(selected.id) &&
+      !pendingGone.has(`share:${shareKey}:${selected.id}`);
     const items: FeedItem[] = [];
     if (feedFilter !== "notes")
       for (const entry of entries)
@@ -2132,6 +2175,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     entries,
     notes,
     entryShares,
+    pendingGone,
     deletedMarkers,
     placeholdersOn,
   ]);
@@ -2293,37 +2337,87 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [reloadSpaces],
   );
 
-  const handleLeave = useCallback(async (spaceId: string) => {
-    setSpaceError(null);
-    try {
-      await invoke("space_leave", { spaceId });
-      setSpaces((prev) => prev.filter((s) => s.id !== spaceId));
+  // Leaving, deleting and removing a member all reach the server and none of
+  // them can be taken back once they have, so the row goes on the click and the
+  // call waits out the Undo toast. The space list itself is left alone: hiding
+  // it is the pending hint job, which is what makes Undo a no-op and stops a
+  // reload landing mid-toast from putting the row back.
+  const handleLeave = useCallback(
+    (spaceId: string) => {
+      setSpaceError(null);
       setSelectedId((cur) => (cur === spaceId ? null : cur));
-    } catch (e) {
-      setSpaceError(errMsg(e, "Could not leave the space."));
-    }
-  }, []);
+      deferDestructive(
+        "Left the space",
+        async () => {
+          try {
+            await invoke("space_leave", { spaceId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not leave the space."));
+            throw e;
+          } finally {
+            await reloadSpaces();
+          }
+        },
+        {
+          key: "space-membership",
+          hides: [`space:${spaceId}`],
+          // Reopen it, unless another space was picked while the toast was up.
+          onUndo: () => setSelectedId((cur) => cur ?? spaceId),
+          errorPrefix: "Could not leave the space",
+        },
+      );
+    },
+    [reloadSpaces],
+  );
 
-  const handleDelete = useCallback(async (spaceId: string) => {
-    setSpaceError(null);
-    try {
-      await invoke("space_delete", { spaceId });
-      setSpaces((prev) => prev.filter((s) => s.id !== spaceId));
+  const handleDelete = useCallback(
+    (spaceId: string) => {
+      setSpaceError(null);
       setSelectedId((cur) => (cur === spaceId ? null : cur));
-    } catch (e) {
-      setSpaceError(errMsg(e, "Could not delete the space."));
-    }
-  }, []);
+      deferDestructive(
+        "Space deleted",
+        async () => {
+          try {
+            await invoke("space_delete", { spaceId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not delete the space."));
+            throw e;
+          } finally {
+            await reloadSpaces();
+          }
+        },
+        {
+          key: "space-membership",
+          hides: [`space:${spaceId}`],
+          onUndo: () => setSelectedId((cur) => cur ?? spaceId),
+          errorPrefix: "Could not delete the space",
+        },
+      );
+    },
+    [reloadSpaces],
+  );
 
   const handleRemoveMember = useCallback(
-    async (spaceId: string, memberUserId: string) => {
+    (spaceId: string, memberUserId: string) => {
       setSpaceError(null);
-      try {
-        await invoke("space_remove_member", { spaceId, memberUserId });
-        reloadSpaces();
-      } catch (e) {
-        setSpaceError(errMsg(e, "Could not remove the member."));
-      }
+      deferDestructive(
+        "Member removed",
+        async () => {
+          try {
+            await invoke("space_remove_member", { spaceId, memberUserId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not remove the member."));
+            throw e;
+          } finally {
+            await reloadSpaces();
+          }
+        },
+        {
+          key: "space-member",
+          hides: [`member:${spaceId}:${memberUserId}`],
+          errorPrefix: "Could not remove the member",
+        },
+      );
     },
     [reloadSpaces],
   );
@@ -2424,26 +2518,52 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [refreshInvites, reloadSpaces],
   );
 
+  // An invite that is turned down or pulled back is gone for good - the only
+  // way back is a fresh one - so both wait out the Undo toast before going.
   const handleDeclineInvite = useCallback(
-    async (inviteId: string) => {
-      try {
-        await invoke("sync_decline_invite", { inviteId });
-        refreshInvites();
-      } catch (e) {
-        setSpaceError(errMsg(e, "Could not decline the invite."));
-      }
+    (inviteId: string) => {
+      deferDestructive(
+        "Invite declined",
+        async () => {
+          try {
+            await invoke("sync_decline_invite", { inviteId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not decline the invite."));
+            throw e;
+          } finally {
+            await refreshInvites();
+          }
+        },
+        {
+          key: "space-invite",
+          hides: [`invite:${inviteId}`],
+          errorPrefix: "Could not decline the invite",
+        },
+      );
     },
     [refreshInvites],
   );
 
   const handleRevokeInvite = useCallback(
-    async (inviteId: string) => {
-      try {
-        await invoke("sync_revoke_invite", { inviteId });
-        refreshInvites();
-      } catch (e) {
-        setSpaceError(errMsg(e, "Could not revoke the invite."));
-      }
+    (inviteId: string) => {
+      deferDestructive(
+        "Invite revoked",
+        async () => {
+          try {
+            await invoke("sync_revoke_invite", { inviteId });
+          } catch (e) {
+            setSpaceError(errMsg(e, "Could not revoke the invite."));
+            throw e;
+          } finally {
+            await refreshInvites();
+          }
+        },
+        {
+          key: "space-invite",
+          hides: [`invite:${inviteId}`],
+          errorPrefix: "Could not revoke the invite",
+        },
+      );
     },
     [refreshInvites],
   );
@@ -2459,9 +2579,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   }, [joinCode, handleJoin, onJoinCodeConsumed]);
 
   const receivedPending = invites.received.filter(
-    (i) => i.status === "pending",
+    (i) => i.status === "pending" && !pendingGone.has(`invite:${i.id}`),
   );
-  const sentPending = invites.sent.filter((i) => i.status === "pending");
+  const sentPending = invites.sent.filter(
+    (i) => i.status === "pending" && !pendingGone.has(`invite:${i.id}`),
+  );
 
   const isFiltering = search.trim().length > 0 || activeFilterCount > 0;
   const feedFilterIndex =

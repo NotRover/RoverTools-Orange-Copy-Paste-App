@@ -27,7 +27,14 @@ import NotesScreen from "./notes-screen/NotesScreen";
 import NotificationsPopout from "./notifications/NotificationsPopout";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
-import { APP_TOAST_EVENT, type ToastRequest } from "./toast/toastBus";
+import {
+  APP_TOAST_DISMISS_EVENT,
+  APP_TOAST_EVENT,
+  deferDestructive,
+  showToast,
+  type ToastGlyph,
+  type ToastRequest,
+} from "./toast/toastBus";
 import { Cloud, CloudWarning } from "@phosphor-icons/react";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import UpdateBanner from "./update-banner/UpdateBanner";
@@ -37,7 +44,6 @@ import {
   TrashIcon,
   UndoIcon,
   PinIcon,
-  CloseIcon,
   MinimizeIcon,
   MaximizeIcon,
   RestoreIcon,
@@ -140,6 +146,61 @@ const WindowControls: React.FC = () => {
   );
 };
 
+/**
+ * Put deleted rows back, newest first.
+ *
+ * Deduped by id: a merge can land while the Undo toast is up and bring the same
+ * entry back from another device, and a second copy of it is worse than the
+ * deletion the user was undoing.
+ */
+function restoreEntries(
+  current: ClipboardEntry[],
+  back: ClipboardEntry[],
+): ClipboardEntry[] {
+  const have = new Set(current.map((e) => e.id));
+  return [...current, ...back.filter((e) => !have.has(e.id))].sort(
+    (a, b) => b.timestamp - a.timestamp,
+  );
+}
+
+function restoreNotes(current: Note[], back: Note[]): Note[] {
+  const have = new Set(current.map((n) => n.id));
+  return [...current, ...back.filter((n) => !have.has(n.id))].sort(
+    (a, b) => b.updated_at - a.updated_at,
+  );
+}
+
+/** Write the group list through to storage on the way past. */
+function storeGroups(next: string[]): string[] {
+  localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
+  return next;
+}
+
+/** Pinning past the limit is rejected by Rust, from a card or a bulk bar. */
+function showPinLimit(): void {
+  showToast("Max pins reached (10)", "info", {
+    duration: 3000,
+    key: "pin-limit",
+    glyph: "pin",
+  });
+}
+
+/** The glyph a toast draws, by explicit choice or by tone. */
+function toastGlyph(glyph: ToastGlyph | undefined, tone?: string) {
+  switch (glyph ?? (tone === "error" ? "warning" : tone === "danger" ? "trash" : "cloud")) {
+    case "trash":
+      return <TrashIcon />;
+    case "pin":
+      return <PinIcon size={13} />;
+    case "warning":
+      return <WarningIcon />;
+    case "cloud-off":
+      return <CloudWarning size={13} />;
+    default:
+      return <Cloud size={13} />;
+  }
+}
+
 const App: React.FC = () => {
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [screen, setScreen] = useState<AppScreen>(() => {
@@ -148,10 +209,6 @@ const App: React.FC = () => {
       ? saved
       : "clipboard";
   });
-  const [undoSnapshot, setUndoSnapshot] = useState<ClipboardEntry[] | null>(
-    null,
-  );
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didRecoverGroupsRef = useRef(false);
 
   // ID of the entry currently in the OS clipboard
@@ -171,35 +228,6 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifAnchor, setNotifAnchor] = useState({ x: 0, y: 0 });
-
-  // Undo state for group deletion
-  const [deletedGroup, setDeletedGroup] = useState<{
-    name: string;
-    entries: ClipboardEntry[];
-  } | null>(null);
-  const deleteGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-
-  // Undo state for single-entry deletion
-  const [deletedEntry, setDeletedEntry] = useState<ClipboardEntry | null>(null);
-  const deleteEntryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-
-  // Undo state for single-note deletion
-  const [deletedNote, setDeletedNote] = useState<Note | null>(null);
-  const deleteNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Undo state for bulk note deletion
-  const [bulkDeletedNotes, setBulkDeletedNotes] = useState<Note[] | null>(null);
-  const bulkDeleteNotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-
-  // Toast: max pins reached
-  const [pinLimitReached, setPinLimitReached] = useState(false);
-  const pinLimitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Groups state — persisted to localStorage
   const [availableGroups, setAvailableGroups] = useState<string[]>(() => {
@@ -264,12 +292,16 @@ const App: React.FC = () => {
 
   // What a previous degraded session had to set aside and this one took back on.
   // Decided before this window existed, so it is polled rather than listened for.
-  const [recovered, setRecovered] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     invoke<string | null>("health_recovery_notice")
       .then((notice) => {
-        if (!cancelled && notice) setRecovered(notice);
+        if (!cancelled && notice)
+          showToast(
+            `Restored the ${notice} you captured before the last restart`,
+            "info",
+            { duration: 8000, key: "recovered", glyph: "warning" },
+          );
       })
       .catch(() => {});
     return () => {
@@ -686,16 +718,24 @@ const App: React.FC = () => {
       toastSeqRef.current += 1;
       setScreenToast({ ...detail, seq: toastSeqRef.current });
     };
+    // Undo on a deferred delete takes its own toast down early. Keyed, so
+    // undoing a toast that a newer one has already replaced leaves that one up.
+    const onDismiss = (e: Event) => {
+      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+      setScreenToast((cur) =>
+        cur && (key === undefined || cur.key === key) ? null : cur,
+      );
+    };
     document.addEventListener(APP_TOAST_EVENT, onToast);
-    return () => document.removeEventListener(APP_TOAST_EVENT, onToast);
+    document.addEventListener(APP_TOAST_DISMISS_EVENT, onDismiss);
+    return () => {
+      document.removeEventListener(APP_TOAST_EVENT, onToast);
+      document.removeEventListener(APP_TOAST_DISMISS_EVENT, onDismiss);
+    };
   }, []);
 
   // An entry sync refused to send. The reason comes from Rust so the toast can
   // say what actually happened instead of guessing at the file-size case.
-  const [syncSkip, setSyncSkip] = useState<{
-    label: string;
-    reason: string;
-  } | null>(null);
   const fileSyncSkippedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -714,7 +754,7 @@ const App: React.FC = () => {
         if (fileSyncSkippedTimerRef.current !== null)
           clearTimeout(fileSyncSkippedTimerRef.current);
         skipBurstRef.current += 1;
-        setSyncSkip(
+        const skip =
           skipBurstRef.current === 1
             ? {
                 label: event.payload.label || "Item",
@@ -723,12 +763,17 @@ const App: React.FC = () => {
             : {
                 label: `${skipBurstRef.current} items`,
                 reason: "See the Account screen for what failed and why.",
-              },
-        );
+              };
+        showToast(`Not synced: ${skip.label}. ${skip.reason}`, "error", {
+          duration: 5000,
+          key: "sync-skip",
+          glyph: "cloud-off",
+        });
+        // The burst counter only resets once the toasts stop arriving, so a
+        // run of skips collapses into one line rather than a stack of them.
         fileSyncSkippedTimerRef.current = setTimeout(() => {
           fileSyncSkippedTimerRef.current = null;
           skipBurstRef.current = 0;
-          setSyncSkip(null);
         }, 5000);
       },
     ).then((fn) => {
@@ -746,49 +791,30 @@ const App: React.FC = () => {
     await invoke("copy_entry", { id });
   }, []);
 
+  // Deletes here work the same way as the ones on the Spaces and Account
+  // screens: the row goes at once, the Rust call waits out the Undo toast, and
+  // Undo puts the snapshot back. All of that is `deferDestructive` - the timer,
+  // the toast and the wiring between them - so each of these handlers is only
+  // the two things that differ, what to hide and how to put it back.
   const handleDelete = useCallback(
     (id: string) => {
-      // Commit any pending delete immediately
-      if (deleteEntryTimerRef.current !== null) {
-        clearTimeout(deleteEntryTimerRef.current);
-        deleteEntryTimerRef.current = null;
-        // Fire-and-forget commit for the previous pending delete
-        if (deletedEntry) {
-          invoke("delete_entry", { id: deletedEntry.id }).catch(console.error);
-        }
-      }
-
-      // Snapshot the entry being deleted
       const entry = entries.find((e) => e.id === id);
       if (!entry) return;
-
-      setDeletedEntry(entry);
       setEntries((prev) => prev.filter((e) => e.id !== id));
-
-      // Defer the actual backend delete
-      deleteEntryTimerRef.current = setTimeout(async () => {
-        deleteEntryTimerRef.current = null;
-        setDeletedEntry(null);
-        await invoke("delete_entry", { id });
-      }, 5000);
+      deferDestructive(
+        "Entry deleted",
+        async () => {
+          await invoke("delete_entry", { id });
+        },
+        {
+          key: "entry-delete",
+          onUndo: () => setEntries((prev) => restoreEntries(prev, [entry])),
+          errorPrefix: "Could not delete the entry",
+        },
+      );
     },
-    [entries, deletedEntry],
+    [entries],
   );
-
-  const handleUndoDelete = useCallback(() => {
-    if (deleteEntryTimerRef.current !== null) {
-      clearTimeout(deleteEntryTimerRef.current);
-      deleteEntryTimerRef.current = null;
-    }
-    if (!deletedEntry) return;
-    setEntries((prev) => {
-      // Re-insert at original position by timestamp
-      const next = [...prev, deletedEntry];
-      next.sort((a, b) => b.timestamp - a.timestamp);
-      return next;
-    });
-    setDeletedEntry(null);
-  }, [deletedEntry]);
 
   const handlePin = useCallback(
     async (id: string, shouldPin: boolean): Promise<boolean> => {
@@ -805,13 +831,7 @@ const App: React.FC = () => {
         );
       } else if (shouldPin) {
         // Backend rejected — max pins reached
-        if (pinLimitTimerRef.current !== null)
-          clearTimeout(pinLimitTimerRef.current);
-        setPinLimitReached(true);
-        pinLimitTimerRef.current = setTimeout(() => {
-          setPinLimitReached(false);
-          pinLimitTimerRef.current = null;
-        }, 3000);
+        showPinLimit();
       }
       return success;
     },
@@ -830,21 +850,10 @@ const App: React.FC = () => {
 
   const handleDeleteGroup = useCallback(
     (name: string) => {
-      // Cancel any pending group delete
-      if (deleteGroupTimerRef.current !== null) {
-        clearTimeout(deleteGroupTimerRef.current);
-        deleteGroupTimerRef.current = null;
-      }
-
-      // Snapshot entries that have this group (for undo)
-      const affectedEntries = entries.filter((e) => e.groups.includes(name));
-
-      // Optimistic UI removal
-      setAvailableGroups((prev) => {
-        const next = prev.filter((g) => g !== name);
-        localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
-        return next;
-      });
+      const affectedIds = new Set(
+        entries.filter((e) => e.groups.includes(name)).map((e) => e.id),
+      );
+      setAvailableGroups((prev) => storeGroups(prev.filter((g) => g !== name)));
       setEntries((prev) =>
         prev.map((e) =>
           e.groups.includes(name)
@@ -852,48 +861,31 @@ const App: React.FC = () => {
             : e,
         ),
       );
-
-      setDeletedGroup({ name, entries: affectedEntries });
-
-      // After timeout, commit the delete to backend
-      deleteGroupTimerRef.current = setTimeout(async () => {
-        deleteGroupTimerRef.current = null;
-        setDeletedGroup(null);
-        removeGroupColor(name);
-        await invoke("purge_group_from_entries", { group: name });
-        const history = await invoke<ClipboardEntry[]>("get_history");
-        setEntries(history);
-      }, 5000);
+      deferDestructive(
+        `Group "${name}" deleted`,
+        async () => {
+          removeGroupColor(name);
+          await invoke("purge_group_from_entries", { group: name });
+          setEntries(await invoke<ClipboardEntry[]>("get_history"));
+        },
+        {
+          key: "group-delete",
+          onUndo: () => {
+            setAvailableGroups((prev) => storeGroups(mergeGroups(prev, [name])));
+            setEntries((prev) =>
+              prev.map((e) =>
+                affectedIds.has(e.id) && !e.groups.includes(name)
+                  ? { ...e, groups: [...e.groups, name] }
+                  : e,
+              ),
+            );
+          },
+          errorPrefix: "Could not delete the group",
+        },
+      );
     },
     [entries],
   );
-
-  const handleUndoDeleteGroup = useCallback(() => {
-    if (deleteGroupTimerRef.current !== null) {
-      clearTimeout(deleteGroupTimerRef.current);
-      deleteGroupTimerRef.current = null;
-    }
-    if (!deletedGroup) return;
-
-    // Restore the group
-    setAvailableGroups((prev) => {
-      const next = mergeGroups(prev, [deletedGroup.name]);
-      localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
-
-    // Restore group tag on affected entries
-    const affectedIds = new Set(deletedGroup.entries.map((e) => e.id));
-    setEntries((prev) =>
-      prev.map((e) =>
-        affectedIds.has(e.id) && !e.groups.includes(deletedGroup.name)
-          ? { ...e, groups: [...e.groups, deletedGroup.name] }
-          : e,
-      ),
-    );
-
-    setDeletedGroup(null);
-  }, [deletedGroup]);
 
   const handleRenameGroup = useCallback(
     async (oldName: string, newName: string) => {
@@ -921,62 +913,28 @@ const App: React.FC = () => {
 
   // ── Bulk operations ───────────────────────────────────────────────
 
-  // Undo state for bulk deletion
-  const [bulkDeletedEntries, setBulkDeletedEntries] = useState<
-    ClipboardEntry[] | null
-  >(null);
-  const bulkDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const handleBulkDelete = useCallback(
     (ids: string[]) => {
-      // Commit any pending single-entry delete
-      if (deleteEntryTimerRef.current !== null) {
-        clearTimeout(deleteEntryTimerRef.current);
-        deleteEntryTimerRef.current = null;
-        if (deletedEntry) {
-          invoke("delete_entry", { id: deletedEntry.id }).catch(console.error);
-          setDeletedEntry(null);
-        }
-      }
-      // Commit any pending bulk delete
-      if (bulkDeleteTimerRef.current !== null) {
-        clearTimeout(bulkDeleteTimerRef.current);
-        bulkDeleteTimerRef.current = null;
-        if (bulkDeletedEntries) {
-          const prevIds = bulkDeletedEntries.map((e) => e.id);
-          invoke("bulk_delete_entries", { ids: prevIds }).catch(console.error);
-        }
-      }
-
       const idSet = new Set(ids);
       const snapshot = entries.filter((e) => idSet.has(e.id));
       if (snapshot.length === 0) return;
-
-      setBulkDeletedEntries(snapshot);
       setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
-
-      bulkDeleteTimerRef.current = setTimeout(async () => {
-        bulkDeleteTimerRef.current = null;
-        setBulkDeletedEntries(null);
-        await invoke("bulk_delete_entries", { ids });
-      }, 5000);
+      deferDestructive(
+        `${snapshot.length} entries deleted`,
+        async () => {
+          await invoke("bulk_delete_entries", { ids });
+        },
+        {
+          // Same key as the single delete: one Undo is offered at a time, and
+          // it is always for the most recent thing that went.
+          key: "entry-delete",
+          onUndo: () => setEntries((prev) => restoreEntries(prev, snapshot)),
+          errorPrefix: "Could not delete the entries",
+        },
+      );
     },
-    [entries, deletedEntry, bulkDeletedEntries],
+    [entries],
   );
-
-  const handleUndoBulkDelete = useCallback(() => {
-    if (bulkDeleteTimerRef.current !== null) {
-      clearTimeout(bulkDeleteTimerRef.current);
-      bulkDeleteTimerRef.current = null;
-    }
-    if (!bulkDeletedEntries) return;
-    setEntries((prev) => {
-      const next = [...prev, ...bulkDeletedEntries];
-      next.sort((a, b) => b.timestamp - a.timestamp);
-      return next;
-    });
-    setBulkDeletedEntries(null);
-  }, [bulkDeletedEntries]);
 
   const handleBulkPin = useCallback(async (ids: string[]) => {
     const changed = await invoke<number>("bulk_pin_entries", {
@@ -987,13 +945,7 @@ const App: React.FC = () => {
       // Some were rejected (pin limit) — re-sync and show toast
       const history = await invoke<ClipboardEntry[]>("get_history");
       setEntries(history);
-      if (pinLimitTimerRef.current !== null)
-        clearTimeout(pinLimitTimerRef.current);
-      setPinLimitReached(true);
-      pinLimitTimerRef.current = setTimeout(() => {
-        setPinLimitReached(false);
-        pinLimitTimerRef.current = null;
-      }, 3000);
+      showPinLimit();
     } else {
       // All succeeded — update UI
       const idSet = new Set(ids);
@@ -1057,26 +1009,26 @@ const App: React.FC = () => {
   );
 
   const handleClearAll = useCallback(() => {
-    if (undoTimerRef.current !== null) clearTimeout(undoTimerRef.current);
-    setUndoSnapshot(entries);
+    const snapshot = entries;
+    // Pinned and Saved entries survive a clear - that is the invariant, and it
+    // is why the snapshot is the whole list rather than what was taken out.
     setEntries((prev) =>
       prev.filter((e) => e.pinned || e.groups.includes("Saved")),
     );
-    undoTimerRef.current = setTimeout(async () => {
-      undoTimerRef.current = null;
-      setUndoSnapshot(null);
-      await invoke("clear_history");
-    }, 5000);
+    deferDestructive(
+      "History cleared",
+      async () => {
+        await invoke("clear_history");
+      },
+      {
+        key: "history-clear",
+        // Merged into what is there rather than replacing it: anything captured
+        // while the toast was up would otherwise be thrown away by the undo.
+        onUndo: () => setEntries((prev) => restoreEntries(prev, snapshot)),
+        errorPrefix: "Could not clear the history",
+      },
+    );
   }, [entries]);
-
-  const handleUndoClear = useCallback(() => {
-    if (undoTimerRef.current !== null) {
-      clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = null;
-    }
-    setEntries(undoSnapshot ?? []);
-    setUndoSnapshot(null);
-  }, [undoSnapshot]);
 
   const { textCount, imageCount, fileCount, htmlCount } = entries.reduce(
     (acc, e) => {
@@ -1116,44 +1068,23 @@ const App: React.FC = () => {
 
   const handleDeleteNote = useCallback(
     (id: string) => {
-      // Commit any pending note delete immediately
-      if (deleteNoteTimerRef.current !== null) {
-        clearTimeout(deleteNoteTimerRef.current);
-        deleteNoteTimerRef.current = null;
-        if (deletedNote) {
-          invoke("delete_note", { id: deletedNote.id }).catch(console.error);
-        }
-      }
-
       const note = notes.find((n) => n.id === id);
       if (!note) return;
-
-      setDeletedNote(note);
       setNotes((prev) => prev.filter((n) => n.id !== id));
-
-      // Defer backend delete
-      deleteNoteTimerRef.current = setTimeout(async () => {
-        deleteNoteTimerRef.current = null;
-        setDeletedNote(null);
-        await invoke("delete_note", { id });
-      }, 5000);
+      deferDestructive(
+        "Note deleted",
+        async () => {
+          await invoke("delete_note", { id });
+        },
+        {
+          key: "note-delete",
+          onUndo: () => setNotes((prev) => restoreNotes(prev, [note])),
+          errorPrefix: "Could not delete the note",
+        },
+      );
     },
-    [notes, deletedNote],
+    [notes],
   );
-
-  const handleUndoDeleteNote = useCallback(() => {
-    if (deleteNoteTimerRef.current !== null) {
-      clearTimeout(deleteNoteTimerRef.current);
-      deleteNoteTimerRef.current = null;
-    }
-    if (!deletedNote) return;
-    setNotes((prev) => {
-      const next = [...prev, deletedNote];
-      next.sort((a, b) => b.updated_at - a.updated_at);
-      return next;
-    });
-    setDeletedNote(null);
-  }, [deletedNote]);
 
   const handlePinNote = useCallback(async (id: string, pin: boolean) => {
     await invoke(pin ? "pin_note" : "unpin_note", { id });
@@ -1172,52 +1103,24 @@ const App: React.FC = () => {
 
   const handleBulkDeleteNotes = useCallback(
     (ids: string[]) => {
-      // Commit any pending single note delete
-      if (deleteNoteTimerRef.current !== null) {
-        clearTimeout(deleteNoteTimerRef.current);
-        deleteNoteTimerRef.current = null;
-        if (deletedNote) {
-          invoke("delete_note", { id: deletedNote.id }).catch(console.error);
-          setDeletedNote(null);
-        }
-      }
-      // Commit any pending bulk note delete
-      if (bulkDeleteNotesTimerRef.current !== null) {
-        clearTimeout(bulkDeleteNotesTimerRef.current);
-        bulkDeleteNotesTimerRef.current = null;
-        if (bulkDeletedNotes) {
-          for (const n of bulkDeletedNotes)
-            invoke("delete_note", { id: n.id }).catch(console.error);
-          setBulkDeletedNotes(null);
-        }
-      }
-
-      const snapshot = notes.filter((n) => ids.includes(n.id));
-      setBulkDeletedNotes(snapshot);
-      setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
-
-      bulkDeleteNotesTimerRef.current = setTimeout(async () => {
-        bulkDeleteNotesTimerRef.current = null;
-        setBulkDeletedNotes(null);
-        for (const id of ids) await invoke("delete_note", { id });
-      }, 5000);
+      const idSet = new Set(ids);
+      const snapshot = notes.filter((n) => idSet.has(n.id));
+      if (snapshot.length === 0) return;
+      setNotes((prev) => prev.filter((n) => !idSet.has(n.id)));
+      deferDestructive(
+        `${snapshot.length} notes deleted`,
+        async () => {
+          for (const id of ids) await invoke("delete_note", { id });
+        },
+        {
+          key: "note-delete",
+          onUndo: () => setNotes((prev) => restoreNotes(prev, snapshot)),
+          errorPrefix: "Could not delete the notes",
+        },
+      );
     },
-    [notes, deletedNote, bulkDeletedNotes],
+    [notes],
   );
-
-  const handleUndoBulkDeleteNotes = useCallback(() => {
-    if (bulkDeleteNotesTimerRef.current !== null) {
-      clearTimeout(bulkDeleteNotesTimerRef.current);
-      bulkDeleteNotesTimerRef.current = null;
-    }
-    if (!bulkDeletedNotes) return;
-    setNotes((prev) => {
-      const next = [...prev, ...bulkDeletedNotes];
-      next.sort((a, b) => b.updated_at - a.updated_at);
-      return next;
-    });
-    setBulkDeletedNotes(null);
-  }, [bulkDeletedNotes]);
 
   const handleBulkPinNotes = useCallback(async (ids: string[]) => {
     setNotes((prev) =>
@@ -1479,129 +1382,23 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {pinLimitReached && (
-          <ToastNotification
-            message="Max pins reached (10)"
-            icon={<PinIcon size={13} />}
-            duration={3000}
-            onDismiss={() => setPinLimitReached(false)}
-          />
-        )}
-
-        {recovered !== null && (
-          <ToastNotification
-            message={`Restored the ${recovered} you captured before the last restart`}
-            icon={<WarningIcon />}
-            duration={8000}
-            onDismiss={() => setRecovered(null)}
-          />
-        )}
-
-        {undoSnapshot !== null && (
-          <ToastNotification
-            message="History cleared"
-            icon={<TrashIcon />}
-            action={{
-              label: "Undo",
-              icon: <UndoIcon />,
-              onClick: handleUndoClear,
-            }}
-            duration={5000}
-            onDismiss={() => setUndoSnapshot(null)}
-          />
-        )}
-
-        {deletedEntry !== null && (
-          <ToastNotification
-            message="Entry deleted"
-            icon={<TrashIcon />}
-            action={{
-              label: "Undo",
-              icon: <UndoIcon />,
-              onClick: handleUndoDelete,
-            }}
-            duration={5000}
-            onDismiss={() => setDeletedEntry(null)}
-          />
-        )}
-
-        {deletedGroup !== null && (
-          <ToastNotification
-            message={`Group "${deletedGroup.name}" deleted`}
-            icon={<CloseIcon size={13} strokeWidth={2.2} />}
-            action={{
-              label: "Undo",
-              icon: <UndoIcon />,
-              onClick: handleUndoDeleteGroup,
-            }}
-            duration={5000}
-            onDismiss={() => setDeletedGroup(null)}
-          />
-        )}
-
-        {bulkDeletedEntries !== null && (
-          <ToastNotification
-            message={`${bulkDeletedEntries.length} entries deleted`}
-            icon={<TrashIcon />}
-            action={{
-              label: "Undo",
-              icon: <UndoIcon />,
-              onClick: handleUndoBulkDelete,
-            }}
-            duration={5000}
-            onDismiss={() => setBulkDeletedEntries(null)}
-          />
-        )}
-
-        {deletedNote !== null && (
-          <ToastNotification
-            message="Note deleted"
-            icon={<TrashIcon />}
-            action={{
-              label: "Undo",
-              icon: <UndoIcon />,
-              onClick: handleUndoDeleteNote,
-            }}
-            duration={5000}
-            onDismiss={() => setDeletedNote(null)}
-          />
-        )}
-
-        {bulkDeletedNotes !== null && (
-          <ToastNotification
-            message={`${bulkDeletedNotes.length} notes deleted`}
-            icon={<TrashIcon />}
-            action={{
-              label: "Undo",
-              icon: <UndoIcon />,
-              onClick: handleUndoBulkDeleteNotes,
-            }}
-            duration={5000}
-            onDismiss={() => setBulkDeletedNotes(null)}
-          />
-        )}
-
-        {syncSkip && (
-          <ToastNotification
-            message={`Not synced: ${syncSkip.label}. ${syncSkip.reason}`}
-            icon={<CloudWarning size={13} />}
-            duration={5000}
-            onDismiss={() => setSyncSkip(null)}
-          />
-        )}
-
+        {/* The only toast in the app. Everything that used to render its own
+            - deletes, undo, pin limits, sync skips, whatever a screen raises -
+            goes through the bus and lands here, so they cannot drift apart in
+            size, position or timing. */}
         {screenToast && (
           <ToastNotification
             /* Keyed by sequence so a replacement restarts the timer bar rather
                than inheriting the old one's remaining time. */
             key={screenToast.seq}
             message={screenToast.message}
-            icon={
-              screenToast.tone === "error" ? (
-                <WarningIcon />
-              ) : (
-                <Cloud size={13} />
-              )
+            icon={toastGlyph(screenToast.glyph, screenToast.tone)}
+            action={
+              screenToast.action && {
+                label: screenToast.action.label,
+                icon: <UndoIcon />,
+                onClick: screenToast.action.onClick,
+              }
             }
             duration={
               screenToast.duration ??

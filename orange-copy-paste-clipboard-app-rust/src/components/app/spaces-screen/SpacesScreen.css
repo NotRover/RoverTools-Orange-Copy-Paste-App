@@ -315,7 +315,7 @@
 .sp-feed-card-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 
 /* Clipboard entry cards: masonry break + flex column so footer pins to bottom */
@@ -1597,10 +1597,13 @@
     visibility 0s linear 0.15s;
 }
 
+/* Left is the rail indent, right matches the clipboard and notes screens, so
+   the cards sit off the rules panel by the same amount they sit off the rail
+   instead of running into its border. */
 .sp-timeline-groups .sp-feed-card-grid,
 .sp-timeline-groups .sp-feed-card-list {
   padding-left: 15px;
-  padding-right: 2px;
+  padding-right: 14px;
 }
 
 /* ── Space settings panel (in-context, under the feed header) ── */

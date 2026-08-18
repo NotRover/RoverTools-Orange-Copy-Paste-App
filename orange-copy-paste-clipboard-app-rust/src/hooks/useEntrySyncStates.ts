@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { usePendingRemovals } from "./pendingRemoval";
 
 export type EntrySyncState = "synced" | "pending";
 
@@ -57,6 +58,9 @@ export function useSyncBadgesVisible(): boolean {
 
 export function useEntrySyncStates(): Record<string, EntrySyncState> {
   const [states, setStates] = useState<Record<string, EntrySyncState>>({});
+  // Items whose server copy is waiting out an Undo toast read as not on the
+  // account, so the badge clears on the click rather than five seconds later.
+  const pendingGone = usePendingRemovals();
 
   const refresh = useCallback(() => {
     invoke<Record<string, EntrySyncState>>("sync_get_entry_states")
@@ -83,5 +87,11 @@ export function useEntrySyncStates(): Record<string, EntrySyncState> {
     };
   }, [refresh]);
 
-  return states;
+  return useMemo(() => {
+    if (pendingGone.size === 0) return states;
+    const shown: Record<string, EntrySyncState> = {};
+    for (const [key, state] of Object.entries(states))
+      if (!pendingGone.has(`cloud:${key}`)) shown[key] = state;
+    return shown;
+  }, [states, pendingGone]);
 }

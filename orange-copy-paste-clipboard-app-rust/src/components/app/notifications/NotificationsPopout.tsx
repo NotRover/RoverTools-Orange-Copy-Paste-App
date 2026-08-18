@@ -9,6 +9,8 @@ import {
   Megaphone,
   Alarm,
 } from "@phosphor-icons/react";
+import { deferDestructive } from "../toast/toastBus";
+import { usePendingRemovals } from "../../../hooks/pendingRemoval";
 import type { AppNotification, NotificationKind } from "../../../types";
 import "./NotificationsPopout.css";
 
@@ -175,11 +177,16 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
     [items],
   );
 
+  // Rows whose clearing is waiting out its Undo toast are already gone from the
+  // panel: the list is read from Rust, which still has them until the toast
+  // runs out.
+  const pendingGone = usePendingRemovals();
   const filtered = useMemo(() => {
-    if (chip === "all") return items;
+    const here = items.filter((n) => !pendingGone.has(`notification:${n.id}`));
+    if (chip === "all") return here;
     const match = CHIPS.find((c) => c.key === chip);
-    return match ? items.filter((n) => match.kinds.includes(n.kind)) : items;
-  }, [items, chip]);
+    return match ? here.filter((n) => match.kinds.includes(n.kind)) : here;
+  }, [items, chip, pendingGone]);
 
   // A page count is a property of the current filter, so switching chips starts
   // over. Without this, filtering after paging deep shows a "Show more" that
@@ -256,7 +263,19 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
             <button
               className="ntf-link"
               onClick={() => {
-                invoke("notifications_clear_read").then(onRefresh).catch(() => {});
+                deferDestructive(
+                  "Read notifications cleared",
+                  () =>
+                    invoke("notifications_clear_read")
+                      .then(onRefresh)
+                      .catch(() => {}),
+                  {
+                    key: "notifications-clear-read",
+                    hides: items
+                      .filter((n) => n.read)
+                      .map((n) => `notification:${n.id}`),
+                  },
+                );
               }}
             >
               Clear read
