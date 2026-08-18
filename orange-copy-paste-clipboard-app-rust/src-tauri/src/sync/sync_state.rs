@@ -68,6 +68,28 @@ impl SyncStateStore {
         self.save();
     }
 
+    /// The account this device last signed in as, empty before the first one.
+    pub fn user_id(&self) -> &str {
+        &self.data.user_id
+    }
+
+    /// Forget everything that described the previous account's server state.
+    ///
+    /// The cursor is the dangerous one: it is a wall-clock server timestamp, so
+    /// the account being signed into inherits a mark set roughly "now" and pulls
+    /// only what is created from here on. Its whole back catalogue is older than
+    /// that, so it silently never arrives. The settings stamp and the backfill
+    /// list are the same mistake in smaller form.
+    ///
+    /// `device_id` and `user_id` are left to the caller — it is about to write
+    /// both for the account signing in.
+    pub fn reset_for_new_account(&mut self) {
+        self.data.last_server_ts = None;
+        self.data.settings_updated_at = 0;
+        self.data.history_backfilled.clear();
+        self.save();
+    }
+
     pub fn set_user_id(&mut self, id: &str) {
         self.data.user_id = id.to_string();
         self.save();

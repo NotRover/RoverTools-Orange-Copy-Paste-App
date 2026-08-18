@@ -50,6 +50,7 @@ type UnsyncedPreview = {
 const MODE_OPTIONS: { value: SyncMode; label: string }[] = [
   { value: "realtime", label: "Realtime" },
   { value: "passive", label: "Passive" },
+  { value: "manual", label: "Manual" },
 ];
 
 function formatBytes(bytes: number): string {
@@ -87,6 +88,20 @@ const AccountScreen: React.FC = () => {
   const [presenceOverrides, setPresenceOverrides] = useState<
     Record<string, boolean>
   >({});
+
+  // Every device list lands through here so the overrides never outlive the
+  // rows they describe. A revoked device keeps its id when it registers again,
+  // and a stale "online" from before the revoke would then sit on top of an
+  // accurate snapshot saying otherwise.
+  const applyDevices = useCallback((ds: SyncDevice[]) => {
+    setDevices(ds);
+    setPresenceOverrides((prev) => {
+      const live = Object.fromEntries(
+        Object.entries(prev).filter(([id]) => ds.some((d) => d.id === id)),
+      );
+      return Object.keys(live).length === Object.keys(prev).length ? prev : live;
+    });
+  }, []);
 
   // Login form
   const [loginEmail, setLoginEmail] = useState("");
@@ -144,10 +159,14 @@ const AccountScreen: React.FC = () => {
       if (u) {
         refreshQuota();
         invoke<string>("sync_get_mode")
-          .then((m) => setSyncMode(m === "passive" ? "passive" : "realtime"))
+          .then((m) =>
+            setSyncMode(
+              m === "passive" || m === "manual" ? m : "realtime",
+            ),
+          )
           .catch(() => {});
         invoke<SyncDevice[]>("sync_list_devices")
-          .then(setDevices)
+          .then(applyDevices)
           .catch(() => {});
         invoke<SyncStatusInfo>("sync_get_status")
           .then((s) => {
@@ -157,7 +176,7 @@ const AccountScreen: React.FC = () => {
           .catch(() => {});
       }
     });
-  }, [refreshQuota]);
+  }, [refreshQuota, applyDevices]);
 
   // ── Silent session restore (fired by App on startup) ────────────
   useEffect(() => {
@@ -166,13 +185,13 @@ const AccountScreen: React.FC = () => {
       setSyncUser(event.payload);
       refreshQuota();
       invoke<SyncDevice[]>("sync_list_devices")
-        .then(setDevices)
+        .then(applyDevices)
         .catch(() => {});
     }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [refreshQuota]);
+  }, [refreshQuota, applyDevices]);
 
   // ── Device presence: mark devices online/offline as events arrive ──
   useEffect(() => {
@@ -194,6 +213,24 @@ const AccountScreen: React.FC = () => {
   }, []);
 
   // ── Cloud Sync handlers ─────────────────────────────────────────
+  // Only reachable while signed out — the way back from the enable hero.
+  // Signed in, "Manual" is how you stop sync; nothing here signs anyone out.
+  const disableSync = async () => {
+    setSyncEnabled(false);
+    try {
+      await invoke("sync_set_enabled", { enabled: false });
+      setSyncUser(null);
+      setSyncStatus(null);
+      setDevices([]);
+      setPresenceOverrides({});
+      setQuota(null);
+      setDeviceError(null);
+    } catch (e) {
+      setSyncEnabled(true);
+      console.error("sync_set_enabled failed", e);
+    }
+  };
+
   const handleSyncToggle = async () => {
     const next = !syncEnabled;
     setSyncEnabled(next);
@@ -221,7 +258,7 @@ const AccountScreen: React.FC = () => {
     setSyncUser(user);
     refreshQuota();
     invoke<SyncDevice[]>("sync_list_devices")
-      .then(setDevices)
+      .then(applyDevices)
       .catch(() => {});
     invoke<SyncStatusInfo>("sync_get_status")
       .then((s) => {
@@ -464,8 +501,7 @@ const AccountScreen: React.FC = () => {
       // The Rust command refuses to revoke the current device with a clear
       // message, so Remove is shown on every row and the error surfaces here.
       await invoke("sync_revoke_device", { deviceId });
-      const ds = await invoke<SyncDevice[]>("sync_list_devices");
-      setDevices(ds);
+      applyDevices(await invoke<SyncDevice[]>("sync_list_devices"));
     } catch (e) {
       setDeviceError(errMsg(e, "Could not remove the device."));
     }
@@ -485,7 +521,14 @@ const AccountScreen: React.FC = () => {
 
   const status = !syncStatus
     ? { kind: "checking", label: "Checking..." }
-    : syncStatus.connected
+    : // Connected and holding is still holding. Manual mode would otherwise
+      // read "Synced" over a queue it is deliberately not sending.
+      syncMode === "manual" && syncStatus.pending_count > 0
+      ? {
+          kind: "pending",
+          label: `${syncStatus.pending_count} waiting`,
+        }
+      : syncStatus.connected
       ? { kind: "connected", label: "Synced" }
       : syncStatus.pending_count > 0
         ? { kind: "pending", label: `${syncStatus.pending_count} pending` }
@@ -986,6 +1029,17 @@ const AccountScreen: React.FC = () => {
                 End-to-end encrypted. Only you can read your data
               </div>
             </div>
+
+            {/* Enabling sync is one click from the hero, so backing out of it
+                has to be one click too - otherwise the only way out of this
+                screen is creating an account. */}
+            <button
+              type="button"
+              className="acct-off-link"
+              onClick={() => void disableSync()}
+            >
+              Turn off cloud sync
+            </button>
           </>
         ) : (
           /* ── Signed in ── */
@@ -1115,9 +1169,7 @@ const AccountScreen: React.FC = () => {
 
               <div className="acct-card acct-mode">
                 <div className="acct-mode-head">
-                  <span className="acct-row-name">
-                    Items from your other devices
-                  </span>
+                  <span className="acct-row-name">Automatic syncing</span>
                   <div className="acct-seg">
                     {MODE_OPTIONS.map((opt) => (
                       <button
@@ -1133,12 +1185,15 @@ const AccountScreen: React.FC = () => {
                 </div>
                 <p className="acct-card-desc">
                   {syncMode === "realtime"
-                    ? "Items from your other devices arrive the moment they are copied."
-                    : "Items from your other devices arrive every 5 minutes, or when you press Sync now. What you copy here still uploads right away."}
+                    ? "Items from your other devices arrive the moment they are copied, and what you copy here uploads right away."
+                    : syncMode === "passive"
+                      ? "Items from your other devices arrive every 5 minutes, or when you press Sync now. What you copy here still uploads right away."
+                      : "Nothing uploads or downloads on its own. What you copy and delete waits on this device until you press Sync now. You stay signed in."}
                 </p>
                 <p className="acct-mode-note">
-                  Spaces are not affected. What other people share with you
-                  always arrives live.
+                  Spaces are not affected. What you share to a space still goes
+                  out right away, and what other people share with you always
+                  arrives live.
                 </p>
               </div>
 
@@ -1345,6 +1400,7 @@ const AccountScreen: React.FC = () => {
                 </div>
               </div>
             </section>
+
 
             <p className="auth-secure acct-secure-foot">
               <Key size={12} weight="fill" />

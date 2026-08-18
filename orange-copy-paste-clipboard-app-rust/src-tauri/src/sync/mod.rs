@@ -85,6 +85,9 @@ struct PushCtx {
     budget: BlobBudget,
     /// Pushes running right now, so the UI can show them as pending.
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// Manual mode: hold personal pushes in the queue instead of sending them.
+    /// Anything addressed to a space ignores this — see [`SyncMode::Manual`].
+    hold_personal: bool,
 }
 
 /// Bytes of blob storage left on the account, as last known.
@@ -173,7 +176,7 @@ fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFil
 }
 
 /// Current Unix time in milliseconds.
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -859,8 +862,18 @@ impl SyncClient {
         }
 
         // 8. Update persisted sync state.
+        //
+        // A different account than last time means the id map and the cursor
+        // describe a server view this session has no claim to, so both go. Only
+        // on an actual change: an empty previous id is a first sign-in, where
+        // they are either empty or already this account's.
         {
             let mut state = self.sync_state.lock();
+            let previous = state.user_id().to_string();
+            if !previous.is_empty() && previous != user_id {
+                self.id_map.lock().reset();
+                state.reset_for_new_account();
+            }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);
         }
@@ -1246,6 +1259,7 @@ impl SyncClient {
             gate: Arc::clone(&self.push_gate),
             budget: Arc::clone(&self.blob_budget),
             in_flight: Arc::clone(&self.in_flight),
+            hold_personal: *self.sync_mode.lock() == SyncMode::Manual,
         }
     }
 
@@ -1423,6 +1437,7 @@ impl SyncClient {
         let id_map = Arc::clone(&self.id_map);
         let status = Arc::clone(&self.status);
         let gate = Arc::clone(&self.push_gate);
+        let hold_personal = *self.sync_mode.lock() == SyncMode::Manual;
         let type_str = entry_type.as_str().to_string();
         let map_key = format!("{type_str}:{client_id}");
         // The tombstone must reach the same spaces the entry did, so members
@@ -1486,9 +1501,15 @@ impl SyncClient {
             let _permit = gate.acquire_owned().await;
             // Always tombstone — even if offline (invariant #5).  A tombstone is
             // a push with deleted_at set, keyed by client_id (no server_id).
-            if let (Some(http), Some(umk)) =
-                (http.as_ref().filter(|h| h.is_authenticated()), umk.as_ref())
-            {
+            //
+            // Manual mode queues it rather than sending, same rule as a push:
+            // held while it is only our own copy, sent when the deletion has to
+            // reach a space's other members.
+            let hold = hold_personal && space_ids.is_empty();
+            if let (Some(http), Some(umk)) = (
+                http.as_ref().filter(|h| !hold && h.is_authenticated()),
+                umk.as_ref(),
+            ) {
                 if let Some(req) = tombstone_req(umk, &client_id, &type_str, space_ids) {
                     match http.push_entries(vec![req]).await {
                         Ok(_) => {
@@ -1529,7 +1550,9 @@ impl SyncClient {
         };
         let state = self.app.state::<crate::state::AppState>();
         let my_device = self.sync_state.lock().data.device_id.clone();
-        let passive = *self.sync_mode.lock() == SyncMode::Passive;
+        // Both non-realtime modes hold personal entries back from live
+        // application; they differ in whether anything fetches them later.
+        let passive = *self.sync_mode.lock() != SyncMode::Realtime;
 
         let mut clip_changed = false;
         let mut notes_changed = false;
@@ -1540,7 +1563,7 @@ impl SyncClient {
             if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
                 continue;
             }
-            // Passive mode: personal entries are not applied live. Space
+            // Passive and manual: personal entries are not applied live. Space
             // entries always are — spaces are realtime by definition.
             if live && passive && e.space_ids.is_empty() {
                 continue;
@@ -1605,8 +1628,26 @@ impl SyncClient {
             // Already removed here. Re-merging would resurrect an item the user
             // took out, which is exactly what a member's local removal must not
             // do — the server still holds it, so every pull would offer it.
-            if self.id_map.lock().is_deleted(&key) {
-                continue;
+            //
+            // Unless it was put back. A space removal strips the space id from
+            // the row, and pull only matches rows that still carry one of our
+            // spaces — so a row arriving with a space we removed it from is the
+            // author sharing it again, not the old copy coming round. Dropping
+            // a record only this device made (`local_only`) says nothing about
+            // the space, so those keep blocking.
+            {
+                let mut id_map = self.id_map.lock();
+                match id_map.deleted_marker(&key) {
+                    Some(m) if m.content_gone => {
+                        let reshared = !m.local_only
+                            && e.space_ids.iter().any(|s| m.space_ids.contains(s));
+                        if !reshared {
+                            continue;
+                        }
+                        id_map.clear_deleted(&key);
+                    }
+                    _ => {}
+                }
             }
 
             // Unwrap the per-entry CEK: "personal" under the UMK for our own
@@ -1681,6 +1722,20 @@ impl SyncClient {
                                     owner_id: e.user_id.clone(),
                                 },
                             );
+                        }
+                    }
+                    // Who wrote this is known now and has nothing to do with the
+                    // blob, so it is recorded before the download rather than
+                    // after it. Until this lands the entry looks like ours: the
+                    // ownership guards all read `is_remote`, so it could be
+                    // edited, pushed and shared, and a removal arriving mid
+                    // download rendered as "You stopped sharing this". A failed
+                    // download made that permanent.
+                    if from_space {
+                        let mut id_map = self.id_map.lock();
+                        id_map.mark_entry_remote(&key);
+                        if let Some(owner) = e.user_id.as_deref() {
+                            id_map.set_entry_owner(&key, owner);
                         }
                     }
                     continue;
@@ -2052,10 +2107,11 @@ impl SyncClient {
     /// to disappear without trace, so a space could not answer "what happened
     /// to the thing I posted here" — the row simply was not there any more.
     ///
-    /// `by_me` says who did it, which is the only thing this side cannot infer:
-    /// the entry-removed event means a space owner acted, and the command means
-    /// the reader did.
-    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_me: bool) {
+    /// `by_author` says whether the person who wrote the entry is also the one
+    /// who removed it — the only thing this side cannot infer. It travels on the
+    /// entry-removed event as `removed_by`; the local command passes true,
+    /// since the reader can only unshare what they posted.
+    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_author: bool) {
         use crate::state::app_state::AppState;
         use std::sync::atomic::Ordering;
 
@@ -2079,7 +2135,7 @@ impl SyncClient {
                     space_ids: vec![space_id.to_string()],
                     owner_id: None,
                     deleted_at: now_ms(),
-                    by_author: by_me,
+                    by_author,
                     content_gone: false,
                     local_only: false,
                 },
@@ -2116,7 +2172,7 @@ impl SyncClient {
                     space_ids,
                     owner_id,
                     deleted_at: now_ms(),
-                    by_author: false,
+                    by_author,
                     content_gone: true,
                     local_only: false,
                 },
@@ -2204,6 +2260,21 @@ impl SyncClient {
         }
     }
 
+    /// Mirror our own socket state onto our row in every cached space.
+    ///
+    /// Our presence reaches other members as a `user:presence` event, but our
+    /// own copy of the member list came from a REST snapshot taken around the
+    /// same moment the socket came up — so whichever landed last won, and it
+    /// was routinely the snapshot saying we were offline while we sat there
+    /// connected. This is the one presence fact this device knows for certain,
+    /// so it stops asking the server for it.
+    pub(crate) fn apply_self_presence(&self, online: bool) {
+        let user_id = self.current_user().map(|u| u.user_id);
+        if let Some(user_id) = user_id {
+            self.apply_member_presence(&user_id, online);
+        }
+    }
+
     /// Spawn a background flush + delta pull on the sync runtime.  Called right
     /// after login so a freshly-signed-in device catches up without blocking
     /// the `sync_login` command's return.
@@ -2214,6 +2285,12 @@ impl SyncClient {
             // without this the first pull after a restart could not decrypt any
             // shared entry.
             self.reconcile_spaces().await;
+            // Spaces are recovered either way — they are not what manual mode
+            // holds. The personal half is: flushing here would send the very
+            // queue the mode exists to keep, so it waits for Sync now.
+            if *self.sync_mode.lock() == SyncMode::Manual {
+                return;
+            }
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
             }
@@ -3065,7 +3142,16 @@ async fn push_entry_task(
         wrapped_keys,
     };
 
-    if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {
+    // Manual mode sends nothing of its own accord, so this takes the queue path
+    // below and the entry waits for Sync now. An entry going to a space is not
+    // "of its own accord": someone is publishing it to other people, and holding
+    // it would leave them looking at a space that silently lost an item.
+    let hold = ctx.hold_personal && push_req.space_ids.is_empty();
+    if let Some(http) = ctx
+        .http
+        .as_ref()
+        .filter(|h| !hold && h.is_authenticated())
+    {
         match http.push_entries(vec![push_req.clone()]).await {
             Ok(result) => {
                 if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
@@ -3105,7 +3191,7 @@ async fn push_entry_task(
         }
     }
 
-    // Offline / unauthenticated — queue
+    // Offline, unauthenticated, or held by manual mode — queue
     let entry_json = match serde_json::to_string(&push_req) {
         Ok(j) => j,
         Err(e) => {

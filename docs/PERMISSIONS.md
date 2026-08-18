@@ -100,7 +100,9 @@ If that ever needs closing, the fix is server-side: reject a push whose
 - **Removing your copy of a shared entry.** Handled by local delete. There is no
   separate "stop showing me this" — deleting locally is that, and it leaves a
   `local_only` placeholder in the Spaces feed.
-- **Getting an entry back after unsharing it.** Re-sharing works; the members who
-  already dropped their copy do not get it again, because their `deleted_marker`
-  blocks the merge. Deliberate, but it means unshare-then-reshare is not a
-  round trip.
+- **Getting an entry back after unsharing it.** Works. A removal takes the space
+  id off the row, and pull only matches rows still carrying one of your spaces -
+  so a row arriving with a space it was removed from is the author sharing it
+  again, and the merge clears the marker rather than blocking on it. A copy you
+  dropped yourself (`local_only`) keeps blocking, since nothing about the space
+  changed.
