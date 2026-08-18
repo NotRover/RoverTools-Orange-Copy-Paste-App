@@ -1447,6 +1447,7 @@ impl SyncClient {
                     deleted_at: now_ms(),
                     by_author: !is_remote,
                     content_gone: true,
+                    local_only: is_remote,
                 },
             );
         }
@@ -1593,6 +1594,7 @@ impl SyncClient {
                             deleted_at: e.deleted_at.unwrap_or_else(now_ms),
                             by_author: true,
                             content_gone: true,
+                            local_only: false,
                         },
                     );
                 }
@@ -2029,6 +2031,7 @@ impl SyncClient {
                 deleted_at: now_ms(),
                 by_author: true,
                 content_gone: false,
+                local_only: false,
             },
         );
     }
@@ -2078,6 +2081,7 @@ impl SyncClient {
                     deleted_at: now_ms(),
                     by_author: by_me,
                     content_gone: false,
+                    local_only: false,
                 },
             );
             drop(id_map);
@@ -2114,6 +2118,7 @@ impl SyncClient {
                     deleted_at: now_ms(),
                     by_author: false,
                     content_gone: true,
+                    local_only: false,
                 },
             );
             id_map.remove_entry(&key);

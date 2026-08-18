@@ -569,15 +569,18 @@ const RemovedRow: React.FC<{
         {isNote ? <NoteIcon size={10} /> : <Clipboard size={10} />}
       </span>
       <span className="sp-removed-text">
-        {/* Two different things, and the difference matters: one took the
-            item away, the other only took it out of this space. */}
-        {item.marker.content_gone
-          ? item.marker.by_author
-            ? `Removed this ${what}`
-            : `This ${what} was taken down by a space owner`
-          : item.marker.by_author
-            ? `Stopped sharing this ${what} here`
-            : `A space owner took this ${what} out of the space`}
+        {/* Three different things, and the differences matter: one took the
+            item away, one took it out of this space, and one only dropped this
+            device's copy of something still shared with everyone else. */}
+        {item.marker.local_only
+          ? `Removed your copy of this ${what}`
+          : item.marker.content_gone
+            ? item.marker.by_author
+              ? `Removed this ${what}`
+              : `This ${what} was taken down by a space owner`
+            : item.marker.by_author
+              ? `Stopped sharing this ${what} here`
+              : `A space owner took this ${what} out of the space`}
       </span>
       <span
         className="sp-removed-time"
@@ -660,7 +663,6 @@ const ClipFeedCard: React.FC<{
           }}
         >
           <DirectionBadge incoming={incoming} />
-          <OwnerBadge owner={owner} incoming={incoming} />
           {showSourceBadge && (
             <span className="sp-list-source-badge sp-list-source-badge--clip">
               <Clipboard size={10} />
@@ -669,6 +671,7 @@ const ClipFeedCard: React.FC<{
           <span className="sp-list-type-wrap">
             <EntryTypePill kind={dk} />
           </span>
+          <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-text">{truncateText(text, 100)}</span>
           <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
           <button
@@ -834,10 +837,10 @@ const NoteFeedCard: React.FC<{
           onContextMenu={openMenu}
         >
           <DirectionBadge incoming={incoming} />
-          <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-note-badge">
             <NoteIcon size={12} />
           </span>
+          <OwnerBadge owner={owner} incoming={incoming} />
           <div className="sp-list-note-content">
             <span className="sp-list-title">
               {note.title || "(Untitled note)"}

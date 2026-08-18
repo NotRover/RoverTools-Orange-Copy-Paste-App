@@ -87,6 +87,9 @@ export interface DeletedMarker {
   /** Whether the local copy went with it. False means the item only left this
    *  space and is still yours. */
   content_gone: boolean;
+  /** True when you removed your own copy of someone else's item. Nothing
+   *  changed in the space - it is still there for everyone else. */
+  local_only: boolean;
 }
 
 /** Per-space send filter: which of my entries auto-flow into the space.

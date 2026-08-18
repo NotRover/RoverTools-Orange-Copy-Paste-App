@@ -366,6 +366,17 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     );
   }, [multiSelect.selectedIds, spaceShares.shares]);
 
+  // Cloud and space actions only ever apply to entries we wrote: rows are keyed
+  // by owner, so a push or a tombstone for someone else's entry is a no-op that
+  // would still be counted in the toast.
+  const selectedOwnIds = useMemo(
+    () =>
+      [...multiSelect.selectedIds].filter(
+        (id) => !remoteKeys.has(`clipboard:${id}`),
+      ),
+    [multiSelect.selectedIds, remoteKeys],
+  );
+
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -491,24 +502,16 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   onBulkToggleSpace={(spaceId, share) =>
                     spaceShares.bulkToggle(
                       "clipboard",
-                      [...multiSelect.selectedIds],
+                      selectedOwnIds,
                       spaceId,
                       share,
                     )
                   }
                   onBulkSync={() =>
-                    void setCloudCopy(
-                      [...multiSelect.selectedIds],
-                      "clipboard",
-                      true,
-                    )
+                    void setCloudCopy(selectedOwnIds, "clipboard", true)
                   }
                   onBulkUnsync={() =>
-                    void setCloudCopy(
-                      [...multiSelect.selectedIds],
-                      "clipboard",
-                      false,
-                    )
+                    void setCloudCopy(selectedOwnIds, "clipboard", false)
                   }
                 />
               )}
@@ -645,7 +648,11 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                                     )
                             }
                             inCloud={!!entrySyncStates[`clipboard:${entry.id}`]}
-                            onToggleCloud={toggleEntryCloud}
+                            onToggleCloud={
+                              remoteKeys.has(`clipboard:${entry.id}`)
+                                ? undefined
+                                : toggleEntryCloud
+                            }
                           />
                         ))}
                       </div>

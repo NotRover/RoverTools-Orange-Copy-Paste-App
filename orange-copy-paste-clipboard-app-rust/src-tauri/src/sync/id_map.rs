@@ -66,6 +66,14 @@ pub struct DeletedMarker {
     /// their old meaning.
     #[serde(default = "yes")]
     pub content_gone: bool,
+    /// True when this device dropped its own copy of someone else's item.
+    ///
+    /// Nothing happened in the space - the item is still there for everyone
+    /// else, and its author still has it. Without this the placeholder read
+    /// "taken down by a space owner", which is a different event entirely and
+    /// not one that took place.
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 fn yes() -> bool {

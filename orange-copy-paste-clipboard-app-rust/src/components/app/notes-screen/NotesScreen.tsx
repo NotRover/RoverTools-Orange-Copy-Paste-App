@@ -301,6 +301,15 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   }, [multiSelect.isSelecting]);
 
   // Bulk-selection state (notes have no "Saved" concept, so allSaved is unused).
+  // Cloud actions only apply to notes we wrote - see ClipboardScreen for why.
+  const selectedOwnIds = useMemo(
+    () =>
+      [...multiSelect.selectedIds].filter(
+        (id) => !remoteKeys.has(`note:${id}`),
+      ),
+    [multiSelect.selectedIds, remoteKeys],
+  );
+
   const { allPinned, commonGroups } = useSelectionSummary(
     notes,
     multiSelect.selectedIds,
@@ -408,18 +417,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       onBulkRemoveGroup([...multiSelect.selectedIds], group);
                   }}
                   onBulkSync={() =>
-                    void setCloudCopy(
-                      [...multiSelect.selectedIds],
-                      "note",
-                      true,
-                    )
+                    void setCloudCopy(selectedOwnIds, "note", true)
                   }
                   onBulkUnsync={() =>
-                    void setCloudCopy(
-                      [...multiSelect.selectedIds],
-                      "note",
-                      false,
-                    )
+                    void setCloudCopy(selectedOwnIds, "note", false)
                   }
                   availableGroups={availableGroups}
                   commonGroups={commonGroups}
@@ -648,9 +649,13 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 : (spaceId) => spaceShares.toggle("note", menuNote.id, spaceId)
             }
             inCloud={!!noteSyncStates[`note:${menuNote.id}`]}
-            onToggleCloud={(upload) => {
-              void setCloudCopy([menuNote.id], "note", upload);
-            }}
+            onToggleCloud={
+              remoteKeys.has(`note:${menuNote.id}`)
+                ? undefined
+                : (upload) => {
+                    void setCloudCopy([menuNote.id], "note", upload);
+                  }
+            }
             showCopy={false}
             showSave={false}
           />
