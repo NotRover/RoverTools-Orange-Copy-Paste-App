@@ -30,13 +30,21 @@ import {
   groupColor,
 } from "../../../types";
 import { UserAvatar } from "../../UserAvatar";
-import { EntryTypePill } from "../../entry-types/EntryTypePill";
+import { EntryTypePill, TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import Topbar, { SortDropdown, LayoutSegment } from "../topbar/Topbar";
-import { RowsIcon } from "../../icons";
+import {
+  CheckIcon,
+  MultiSelectIcon,
+  RowsIcon,
+  TrashIcon,
+} from "../../icons";
+import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import {
+  ActiveFilterStrip,
   CardDivider,
   DateSection,
   FilterCardShell,
@@ -82,6 +90,7 @@ import {
   toastError,
 } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
+import { useSticky, useStickySet } from "../../../hooks/useSticky";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
@@ -102,6 +111,12 @@ type ContentFeedItem = Exclude<FeedItem, { kind: "removed" }>;
 
 /** When a feed item happened. A placeholder is placed by when it was removed,
  *  which is the only time it has. */
+/** A feed key ("clipboard:<id>") back into the pair the commands take. */
+function splitFeedKey(key: string): ["clipboard" | "note", string] {
+  const at = key.indexOf(":");
+  return [key.slice(0, at) as "clipboard" | "note", key.slice(at + 1)];
+}
+
 const feedTimestamp = (item: FeedItem): number =>
   item.kind === "clipboard"
     ? item.entry.timestamp
@@ -598,6 +613,14 @@ const RemovedRow: React.FC<{
 
 // ── Clipboard feed card ───────────────────────────────────────────────
 
+/* The same box the clipboard cards draw, so a selection reads identically on
+   both screens. Every feed card shape gets it. */
+const SelectBox: React.FC = () => (
+  <div className="entry-card-checkbox">
+    <CheckIcon size={10} strokeWidth={3} />
+  </div>
+);
+
 const ClipFeedCard: React.FC<{
   entry: ClipboardEntry;
   onCopy: (id: string) => void;
@@ -609,6 +632,11 @@ const ClipFeedCard: React.FC<{
   owner: SpaceMember | null;
   /** Owner-only takedown, absent when we do not own the space. */
   onRemove?: () => void;
+  /** Bulk selection: on while the feed is in select mode. */
+  selecting?: boolean;
+  selected?: boolean;
+  /** Toggle this card. `range` is true for a shift-click. */
+  onSelect?: (range: boolean) => void;
 }> = ({
   entry,
   onCopy,
@@ -618,6 +646,9 @@ const ClipFeedCard: React.FC<{
   incoming,
   owner,
   onRemove,
+  selecting = false,
+  selected = false,
+  onSelect,
 }) => {
   const [copied, setCopied] = useState(false);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
@@ -642,6 +673,23 @@ const ClipFeedCard: React.FC<{
     [],
   );
 
+  // In select mode the card is a checkbox: a click picks it rather than
+  // opening it, and the right-click menu would offer actions that only make
+  // sense one at a time.
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (selecting && onSelect) {
+      onSelect(e.shiftKey);
+      return;
+    }
+    onView(entry);
+  };
+  const handleContext = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (selecting) return;
+    setMenuPos({ x: e.clientX, y: e.clientY });
+  };
+
   const dk = deriveDisplayKind(entry);
 
   // ── List mode ──────────────────────────────────────────────────────
@@ -657,14 +705,11 @@ const ClipFeedCard: React.FC<{
     return (
       <>
         <div
-          className="sp-list-card"
-          onClick={() => onView(entry)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setMenuPos({ x: e.clientX, y: e.clientY });
-          }}
+          className={`sp-list-card${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+          onClick={handleCardClick}
+          onContextMenu={handleContext}
         >
+          {selecting && <SelectBox />}
           <DirectionBadge incoming={incoming} />
           {showSourceBadge && (
             <span className="sp-list-source-badge sp-list-source-badge--clip">
@@ -677,12 +722,14 @@ const ClipFeedCard: React.FC<{
           <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-text">{truncateText(text, 100)}</span>
           <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
-          <button
-            className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
-            onClick={handleCopy}
-          >
-            {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
-          </button>
+          {!selecting && (
+            <button
+              className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
+              onClick={handleCopy}
+            >
+              {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
+            </button>
+          )}
         </div>
         <FeedCardMenu
           pos={menuPos}
@@ -746,14 +793,11 @@ const ClipFeedCard: React.FC<{
   return (
     <>
       <div
-        className="entry-card sp-feed-entry-card"
-        onClick={() => onView(entry)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setMenuPos({ x: e.clientX, y: e.clientY });
-        }}
+        className={`entry-card sp-feed-entry-card${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+        onClick={handleCardClick}
+        onContextMenu={handleContext}
       >
+        {selecting && <SelectBox />}
         {mediaSection}
         <div className="card-body">
           {preview}
@@ -776,14 +820,16 @@ const ClipFeedCard: React.FC<{
             ) : (
               <span className="card-time">{timeAgo(entry.timestamp)}</span>
             )}
-            <button
-              className="sp-card-copy-btn"
-              onClick={handleCopy}
-              data-tooltip="Copy"
-              data-tooltip-pos="top"
-            >
-              <Copy size={10} />
-            </button>
+            {!selecting && (
+              <button
+                className="sp-card-copy-btn"
+                onClick={handleCopy}
+                data-tooltip="Copy"
+                data-tooltip-pos="top"
+              >
+                <Copy size={10} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -812,6 +858,11 @@ const NoteFeedCard: React.FC<{
   owner: SpaceMember | null;
   /** Owner-only takedown, absent when we do not own the space. */
   onRemove?: () => void;
+  /** Bulk selection: on while the feed is in select mode. */
+  selecting?: boolean;
+  selected?: boolean;
+  /** Toggle this card. `range` is true for a shift-click. */
+  onSelect?: (range: boolean) => void;
 }> = ({
   note,
   entries,
@@ -821,24 +872,39 @@ const NoteFeedCard: React.FC<{
   incoming,
   owner,
   onRemove,
+  selecting = false,
+  selected = false,
+  onSelect,
 }) => {
   const plain = extractNoteText(note.content);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
-  const openMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-  }, []);
+  const openMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (selecting) return;
+      setMenuPos({ x: e.clientX, y: e.clientY });
+    },
+    [selecting],
+  );
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (selecting && onSelect) {
+      onSelect(e.shiftKey);
+      return;
+    }
+    onView(note);
+  };
 
   // ── List mode ──────────────────────────────────────────────────────
   if (layout === "list") {
     return (
       <>
         <div
-          className="sp-list-card sp-list-card--note"
-          onClick={() => onView(note)}
+          className={`sp-list-card sp-list-card--note${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+          onClick={handleCardClick}
           onContextMenu={openMenu}
         >
+          {selecting && <SelectBox />}
           <DirectionBadge incoming={incoming} />
           <span className="sp-list-note-badge">
             <NoteIcon size={12} />
@@ -870,10 +936,11 @@ const NoteFeedCard: React.FC<{
   return (
     <>
       <div
-        className="ns-card"
-        onClick={() => onView(note)}
+        className={`ns-card${selecting ? " sp-selectable" : ""}${selected ? " sp-selected" : ""}`}
+        onClick={handleCardClick}
         onContextMenu={openMenu}
       >
+        {selecting && <SelectBox />}
         <div className="ns-card-body">
           <div className="ns-card-title">
             {deriveNoteTitle(note.title, note.content)}
@@ -1707,8 +1774,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     cache.showRemoved,
   );
   const [spaceError, setSpaceError] = useState<string | null>(null);
-  const [feedFilter, setFeedFilter] = useState<FeedFilter>("all");
-  const [search, setSearch] = useState("");
+  // Sticky, like the clipboard and notes filters: this screen unmounts on a
+  // switch, and coming back to an unfiltered feed with every day expanded
+  // undoes work the user did on purpose.
+  const [feedFilter, setFeedFilter] = useSticky<FeedFilter>("sp-f-kind", "all");
+  const [search, setSearch] = useSticky("sp-f-search", "");
   const [sort, setSort] = useState<SortMode>(
     () => (localStorage.getItem("spaces-sort") as SortMode) ?? "newest",
   );
@@ -1717,19 +1787,20 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
   // Never a placeholder: there is nothing to open.
   const [detailItem, setDetailItem] = useState<ContentFeedItem | null>(null);
-  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+  const [collapsedDays, setCollapsedDays] = useStickySet("sp-collapsed-days");
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Feed filter state
-  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
-    new Set(),
+  // Feed filter state. The dropdown being open is the one thing that is not
+  // remembered - it would reopen itself on every return visit.
+  const [selectedKinds, setSelectedKinds] = useStickySet<DisplayKind>(
+    "sp-f-kinds",
   );
-  const [datePreset, setDatePreset] = useState<DatePreset>("any");
-  const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState("");
+  const [datePreset, setDatePreset] = useSticky<DatePreset>("sp-f-date", "any");
+  const [dateAfter, setDateAfter] = useSticky("sp-f-date-after", "");
+  const [dateBefore, setDateBefore] = useSticky("sp-f-date-before", "");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -1750,6 +1821,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           ).length
         : 0,
     [deletedMarkers, selected, placeholdersOn],
+  );
+
+  const multiSelect = useMultiSelect();
+
+  // Removing is the only bulk action here, so only what this account may
+  // remove can be picked: the space owner moderates anything, a member takes
+  // out what they shared. Same rule as the card menu, and the backend narrows
+  // to the caller's own rows for non-owners regardless.
+  const canRemoveKey = useCallback(
+    (key: string) =>
+      !!selected && (selected.is_owner || !remoteKeys.has(key)),
+    [selected, remoteKeys],
   );
 
   // Clearing forgets the placeholders only. The items stay gone: the same
@@ -1881,6 +1964,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     () => selectedKinds.size + (datePreset === "any" ? 0 : 1),
     [selectedKinds, datePreset],
   );
+
+  // What the badge on the funnel cannot say: which filters are on. Same strip
+  // and same wording as the clipboard and notes screens.
+  const filterNames = useMemo(() => {
+    const out = ALL_DISPLAY_KINDS.filter((k) => selectedKinds.has(k)).map(
+      (k) => TYPE_LABELS[k],
+    );
+    if (datePreset === "today") out.push("Today");
+    if (datePreset === "7d") out.push("Last 7 days");
+    if (datePreset === "range") out.push("Date range");
+    return out;
+  }, [selectedKinds, datePreset]);
 
   const clearAllFilters = useCallback(() => {
     setSelectedKinds(new Set());
@@ -2246,6 +2341,77 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     sort,
   ]);
 
+  // Every key in the feed this account may remove, in the order they are on
+  // screen, so shift-click picks the range the user sees.
+  const selectableKeys = useMemo(
+    () =>
+      feedItems
+        .filter((i) => i.kind !== "removed")
+        .map((i) =>
+          i.kind === "clipboard" ? `clipboard:${i.entry.id}` : `note:${i.note.id}`,
+        )
+        .filter(canRemoveKey),
+    [feedItems, canRemoveKey],
+  );
+
+  // The bulk half of handleRemoveFromSpace: one toast and one grace period for
+  // the whole selection, and every row leaves the feed on the click.
+  const handleBulkRemoveFromSpace = useCallback(() => {
+    if (!selected) return;
+    const spaceId = selected.id;
+    const keys = [...multiSelect.selectedIds].filter(canRemoveKey);
+    if (keys.length === 0) return;
+    multiSelect.exitSelectMode();
+    deferDestructive(
+      keys.length === 1
+        ? "Removed from the space"
+        : `Removed ${keys.length} items from the space`,
+      async () => {
+        try {
+          for (const key of keys) {
+            const [entryType, clientId] = splitFeedKey(key);
+            await invoke("space_remove_entry", {
+              spaceId,
+              clientId,
+              entryType,
+            });
+          }
+        } catch (e) {
+          setSpaceError(String(e));
+          throw e;
+        } finally {
+          // Re-read before returning: the hints are released the moment this
+          // resolves, and the feed goes back to reading the share map.
+          await refreshShares();
+        }
+      },
+      {
+        key: "space-remove-entry",
+        hides: keys.map((k) => `share:${k}:${spaceId}`),
+        errorPrefix: "Could not remove from the space",
+      },
+    );
+  }, [selected, multiSelect, canRemoveKey, refreshShares]);
+
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    multiSelect.pruneStaleIds(new Set(selectableKeys));
+  }, [selectableKeys, multiSelect.isSelecting]);
+
+  // A selection is about one space. Switching spaces makes it meaningless.
+  useEffect(() => {
+    multiSelect.exitSelectMode();
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!multiSelect.isSelecting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") multiSelect.exitSelectMode();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [multiSelect.isSelecting]);
+
   /** What each type would leave you with: date and search applied, the type
    *  filter itself excluded. Placeholders have no type, so they sit outside. */
   const kindCounts = useMemo<CountMap>(() => {
@@ -2592,7 +2758,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const selectedFilter = selected
     ? (sendFilters[selected.id] ?? DEFAULT_FILTER)
     : DEFAULT_FILTER;
-  const selectedRules = filterRuleCount(sendFilters[selected?.id ?? ""]);
 
   const leftSlot = (
     <div className="sp-filter-tabs">
@@ -2639,16 +2804,78 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
 
   const rightSlot = (
-    <LayoutSegment
-      layout={layout}
-      onLayoutChange={(l) => {
-        setLayout(l);
-        localStorage.setItem("spaces-layout", l);
-      }}
-      tilesLabel="Cards"
-      listLabel="Rows"
-      listIcon={<RowsIcon size={12} />}
-    />
+    <>
+      <LayoutSegment
+        layout={layout}
+        onLayoutChange={(l) => {
+          setLayout(l);
+          localStorage.setItem("spaces-layout", l);
+        }}
+        tilesLabel="Cards"
+        listLabel="Rows"
+        listIcon={<RowsIcon size={12} />}
+      />
+      {/* Nothing to select in an empty feed, and nothing removable in one
+          where everything belongs to other members. */}
+      {selectableKeys.length > 0 && (
+        <>
+          <div className="cs-toolbar-sep" />
+          <div className="bulk-select-wrap">
+            <button
+              className={`cs-tb-btn${multiSelect.isSelecting ? " cs-tb-btn--active" : ""}`}
+              onClick={() => {
+                document.dispatchEvent(new Event("tooltip:hide"));
+                multiSelect.isSelecting
+                  ? multiSelect.exitSelectMode()
+                  : multiSelect.enterSelectMode();
+              }}
+              data-tooltip={
+                multiSelect.isSelecting
+                  ? multiSelect.selectedCount > 0
+                    ? `${multiSelect.selectedCount} selected`
+                    : "Exit selection"
+                  : "Select items"
+              }
+              data-tooltip-pos="below"
+            >
+              <MultiSelectIcon size={13} />
+              {multiSelect.isSelecting && multiSelect.selectedCount > 0 && (
+                <span className="cs-tb-badge">{multiSelect.selectedCount}</span>
+              )}
+            </button>
+
+            {multiSelect.isSelecting && (
+              <BulkActionsBar
+                selectedCount={multiSelect.selectedCount}
+                totalCount={selectableKeys.length}
+                onSelectAll={() => multiSelect.selectAll(selectableKeys)}
+                onDeselectAll={multiSelect.deselectAll}
+                onExitSelectMode={multiSelect.exitSelectMode}
+                onBulkRemoveFromSpace={handleBulkRemoveFromSpace}
+              />
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Only while this space has placeholders to clear, so the corner does
+          not carry a permanently dead button. */}
+      {removedCount > 0 && (
+        <>
+          <div className="cs-toolbar-sep" />
+          <button
+            className="cs-tb-btn cs-tb-btn--danger"
+            onClick={handleClearRemoved}
+            aria-label={`Clear ${removedCount} placeholder${removedCount === 1 ? "" : "s"}`}
+            data-tooltip="Clear placeholders"
+            data-tooltip-pos="below"
+          >
+            <TrashIcon size={13} />
+            <span className="cs-tb-n">{removedCount}</span>
+          </button>
+        </>
+      )}
+    </>
   );
 
   return (
@@ -2668,48 +2895,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
         {selected ? (
           <>
-            <div className="sp-feed-header">
-              <div className="sp-feed-header-left">
-                <span className="sp-feed-space-name">{selected.name}</span>
-                <span className="sp-feed-member-count">
-                  <Users size={10} />
-                  {selected.member_count} member
-                  {selected.member_count === 1 ? "" : "s"}
-                </span>
-                <span className="sp-feed-item-count">
-                  {feedItems.length} item{feedItems.length === 1 ? "" : "s"}
-                  {isFiltering && allFeedItems.length !== feedItems.length && (
-                    <span className="sp-feed-filtered-hint">
-                      {" "}
-                      of {allFeedItems.length}
-                    </span>
-                  )}
-                </span>
-                {removedCount > 0 && (
-                  <button
-                    className="sp-feed-clear-removed"
-                    onClick={handleClearRemoved}
-                    data-tooltip="Hide the placeholders. The items stay removed."
-                    data-tooltip-pos="below"
-                  >
-                    <Prohibit size={9} weight="bold" />
-                    clear {removedCount} removed
-                  </button>
-                )}
-                {autocopy[selected.id] && (
-                  <span className="sp-feed-flag">
-                    <Clipboard size={9} />
-                    auto-copy on
-                  </span>
-                )}
-                {selectedRules > 0 && (
-                  <span className="sp-feed-flag">
-                    <Funnel size={9} />
-                    auto-share on
-                  </span>
-                )}
-              </div>
-            </div>
+            {/* The name, member count and the rules are all on the panel to
+                the right, so the only thing worth a line here is what the
+                filters left. */}
+            <ActiveFilterStrip
+              names={filterNames}
+              matched={feedItems.length}
+              total={allFeedItems.length}
+              onClear={clearAllFilters}
+            />
 
             {detailItem ? (
               detailItem.kind === "note" ? (
@@ -2823,8 +3017,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                         `clipboard:${item.entry.id}`,
                                       )}
                                       onRemove={
-                                        selected.is_owner ||
-                                        !remoteKeys.has(
+                                        canRemoveKey(
                                           `clipboard:${item.entry.id}`,
                                         )
                                           ? () =>
@@ -2833,6 +3026,25 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                                 "clipboard",
                                               )
                                           : undefined
+                                      }
+                                      selecting={
+                                        multiSelect.isSelecting &&
+                                        canRemoveKey(
+                                          `clipboard:${item.entry.id}`,
+                                        )
+                                      }
+                                      selected={multiSelect.selectedIds.has(
+                                        `clipboard:${item.entry.id}`,
+                                      )}
+                                      onSelect={(range) =>
+                                        range
+                                          ? multiSelect.selectRange(
+                                              `clipboard:${item.entry.id}`,
+                                              selectableKeys,
+                                            )
+                                          : multiSelect.toggleSelect(
+                                              `clipboard:${item.entry.id}`,
+                                            )
                                       }
                                     />
                                   ) : (
@@ -2850,14 +3062,30 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       )}
                                       owner={ownerFor(`note:${item.note.id}`)}
                                       onRemove={
-                                        selected.is_owner ||
-                                        !remoteKeys.has(`note:${item.note.id}`)
+                                        canRemoveKey(`note:${item.note.id}`)
                                           ? () =>
                                               handleRemoveFromSpace(
                                                 item.note.id,
                                                 "note",
                                               )
                                           : undefined
+                                      }
+                                      selecting={
+                                        multiSelect.isSelecting &&
+                                        canRemoveKey(`note:${item.note.id}`)
+                                      }
+                                      selected={multiSelect.selectedIds.has(
+                                        `note:${item.note.id}`,
+                                      )}
+                                      onSelect={(range) =>
+                                        range
+                                          ? multiSelect.selectRange(
+                                              `note:${item.note.id}`,
+                                              selectableKeys,
+                                            )
+                                          : multiSelect.toggleSelect(
+                                              `note:${item.note.id}`,
+                                            )
                                       }
                                     />
                                   ),

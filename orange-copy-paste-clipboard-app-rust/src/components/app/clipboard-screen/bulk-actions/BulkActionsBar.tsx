@@ -7,6 +7,7 @@ import {
   Cloud,
   CloudArrowUp,
   CloudSlash,
+  Prohibit,
 } from "@phosphor-icons/react";
 import {
   TrashIcon,
@@ -24,15 +25,20 @@ interface BulkActionsBarProps {
   onSelectAll: () => void;
   onDeselectAll: () => void;
   onExitSelectMode: () => void;
-  onBulkDelete: () => void;
-  allPinned: boolean;
-  onBulkTogglePin: () => void;
-  allSaved: boolean;
-  onBulkToggleSave: () => void;
-  onBulkAddGroup: (group: string) => void;
-  onBulkRemoveGroup: (group: string) => void;
-  availableGroups: string[];
-  commonGroups: string[];
+  /* Every action below is optional: a chip is rendered only when its handler
+     is passed, so a screen where an action is not allowed shows nothing rather
+     than something disabled. */
+  onBulkDelete?: () => void;
+  allPinned?: boolean;
+  onBulkTogglePin?: () => void;
+  allSaved?: boolean;
+  onBulkToggleSave?: () => void;
+  onBulkAddGroup?: (group: string) => void;
+  onBulkRemoveGroup?: (group: string) => void;
+  availableGroups?: string[];
+  commonGroups?: string[];
+  /** Take the selection out of the space being viewed. Spaces feed only. */
+  onBulkRemoveFromSpace?: () => void;
   /** Spaces this account belongs to. Empty hides the share chip. */
   spaces?: Space[];
   /** Spaces every selected item is already in. */
@@ -58,8 +64,9 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   onBulkToggleSave,
   onBulkAddGroup,
   onBulkRemoveGroup,
-  availableGroups,
-  commonGroups,
+  availableGroups = [],
+  commonGroups = [],
+  onBulkRemoveFromSpace,
   spaces = [],
   commonSpaceIds = [],
   onBulkToggleSpace,
@@ -134,7 +141,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   }, [spacesOpen]);
 
   const allSelected = selectedCount === totalCount && totalCount > 0;
-  const hasGroups = availableGroups.length > 0;
+  const hasGroups = availableGroups.length > 0 && !!onBulkAddGroup;
   const canShare = spaces.length > 0 && !!onBulkToggleSpace;
 
   return (
@@ -155,6 +162,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       <div className="bulk-popup-vsep" />
 
       {/* Pin chip */}
+      {onBulkTogglePin && (
       <button
         className={`bulk-popup-chip bulk-popup-chip--pin${allPinned ? " bulk-popup-chip--pin-active" : ""}`}
         onClick={onBulkTogglePin}
@@ -164,8 +172,10 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
         <PinIcon size={10} filled={allPinned} />
         <span>{allPinned ? "Pinned" : "Pin"}</span>
       </button>
+      )}
 
       {/* Save chip */}
+      {onBulkToggleSave && (
       <button
         className={`bulk-popup-chip bulk-popup-chip--save${allSaved ? " bulk-popup-chip--save-active" : ""}`}
         onClick={onBulkToggleSave}
@@ -175,6 +185,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
         <SaveStarIcon size={10} filled={allSaved} />
         <span>{allSaved ? "Saved" : "Save"}</span>
       </button>
+      )}
 
       {/* Groups chip + flyout */}
       {hasGroups && (
@@ -213,8 +224,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                       }}
                       onClick={() =>
                         active
-                          ? onBulkRemoveGroup(group)
-                          : onBulkAddGroup(group)
+                          ? onBulkRemoveGroup?.(group)
+                          : onBulkAddGroup?.(group)
                       }
                     >
                       <span
@@ -332,19 +343,35 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
         </div>
       )}
 
-      {/* Thin rule before delete */}
-      <div className="bulk-popup-vsep" />
+      {(onBulkRemoveFromSpace || onBulkDelete) && (
+        <div className="bulk-popup-vsep" />
+      )}
+
+      {/* Remove from space: not a delete. Whoever shared each item keeps it. */}
+      {onBulkRemoveFromSpace && (
+        <button
+          className="bulk-popup-chip bulk-popup-chip--delete"
+          onClick={onBulkRemoveFromSpace}
+          data-tooltip="Remove selected from this space"
+          data-tooltip-pos="below"
+        >
+          <Prohibit size={10} />
+          <span>Remove</span>
+        </button>
+      )}
 
       {/* Delete */}
-      <button
-        className="bulk-popup-chip bulk-popup-chip--delete"
-        onClick={onBulkDelete}
-        data-tooltip="Delete selected"
-        data-tooltip-pos="below"
-      >
-        <TrashIcon size={10} />
-        <span>Delete</span>
-      </button>
+      {onBulkDelete && (
+        <button
+          className="bulk-popup-chip bulk-popup-chip--delete"
+          onClick={onBulkDelete}
+          data-tooltip="Delete selected"
+          data-tooltip-pos="below"
+        >
+          <TrashIcon size={10} />
+          <span>Delete</span>
+        </button>
+      )}
 
       {/* Close */}
       <button

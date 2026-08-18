@@ -268,7 +268,9 @@
   width: calc(33.333% - 1.333px);
   height: calc(100% - 4px);
   border-radius: 6px;
-  background: var(--cta, var(--accent));
+  /* Same token as .cs-layout-slider: the two segments sit in one toolbar, so
+     a second orange reads as a mistake rather than a distinction. */
+  background: var(--accent);
   z-index: 0;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
@@ -368,7 +370,9 @@
   border-radius: var(--radius-xs);
   background: var(--surface);
   cursor: pointer;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
   overflow: hidden;
 }
 
@@ -579,7 +583,10 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .sp-list-action:hover {
@@ -605,7 +612,9 @@
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .sp-clear-filters-btn:hover {
@@ -613,65 +622,10 @@
   color: var(--accent);
 }
 
-/* ── Feed header ── */
-
-.sp-feed-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px 9px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  gap: 10px;
-}
-
-.sp-feed-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.sp-feed-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.sp-feed-space-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: -0.1px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sp-feed-item-count {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.sp-feed-filtered-hint {
-  color: var(--text-muted);
-  opacity: 0.7;
-}
-
-.sp-feed-member-count {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--text) 7%, transparent);
-  border-radius: 6px;
-  padding: 2px 8px;
-  white-space: nowrap;
-}
+/* The old feed header is gone: the space name, member count and rule flags it
+   carried are all on the panel to the right, and what the filters left is the
+   same strip the clipboard and notes screens draw. It brings its own spacing
+   and renders nothing when no filter is on, so there is no empty bar here. */
 
 /* ── Scrollable feed ── */
 
@@ -866,7 +820,9 @@
   scrollbar-color: var(--border) transparent;
 }
 
-.sp-panel-scroll::-webkit-scrollbar { width: 4px; }
+.sp-panel-scroll::-webkit-scrollbar {
+  width: 4px;
+}
 .sp-panel-scroll::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 4px;
@@ -955,7 +911,9 @@
   border-radius: 10px;
   background: var(--surface);
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
   text-align: left;
   position: relative;
   margin-bottom: 5px;
@@ -1078,7 +1036,10 @@
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .sp-action-btn:hover:not(:disabled) {
@@ -1153,7 +1114,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.12s ease, color 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .sp-inline-btn:hover {
@@ -1228,7 +1191,10 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .sp-card-copy-btn:hover {
@@ -1256,8 +1222,14 @@
 }
 
 @keyframes syncDetailIn {
-  from { opacity: 0; transform: translateX(8px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .sp-detail-toolbar {
@@ -1282,7 +1254,9 @@
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .sp-detail-back:hover {
@@ -1341,7 +1315,9 @@
   scrollbar-color: var(--border) transparent;
 }
 
-.sp-detail-scroll::-webkit-scrollbar { width: 5px; }
+.sp-detail-scroll::-webkit-scrollbar {
+  width: 5px;
+}
 .sp-detail-scroll::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 4px;
@@ -1697,7 +1673,9 @@
   border: 1px solid var(--border);
   background: var(--bg);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .sp-switch::after {
@@ -1709,7 +1687,9 @@
   height: 11px;
   border-radius: 50%;
   background: var(--text-muted);
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .sp-switch:checked {
@@ -1894,49 +1874,8 @@
   color: var(--text);
 }
 
-/* Feed header flags */
-
-.sp-feed-flag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: var(--accent-dim);
-  color: var(--accent);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
-/* Same shape as a flag, but it does something, so it reads as neutral until
-   hovered rather than sitting in the accent like a live setting. */
-.sp-feed-clear-removed {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  transition:
-    color 0.13s ease,
-    border-color 0.13s ease,
-    background 0.13s ease;
-}
-
-.sp-feed-clear-removed:hover {
-  color: var(--text);
-  border-color: var(--border-light);
-  background: var(--surface-hover);
-}
-
+/* Neutral until hovered: it does something, rather than sitting in the accent
+   like a live setting would. */
 /* Right rail: received invites, space flags, sent invites */
 
 .sp-invite-strip {
@@ -2038,4 +1977,33 @@
   font-size: 10.5px;
   color: var(--text-secondary);
   cursor: pointer;
+}
+/* ── Bulk selection ──
+   The checkbox itself is .entry-card-checkbox from BulkActionsBar.css, so a
+   selection looks the same here as on the clipboard screen. These rules are
+   what the three feed card shapes need on top of it. */
+
+.sp-selectable {
+  position: relative;
+  cursor: pointer;
+}
+
+.sp-selected {
+  border-color: var(--accent);
+}
+
+.sp-selected .entry-card-checkbox {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.sp-selected .entry-card-checkbox svg {
+  opacity: 1;
+}
+
+/* A row has somewhere to put the box: it is the first thing on the line,
+   rather than floating over the content the way it does on a card. */
+.sp-list-card .entry-card-checkbox {
+  position: static;
+  flex-shrink: 0;
 }

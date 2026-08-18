@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "@phosphor-icons/react";
 import type { ClipboardEntry, DisplayKind, Space } from "../../../../types";
+import { useSticky, useStickySet } from "../../../../hooks/useSticky";
 import {
   deriveDisplayKind,
   htmlPlainText,
@@ -165,24 +166,32 @@ export function useSearchFilter(
   entries: ClipboardEntry[],
   cloud: CloudFilterContext | null = null,
 ): SearchFilterState {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [cloudFilter, setCloudFilter] = useState<CloudFilter>("any");
-  const [shareFilter, setShareFilter] = useState<ShareFilter>("any");
-  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(
-    new Set(),
+  // Every applied filter is sticky: the screen unmounts on a switch, and a
+  // narrowed list silently going back to everything is worse than remembering
+  // it - the chip row and Clear filters both say what is on. The dropdown
+  // being open is not, since reopening itself on a return visit is not a
+  // preference anyone expressed.
+  const [searchQuery, setSearchQuery] = useSticky("sc-f-search", "");
+  const [cloudFilter, setCloudFilter] = useSticky<CloudFilter>(
+    "sc-f-cloud",
+    "any",
   );
-  const [receivedOnly, setReceivedOnly] = useState(false);
-  const [selectedKinds, setSelectedKinds] = useState<Set<DisplayKind>>(
-    new Set(),
+  const [shareFilter, setShareFilter] = useSticky<ShareFilter>(
+    "sc-f-share",
+    "any",
   );
-  const [pinnedOnly, setPinnedOnly] = useState(false);
-  const [datePreset, setDatePreset] = useState<DatePreset>("any");
-  const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState("");
+  const [selectedSpaceIds, setSelectedSpaceIds] = useStickySet("sc-f-spaces");
+  const [receivedOnly, setReceivedOnly] = useSticky("sc-f-received", false);
+  const [selectedKinds, setSelectedKinds] = useStickySet<DisplayKind>(
+    "sc-f-kinds",
+  );
+  const [pinnedOnly, setPinnedOnly] = useSticky("sc-f-pinned", false);
+  const [datePreset, setDatePreset] = useSticky<DatePreset>("sc-f-date", "any");
+  const [dateAfter, setDateAfter] = useSticky("sc-f-date-after", "");
+  const [dateBefore, setDateBefore] = useSticky("sc-f-date-before", "");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [selectedFilterGroups, setSelectedFilterGroups] = useState<Set<string>>(
-    new Set(),
-  );
+  const [selectedFilterGroups, setSelectedFilterGroups] =
+    useStickySet("sc-f-groups");
   const filterRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 

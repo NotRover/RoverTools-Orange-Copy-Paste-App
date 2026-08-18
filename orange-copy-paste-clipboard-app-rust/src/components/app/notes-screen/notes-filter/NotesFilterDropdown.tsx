@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "@phosphor-icons/react";
 import type { Note, Space } from "../../../../types";
+import { useSticky, useStickySet } from "../../../../hooks/useSticky";
 import { FilterIcon } from "../../../icons";
 import { PinIcon as PinIconElement } from "../../../entry-types/EntryTypePill";
 import {
@@ -89,17 +90,23 @@ export function useNotesFilter(
   search: string,
   cloud: NotesCloudContext | null = null,
 ): NotesFilterState {
-  const [pinnedOnly, setPinnedOnly] = useState(false);
-  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
-  const [cloudFilter, setCloudFilter] = useState<CloudFilter>("any");
-  const [shareFilter, setShareFilter] = useState<ShareFilter>("any");
-  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(
-    new Set(),
+  // Sticky for the same reason as the clipboard filters, and with the same
+  // exception: the dropdown itself does not reopen on a return visit.
+  const [pinnedOnly, setPinnedOnly] = useSticky("ns-f-pinned", false);
+  const [selectedGroups, setSelectedGroups] = useStickySet("ns-f-groups");
+  const [cloudFilter, setCloudFilter] = useSticky<CloudFilter>(
+    "ns-f-cloud",
+    "any",
   );
-  const [receivedOnly, setReceivedOnly] = useState(false);
-  const [datePreset, setDatePreset] = useState<DatePreset>("any");
-  const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState("");
+  const [shareFilter, setShareFilter] = useSticky<ShareFilter>(
+    "ns-f-share",
+    "any",
+  );
+  const [selectedSpaceIds, setSelectedSpaceIds] = useStickySet("ns-f-spaces");
+  const [receivedOnly, setReceivedOnly] = useSticky("ns-f-received", false);
+  const [datePreset, setDatePreset] = useSticky<DatePreset>("ns-f-date", "any");
+  const [dateAfter, setDateAfter] = useSticky("ns-f-date-after", "");
+  const [dateBefore, setDateBefore] = useSticky("ns-f-date-before", "");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
