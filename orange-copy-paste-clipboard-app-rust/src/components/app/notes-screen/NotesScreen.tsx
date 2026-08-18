@@ -601,6 +601,8 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 onSetGroups={onSetGroups}
                 onCopyEntry={onCopyEntry}
                 onBack={() => setEditingId(null)}
+                readOnly={remoteKeys.has(`note:${editingNote.id}`)}
+                ownerName={noteOwners[`note:${editingNote.id}`]?.display_name}
               />
             </div>
           </>
@@ -640,8 +642,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             spaces={spaceShares.spaces}
             signedIn={spaceShares.signedIn}
             itemSpaceIds={spaceShares.shares[`note:${menuNote.id}`]}
-            onToggleSpace={(spaceId) =>
-              spaceShares.toggle("note", menuNote.id, spaceId)
+            onToggleSpace={
+              remoteKeys.has(`note:${menuNote.id}`)
+                ? undefined
+                : (spaceId) => spaceShares.toggle("note", menuNote.id, spaceId)
             }
             inCloud={!!noteSyncStates[`note:${menuNote.id}`]}
             onToggleCloud={(upload) => {

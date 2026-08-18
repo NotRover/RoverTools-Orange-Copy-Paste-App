@@ -634,8 +634,15 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                               entry.id,
                             )}
                             owner={entryOwners[`clipboard:${entry.id}`]}
-                            onToggleSpace={(entryId, spaceId) =>
-                              spaceShares.toggle("clipboard", entryId, spaceId)
+                            onToggleSpace={
+                              remoteKeys.has(`clipboard:${entry.id}`)
+                                ? undefined
+                                : (entryId, spaceId) =>
+                                    spaceShares.toggle(
+                                      "clipboard",
+                                      entryId,
+                                      spaceId,
+                                    )
                             }
                             inCloud={!!entrySyncStates[`clipboard:${entry.id}`]}
                             onToggleCloud={toggleEntryCloud}

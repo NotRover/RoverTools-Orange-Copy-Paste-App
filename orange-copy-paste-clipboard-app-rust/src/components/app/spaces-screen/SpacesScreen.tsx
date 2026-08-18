@@ -1758,12 +1758,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch((e) => toastError("Could not clear the placeholders", e));
   }, [selected]);
 
-  // Take someone else's item out of a space we own. Moderation, not deletion:
-  // the member who shared it keeps their own copy, the space stops carrying it,
-  // and everyone here gets a placeholder in its place.
+  // Take an item out of a space. Two callers: the space owner moderating
+  // anything here, and a member unsharing something they posted. Neither is a
+  // deletion - whoever shared it keeps their own copy, the space stops carrying
+  // it, and everyone here gets a placeholder in its place.
   const handleRemoveFromSpace = useCallback(
     (clientId: string, entryType: "clipboard" | "note") => {
-      if (!selected?.is_owner) return;
+      if (!selected) return;
       invoke("space_remove_entry", {
         spaceId: selected.id,
         clientId,
@@ -2699,7 +2700,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                         `clipboard:${item.entry.id}`,
                                       )}
                                       onRemove={
-                                        selected.is_owner
+                                        selected.is_owner ||
+                                        !remoteKeys.has(
+                                          `clipboard:${item.entry.id}`,
+                                        )
                                           ? () =>
                                               handleRemoveFromSpace(
                                                 item.entry.id,
@@ -2723,7 +2727,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       )}
                                       owner={ownerFor(`note:${item.note.id}`)}
                                       onRemove={
-                                        selected.is_owner
+                                        selected.is_owner ||
+                                        !remoteKeys.has(`note:${item.note.id}`)
                                           ? () =>
                                               handleRemoveFromSpace(
                                                 item.note.id,

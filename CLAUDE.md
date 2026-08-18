@@ -132,7 +132,7 @@ These bind the client and backend. Changing one side usually means changing the 
 **API versioning**
 - Client routes under `/api/v1`; admin under `/internal/v1`; `/internal/healthz` + `/internal/metrics` unversioned. Every response carries `X-API-Version`. Single source: `src/version.py`.
 
-**Migrations are written, never auto-applied.** Author Alembic migrations, but **never apply them or push DB changes without explicit approval.**
+**Migrations apply on deploy, not from your machine.** Render runs `alembic upgrade head` as a pre-deploy step, so a merged revision reaches the database on the next deploy. Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.**
 
 ## Non-Negotiable Invariants (Client App)
 

@@ -102,6 +102,8 @@ export interface NotionEditorProps {
   onSelectionChange?: () => void;
   /** Fires with document stats on every edit / selection change. */
   onStatsChange?: (stats: EditorStats) => void;
+  /** Render the note but refuse edits - used for entries another member wrote. */
+  readOnly?: boolean;
 }
 
 // ── Error boundary ───────────────────────────────────────────────────────
@@ -172,7 +174,10 @@ const IndentExtension = Extension.create({
 // ── Component ────────────────────────────────────────────────────────────
 
 const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
-  ({ noteId, initialContent, onChange, onSelectionChange, onStatsChange }, ref) => {
+  (
+    { noteId, initialContent, onChange, onSelectionChange, onStatsChange, readOnly },
+    ref,
+  ) => {
     const [tableHandlePos, setTableHandlePos] = useState<{
       visible: boolean;
       rowX: number; rowY: number;
@@ -264,6 +269,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         ResolvedImage.configure({ inline: false, allowBase64: true }),
       ],
       content: parseStoredContent(initialContent),
+      editable: !readOnly,
       editorProps: {
         attributes: { class: "ee-rich ProseMirror" },
         handlePaste: (view, event) => {
@@ -488,6 +494,12 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [noteId]);
+
+    // `editable` is read once at construction, so a note that becomes read-only
+    // while open (its owner shares it mid-edit) needs telling.
+    useEffect(() => {
+      editor?.setEditable(!readOnly);
+    }, [editor, readOnly]);
 
     // Refresh image/link DOM once the attachment resolver finishes loading.
     useEffect(() => {

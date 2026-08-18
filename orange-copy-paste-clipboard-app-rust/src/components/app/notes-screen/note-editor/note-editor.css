@@ -366,6 +366,25 @@
   position: relative;
 }
 
+/* Someone else's note: the toolbar stays visible so the layout does not jump,
+   but nothing in it can be reached. */
+.ns-format-bar--locked {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.ns-readonly-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.08));
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
 .ns-fmt-group {
   display: inline-flex;
   align-items: center;
