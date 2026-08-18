@@ -3,6 +3,8 @@ import type { ClipboardEntry, Note } from "../../../../types";
 import { groupColor } from "../../../../types";
 import { CheckIcon, PinIcon, TrashIcon } from "../../../icons";
 import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
+import type { EntryOwner } from "../../../../hooks/useEntryOwners";
+import OwnerChip from "../../clipboard-screen/entry-card/OwnerChip";
 import { deriveNoteTitle } from "../notes-utils";
 import { useRelativeTime } from "../../../../hooks/useRelativeTime";
 import NotePreview from "../NotePreview";
@@ -24,6 +26,8 @@ interface NoteCardProps {
   syncState?: EntrySyncState;
   /** Spaces this note is shared into, for the share chip. */
   sharedSpaceNames?: string[];
+  /** Set only when the note arrived from another member of a space. */
+  owner?: EntryOwner;
 }
 
 const NoteCardImpl: React.FC<NoteCardProps> = ({
@@ -38,6 +42,7 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
   onContextMenu,
   syncState,
   sharedSpaceNames = [],
+  owner,
 }) => {
   const content = note.content ?? "";
   const relTime = useRelativeTime(note.updated_at);
@@ -111,6 +116,7 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
           {/* Where this note went, sat next to the time exactly as on a
               clipboard card: cloud for your own devices, share for other
               people. */}
+          {owner && <OwnerChip owner={owner} />}
           {sharedSpaceNames.length > 0 && (
             <span
               className="ns-card-sync ns-card-sync--shared"

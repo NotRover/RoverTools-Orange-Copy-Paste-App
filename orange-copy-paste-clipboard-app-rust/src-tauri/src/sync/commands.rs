@@ -165,6 +165,16 @@ pub async fn sync_oauth_complete(
     Ok(user)
 }
 
+/// The OAuth attempt already waiting on a password, if the browser handshake
+/// landed while the sign-in screen was not mounted.
+#[tauri::command]
+pub fn sync_oauth_pending(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::sync::OAuthBegin>, String> {
+    let sync = state.sync_client.lock().clone();
+    Ok(sync.and_then(|s| s.pending_oauth()))
+}
+
 /// Discard a stashed OAuth session when the user backs out of the password step.
 #[tauri::command]
 pub fn sync_oauth_cancel(state: State<'_, AppState>) -> Result<(), String> {

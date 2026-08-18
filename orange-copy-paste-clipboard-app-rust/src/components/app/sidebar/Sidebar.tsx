@@ -1,9 +1,9 @@
 import React from "react";
 import {
-  Cloud,
   CloudCheck,
   CloudWarning,
   CloudArrowUp,
+  CloudSlash,
   UserCircle,
 } from "@phosphor-icons/react";
 import type { AppScreen, AppTheme, SyncIndicator } from "../../../types";
@@ -37,25 +37,30 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const spacesActive = screen === "spaces";
 
+  // The icon carries the sync status, so each state has to be readable on its
+  // own - a signed-out cloud that looks like every other inactive nav icon says
+  // nothing, and reading "connected" with no account behind it is worse.
   const syncIcon =
     syncState === "connected" ? <CloudCheck   size={20} weight="duotone" /> :
     syncState === "syncing"   ? <CloudArrowUp size={20} weight="duotone" /> :
     syncState === "offline"   ? <CloudWarning size={20} weight="duotone" /> :
-                                <Cloud        size={20} weight="regular"  />;
+                                <CloudSlash   size={20} weight="regular"  />;
 
-  // Status colour — suppressed while the Sync screen is active (use active style).
+  // Status colour — suppressed while the Spaces screen is active, which has its
+  // own active style. Signed out is deliberately muted rather than uncoloured:
+  // no colour reads as "no status", and this is a status.
   const syncColor =
-    spacesActive                ? undefined :
+    spacesActive              ? undefined :
     syncState === "connected" ? "#22c55e" :
     syncState === "syncing"   ? "#3b82f6" :
     syncState === "offline"   ? "#f59e0b" :
-                                undefined;
+                                "#6b7280";
 
   const syncTooltip =
-    syncState === "connected" ? "Spaces - Connected" :
+    syncState === "connected" ? "Spaces - Synced" :
     syncState === "syncing"   ? "Spaces - Syncing..." :
-    syncState === "offline"   ? "Spaces - Offline" :
-                                "Spaces";
+    syncState === "offline"   ? "Spaces - Signed in, cannot reach the server" :
+                                "Spaces - Not signed in";
 
   return (
   <aside className="sidebar">

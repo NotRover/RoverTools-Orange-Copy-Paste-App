@@ -17,6 +17,8 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Candidate loopback ports, tried in order.  Every one of these must be
@@ -55,8 +57,10 @@ pub fn open_browser(url: &str) -> Result<(), String> {
 impl Loopback {
     /// Block until the browser hits the redirect, then return the `code` query
     /// parameter.  Runs the blocking accept loop with a deadline so a user who
-    /// never completes consent doesn't hang the caller forever.
-    pub fn wait_for_code(self) -> Result<String, String> {
+    /// never completes consent doesn't hang the caller forever, and watches
+    /// `cancel` so a fresh attempt (or a cancel from the UI) releases the port
+    /// instead of holding it until the deadline.
+    pub fn wait_for_code(self, cancel: Arc<AtomicBool>) -> Result<String, String> {
         self.listener
             .set_nonblocking(true)
             .map_err(|e| format!("loopback nonblocking: {e}"))?;
@@ -75,6 +79,9 @@ impl Loopback {
                     return result;
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if cancel.load(Ordering::Relaxed) {
+                        return Err("sign-in was cancelled".into());
+                    }
                     if Instant::now() >= deadline {
                         return Err("timed out waiting for the browser sign-in to complete".into());
                     }

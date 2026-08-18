@@ -443,7 +443,9 @@
   max-width: 130px;
   padding: 2px 7px 2px 2px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  /* Squircle rather than a pill, so the member chip reads the same here as on
+     the clipboard and notes cards. */
+  border-radius: 8px;
   background: var(--surface-hover);
   font-size: 10px;
   font-weight: 600;
@@ -454,7 +456,7 @@
   width: 15px;
   height: 15px;
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: 6px;
   object-fit: cover;
 }
 

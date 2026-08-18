@@ -7,6 +7,8 @@ import React, {
 } from "react";
 import type { ClipboardEntry } from "../../../../types";
 import type { EntrySyncState } from "../../../../hooks/useEntrySyncStates";
+import type { EntryOwner } from "../../../../hooks/useEntryOwners";
+import OwnerChip from "./OwnerChip";
 import { deriveDisplayKind, groupColor } from "../../../../types";
 import {
   ImageIcon,
@@ -44,6 +46,8 @@ interface ChipBarProps {
   relTime: string;
   /** Spaces this entry is shared into, by name. Empty means personal only. */
   sharedSpaceNames?: string[];
+  /** Set only when the entry arrived from another member. */
+  owner?: EntryOwner;
 }
 
 const ChipBar: React.FC<ChipBarProps> = ({
@@ -65,6 +69,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
   copied,
   relTime,
   sharedSpaceNames = [],
+  owner,
 }) => {
   const [showHiddenChips, setShowHiddenChips] = useState(false);
   const [visibleBaseCount, setVisibleBaseCount] = useState(0);
@@ -77,6 +82,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
   const savedMeasureRef = useRef<HTMLSpanElement | null>(null);
   const clipboardMeasureRef = useRef<HTMLSpanElement | null>(null);
   const overflowMeasureRef = useRef<HTMLButtonElement | null>(null);
+  const ownerMeasureRef = useRef<HTMLSpanElement | null>(null);
 
   // Build an ordered list of optional base chips (excluding type, which always shows)
   const optionalBases: Array<{
@@ -98,7 +104,11 @@ const ChipBar: React.FC<ChipBarProps> = ({
     const chipContainer = footerChipsRef.current;
     if (!chipContainer) return;
 
-    const containerWidth = chipContainer.clientWidth;
+    const ownerNode = ownerMeasureRef.current;
+    const ownerWidth = ownerNode
+      ? Math.ceil(ownerNode.getBoundingClientRect().width) + CHIP_GAP_PX
+      : 0;
+    const containerWidth = chipContainer.clientWidth - ownerWidth;
     if (containerWidth <= 0) {
       setVisibleBaseCount(0);
       setVisibleGroupCount(0);
@@ -186,7 +196,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
 
     setVisibleBaseCount(baseFit);
     setVisibleGroupCount(Math.max(0, Math.min(groupFit, displayGroups.length)));
-  }, [displayGroups, entry.pinned, entryGroups, isInClipboard]);
+  }, [displayGroups, entry.pinned, entryGroups, isInClipboard, owner]);
 
   useEffect(() => {
     setShowHiddenChips(false);
@@ -377,6 +387,12 @@ const ChipBar: React.FC<ChipBarProps> = ({
             >
               +{totalHiddenCount}
             </button>
+          )}
+
+          {owner && (
+            <span ref={ownerMeasureRef} className="card-owner-slot">
+              <OwnerChip owner={owner} />
+            </span>
           )}
 
           {/* Hidden measurer for dynamic chip fitting */}

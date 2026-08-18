@@ -373,6 +373,10 @@ pub struct SyncClient {
     /// An OAuth session that has authenticated but is awaiting the account
     /// password (the E2E secret) from the user before it can be finalized.
     pending_oauth: Mutex<Option<PendingOAuth>>,
+    /// Cancel flag for the loopback capture of the in-flight OAuth attempt.
+    /// Tripping it lets the blocking accept loop drop its listener early, so a
+    /// retry can bind the same port instead of waiting out the capture deadline.
+    oauth_cancel: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
 
     /// Pending offline operation queue.
     pending_queue: Arc<Mutex<PendingQueue>>,
@@ -545,6 +549,7 @@ impl SyncClient {
             user: Mutex::new(None),
             http: Mutex::new(None),
             pending_oauth: Mutex::new(None),
+            oauth_cancel: Mutex::new(None),
             pending_queue,
             push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
             blob_budget: Arc::new(Mutex::new(None)),
@@ -619,6 +624,12 @@ impl SyncClient {
         provider: String,
         device_name: String,
     ) -> Result<OAuthBegin, String> {
+        // Abandon whatever a previous attempt left listening, so this one can
+        // take the port back.
+        self.trip_oauth_cancel();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        *self.oauth_cancel.lock() = Some(Arc::clone(&cancel));
+
         let (verifier, challenge) = crypto::pkce_pair();
 
         // Bind the loopback redirect target *before* building the URL so the
@@ -632,7 +643,7 @@ impl SyncClient {
         // The accept loop is blocking; run it off the async worker.
         let code = self
             .handle
-            .spawn_blocking(move || loopback.wait_for_code())
+            .spawn_blocking(move || loopback.wait_for_code(cancel))
             .await
             .map_err(|e| format!("oauth capture task: {e}"))??;
 
@@ -654,7 +665,12 @@ impl SyncClient {
             is_new,
         });
 
-        Ok(OAuthBegin { email, is_new })
+        let begin = OAuthBegin { email, is_new };
+        // Also announce it: the command's reply can be missed if the window was
+        // hidden or reloaded during the browser handshake, and the event lets
+        // the UI move on to the password step anyway.
+        let _ = self.app.emit("sync:oauth-ready", &begin);
+        Ok(begin)
     }
 
     /// Phase 2 of OAuth sign-in: take the stashed session plus the account
@@ -684,9 +700,28 @@ impl SyncClient {
         .await
     }
 
-    /// Discard a stashed OAuth session (user cancelled the password step).
+    /// The stashed OAuth attempt, if the browser handshake already landed.
+    /// Lets a freshly mounted UI pick up a step it may have missed.
+    pub fn pending_oauth(&self) -> Option<OAuthBegin> {
+        self.pending_oauth.lock().as_ref().map(|p| OAuthBegin {
+            email: p.email.clone(),
+            is_new: p.is_new,
+        })
+    }
+
+    /// Discard a stashed OAuth session (user cancelled the password step) and
+    /// stop any loopback capture still waiting on the browser.
     pub fn cancel_oauth(&self) {
         *self.pending_oauth.lock() = None;
+        self.trip_oauth_cancel();
+    }
+
+    /// Signal the in-flight loopback capture, if any, to give up.
+    fn trip_oauth_cancel(&self) {
+        let flag = self.oauth_cancel.lock().take();
+        if let Some(flag) = flag {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Send a Supabase password-reset email.  Restores account *access*; note
