@@ -22,7 +22,7 @@ const CHANGED_EVENT: &str = "notifications:changed";
 /// Reconcile runs on every reconnect, so without that guard a user sitting on
 /// an unchanged feed would get a write and a re-render every time the socket
 /// came back.
-fn commit(app: &tauri::AppHandle, changed: bool) {
+pub(crate) fn commit(app: &tauri::AppHandle, changed: bool) {
     if !changed {
         return;
     }
@@ -69,6 +69,10 @@ pub fn notifications_clear_read(app: tauri::AppHandle) {
 
 /// Bring the feed in line with the server.
 ///
+/// Two sources, both of which only the server can answer for: announcements it
+/// wrote (see [`crate::sync::SyncClient::pull_announcements`]) and the current
+/// state of this user's invites.
+///
 /// Invites are the server's record, not ours: one can be accepted on a phone,
 /// revoked by the sender, or expire while this device was closed. So rather
 /// than trusting what was stored, every refresh re-reads the list and retires
@@ -77,14 +81,19 @@ pub fn notifications_clear_read(app: tauri::AppHandle) {
 /// state.
 #[tauri::command]
 pub async fn notifications_refresh(app: tauri::AppHandle) -> Result<(), String> {
-    let http = {
+    let sync = {
         let state = app.state::<AppState>();
         let client = state.sync_client.lock().clone();
-        match client.and_then(|c| c.http()) {
-            Some(http) => http,
+        match client {
+            Some(client) => client,
             None => return Ok(()),
         }
     };
+    let Some(http) = sync.http() else { return Ok(()) };
+    // Announcements first: they raise their own rows and are independent of the
+    // invite reconcile below, so a failure there should not cost the user a
+    // message from the server.
+    sync.pull_announcements().await;
     let invites = http.list_invites().await?;
     let mut changed = false;
     {

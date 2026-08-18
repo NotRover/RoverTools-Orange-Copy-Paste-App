@@ -474,6 +474,63 @@ the feed is capped at 500; unread rows are exempt from the age sweep. Signing in
 as a different account clears the feed in `finalize_session` — invites are
 addressed to a person.
 
+**What raises a notification**
+
+| Source | Kind | Where |
+|--------|------|-------|
+| An invite addressed to this user | `space_invite` | `notifications_refresh`, reconciled against `GET /api/v1/invites` |
+| Someone joined or left a space, or a space was deleted | `space_activity` | `SyncClient::handle_membership_changed`, off the `space:membership_changed` socket event |
+| An invite this user sent was accepted or declined | `space_activity` | `SyncClient::note_invite_answered`, off `invite:updated` |
+| A space owner removed something this user shared there | `space_activity` | `SyncClient::note_entry_taken_down`, in `drop_space_entry` |
+| Sync refused to send an item | `sync_warning` | `record_skip` |
+| Items sitting in the manual-mode queue | `reminder` | `remind_manual_queue_waiting`, on the reminder sweep |
+| Blob storage past 90% | `reminder` | `remind_storage_nearly_full`, on the reminder sweep |
+| The server said something | `announcement` (or whatever `kind` it names) | `SyncClient::pull_announcements` from `GET /api/v1/announcements`, and the `announcement:new` socket event |
+
+Four rules the sources follow:
+
+- **Your own actions are not news.** `note_membership_change` drops events whose
+  actor is this user — you watched the screen change. Losing your *own*
+  membership is the exception, and the reason the case exists: the payload
+  cannot separate being removed from leaving, and missing a removal is worse
+  than a redundant line after a deliberate leave.
+- **Ids decide whether a row stacks or replaces.** A membership change is a
+  distinct occurrence, so its id carries `now_ms()`. Everything else is keyed on
+  the thing it is about (`invite-answered:<id>`, `space-removed:<space>:<type>:<client_id>`)
+  so a replayed event cannot report it twice.
+- **Bursts collapse to one row.** `record_skip` can fire hundreds of times in a
+  single push, so it uses `raise_rolling` on the fixed id `sync-skipped`: one
+  line carrying the count, back to unread whenever the count moves.
+  `clear_skipped` dismisses it, or the centre would keep quoting a number the
+  Account screen no longer shows.
+- **Reminders describe a state, not an event,** so they are true on every sweep
+  and would nag. `reminder_id` folds the current day into the id, which hands
+  the rate limiting to the store's own idempotence: repeats inside a day land on
+  the row that is already there (and `upsert` refreshes its count without
+  re-alerting), while tomorrow gets a fresh row if the state still holds.
+
+**Server-authored announcements** are the one notification the app does not
+raise itself. They are also the one payload in the sync contract that arrives as
+plaintext, and only because they are the *service's* words - a maintenance
+window, a note to one account - never anything quoting content the server would
+have had to decrypt to write.
+
+Delivery is doubled, because the interesting case is a user who is not looking:
+a connected socket gets `announcement:new` now, and `pull_announcements` hands
+the same rows to a device that was closed. Both key on `announcement:<id>`, so
+both landing is a no-op.
+
+`SyncState::announcements_cursor` is what makes dismissing one stick. The server
+keeps no per-user read state - it answers "what is newer than this" - so asking
+for the same window twice would hand back rows the user had already cleared. The
+cursor advances only *after* the rows are in the store, so a crash between the
+two repeats a message rather than losing one.
+
+Membership names come from the cached space list, which is stale until
+`reconcile_spaces` has run — so `handle_membership_changed` owns the reconcile
+and reads names on *both* sides of it: a joiner is not cached yet, and a space
+that was left or deleted is gone afterwards. The fresher answer wins.
+
 **Popout behaviour** (`components/app/notifications/NotificationsPopout.tsx`):
 
 - Anchored to the bell in `sidebar-bottom` and portalled to `document.body`. It
@@ -486,6 +543,11 @@ addressed to a person.
   Escape, a parent closing it) counts exactly once.
 - The outside-click handler ignores `[data-notif-bell]`, or the bell would close
   the popout and then immediately reopen it with its own click.
+- A row carrying `space_id` in its `data` opens the Spaces screen on click or
+  Enter. Invites awaiting an answer are excluded — answering must not be a side
+  effect of trying to read the row. It lands on Spaces generally, not on the
+  space itself; per-space deep linking would need a selection prop on
+  `SpacesScreen`.
 
 ---
 

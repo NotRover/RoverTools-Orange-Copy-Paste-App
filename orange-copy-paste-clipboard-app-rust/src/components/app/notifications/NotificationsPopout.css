@@ -179,6 +179,12 @@
   background: var(--surface);
 }
 
+/* Rows that lead somewhere. Not every row does - a sync warning has nowhere to
+   go - so the cursor is the honest signal for which are which. */
+.ntf-row--link {
+  cursor: pointer;
+}
+
 /* Unread: a tinted ground plus an accent rail, so the state survives the hover
    background as well as a screenshot in either theme. */
 .ntf-row.unread {

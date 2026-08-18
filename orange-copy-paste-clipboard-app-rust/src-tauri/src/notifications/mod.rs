@@ -11,3 +11,29 @@ pub mod commands;
 pub mod store;
 
 pub use store::{Notification, NotificationKind, NotificationStore};
+
+use tauri::Manager;
+
+/// Raise a notification from anywhere in the app.
+///
+/// Idempotent on the notification's id, so a source that can fire the same
+/// event twice - a reconnect replaying it, a retry - does not stack rows.
+pub fn raise(app: &tauri::AppHandle, notification: Notification) {
+    let changed = app
+        .state::<crate::state::AppState>()
+        .notifications
+        .lock()
+        .upsert(notification);
+    commands::commit(app, changed);
+}
+
+/// Raise a rolling summary, where new text means a new event. See
+/// [`NotificationStore::announce`].
+pub fn raise_rolling(app: &tauri::AppHandle, notification: Notification) {
+    let changed = app
+        .state::<crate::state::AppState>()
+        .notifications
+        .lock()
+        .announce(notification);
+    commands::commit(app, changed);
+}

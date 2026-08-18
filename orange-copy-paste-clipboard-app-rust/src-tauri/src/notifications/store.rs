@@ -26,8 +26,29 @@ pub enum NotificationKind {
     SpaceActivity,
     /// Sync could not do something the user asked for.
     SyncWarning,
-    /// A time-based reminder the user set.
+    /// A message written by the server: maintenance, an account notice.
+    Announcement,
+    /// A nudge about a state the user has left standing - a queue waiting on
+    /// manual sync, storage filling up. Nothing happened; something is still
+    /// true.
     Reminder,
+}
+
+impl NotificationKind {
+    /// Map the server's `kind` string onto a variant.
+    ///
+    /// Unknown values become [`Self::Announcement`] rather than being dropped:
+    /// the server may start naming a kind this build has never heard of, and
+    /// showing the message under a general heading beats not showing it.
+    pub fn from_wire(kind: &str) -> Self {
+        match kind {
+            "space_invite" => Self::SpaceInvite,
+            "space_activity" => Self::SpaceActivity,
+            "sync_warning" => Self::SyncWarning,
+            "reminder" => Self::Reminder,
+            _ => Self::Announcement,
+        }
+    }
 }
 
 /// One line in the notification centre.
@@ -127,6 +148,31 @@ impl NotificationStore {
         existing.body = incoming.body;
         existing.resolved = incoming.resolved;
         existing.data = incoming.data;
+        true
+    }
+
+    /// Upsert a rolling summary, where a change to the text *is* a new event.
+    ///
+    /// [`Self::upsert`] deliberately preserves `read` and `created_at`, which is
+    /// right for a row that stands for one fixed thing. A summary that counts
+    /// ("3 items were not sent") stands for a running total instead: once it
+    /// moves, the user has not seen the new number, so the row goes back to
+    /// unread and takes the time of the change.
+    pub fn announce(&mut self, incoming: Notification) -> bool {
+        let Some(existing) = self.items.iter_mut().find(|n| n.id == incoming.id) else {
+            self.items.push(incoming);
+            self.sort_recent();
+            return true;
+        };
+        if existing.title == incoming.title && existing.body == incoming.body {
+            return false;
+        }
+        existing.title = incoming.title;
+        existing.body = incoming.body;
+        existing.data = incoming.data;
+        existing.created_at = incoming.created_at;
+        existing.read = false;
+        self.sort_recent();
         true
     }
 
@@ -253,6 +299,25 @@ mod tests {
         assert!(store.resolve("invite:a", "Joined"));
         assert!(!store.resolve("invite:a", "Joined"));
         assert_eq!(store.all()[0].resolved.as_deref(), Some("Joined"));
+    }
+
+    #[test]
+    fn announce_reopens_a_read_summary_only_when_its_text_moves() {
+        let mut store = NotificationStore::new();
+        let mut first = invite("s");
+        first.body = "1 item".into();
+        store.announce(first.clone());
+        store.mark_all_read();
+
+        assert!(!store.announce(first.clone()));
+        assert_eq!(store.unread_count(), 0);
+
+        let mut second = first;
+        second.body = "2 items".into();
+        second.created_at += 5;
+        assert!(store.announce(second));
+        assert_eq!(store.unread_count(), 1);
+        assert_eq!(store.all()[0].body, "2 items");
     }
 
     #[test]

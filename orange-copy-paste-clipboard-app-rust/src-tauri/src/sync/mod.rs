@@ -58,6 +58,14 @@ const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
 /// How often the passive-mode pull loop wakes up.  Pushes are always immediate
 /// (the backup must not lose data); passive only batches what gets *applied*.
 const PASSIVE_PULL_INTERVAL_SECS: u64 = 300;
+/// How often the reminder sweep looks at the account's standing state.
+///
+/// Frequent enough that a nudge lands the same day it becomes true, and cheap
+/// because each check is also day-bucketed - the interval decides latency, the
+/// bucket decides how often the user can be told.
+const REMINDER_SWEEP_INTERVAL_SECS: u64 = 30 * 60;
+/// Share of the storage quota that counts as nearly full.
+const STORAGE_WARN_RATIO: f64 = 0.9;
 
 /// Settings key holding the per-space send filters (JSON map keyed by space
 /// id).  Lives in settings.json and rides in the encrypted settings blob so
@@ -2119,6 +2127,134 @@ impl SyncClient {
     /// who removed it — the only thing this side cannot infer. It travels on the
     /// entry-removed event as `removed_by`; the local command passes true,
     /// since the reader can only unshare what they posted.
+    /// A member joined, left, was removed, or the space was deleted.
+    ///
+    /// Owns the reconcile as well as the notification because the two are
+    /// ordered: the cached space list is what turns ids into names, and it is
+    /// stale until reconcile has run. Names are read on both sides of it - a
+    /// joiner is not in the cache yet, and a space that was left or deleted is
+    /// gone from it afterwards - and the fresher answer wins.
+    pub(crate) fn handle_membership_changed(
+        self: &Arc<Self>,
+        space_id: String,
+        action: String,
+        actor_id: String,
+    ) {
+        let before = self.membership_names(&space_id, &actor_id);
+        let this = Arc::clone(self);
+        tokio::runtime::Handle::current().spawn(async move {
+            this.reconcile_spaces().await;
+            let after = this.membership_names(&space_id, &actor_id);
+            this.note_membership_change(&space_id, &action, &actor_id, before, after);
+        });
+    }
+
+    /// `(space name, that member's display name)` as currently cached.
+    fn membership_names(&self, space_id: &str, user_id: &str) -> (Option<String>, Option<String>) {
+        let spaces = self.spaces.lock();
+        let Some(space) = spaces.iter().find(|s| s.id == space_id) else {
+            return (None, None);
+        };
+        let member = space
+            .members
+            .iter()
+            .find(|m| m.user_id == user_id)
+            .map(|m| m.display_name.clone());
+        (Some(space.name.clone()), member)
+    }
+
+    fn note_membership_change(
+        &self,
+        space_id: &str,
+        action: &str,
+        actor_id: &str,
+        before: (Option<String>, Option<String>),
+        after: (Option<String>, Option<String>),
+    ) {
+        let space_name = after.0.or(before.0).unwrap_or_else(|| "a space".into());
+        let actor_name = after.1.or(before.1).unwrap_or_else(|| "Someone".into());
+        let me = self.current_user().map(|u| u.user_id).unwrap_or_default();
+        let by_me = actor_id == me;
+
+        // Doing it yourself is not news - you watched it happen and the screen
+        // already changed under you. Losing your own membership is the one
+        // exception, and it is the case this exists for.
+        let title = match (action, by_me) {
+            ("joined", false) => format!("{actor_name} joined {space_name}"),
+            ("left", true) => format!("You are no longer in {space_name}"),
+            ("left", false) => format!("{actor_name} left {space_name}"),
+            ("deleted", false) => format!("{space_name} was deleted"),
+            _ => return,
+        };
+
+        // Each occurrence is its own row, so the id carries the time. Nothing
+        // replays these - they arrive once, live, over the socket.
+        let id = format!("space-activity:{space_id}:{action}:{actor_id}:{}", now_ms());
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                id,
+                crate::notifications::NotificationKind::SpaceActivity,
+                title,
+            )
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// A space owner removed something this user had shared there.
+    fn note_entry_taken_down(&self, space_id: &str, client_id: &str, entry_type: &str) {
+        let space_name = self
+            .spaces
+            .lock()
+            .iter()
+            .find(|s| s.id == space_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "a space".into());
+        let what = if entry_type == "note" { "note" } else { "item" };
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                // Keyed on the entry, so a repeat of the event cannot report the
+                // same removal twice.
+                format!("space-removed:{space_id}:{entry_type}:{client_id}"),
+                crate::notifications::NotificationKind::SpaceActivity,
+                format!("A space owner removed your {what} from {space_name}"),
+            )
+            .with_body("You still have your copy. It is only out of that space.")
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// Someone accepted or declined an invite this user sent.
+    ///
+    /// Only the sender is told: on the receiving side the invite's own row is
+    /// the record, and it is retired by `notifications_refresh`.
+    pub(crate) fn note_invite_answered(&self, invite_id: &str, status: &str, space_id: &str) {
+        let verb = match status {
+            "accepted" => "accepted",
+            "declined" => "declined",
+            _ => return,
+        };
+        let space_name = self
+            .spaces
+            .lock()
+            .iter()
+            .find(|s| s.id == space_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "a space".into());
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                // One row per invite: the server sends a final answer once, and
+                // a reconnect that replays it must not add a second line.
+                format!("invite-answered:{invite_id}"),
+                crate::notifications::NotificationKind::SpaceActivity,
+                format!("Your invite to {space_name} was {verb}"),
+            )
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
     pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_author: bool) {
         use crate::state::app_state::AppState;
         use std::sync::atomic::Ordering;
@@ -2149,6 +2285,12 @@ impl SyncClient {
                 },
             );
             drop(id_map);
+            // Ours and not us: a space owner took it down. The Spaces feed
+            // shows a placeholder where it was, but only while the user happens
+            // to be looking at that space - this is what tells them otherwise.
+            if !by_author {
+                self.note_entry_taken_down(space_id, client_id, entry_type);
+            }
             let _ = self.app.emit(
                 if entry_type == "note" {
                     "sync:notes-merged"
@@ -2235,9 +2377,16 @@ impl SyncClient {
 
     /// Drop the recorded skips (and their count) after the user has seen them.
     pub fn clear_skipped(&self) {
-        let mut status = self.status.lock();
-        status.skipped_count = 0;
-        status.skipped.clear();
+        {
+            let mut status = self.status.lock();
+            status.skipped_count = 0;
+            status.skipped.clear();
+        }
+        // The rolling row quotes that count, so leaving it behind would have
+        // the centre reporting items the Account screen says no longer exist.
+        let state = self.app.state::<crate::state::AppState>();
+        let changed = state.notifications.lock().dismiss("sync-skipped");
+        crate::notifications::commands::commit(&self.app, changed);
     }
 
     /// The cached space list (refreshed by [`Self::reconcile_spaces`]).
@@ -2303,6 +2452,113 @@ impl SyncClient {
                 eprintln!("[sync] initial sync failed: {e}");
             }
         });
+    }
+
+    /// Pull server-authored announcements and put them in the notification
+    /// centre.
+    ///
+    /// The watermark is what makes dismissing stick. The server keeps no
+    /// per-user read state - it answers "what is newer than this" - so a refresh
+    /// that asked for the same window again would hand back rows the user had
+    /// already cleared, and they would reappear on every reconnect.
+    pub async fn pull_announcements(&self) {
+        let Some(http) = self.http() else { return };
+        let since = self.sync_state.lock().data.announcements_cursor;
+        let Ok(list) = http.list_announcements(since).await else { return };
+
+        let mut newest = since;
+        for item in list.announcements {
+            newest = newest.max(item.created_at);
+            let mut n = crate::notifications::Notification::new(
+                format!("announcement:{}", item.id),
+                crate::notifications::NotificationKind::from_wire(&item.kind),
+                item.title,
+            )
+            .with_body(item.body);
+            n.data = item.data;
+            // The server's own timestamp, so a device that was closed for a week
+            // files each message under the day it was sent.
+            n.created_at = item.created_at;
+            crate::notifications::raise(&self.app, n);
+        }
+        // Only after the rows are in the store: a crash between the two would
+        // otherwise skip messages the user never saw.
+        self.sync_state.lock().set_announcements_cursor(newest);
+    }
+
+    /// Start the reminder sweep: every half hour, look at the account's
+    /// standing state and raise anything the user would want a nudge about.
+    ///
+    /// Unlike every other notification source, nothing *happens* to trigger
+    /// these - they are true for as long as the user leaves them true, which is
+    /// exactly what makes them worth a reminder and also what would make them
+    /// nag. Each check buckets its notification id by day, so a condition that
+    /// holds for a week produces seven rows at most, and the count inside a row
+    /// stays current without alerting again (upsert keeps the read flag).
+    ///
+    /// Holds a `Weak` for the same reason the passive loop does: the sweep must
+    /// not keep a signed-out client alive.
+    pub fn spawn_reminder_loop(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        self.handle.spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(REMINDER_SWEEP_INTERVAL_SECS)).await;
+                let Some(sync) = weak.upgrade() else { break };
+                if sync.user.lock().is_none() {
+                    continue;
+                }
+                sync.remind_manual_queue_waiting();
+                sync.remind_storage_nearly_full().await;
+            }
+        });
+    }
+
+    /// Manual mode only sends when asked, so a queue can sit indefinitely with
+    /// nothing on screen saying so unless the user opens the Account screen.
+    fn remind_manual_queue_waiting(&self) {
+        if *self.sync_mode.lock() != SyncMode::Manual {
+            return;
+        }
+        let waiting = self.status.lock().pending_count;
+        if waiting == 0 {
+            return;
+        }
+        let noun = if waiting == 1 { "item is" } else { "items are" };
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                reminder_id("manual-queue"),
+                crate::notifications::NotificationKind::Reminder,
+                format!("{waiting} {noun} waiting to sync"),
+            )
+            .with_body("Syncing is set to manual, so they stay on this device until you sync."),
+        );
+    }
+
+    /// Running out of storage stops image sync, and the first sign of it is
+    /// otherwise an entry that quietly never sends.
+    async fn remind_storage_nearly_full(&self) {
+        let Some(http) = self.http() else { return };
+        let Ok(quota) = http.blob_quota().await else { return };
+        if quota.quota_bytes == 0 {
+            return;
+        }
+        // Refills the image-upload precheck too, so the request is not spent
+        // only on this.
+        self.set_blob_budget(quota.used_bytes, quota.quota_bytes);
+        let used = quota.used_bytes as f64 / quota.quota_bytes as f64;
+        if used < STORAGE_WARN_RATIO {
+            return;
+        }
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                reminder_id("storage"),
+                crate::notifications::NotificationKind::Reminder,
+                format!("Storage is {}% full", (used * 100.0).round() as u64),
+            )
+            .with_body("Images stop syncing once it fills. Deleting shared images frees the most."),
+        );
     }
 
     /// Start the passive-mode pull loop: every 5 minutes, if the mode is
@@ -2930,6 +3186,16 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// A reminder id bucketed to the current day.
+///
+/// Reminders describe a state rather than an event, so the same one is true on
+/// every sweep. Folding the day into the id makes the store's own idempotence
+/// do the rate limiting: repeats within a day land on the row that is already
+/// there, and tomorrow gets a fresh one if the state is still true.
+fn reminder_id(kind: &str) -> String {
+    format!("reminder:{kind}:{}", now_ms() / (24 * 60 * 60 * 1000))
+}
+
 /// A short human label for an entry, used when telling the user which item
 /// sync refused to send.
 fn skip_label_for(entry: &ClipboardEntry) -> String {
@@ -2964,7 +3230,7 @@ fn skip_label_for(entry: &ClipboardEntry) -> String {
 /// Record an entry sync refused to send: bump the count, keep the reason for
 /// the Account screen, and tell the UI so it can surface it immediately.
 fn record_skip(ctx: &PushCtx, client_id: &str, label: &str, reason: String) {
-    {
+    let total = {
         let mut status = ctx.status.lock();
         status.skipped_count += 1;
         status.skipped.insert(
@@ -2977,10 +3243,30 @@ fn record_skip(ctx: &PushCtx, client_id: &str, label: &str, reason: String) {
             },
         );
         status.skipped.truncate(SKIPPED_HISTORY_LIMIT);
-    }
+        status.skipped_count
+    };
     let _ = ctx.app.emit(
         "sync:entry-skipped",
         serde_json::json!({ "client_id": client_id, "label": label, "reason": reason }),
+    );
+
+    // One rolling row, not one per item. A single push can refuse hundreds of
+    // entries at once (see SKIPPED_HISTORY_LIMIT above), and a feed of hundreds
+    // of near-identical lines buries everything else in it. The count carries
+    // the scale; the Account screen still lists them individually.
+    let title = if total == 1 {
+        format!("{label} was not sent")
+    } else {
+        format!("{total} items were not sent")
+    };
+    crate::notifications::raise_rolling(
+        &ctx.app,
+        crate::notifications::Notification::new(
+            "sync-skipped",
+            crate::notifications::NotificationKind::SyncWarning,
+            title,
+        )
+        .with_body(reason),
     );
 }
 

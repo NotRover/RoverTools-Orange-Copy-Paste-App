@@ -291,12 +291,19 @@ impl WsListener {
                     .await;
                 // The owner's reconcile (re)wraps keyrings for the current
                 // member list — including the rekey a removal leaves behind;
-                // members just refresh their cached space list.
+                // members just refresh their cached space list. It also owns
+                // the notification, which has to wait for that refreshed list
+                // to turn the ids in this payload into names.
                 if let Some(sync) = self.sync_client() {
-                    let handle = tokio::runtime::Handle::current();
-                    handle.spawn(async move {
-                        sync.reconcile_spaces().await;
-                    });
+                    let p = &msg.payload;
+                    let space_id = p.get("space_id").and_then(|v| v.as_str()).unwrap_or_default();
+                    let action = p.get("action").and_then(|v| v.as_str()).unwrap_or_default();
+                    let user_id = p.get("user_id").and_then(|v| v.as_str()).unwrap_or_default();
+                    sync.handle_membership_changed(
+                        space_id.to_string(),
+                        action.to_string(),
+                        user_id.to_string(),
+                    );
                 }
             }
             // The owner opened this space's back catalogue. Reconcile rather than
@@ -314,8 +321,52 @@ impl WsListener {
             "invite:received" => {
                 let _ = self.app.emit("sync:invite-received", &msg.payload);
             }
+            // Someone answered an invite. `accepted` and `declined` are
+            // addressed to whoever sent it; `revoked` goes to the invitee and
+            // is left to `notifications_refresh`, which retires their row from
+            // the server's own answer rather than guessing from an event.
             "invite:updated" => {
                 let _ = self.app.emit("sync:invite-updated", &msg.payload);
+                if let Some(sync) = self.sync_client() {
+                    let p = &msg.payload;
+                    if let (Some(invite_id), Some(status), Some(space_id)) = (
+                        p.get("invite_id").and_then(|v| v.as_str()),
+                        p.get("status").and_then(|v| v.as_str()),
+                        p.get("space_id").and_then(|v| v.as_str()),
+                    ) {
+                        sync.note_invite_answered(invite_id, status, space_id);
+                    }
+                }
+            }
+            // A message from the server itself. Raised straight away for anyone
+            // connected; everyone else picks the same row up from
+            // `pull_announcements` on their next refresh, and the shared
+            // `announcement:<id>` key makes both paths landing a no-op.
+            "announcement:new" => {
+                let p = &msg.payload;
+                if let (Some(id), Some(title)) = (
+                    p.get("id").and_then(|v| v.as_str()),
+                    p.get("title").and_then(|v| v.as_str()),
+                ) {
+                    let kind = p.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                    let mut n = crate::notifications::Notification::new(
+                        format!("announcement:{id}"),
+                        crate::notifications::NotificationKind::from_wire(kind),
+                        title,
+                    )
+                    .with_body(p.get("body").and_then(|v| v.as_str()).unwrap_or(""));
+                    if let Some(ts) = p.get("created_at").and_then(|v| v.as_u64()) {
+                        n.created_at = ts;
+                    }
+                    if let Some(map) = p.get("data").and_then(|v| v.as_object()) {
+                        for (k, v) in map {
+                            if let Some(text) = v.as_str() {
+                                n.data.insert(k.clone(), text.to_string());
+                            }
+                        }
+                    }
+                    crate::notifications::raise(&self.app, n);
+                }
             }
             // Application-level keepalive — reply so the server refreshes our
             // presence TTL (otherwise we're marked offline after ~5 min).

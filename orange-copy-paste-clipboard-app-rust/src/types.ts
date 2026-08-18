@@ -134,6 +134,7 @@ export type NotificationKind =
   | "space_invite"
   | "space_activity"
   | "sync_warning"
+  | "announcement"
   | "reminder";
 
 /** One row in the notification centre. Mirrors the Rust `Notification`. */

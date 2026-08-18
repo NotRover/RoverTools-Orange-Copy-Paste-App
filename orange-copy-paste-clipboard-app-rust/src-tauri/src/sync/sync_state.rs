@@ -24,6 +24,11 @@ pub struct SyncState {
     /// this device a backfill, whenever it next signs in.
     #[serde(default)]
     pub history_backfilled: Vec<String>,
+    /// `created_at` of the newest server announcement this device has been
+    /// handed. Only newer ones are asked for, so dismissing one sticks instead
+    /// of being undone by the next refresh.
+    #[serde(default)]
+    pub announcements_cursor: u64,
 }
 
 pub struct SyncStateStore {
@@ -44,6 +49,15 @@ impl SyncStateStore {
     /// Advance the pull cursor and persist.
     pub fn set_last_server_ts(&mut self, ts: u64) {
         self.data.last_server_ts = Some(ts);
+        self.save();
+    }
+
+    /// Advance the announcement watermark, keeping the highest seen.
+    pub fn set_announcements_cursor(&mut self, ts: u64) {
+        if ts <= self.data.announcements_cursor {
+            return;
+        }
+        self.data.announcements_cursor = ts;
         self.save();
     }
 

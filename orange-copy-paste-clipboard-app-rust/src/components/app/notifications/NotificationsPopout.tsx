@@ -6,6 +6,7 @@ import {
   BellSimple,
   CheckCircle,
   WarningCircle,
+  Megaphone,
   Alarm,
 } from "@phosphor-icons/react";
 import type { AppNotification, NotificationKind } from "../../../types";
@@ -29,6 +30,7 @@ const CHIPS: Array<{ key: string; label: string; kinds: NotificationKind[] }> = 
   { key: "invites", label: "Invites", kinds: ["space_invite"] },
   { key: "spaces", label: "Spaces", kinds: ["space_activity"] },
   { key: "sync", label: "Sync", kinds: ["sync_warning"] },
+  { key: "news", label: "News", kinds: ["announcement"] },
   { key: "reminders", label: "Reminders", kinds: ["reminder"] },
 ];
 
@@ -79,6 +81,8 @@ function glyphFor(kind: NotificationKind) {
       return { icon: <CheckCircle size={15} weight="duotone" />, tone: "good" };
     case "sync_warning":
       return { icon: <WarningCircle size={15} weight="duotone" />, tone: "warn" };
+    case "announcement":
+      return { icon: <Megaphone size={15} weight="duotone" />, tone: "accent" };
     default:
       return { icon: <Alarm size={15} weight="duotone" />, tone: "plain" };
   }
@@ -306,10 +310,27 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
             {g.rows.map((n) => {
               const glyph = glyphFor(n.kind);
               const actionable = n.kind === "space_invite" && !n.resolved;
+              // A row about a space opens it, unless it is still asking a
+              // question - answering an invite must not be a side effect of
+              // trying to read it.
+              const linked = !actionable && !!n.data.space_id;
               return (
                 <div
                   key={n.id}
-                  className={`ntf-row${n.read ? "" : " unread"}`}
+                  className={`ntf-row${n.read ? "" : " unread"}${linked ? " ntf-row--link" : ""}`}
+                  role={linked ? "button" : undefined}
+                  tabIndex={linked ? 0 : undefined}
+                  onClick={linked ? onOpenSpaces : undefined}
+                  onKeyDown={
+                    linked
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onOpenSpaces();
+                          }
+                        }
+                      : undefined
+                  }
                 >
                   <span className={`ntf-glyph ntf-glyph--${glyph.tone}`}>
                     {glyph.icon}
@@ -344,7 +365,10 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
                   </div>
                   <button
                     className="ntf-dismiss"
-                    onClick={() => dismiss(n.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dismiss(n.id);
+                    }}
                     aria-label="Dismiss"
                     data-tooltip="Dismiss"
                     data-tooltip-pos="left"
