@@ -58,6 +58,14 @@ const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
 /// How often the passive-mode pull loop wakes up.  Pushes are always immediate
 /// (the backup must not lose data); passive only batches what gets *applied*.
 const PASSIVE_PULL_INTERVAL_SECS: u64 = 300;
+/// How often the reminder sweep looks at the account's standing state.
+///
+/// Frequent enough that a nudge lands the same day it becomes true, and cheap
+/// because each check is also day-bucketed - the interval decides latency, the
+/// bucket decides how often the user can be told.
+const REMINDER_SWEEP_INTERVAL_SECS: u64 = 30 * 60;
+/// Share of the storage quota that counts as nearly full.
+const STORAGE_WARN_RATIO: f64 = 0.9;
 
 /// Settings key holding the per-space send filters (JSON map keyed by space
 /// id).  Lives in settings.json and rides in the encrypted settings blob so
@@ -873,6 +881,14 @@ impl SyncClient {
             if !previous.is_empty() && previous != user_id {
                 self.id_map.lock().reset();
                 state.reset_for_new_account();
+                // Invites and space activity are addressed to a person, so the
+                // feed is the previous account's mail. It is refilled from the
+                // server for whoever just signed in.
+                let app_state = self.app.state::<crate::state::AppState>();
+                app_state.notifications.lock().reset();
+                app_state
+                    .notifications_dirty
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);
@@ -888,6 +904,26 @@ impl SyncClient {
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
+
+        // One-shot: rebuild who-wrote-what from the server.
+        //
+        // Records written before bug #8 was fixed were last-write-wins, so any
+        // of them may name whoever pushed last instead of the author. Keeping
+        // one would now be worse than the original bug: the record is sticky, so
+        // a wrong name would refuse the real author's next update as if they
+        // were the impostor. Nothing local can tell a good record from a bad
+        // one, so all of them go.
+        //
+        // Rewinding the cursor is what puts them back. Pull returns rows in
+        // `server_ts` order, so the earliest row for an entry - the author's,
+        // since a rival copy can only be pushed after the original exists -
+        // arrives first and establishes them, and the rival is then refused.
+        // Nothing else would revisit these rows: both sit below the cursor.
+        if !self.sync_state.lock().data.authorship_repaired {
+            let cleared = self.id_map.lock().clear_all_entry_owners();
+            self.sync_state.lock().rewind_for_authorship_repair();
+            eprintln!("[sync] rebuilding authorship for {cleared} entries from a full pull");
+        }
 
         // 10. Start the realtime listener.  It owns `connected` from here on —
         // setting it true at login made the status pill claim "Synced" for as
@@ -1576,6 +1612,25 @@ impl SyncClient {
                 e.client_id
             );
 
+            // One entry, one author. A row naming anybody else is a rival copy
+            // and is dropped whole - content, tombstone and all.
+            //
+            // Rows are keyed server-side by `(user_id, client_id, entry_type)`,
+            // so a device that pushes an entry it did not write does not update
+            // the original: it inserts a second row carrying the same
+            // `client_id` under its own account, and every member then pulls
+            // both. Merging collapses them onto one local key, so before this
+            // guard the later row won on arrival order - renaming the entry to
+            // whoever pushed last and overwriting the author's text with theirs.
+            //
+            // The push guards (`spawn_push_note`, `spawn_push_clipboard_entry`)
+            // stop this device creating such a row. This is the receiving half:
+            // rows already on the server, or written by a device that has not
+            // been updated, must not be able to take an entry over.
+            if !self.row_is_authoritative(&key, e) {
+                continue;
+            }
+
             // Tombstone → remove locally.
             if e.deleted_at.is_some() {
                 let had_local = if is_note {
@@ -2070,6 +2125,49 @@ impl SyncClient {
 
     /// Whether another member wrote this entry. Anything that edits content has
     /// to ask first: a copy shared into a space is theirs, not ours to rewrite.
+    /// Whether an incoming row speaks for the entry it names.
+    ///
+    /// True when it comes from the entry's author, or when nobody is on record
+    /// yet and this row gets to establish them. False for a rival row - the same
+    /// `client_id` under a different account - which is then dropped rather than
+    /// merged.
+    ///
+    /// Rows that carry no `user_id` are always accepted: they predate the field,
+    /// and refusing them would strand entries this device already holds.
+    fn row_is_authoritative(&self, key: &str, e: &crate::sync::client::PulledEntry) -> bool {
+        accepts_row(self.author_of(key).as_deref(), e.user_id.as_deref())
+    }
+
+    /// Who this device believes wrote `key`, or `None` when that is still open.
+    ///
+    /// Repairs one impossible state on the way past: this account recorded as
+    /// the author of an entry also flagged as having arrived from someone else.
+    /// Both cannot be true, and it is the fingerprint of the old last-write-wins
+    /// behaviour - our own stray row landing after the author's and taking their
+    /// name off it. The remote flag is the half that was never wrong (it is
+    /// sticky, and only a space-key decrypt sets it), so the owner is the half
+    /// that gets dropped, letting the author's next row put the right name back.
+    fn author_of(&self, key: &str) -> Option<String> {
+        // Read before taking the id_map lock: nothing else nests these two, and
+        // this is the one place that would want both.
+        let self_id = self.user.lock().as_ref().map(|u| u.user_id.clone());
+        let mut id_map = self.id_map.lock();
+        let recorded = id_map.owner_of(key);
+        let author = resolve_author(
+            recorded.as_deref(),
+            id_map.is_remote(key),
+            id_map.get_server_id(key).is_some(),
+            self_id.as_deref(),
+        );
+        // Released as impossible: drop it from the record too, so the author's
+        // next row can put the right name back rather than being refused by the
+        // stale one.
+        if author.is_none() && recorded.is_some() {
+            id_map.clear_entry_owner(key);
+        }
+        author
+    }
+
     pub fn is_remote_entry(&self, entry_type: &str, client_id: &str) -> bool {
         self.id_map.lock().is_remote(&format!("{entry_type}:{client_id}"))
     }
@@ -2111,6 +2209,134 @@ impl SyncClient {
     /// who removed it — the only thing this side cannot infer. It travels on the
     /// entry-removed event as `removed_by`; the local command passes true,
     /// since the reader can only unshare what they posted.
+    /// A member joined, left, was removed, or the space was deleted.
+    ///
+    /// Owns the reconcile as well as the notification because the two are
+    /// ordered: the cached space list is what turns ids into names, and it is
+    /// stale until reconcile has run. Names are read on both sides of it - a
+    /// joiner is not in the cache yet, and a space that was left or deleted is
+    /// gone from it afterwards - and the fresher answer wins.
+    pub(crate) fn handle_membership_changed(
+        self: &Arc<Self>,
+        space_id: String,
+        action: String,
+        actor_id: String,
+    ) {
+        let before = self.membership_names(&space_id, &actor_id);
+        let this = Arc::clone(self);
+        tokio::runtime::Handle::current().spawn(async move {
+            this.reconcile_spaces().await;
+            let after = this.membership_names(&space_id, &actor_id);
+            this.note_membership_change(&space_id, &action, &actor_id, before, after);
+        });
+    }
+
+    /// `(space name, that member's display name)` as currently cached.
+    fn membership_names(&self, space_id: &str, user_id: &str) -> (Option<String>, Option<String>) {
+        let spaces = self.spaces.lock();
+        let Some(space) = spaces.iter().find(|s| s.id == space_id) else {
+            return (None, None);
+        };
+        let member = space
+            .members
+            .iter()
+            .find(|m| m.user_id == user_id)
+            .map(|m| m.display_name.clone());
+        (Some(space.name.clone()), member)
+    }
+
+    fn note_membership_change(
+        &self,
+        space_id: &str,
+        action: &str,
+        actor_id: &str,
+        before: (Option<String>, Option<String>),
+        after: (Option<String>, Option<String>),
+    ) {
+        let space_name = after.0.or(before.0).unwrap_or_else(|| "a space".into());
+        let actor_name = after.1.or(before.1).unwrap_or_else(|| "Someone".into());
+        let me = self.current_user().map(|u| u.user_id).unwrap_or_default();
+        let by_me = actor_id == me;
+
+        // Doing it yourself is not news - you watched it happen and the screen
+        // already changed under you. Losing your own membership is the one
+        // exception, and it is the case this exists for.
+        let title = match (action, by_me) {
+            ("joined", false) => format!("{actor_name} joined {space_name}"),
+            ("left", true) => format!("You are no longer in {space_name}"),
+            ("left", false) => format!("{actor_name} left {space_name}"),
+            ("deleted", false) => format!("{space_name} was deleted"),
+            _ => return,
+        };
+
+        // Each occurrence is its own row, so the id carries the time. Nothing
+        // replays these - they arrive once, live, over the socket.
+        let id = format!("space-activity:{space_id}:{action}:{actor_id}:{}", now_ms());
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                id,
+                crate::notifications::NotificationKind::SpaceActivity,
+                title,
+            )
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// A space owner removed something this user had shared there.
+    fn note_entry_taken_down(&self, space_id: &str, client_id: &str, entry_type: &str) {
+        let space_name = self
+            .spaces
+            .lock()
+            .iter()
+            .find(|s| s.id == space_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "a space".into());
+        let what = if entry_type == "note" { "note" } else { "item" };
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                // Keyed on the entry, so a repeat of the event cannot report the
+                // same removal twice.
+                format!("space-removed:{space_id}:{entry_type}:{client_id}"),
+                crate::notifications::NotificationKind::SpaceActivity,
+                format!("A space owner removed your {what} from {space_name}"),
+            )
+            .with_body("You still have your copy. It is only out of that space.")
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// Someone accepted or declined an invite this user sent.
+    ///
+    /// Only the sender is told: on the receiving side the invite's own row is
+    /// the record, and it is retired by `notifications_refresh`.
+    pub(crate) fn note_invite_answered(&self, invite_id: &str, status: &str, space_id: &str) {
+        let verb = match status {
+            "accepted" => "accepted",
+            "declined" => "declined",
+            _ => return,
+        };
+        let space_name = self
+            .spaces
+            .lock()
+            .iter()
+            .find(|s| s.id == space_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "a space".into());
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                // One row per invite: the server sends a final answer once, and
+                // a reconnect that replays it must not add a second line.
+                format!("invite-answered:{invite_id}"),
+                crate::notifications::NotificationKind::SpaceActivity,
+                format!("Your invite to {space_name} was {verb}"),
+            )
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
     pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_author: bool) {
         use crate::state::app_state::AppState;
         use std::sync::atomic::Ordering;
@@ -2141,6 +2367,12 @@ impl SyncClient {
                 },
             );
             drop(id_map);
+            // Ours and not us: a space owner took it down. The Spaces feed
+            // shows a placeholder where it was, but only while the user happens
+            // to be looking at that space - this is what tells them otherwise.
+            if !by_author {
+                self.note_entry_taken_down(space_id, client_id, entry_type);
+            }
             let _ = self.app.emit(
                 if entry_type == "note" {
                     "sync:notes-merged"
@@ -2227,9 +2459,16 @@ impl SyncClient {
 
     /// Drop the recorded skips (and their count) after the user has seen them.
     pub fn clear_skipped(&self) {
-        let mut status = self.status.lock();
-        status.skipped_count = 0;
-        status.skipped.clear();
+        {
+            let mut status = self.status.lock();
+            status.skipped_count = 0;
+            status.skipped.clear();
+        }
+        // The rolling row quotes that count, so leaving it behind would have
+        // the centre reporting items the Account screen says no longer exist.
+        let state = self.app.state::<crate::state::AppState>();
+        let changed = state.notifications.lock().dismiss("sync-skipped");
+        crate::notifications::commands::commit(&self.app, changed);
     }
 
     /// The cached space list (refreshed by [`Self::reconcile_spaces`]).
@@ -2295,6 +2534,113 @@ impl SyncClient {
                 eprintln!("[sync] initial sync failed: {e}");
             }
         });
+    }
+
+    /// Pull server-authored announcements and put them in the notification
+    /// centre.
+    ///
+    /// The watermark is what makes dismissing stick. The server keeps no
+    /// per-user read state - it answers "what is newer than this" - so a refresh
+    /// that asked for the same window again would hand back rows the user had
+    /// already cleared, and they would reappear on every reconnect.
+    pub async fn pull_announcements(&self) {
+        let Some(http) = self.http() else { return };
+        let since = self.sync_state.lock().data.announcements_cursor;
+        let Ok(list) = http.list_announcements(since).await else { return };
+
+        let mut newest = since;
+        for item in list.announcements {
+            newest = newest.max(item.created_at);
+            let mut n = crate::notifications::Notification::new(
+                format!("announcement:{}", item.id),
+                crate::notifications::NotificationKind::from_wire(&item.kind),
+                item.title,
+            )
+            .with_body(item.body);
+            n.data = item.data;
+            // The server's own timestamp, so a device that was closed for a week
+            // files each message under the day it was sent.
+            n.created_at = item.created_at;
+            crate::notifications::raise(&self.app, n);
+        }
+        // Only after the rows are in the store: a crash between the two would
+        // otherwise skip messages the user never saw.
+        self.sync_state.lock().set_announcements_cursor(newest);
+    }
+
+    /// Start the reminder sweep: every half hour, look at the account's
+    /// standing state and raise anything the user would want a nudge about.
+    ///
+    /// Unlike every other notification source, nothing *happens* to trigger
+    /// these - they are true for as long as the user leaves them true, which is
+    /// exactly what makes them worth a reminder and also what would make them
+    /// nag. Each check buckets its notification id by day, so a condition that
+    /// holds for a week produces seven rows at most, and the count inside a row
+    /// stays current without alerting again (upsert keeps the read flag).
+    ///
+    /// Holds a `Weak` for the same reason the passive loop does: the sweep must
+    /// not keep a signed-out client alive.
+    pub fn spawn_reminder_loop(self: &Arc<Self>) {
+        let weak = Arc::downgrade(self);
+        self.handle.spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(REMINDER_SWEEP_INTERVAL_SECS)).await;
+                let Some(sync) = weak.upgrade() else { break };
+                if sync.user.lock().is_none() {
+                    continue;
+                }
+                sync.remind_manual_queue_waiting();
+                sync.remind_storage_nearly_full().await;
+            }
+        });
+    }
+
+    /// Manual mode only sends when asked, so a queue can sit indefinitely with
+    /// nothing on screen saying so unless the user opens the Account screen.
+    fn remind_manual_queue_waiting(&self) {
+        if *self.sync_mode.lock() != SyncMode::Manual {
+            return;
+        }
+        let waiting = self.status.lock().pending_count;
+        if waiting == 0 {
+            return;
+        }
+        let noun = if waiting == 1 { "item is" } else { "items are" };
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                reminder_id("manual-queue"),
+                crate::notifications::NotificationKind::Reminder,
+                format!("{waiting} {noun} waiting to sync"),
+            )
+            .with_body("Syncing is set to manual, so they stay on this device until you sync."),
+        );
+    }
+
+    /// Running out of storage stops image sync, and the first sign of it is
+    /// otherwise an entry that quietly never sends.
+    async fn remind_storage_nearly_full(&self) {
+        let Some(http) = self.http() else { return };
+        let Ok(quota) = http.blob_quota().await else { return };
+        if quota.quota_bytes == 0 {
+            return;
+        }
+        // Refills the image-upload precheck too, so the request is not spent
+        // only on this.
+        self.set_blob_budget(quota.used_bytes, quota.quota_bytes);
+        let used = quota.used_bytes as f64 / quota.quota_bytes as f64;
+        if used < STORAGE_WARN_RATIO {
+            return;
+        }
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                reminder_id("storage"),
+                crate::notifications::NotificationKind::Reminder,
+                format!("Storage is {}% full", (used * 100.0).round() as u64),
+            )
+            .with_body("Images stop syncing once it fills. Deleting shared images frees the most."),
+        );
     }
 
     /// Start the passive-mode pull loop: every 5 minutes, if the mode is
@@ -2922,8 +3268,64 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// A reminder id bucketed to the current day.
+///
+/// Reminders describe a state rather than an event, so the same one is true on
+/// every sweep. Folding the day into the id makes the store's own idempotence
+/// do the rate limiting: repeats within a day land on the row that is already
+/// there, and tomorrow gets a fresh one if the state is still true.
+fn reminder_id(kind: &str) -> String {
+    format!("reminder:{kind}:{}", now_ms() / (24 * 60 * 60 * 1000))
+}
+
 /// A short human label for an entry, used when telling the user which item
 /// sync refused to send.
+/// Whether a pulled row speaks for the entry it names.
+///
+/// Split out from [`SyncClient::row_is_authoritative`] so the rule can be tested
+/// on its own. It decided a bug that cost attribution outright (see bug #8 in
+/// `docs/BUGFIX_HISTORY.md`), and the failure was silent - the wrong answer
+/// looked exactly like an ordinary merge.
+///
+/// A row with no `user_id` predates the field. Refusing those would strand
+/// entries this device already holds, and they cannot be rival rows: the shape
+/// this guards against is created by a client new enough to always send one.
+fn accepts_row(author: Option<&str>, incoming: Option<&str>) -> bool {
+    match (author, incoming) {
+        (_, None) => true,
+        (None, Some(_)) => true,
+        (Some(author), Some(incoming)) => author == incoming,
+    }
+}
+
+/// Who a device believes wrote an entry, from what it has on record.
+///
+/// Split out from [`SyncClient::author_of`] for the same reason as
+/// [`accepts_row`]. `recorded` is the id_map's owner, `is_remote` its sticky
+/// arrived-from-elsewhere flag, `known_locally` whether this device holds the
+/// entry at all.
+///
+/// Returns `None` when authorship is open - either genuinely unknown, or
+/// recorded impossibly and released. The second case is the repair: a remote
+/// entry cannot have been written by this account, and that pairing is the
+/// residue of the old last-write-wins behaviour.
+fn resolve_author(
+    recorded: Option<&str>,
+    is_remote: bool,
+    known_locally: bool,
+    self_id: Option<&str>,
+) -> Option<String> {
+    match (recorded, self_id) {
+        (Some(owner), Some(me)) if is_remote && owner == me => None,
+        (Some(owner), _) => Some(owner.to_string()),
+        // Nobody on record. An entry this device knows and has not flagged as
+        // arriving from elsewhere is one we wrote - saying so is what stops the
+        // takeover running the other way, somebody else's row claiming ours.
+        (None, Some(me)) if !is_remote && known_locally => Some(me.to_string()),
+        (None, _) => None,
+    }
+}
+
 fn skip_label_for(entry: &ClipboardEntry) -> String {
     if let Some(label) = entry.label.as_ref().filter(|l| !l.trim().is_empty()) {
         return label.clone();
@@ -2956,7 +3358,7 @@ fn skip_label_for(entry: &ClipboardEntry) -> String {
 /// Record an entry sync refused to send: bump the count, keep the reason for
 /// the Account screen, and tell the UI so it can surface it immediately.
 fn record_skip(ctx: &PushCtx, client_id: &str, label: &str, reason: String) {
-    {
+    let total = {
         let mut status = ctx.status.lock();
         status.skipped_count += 1;
         status.skipped.insert(
@@ -2969,10 +3371,30 @@ fn record_skip(ctx: &PushCtx, client_id: &str, label: &str, reason: String) {
             },
         );
         status.skipped.truncate(SKIPPED_HISTORY_LIMIT);
-    }
+        status.skipped_count
+    };
     let _ = ctx.app.emit(
         "sync:entry-skipped",
         serde_json::json!({ "client_id": client_id, "label": label, "reason": reason }),
+    );
+
+    // One rolling row, not one per item. A single push can refuse hundreds of
+    // entries at once (see SKIPPED_HISTORY_LIMIT above), and a feed of hundreds
+    // of near-identical lines buries everything else in it. The count carries
+    // the scale; the Account screen still lists them individually.
+    let title = if total == 1 {
+        format!("{label} was not sent")
+    } else {
+        format!("{total} items were not sent")
+    };
+    crate::notifications::raise_rolling(
+        &ctx.app,
+        crate::notifications::Notification::new(
+            "sync-skipped",
+            crate::notifications::NotificationKind::SyncWarning,
+            title,
+        )
+        .with_body(reason),
     );
 }
 
@@ -3183,6 +3605,19 @@ async fn push_entry_task(
                         "[sync] {entry_type} {client_id} rejected by the server: {}",
                         c.reason
                     );
+                    // The server refuses a push that would plant a rival copy of
+                    // an entry somebody else wrote. Reaching here means a client
+                    // guard did not hold, so it goes where the user can see it
+                    // rather than only to stderr - a silent rejection is how
+                    // this class of bug stayed hidden the first time.
+                    if c.reason == "not_your_entry" {
+                        record_skip(
+                            &ctx,
+                            &client_id,
+                            if entry_type == "note" { "A note" } else { "An item" },
+                            "Only the member who wrote this can change it in the space.".into(),
+                        );
+                    }
                 }
                 ctx.status.lock().pending_count = ctx.queue.lock().len();
                 return;
@@ -3219,4 +3654,85 @@ async fn push_entry_task(
         "sync:entry-queued",
         serde_json::json!({ "client_id": client_id, "entry_type": entry_type }),
     );
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::{accepts_row, resolve_author};
+
+    const ME: &str = "spec";
+    const THEM: &str = "hasan";
+
+    // ── Who does this device think wrote the entry ──────────────────
+
+    #[test]
+    fn a_recorded_author_stands() {
+        assert_eq!(
+            resolve_author(Some(THEM), true, true, Some(ME)).as_deref(),
+            Some(THEM)
+        );
+    }
+
+    #[test]
+    fn an_entry_we_hold_and_never_flagged_remote_is_ours() {
+        assert_eq!(
+            resolve_author(None, false, true, Some(ME)).as_deref(),
+            Some(ME)
+        );
+    }
+
+    #[test]
+    fn an_entry_we_have_never_seen_has_no_author_yet() {
+        assert_eq!(resolve_author(None, false, false, Some(ME)), None);
+    }
+
+    #[test]
+    fn we_cannot_be_the_author_of_something_that_came_from_elsewhere() {
+        // The exact residue of bug #8: our own stray row landed after the
+        // author's and took their name off the entry. Both cannot be true, and
+        // the remote flag is the half that is never wrong.
+        assert_eq!(resolve_author(Some(ME), true, true, Some(ME)), None);
+    }
+
+    #[test]
+    fn signed_out_we_claim_nothing() {
+        assert_eq!(resolve_author(None, false, true, None), None);
+        // A recorded author still stands - it says nothing about us.
+        assert_eq!(
+            resolve_author(Some(THEM), true, true, None).as_deref(),
+            Some(THEM)
+        );
+    }
+
+    // ── Which rows are allowed to touch it ──────────────────────────
+
+    #[test]
+    fn the_author_may_update_their_own_entry() {
+        assert!(accepts_row(Some(THEM), Some(THEM)));
+    }
+
+    #[test]
+    fn a_rival_row_is_refused() {
+        // The whole bug in one line: before this, arrival order decided, and
+        // pull order (server_ts ascending) put the rival last every time.
+        assert!(!accepts_row(Some(THEM), Some(ME)));
+    }
+
+    #[test]
+    fn nobody_may_take_over_an_entry_of_ours() {
+        assert!(!accepts_row(Some(ME), Some(THEM)));
+    }
+
+    #[test]
+    fn an_unclaimed_entry_accepts_the_first_row_to_name_an_author() {
+        assert!(accepts_row(None, Some(THEM)));
+    }
+
+    #[test]
+    fn a_row_without_an_author_is_always_accepted() {
+        // Predates the field. Refusing these would strand entries this device
+        // already holds.
+        assert!(accepts_row(Some(THEM), None));
+        assert!(accepts_row(None, None));
+    }
 }

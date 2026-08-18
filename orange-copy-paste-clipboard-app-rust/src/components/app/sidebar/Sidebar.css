@@ -105,6 +105,14 @@
   pointer-events: none;
 }
 
+/* With the popout open the bell fills with --accent-dim-strong, and a solid
+   accent badge on that tint loses its edge. Inverting it - the sidebar ground
+   behind accent digits - keeps the count legible against the fill. */
+.nav-btn.active[data-notif-bell] .nav-badge {
+  background: var(--sidebar-bg);
+  color: var(--accent);
+}
+
 /* Sync in progress — gentle pulse on the cloud status icon. */
 .nav-btn--syncing {
   animation: sidebar-sync-pulse 1.1s ease-in-out infinite;

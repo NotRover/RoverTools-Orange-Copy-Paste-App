@@ -9,7 +9,7 @@ import type {
   AppScreen,
   AppTheme,
   SyncIndicator,
-  SyncInviteList,
+  AppNotification,
 } from "../../types";
 import {
   classifyFileEntry,
@@ -24,6 +24,7 @@ import SettingsScreen from "./settings-screen/SettingsScreen";
 import ShortcutsScreen from "./shortcuts-screen/ShortcutsScreen";
 import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import NotesScreen from "./notes-screen/NotesScreen";
+import NotificationsPopout from "./notifications/NotificationsPopout";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import ToastNotification from "./toast/ToastNotification";
 import { APP_TOAST_EVENT, type ToastRequest } from "./toast/toastBus";
@@ -167,7 +168,9 @@ const App: React.FC = () => {
   const [syncTick, setSyncTick] = useState(0);
   const [syncActivity, setSyncActivity] = useState(false);
   // Received shared-space invites still awaiting a response.
-  const [pendingInviteCount, setPendingInviteCount] = useState(0);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifAnchor, setNotifAnchor] = useState({ x: 0, y: 0 });
 
   // Undo state for group deletion
   const [deletedGroup, setDeletedGroup] = useState<{
@@ -553,25 +556,30 @@ const App: React.FC = () => {
       });
     };
 
-    const refresh = () => {
-      invoke<SyncInviteList>("sync_list_invites")
+    // Two steps, deliberately separate: `reload` reads the local feed, which
+    // always works; `pull` asks the server to reconcile it and emits
+    // `notifications:changed` when that moved something. So a signed-out or
+    // offline launch still shows whatever was stored, rather than an empty
+    // centre while the network decides.
+    const reload = () => {
+      invoke<AppNotification[]>("notifications_list")
         .then((list) => {
-          if (cancelled) return;
-          setPendingInviteCount(
-            list.received.filter((i) => i.status === "pending").length,
-          );
+          if (!cancelled) setNotifications(list);
         })
-        .catch(() => {
-          if (!cancelled) setPendingInviteCount(0);
-        });
+        .catch(() => {});
+    };
+    const pull = () => {
+      invoke("notifications_refresh").catch(() => {});
     };
 
-    refresh();
-    track(listen("sync:invite-received", refresh));
-    track(listen("sync:invite-updated", refresh));
+    reload();
+    pull();
+    track(listen("notifications:changed", reload));
+    track(listen("sync:invite-received", pull));
+    track(listen("sync:invite-updated", pull));
     track(
       listen<{ connected: boolean }>("sync:status-changed", (event) => {
-        if (event.payload.connected) refresh();
+        if (event.payload.connected) pull();
       }),
     );
 
@@ -1293,7 +1301,21 @@ const App: React.FC = () => {
         screen={screen}
         theme={theme}
         syncState={syncState}
-        pendingInvites={pendingInviteCount}
+        unreadNotifications={notifications.filter((n) => !n.read).length}
+        notificationsOpen={notifOpen}
+        onToggleNotifications={(rect) => {
+          // The panel grows upward from the bell, just clear of the sidebar.
+          // Its height is not known here, so the popout does that subtraction
+          // itself once it has measured.
+          setNotifAnchor({ x: rect.right + 8, y: rect.bottom });
+          setNotifOpen((v) => {
+            // Opening is the moment the user is actually looking, so reconcile
+            // then: an invite answered on another device shows as answered
+            // here instead of offering buttons that will fail.
+            if (!v) invoke("notifications_refresh").catch(() => {});
+            return !v;
+          });
+        }}
         onNavigate={(s) => {
           setScreen(s);
           if (s === "clipboard" || s === "notes" || s === "spaces") {
@@ -1301,6 +1323,24 @@ const App: React.FC = () => {
           }
         }}
         onToggleTheme={toggleTheme}
+      />
+
+      <NotificationsPopout
+        open={notifOpen}
+        anchorX={notifAnchor.x}
+        anchorY={notifAnchor.y}
+        items={notifications}
+        onClose={() => setNotifOpen(false)}
+        onRefresh={() => {
+          invoke<AppNotification[]>("notifications_list")
+            .then(setNotifications)
+            .catch(() => {});
+        }}
+        onOpenSpaces={() => {
+          setNotifOpen(false);
+          setScreen("spaces");
+          localStorage.setItem("sc-last-screen", "spaces");
+        }}
       />
 
       <div className="main-frame">

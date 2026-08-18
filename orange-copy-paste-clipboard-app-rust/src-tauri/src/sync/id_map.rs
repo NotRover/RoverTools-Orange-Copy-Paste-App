@@ -189,14 +189,58 @@ impl IdMap {
 
     /// Record which account wrote `client_id`. Idempotent, for the same reason
     /// as `mark_entry_remote`: a re-merge must not rewrite the file.
-    pub fn set_entry_owner(&mut self, client_id: &str, user_id: &str) {
-        if self.data.entry_owners.get(client_id).map(String::as_str) == Some(user_id) {
-            return;
+    ///
+    /// Sticky, unlike an ordinary map insert: once an author is on record, a
+    /// later row naming somebody else does not get to replace them. An entry has
+    /// exactly one author, and this used to be last-write-wins - so a second row
+    /// carrying the same `client_id` under a different account (the shape a
+    /// stray push leaves behind) would rename the entry to whoever pushed last,
+    /// and pull order decided whose name a member saw.
+    ///
+    /// Returns whether the record now names `user_id`, so a caller can tell
+    /// "agreed" from "refused".
+    pub fn set_entry_owner(&mut self, client_id: &str, user_id: &str) -> bool {
+        match self.data.entry_owners.get(client_id).map(String::as_str) {
+            Some(existing) if existing == user_id => return true,
+            Some(_) => return false,
+            None => {}
         }
         self.data
             .entry_owners
             .insert(client_id.to_string(), user_id.to_string());
         self.persist();
+        true
+    }
+
+    /// Forget every recorded author, returning how many went.
+    ///
+    /// Run once per install, against records written before authorship was
+    /// decided properly (see `SyncState::authorship_repaired`). Those were
+    /// last-write-wins, so any of them may name whoever pushed last rather than
+    /// whoever wrote the entry - and keeping a wrong one would now be worse than
+    /// before, because the record is sticky: it would refuse the real author's
+    /// next update as if *they* were the impostor.
+    ///
+    /// Nothing here can tell a good record from a bad one, so all of them go and
+    /// the server re-establishes them on the backfill that follows.
+    pub fn clear_all_entry_owners(&mut self) -> usize {
+        let count = self.data.entry_owners.len();
+        if count > 0 {
+            self.data.entry_owners.clear();
+            self.persist();
+        }
+        count
+    }
+
+    /// Drop a recorded author, so the next row to arrive can establish one.
+    ///
+    /// Only used to undo the one state that cannot be true: this account named
+    /// as the author of an entry that is also flagged as arriving from someone
+    /// else. See `SyncClient::author_of`.
+    pub fn clear_entry_owner(&mut self, client_id: &str) {
+        if self.data.entry_owners.remove(client_id).is_some() {
+            self.persist();
+        }
     }
 
     /// Owner account id per entry key, for the Spaces feed to resolve against
@@ -345,4 +389,67 @@ impl IdMap {
 /// Derive the path for id_map.json given an app_data directory.
 pub fn id_map_path(app_data: &Path) -> PathBuf {
     app_data.join("id_map.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A map backed by a path in a temp dir, so `persist` is exercised rather
+    /// than stubbed.
+    fn map() -> IdMap {
+        let dir = std::env::temp_dir().join(format!("id_map_test_{}", crate::sync::now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        IdMap::load(dir.join("id_map.json"))
+    }
+
+    #[test]
+    fn the_first_author_on_record_keeps_the_entry() {
+        let mut m = map();
+        assert!(m.set_entry_owner("note:a", "hasan"));
+        // A second account claiming the same entry is a rival row, not a
+        // correction: the entry stays Hasan's and the caller is told it was
+        // refused.
+        assert!(!m.set_entry_owner("note:a", "spec"));
+        assert_eq!(m.owner_of("note:a").as_deref(), Some("hasan"));
+        // Repeating the real author is agreement, not a change.
+        assert!(m.set_entry_owner("note:a", "hasan"));
+    }
+
+    #[test]
+    fn clearing_an_author_lets_the_next_row_establish_one() {
+        let mut m = map();
+        m.set_entry_owner("note:a", "spec");
+        m.clear_entry_owner("note:a");
+        assert_eq!(m.owner_of("note:a"), None);
+        assert!(m.set_entry_owner("note:a", "hasan"));
+        assert_eq!(m.owner_of("note:a").as_deref(), Some("hasan"));
+    }
+
+    #[test]
+    fn the_one_shot_rebuild_drops_every_recorded_author() {
+        let mut m = map();
+        m.set_entry_owner("note:a", "hasan");
+        m.set_entry_owner("note:b", "spec");
+        m.mark_entry_remote("note:a");
+        assert_eq!(m.clear_all_entry_owners(), 2);
+        assert_eq!(m.owner_of("note:a"), None);
+        // The remote flag is not authorship and stays: it is the half that was
+        // never wrong, and it is what keeps the permission guards honest while
+        // the names are being rebuilt.
+        assert!(m.is_remote("note:a"));
+        // Whoever arrives first now establishes the author again.
+        assert!(m.set_entry_owner("note:a", "hasan"));
+    }
+
+    #[test]
+    fn removing_an_entry_forgets_who_wrote_it() {
+        let mut m = map();
+        m.set_entry("note:a", "srv-1");
+        m.mark_entry_remote("note:a");
+        m.set_entry_owner("note:a", "hasan");
+        m.remove_entry("note:a");
+        assert_eq!(m.owner_of("note:a"), None);
+        assert!(!m.is_remote("note:a"));
+    }
 }

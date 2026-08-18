@@ -388,6 +388,31 @@ pub struct InviteListResponse {
     pub received: Vec<InviteOut>,
 }
 
+/// A message written by the server rather than by a user.
+///
+/// The one payload in the sync contract that arrives as plaintext, because it
+/// is the service's own words - a maintenance window, a note to one account -
+/// and never quotes content the server would have had to decrypt to know.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnnouncementOut {
+    pub id: String,
+    /// Names a client notification kind. Free-form on the wire so the server can
+    /// start using a new one before every build knows it; unknown values fall
+    /// back rather than dropping the message.
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub data: std::collections::BTreeMap<String, String>,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnnouncementListResponse {
+    pub announcements: Vec<AnnouncementOut>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SendInviteRequest {
     pub email: String,
@@ -1201,6 +1226,18 @@ impl SyncHttpClient {
     pub async fn list_invites(&self) -> Result<InviteListResponse, String> {
         self.get_json("list invites", || self.authed(Method::GET, "/api/v1/invites"))
             .await
+    }
+
+    /// Announcements this account has not been handed yet.
+    ///
+    /// `since` is this device's watermark, and the reason dismissing sticks: the
+    /// server keeps no per-user read state, so asking for the same window again
+    /// would hand back rows the user had already cleared.
+    pub async fn list_announcements(&self, since: u64) -> Result<AnnouncementListResponse, String> {
+        self.get_json("list announcements", || {
+            self.authed(Method::GET, &format!("/api/v1/announcements?since={since}"))
+        })
+        .await
     }
 
     /// Send an addressed invite for a space we own (also emails the code).

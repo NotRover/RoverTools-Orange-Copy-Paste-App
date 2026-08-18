@@ -46,9 +46,10 @@ fn get_or_create_client(
         return Ok(existing);
     }
     let client = Arc::new(SyncClient::new(app.clone(), SyncConfig::load(app))?);
-    // The passive-mode pull loop needs the Arc (it holds a Weak), so it starts
-    // here rather than inside `new`.
+    // Both loops need the Arc (they hold a Weak), so they start here rather
+    // than inside `new`.
     client.spawn_passive_pull_loop();
+    client.spawn_reminder_loop();
     *guard = Some(Arc::clone(&client));
     Ok(client)
 }

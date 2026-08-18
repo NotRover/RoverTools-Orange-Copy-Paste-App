@@ -40,8 +40,9 @@ export function useEntryOwners(): Record<string, EntryOwner> {
     Promise.all([
       invoke<Record<string, string>>("sync_get_entry_owners"),
       invoke<Space[]>("spaces_list"),
+      invoke<string[]>("sync_get_remote_entries"),
     ])
-      .then(([byEntry, spaces]) => {
+      .then(([byEntry, spaces, remoteKeys]) => {
         // One directory across every space: the same person can be in more than
         // one, and the first name found is as good as any.
         const directory = new Map<string, EntryOwner>();
@@ -57,6 +58,14 @@ export function useEntryOwners(): Record<string, EntryOwner> {
           }
         }
         const next: Record<string, EntryOwner> = {};
+        // Start from every entry known to have come from someone else, named or
+        // not. Which account wrote one can be missing where the fact that it is
+        // not ours is certain: a sender who has since left, or an entry whose
+        // recorded author was released as wrong. "Not yours, name unknown" is
+        // the honest answer there, and showing no chip would say the opposite.
+        for (const key of remoteKeys) {
+          next[key] = { user_id: "", display_name: "A member", avatar_url: null };
+        }
         for (const [key, userId] of Object.entries(byEntry)) {
           next[key] = directory.get(userId) ?? {
             user_id: userId,

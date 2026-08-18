@@ -5,6 +5,7 @@ import {
   CloudArrowUp,
   CloudSlash,
   UserCircle,
+  BellSimple,
 } from "@phosphor-icons/react";
 import type { AppScreen, AppTheme, SyncIndicator } from "../../../types";
 import {
@@ -21,19 +22,25 @@ interface SidebarProps {
   screen: AppScreen;
   theme: AppTheme;
   syncState: SyncIndicator;
-  /** Received shared-space invites awaiting a response. */
-  pendingInvites?: number;
+  /** Unread rows in the notification centre. */
+  unreadNotifications?: number;
+  /** Whether the notification popout is open, for the pressed state. */
+  notificationsOpen?: boolean;
   onNavigate: (screen: AppScreen) => void;
   onToggleTheme: () => void;
+  /** Toggle the notification popout, anchored to the bell that was clicked. */
+  onToggleNotifications: (anchor: DOMRect) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   screen,
   theme,
   syncState,
-  pendingInvites = 0,
+  unreadNotifications = 0,
+  notificationsOpen = false,
   onNavigate,
   onToggleTheme,
+  onToggleNotifications,
 }) => {
   const spacesActive = screen === "spaces";
 
@@ -128,6 +135,27 @@ const Sidebar: React.FC<SidebarProps> = ({
         {theme === "dark" ? <SunIcon /> : <MoonIcon />}
       </button>
 
+      {/* The badge lives here rather than on the account button: invites are
+          one of several things the centre reports, and a count on Account
+          pointed at a screen that no longer answers it. */}
+      <button
+        className={`nav-btn ${notificationsOpen ? "active" : ""}`}
+        onClick={(e) =>
+          onToggleNotifications(e.currentTarget.getBoundingClientRect())
+        }
+        data-tooltip="Notifications"
+        data-tooltip-pos="right"
+        data-notif-bell=""
+        aria-expanded={notificationsOpen}
+      >
+        <BellSimple size={21} weight={notificationsOpen ? "fill" : "regular"} />
+        {unreadNotifications > 0 && (
+          <span className="nav-badge">
+            {unreadNotifications > 9 ? "9+" : unreadNotifications}
+          </span>
+        )}
+      </button>
+
       <button
         className={`nav-btn ${screen === "account" ? "active" : ""}`}
         onClick={() => onNavigate("account")}
@@ -135,11 +163,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip-pos="right"
       >
         <UserCircle size={22} weight={screen === "account" ? "fill" : "regular"} />
-        {pendingInvites > 0 && (
-          <span className="nav-badge">
-            {pendingInvites > 9 ? "9+" : pendingInvites}
-          </span>
-        )}
       </button>
 
       <button
