@@ -248,15 +248,41 @@ impl NotificationStore {
         before != self.items.len()
     }
 
+    /// Fold in notifications a sealed session captured while it could not read
+    /// this file. Ids are stable and derived from the source, so "already
+    /// there" means the same event, and the existing row wins.
+    /// `None` means the bytes did not parse and the file is kept; `Some(0)`
+    /// means it held nothing new and is safely redundant.
+    pub fn merge_leftover(&mut self, bytes: &[u8]) -> Option<usize> {
+        let Ok(items) = rmp_serde::from_slice::<Vec<Notification>>(bytes) else {
+            return None;
+        };
+        let mut added = 0;
+        for item in items {
+            if !self.items.iter().any(|n| n.id == item.id) {
+                self.items.push(item);
+                added += 1;
+            }
+        }
+        if added > 0 {
+            self.sort_recent();
+            self.prune(crate::sync::now_ms());
+        }
+        Some(added)
+    }
+
     // -- Persistence -------------------------------------------------
 
+    /// Same shared read contract as the other stores: a missing file is an
+    /// empty feed, a good load refreshes `.bak`, and a file that will not load
+    /// is sealed with the backup shown instead.
     pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        if !path.exists() {
+        let parsed = crate::health::load_state(path, &|bytes| {
+            rmp_serde::from_slice::<Vec<Notification>>(bytes).map_err(|e| e.to_string())
+        })?;
+        let Some(loaded) = parsed else {
             return Ok(());
-        }
-        let data = std::fs::read(path)?;
-        let loaded: Vec<Notification> = rmp_serde::from_slice(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        };
         self.items = loaded;
         self.sort_recent();
         self.prune(crate::sync::now_ms());

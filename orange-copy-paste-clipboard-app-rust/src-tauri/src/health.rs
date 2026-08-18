@@ -24,6 +24,14 @@
 //!   A torn file would still be poison, so the rename stays; a power cut just
 //!   costs a re-download or a re-push.
 //!
+//! A second, narrower latch covers the mirror-image hazard on the way in. A
+//! state file that exists and will not read leaves its store empty, and an empty
+//! store is indistinguishable from a genuinely empty one — so the next flush
+//! writes nothing over everything. [`seal`] marks that one path unwritable for
+//! the session, and [`write_state`] then diverts it to `.quarantine` exactly as
+//! it does while degraded. The session shows less than the user has; it never
+//! destroys what it could not read.
+//!
 //! A deadlock produces no panic and so latches nothing — see the liveness
 //! section below for the separate, self-clearing signal that covers it.
 
@@ -43,6 +51,14 @@ static DEGRADED: AtomicBool = AtomicBool::new(false);
 static REASON: Mutex<Option<String>> = Mutex::new(None);
 /// Paths already reported as quarantined, so a repeating flush logs once.
 static QUARANTINE_LOGGED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+/// State files this session could not read, and so must never write. Per-path
+/// rather than process-wide: one unreadable file says nothing about the others,
+/// and sealing all of them would turn one bad read into a session that saves
+/// nothing at all.
+static SEALED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+/// The same set phrased for the user, deduplicated — history and its saved-entries
+/// file are two paths but one thing to be told about.
+static SEALED_LABELS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 /// Makes each temp file unique, so two writers of one path cannot land in the
 /// same scratch file and interleave their bytes.
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -183,6 +199,168 @@ pub fn recovery_notice() -> Option<String> {
         return None;
     }
     Some(items.iter().cloned().collect::<Vec<_>>().join(" and "))
+}
+
+// ── Reading state, and sealing what will not read ───────────────────
+//
+// The write path is careful because a torn file is poison. The read path has to
+// be careful for the opposite reason: it is the only place that can tell an
+// empty store from a store that failed to fill, and every caller downstream has
+// already lost that distinction by the time it has a `Vec`.
+
+/// Attempts at a read, and the pause between them. Matched to the write path's
+/// rename retry, which exists for the same reason: on Windows a scanner or the
+/// search indexer can hold a transient handle to a file that was just replaced.
+const READ_ATTEMPTS: u32 = 3;
+const READ_BACKOFF_MS: u64 = 40;
+
+/// A state file's contents, or `None` when there is genuinely no file yet.
+///
+/// The `Err` case is the one that matters: the file is there and would not read.
+/// Callers must not fold that into an empty store — [`seal`] the path instead.
+pub fn read_state(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    let mut last = None;
+    for attempt in 0..READ_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(READ_BACKOFF_MS));
+        }
+        match std::fs::read(path) {
+            Ok(data) => return Ok(Some(data)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => last = Some(e.to_string()),
+        }
+    }
+    Err(last.unwrap_or_else(|| "unknown".into()))
+}
+
+/// Mark one state file unwritable for the rest of the session.
+///
+/// Called when a file that exists could not be read or could not be parsed. In
+/// both cases the store backing it is empty for reasons that have nothing to do
+/// with what the user has, so the flush loop's snapshot of that store is not a
+/// truthful replacement for the file and must not become one.
+///
+/// One-way, like [`mark_degraded`], and for the same reason: nothing later in
+/// the session can prove the store was filled after all.
+pub fn seal(path: &Path, why: &str) {
+    if !SEALED.lock().insert(path.to_path_buf()) {
+        return;
+    }
+    let label = label_for(path);
+    SEALED_LABELS.lock().insert(label.clone());
+    note(
+        "state file sealed",
+        &format!(
+            "  file:   {}
+  reason: {why}
+  effect: {label} is incomplete this session and              will not be overwritten
+",
+            path.display()
+        ),
+    );
+}
+
+/// Whether this path was sealed by [`seal`].
+pub fn is_sealed(path: &Path) -> bool {
+    SEALED.lock().contains(path)
+}
+
+/// What could not be read this session, phrased for the user, or `None` if
+/// everything loaded. Decided at startup, before any window exists, so the UI
+/// polls for it rather than listening.
+pub fn sealed_notice() -> Option<String> {
+    let items = SEALED_LABELS.lock();
+    if items.is_empty() {
+        return None;
+    }
+    Some(items.iter().cloned().collect::<Vec<_>>().join(" and "))
+}
+
+/// What to call a state file when telling the user about it. One place, so the
+/// wording cannot drift between the crash log and the banner.
+fn label_for(path: &Path) -> String {
+    match path.file_name().and_then(|n| n.to_str()).unwrap_or_default() {
+        "history.bin" | "pinned_entries.bin" => "clipboard history".into(),
+        "notes.bin" => "notes".into(),
+        "notifications.bin" => "notifications".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Load one state file through the full read contract, in one place:
+///
+/// - a transient refusal is retried ([`read_state`]);
+/// - a successful parse refreshes `<name>.bak`, the last-known-good copy;
+/// - a file that exists but will not read or parse is [`seal`]ed, and the
+///   backup is offered instead - shown, never written over the main file,
+///   since the seal keeps every write away from it;
+/// - `Ok(None)` means there is genuinely no file yet.
+///
+/// `Err` is only reached when the main file failed *and* there is no usable
+/// backup, so a caller that gets data can trust it came from a real load.
+pub fn load_state<T>(
+    path: &Path,
+    parse: &dyn Fn(&[u8]) -> Result<T, String>,
+) -> io::Result<Option<T>> {
+    let bak = sibling(path, ".bak");
+    let data = match read_state(path) {
+        Ok(Some(data)) => data,
+        Ok(None) => return Ok(None),
+        Err(e) => {
+            seal(path, &e);
+            return from_backup(path, &bak, parse)
+                .map(Some)
+                .ok_or_else(|| io::Error::other(e));
+        }
+    };
+    match parse(&data) {
+        Ok(value) => {
+            // Refresh the last-known-good copy with the exact bytes that just
+            // parsed. Unflushed on purpose: it is a second chance, not the
+            // primary, and a torn backup simply fails to parse when tried.
+            let _ = replace_atomic(&bak, &data);
+            Ok(Some(value))
+        }
+        Err(e) => {
+            seal(path, &format!("did not parse: {e}"));
+            from_backup(path, &bak, parse)
+                .map(Some)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, e))
+        }
+    }
+}
+
+/// The last-known-good copy, if it exists and parses. Only consulted once the
+/// main file has already been sealed, so showing it can never mask real data -
+/// and the seal means nothing read here can be written back over the main file.
+fn from_backup<T>(path: &Path, bak: &Path, parse: &dyn Fn(&[u8]) -> Result<T, String>) -> Option<T> {
+    let bytes = std::fs::read(bak).ok()?;
+    let value = parse(&bytes).ok()?;
+    note(
+        "backup shown",
+        &format!(
+            "  file:   {}
+  it did not load, so this session shows {} from its last-known-good              copy
+",
+            path.display(),
+            bak.display()
+        ),
+    );
+    Some(value)
+}
+
+/// What a sealed session set aside for `path`, if anything. The bytes only -
+/// the caller owns the format and does the merge; the file stays on disk until
+/// [`discard_sealed_leftover`] says the merge landed somewhere durable.
+pub fn sealed_leftover(path: &Path) -> Option<Vec<u8>> {
+    std::fs::read(sibling(path, ".sealed.quarantine")).ok()
+}
+
+/// Drop a sealed session's leftover once its contents live in the main file.
+/// Only call after the save that includes them has succeeded: until then the
+/// leftover is the sole copy, and the merge is idempotent anyway.
+pub fn discard_sealed_leftover(path: &Path) {
+    let _ = std::fs::remove_file(sibling(path, ".sealed.quarantine"));
 }
 
 // ── Liveness ────────────────────────────────────────────────────────
@@ -486,19 +664,38 @@ fn rename_with_retry(tmp: &Path, path: &Path) -> io::Result<()> {
 /// [`write_atomic`] for state the user would miss — clipboard history, saved
 /// entries, notes.
 ///
-/// Once the process is degraded this refuses to touch the real file, because the
-/// bytes may have been serialized from a half-mutated structure. They still go
-/// to `<name>.quarantine`, so anything captured after the fault is recoverable
-/// by hand rather than dropped on the floor.
+/// Refused in two cases, both of which mean the in-memory store is not a
+/// truthful replacement for the file:
+///
+/// - the process is degraded, so the bytes may have been serialized from a
+///   half-mutated structure;
+/// - this path was [`seal`]ed, because the file exists and would not load, so
+///   the store never held its contents in the first place.
+///
+/// Either way the payload still goes to `<name>.quarantine`, so anything
+/// captured since is recoverable by hand rather than dropped on the floor.
 pub fn write_state(path: &Path, data: &[u8]) -> io::Result<()> {
-    if !is_degraded() {
+    let sealed = is_sealed(path);
+    if !is_degraded() && !sealed {
         return write_atomic(path, data);
     }
 
-    let quarantine = sibling(path, ".quarantine");
+    // Sealed payloads go to their own suffix, never `.quarantine`. The startup
+    // swap in [`recover_quarantined`] is only correct for a degraded session,
+    // whose held-back snapshot is a superset of the file. A sealed session's
+    // snapshot is the opposite - the store never loaded, so it holds only what
+    // was captured since - and swapping it in would displace the very file the
+    // seal existed to protect. These are merged back instead, by id, once a
+    // later session reads the main file successfully.
+    let quarantine = if sealed {
+        sibling(path, ".sealed.quarantine")
+    } else {
+        sibling(path, ".quarantine")
+    };
     if QUARANTINE_LOGGED.lock().insert(path.to_path_buf()) {
         eprintln!(
-            "[health] degraded — not overwriting {}; writing {} instead",
+            "[health] {} — not overwriting {}; writing {} instead",
+            if sealed { "unreadable at startup" } else { "degraded" },
             path.display(),
             quarantine.display()
         );
@@ -507,9 +704,11 @@ pub fn write_state(path: &Path, data: &[u8]) -> io::Result<()> {
     // the same suspect state plus everything captured since, so it is a superset
     // — the first one is the least useful copy to have kept.
     write_atomic(&quarantine, data)?;
-    Err(io::Error::other(
-        "process degraded after a panic; state file left untouched",
-    ))
+    Err(io::Error::other(if sealed {
+        "state file could not be read at startup; left untouched"
+    } else {
+        "process degraded after a panic; state file left untouched"
+    }))
 }
 
 // ── Panic hook ──────────────────────────────────────────────────────
@@ -581,11 +780,23 @@ pub fn health_recovery_notice() -> Option<String> {
     recovery_notice()
 }
 
+/// What could not be read at startup, so the app can say why a store looks
+/// emptier than it should and that the file behind it is being left alone.
+/// Polled for the same reason as [`health_recovery_notice`].
+#[tauri::command]
+pub fn health_sealed_notice() -> Option<String> {
+    sealed_notice()
+}
+
 /// Restart the app. The only real recovery from a degraded process: it rebuilds
 /// every in-memory structure from what is on disk, which was protected from the
 /// bad state precisely so this would be safe.
 #[tauri::command]
 pub fn health_restart_app(app: tauri::AppHandle) {
+    // `restart` bypasses the event loop, so the exit-time flush never runs -
+    // do it here. While degraded the writes are refused into quarantine, which
+    // is exactly what the restart is about to recover.
+    crate::flush_dirty_stores(&app);
     app.restart()
 }
 
@@ -826,6 +1037,131 @@ mod tests {
         write_state(&dir.join("history.bin"), b"payload").expect("healthy write");
         assert!(!write_failure_pending());
         assert_eq!(at(u64::MAX), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The seal is the read path's whole guarantee: a file that would not load
+    /// must never be replaced by the empty store it left behind. Process-global
+    /// like `RECOVERED`, so it uses paths no other test writes to, and never
+    /// asserts that an *unrelated* path is unsealed.
+    #[test]
+    fn a_sealed_path_is_never_overwritten_but_still_quarantines() {
+        let dir = scratch_dir("seal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("notes.bin");
+        std::fs::write(&target, b"the users notes").unwrap();
+
+        seal(&target, "unit: pretend the read failed");
+        assert!(is_sealed(&target));
+
+        // The real file survives every write attempt...
+        let err = write_state(&target, b"empty store snapshot");
+        assert!(err.is_err(), "a sealed write must report failure");
+        assert_eq!(std::fs::read(&target).unwrap(), b"the users notes");
+
+        // ...and the refused payload is kept beside it under the sealed
+        // suffix, newest wins. NOT `.quarantine`: the startup swap adopts that
+        // one wholesale, which is only correct for a degraded session's
+        // superset snapshot - a sealed session's snapshot is merged instead.
+        write_state(&target, b"newer snapshot").unwrap_err();
+        assert_eq!(
+            std::fs::read(sibling(&target, ".sealed.quarantine")).unwrap(),
+            b"newer snapshot"
+        );
+        assert!(!sibling(&target, ".quarantine").exists());
+
+        // The leftover round-trip: readable while it exists, gone once the
+        // merge landed.
+        assert_eq!(
+            sealed_leftover(&target),
+            Some(b"newer snapshot".to_vec())
+        );
+        discard_sealed_leftover(&target);
+        assert_eq!(sealed_leftover(&target), None);
+
+        // Sealing is per-path: the sibling store still saves normally.
+        let other = dir.join("history.bin");
+        write_state(&other, b"fine").expect("unsealed sibling must write");
+        assert_eq!(std::fs::read(&other).unwrap(), b"fine");
+
+        // The notice names the store in user words, not the file name.
+        let notice = sealed_notice().expect("a seal must produce a notice");
+        assert!(notice.contains("notes"), "unhelpful notice: {notice}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The full read contract in one pass: a good load refreshes the backup,
+    /// a corrupted main file is sealed and the backup stands in read-only, and
+    /// nothing ever writes over the corrupted original.
+    #[test]
+    fn load_state_falls_back_to_the_last_known_good_copy() {
+        let dir = scratch_dir("load-state");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("data.bin");
+        let parse = |b: &[u8]| -> Result<Vec<u8>, String> {
+            if b.starts_with(b"good") {
+                Ok(b.to_vec())
+            } else {
+                Err("corrupt".into())
+            }
+        };
+
+        // No file yet: a clean install, not an error, and no seal.
+        assert!(matches!(load_state(&target, &parse), Ok(None)));
+        assert!(!is_sealed(&target));
+
+        // A good load returns the data and refreshes the backup copy.
+        std::fs::write(&target, b"good v1").unwrap();
+        assert_eq!(load_state(&target, &parse).unwrap(), Some(b"good v1".to_vec()));
+        assert_eq!(
+            std::fs::read(sibling(&target, ".bak")).unwrap(),
+            b"good v1"
+        );
+
+        // The main file corrupts. The backup stands in, the path seals, and
+        // the corrupted original is left exactly as it was for forensics.
+        std::fs::write(&target, b"garbage").unwrap();
+        assert_eq!(load_state(&target, &parse).unwrap(), Some(b"good v1".to_vec()));
+        assert!(is_sealed(&target));
+        assert_eq!(std::fs::read(&target).unwrap(), b"garbage");
+        // ...and the backup was not "refreshed" with the garbage.
+        assert_eq!(
+            std::fs::read(sibling(&target, ".bak")).unwrap(),
+            b"good v1"
+        );
+
+        // Corrupt main and no backup: the error finally surfaces, but the
+        // seal still protects the file from the empty store it left behind.
+        let orphan = dir.join("orphan.bin");
+        std::fs::write(&orphan, b"garbage").unwrap();
+        assert!(load_state(&orphan, &parse).is_err());
+        assert!(is_sealed(&orphan));
+        assert_eq!(std::fs::read(&orphan).unwrap(), b"garbage");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `read_state` must keep "no file" and "file would not read" apart - the
+    /// first is a clean install, the second is the trigger for the seal above.
+    #[test]
+    fn read_state_separates_absent_from_unreadable() {
+        let dir = scratch_dir("read-state");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let absent = dir.join("never-written.bin");
+        assert!(matches!(read_state(&absent), Ok(None)));
+
+        let present = dir.join("present.bin");
+        std::fs::write(&present, b"bytes").unwrap();
+        assert_eq!(read_state(&present).unwrap(), Some(b"bytes".to_vec()));
+
+        // A directory at the path is the portable stand-in for "exists and will
+        // not read" - open() fails on it on every platform, and it is not gone.
+        let blocked = dir.join("blocked.bin");
+        std::fs::create_dir_all(&blocked).unwrap();
+        assert!(read_state(&blocked).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

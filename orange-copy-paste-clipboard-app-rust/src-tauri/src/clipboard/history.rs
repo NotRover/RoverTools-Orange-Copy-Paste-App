@@ -157,13 +157,15 @@ fn save_entries_binary(
 }
 
 /// Load entries from a MessagePack binary file.
+/// Load entries through the shared read contract: a missing file is an empty
+/// history, a good load refreshes the `.bak` copy, and a file that will not
+/// load is sealed against writes with the backup shown instead. An `Err` here
+/// means the file failed *and* no backup could stand in.
 fn load_entries_binary(path: &std::path::Path) -> Result<Vec<ClipboardEntry>, std::io::Error> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let data = std::fs::read(path)?;
-    rmp_serde::from_slice(&data)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    let parsed = crate::health::load_state(path, &|bytes| {
+        rmp_serde::from_slice(bytes).map_err(|e| e.to_string())
+    })?;
+    Ok(parsed.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -565,6 +567,33 @@ impl ClipboardHistory {
         }
 
         Ok(())
+    }
+
+    /// Fold in entries a sealed session captured while it could not read this
+    /// file. By id, adding only what is missing: the main file is the elder
+    /// copy and wins any overlap, and running twice adds nothing the second
+    /// time - which is what lets the leftover survive until a save that
+    /// includes it has actually landed.
+    /// `None` means the bytes did not parse - the file stays on disk for
+    /// recovery by hand. `Some(0)` means everything in it was already here,
+    /// which makes the leftover safely redundant.
+    pub fn merge_leftover(&mut self, bytes: &[u8]) -> Option<usize> {
+        let Ok(entries) = rmp_serde::from_slice::<Vec<ClipboardEntry>>(bytes) else {
+            // Adopting garbage would be its own data loss.
+            return None;
+        };
+        advance_id_past(&entries);
+        let mut added = 0;
+        for entry in entries.into_iter().rev() {
+            if self.find(&entry.id).is_none() {
+                self.entries.insert(0, entry);
+                added += 1;
+            }
+        }
+        if added > 0 {
+            self.externalize_images();
+        }
+        Some(added)
     }
 
     /// Load the full history from a file, replacing all current entries.
