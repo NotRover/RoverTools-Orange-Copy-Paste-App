@@ -173,7 +173,7 @@ fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFil
 }
 
 /// Current Unix time in milliseconds.
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -859,8 +859,18 @@ impl SyncClient {
         }
 
         // 8. Update persisted sync state.
+        //
+        // A different account than last time means the id map and the cursor
+        // describe a server view this session has no claim to, so both go. Only
+        // on an actual change: an empty previous id is a first sign-in, where
+        // they are either empty or already this account's.
         {
             let mut state = self.sync_state.lock();
+            let previous = state.user_id().to_string();
+            if !previous.is_empty() && previous != user_id {
+                self.id_map.lock().reset();
+                state.reset_for_new_account();
+            }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);
         }

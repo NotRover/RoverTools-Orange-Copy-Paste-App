@@ -80,6 +80,9 @@ fn yes() -> bool {
     true
 }
 
+/// How long a removal stays in the Spaces feed: 30 days.
+const PLACEHOLDER_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
 pub struct IdMap {
     data: IdMapData,
     path: PathBuf,
@@ -88,11 +91,32 @@ pub struct IdMap {
 impl IdMap {
     pub fn load(path: PathBuf) -> Self {
         let data = crate::sync::persist::load_json(&path);
-        Self { data, path }
+        let mut map = Self { data, path };
+        // Also on startup, not only when the next removal arrives: an install
+        // that stops removing things would otherwise keep its last batch for
+        // good.
+        let before = map.data.deleted_markers.len();
+        map.prune_deleted(crate::sync::now_ms());
+        if map.data.deleted_markers.len() != before {
+            map.persist();
+        }
+        map
     }
 
     fn persist(&self) {
         crate::sync::persist::save_json(&self.path, &self.data);
+    }
+
+    /// Drop everything. Every field here describes one account's view of the
+    /// server — server ids, who wrote what, which spaces an entry is in, what
+    /// was removed — and none of it survives a change of account. Carried over,
+    /// it locks the new account out of its own entries: anything the previous
+    /// account received stayed marked as someone else's, so it could not be
+    /// edited, pushed or shared, and it wore a name from a person the new
+    /// account has never met.
+    pub fn reset(&mut self) {
+        self.data = IdMapData::default();
+        self.persist();
     }
 
     // ── Clipboard / Note entries ──────────────────────────────────
@@ -186,10 +210,30 @@ impl IdMap {
     /// Record that an item is gone, keeping enough to show a placeholder and to
     /// recognise it if the server offers it again.
     pub fn mark_deleted(&mut self, client_id: &str, marker: DeletedMarker) {
+        let now = marker.deleted_at;
         self.data
             .deleted_markers
             .insert(client_id.to_string(), marker);
+        self.prune_deleted(now);
         self.persist();
+    }
+
+    /// Drop placeholders old enough that nobody is still asking what happened.
+    ///
+    /// Nothing else removed these, so a long-lived install accumulated one per
+    /// item ever taken out of a space, forever. Age is the only fair measure —
+    /// the feed shows them newest first and a months-old removal is history, not
+    /// news.
+    ///
+    /// `local_only` records are exempt, and not for tidiness: they are the only
+    /// ones still doing work. The item they name is still in the space, so pull
+    /// keeps offering it, and the record is the sole reason it does not come
+    /// back. The rest describe rows the server has already stopped handing us.
+    fn prune_deleted(&mut self, now: u64) {
+        let cutoff = now.saturating_sub(PLACEHOLDER_TTL_MS);
+        self.data
+            .deleted_markers
+            .retain(|_, m| m.local_only || m.deleted_at >= cutoff);
     }
 
     /// Whether this item was taken away here, as opposed to merely leaving a
@@ -220,12 +264,21 @@ impl IdMap {
     }
 
     /// Forget every removal in a space, for "clear removed items".
+    ///
+    /// One marker can name several spaces — an entry shared into three and then
+    /// deleted leaves a placeholder in each. Clearing one space drops only that
+    /// space's mention, so the other feeds keep theirs; the record goes when the
+    /// last one does.
     pub fn clear_deleted_in_space(&mut self, space_id: &str) -> usize {
-        let before = self.data.deleted_markers.len();
-        self.data
-            .deleted_markers
-            .retain(|_, m| !m.space_ids.iter().any(|s| s == space_id));
-        let removed = before - self.data.deleted_markers.len();
+        let mut removed = 0usize;
+        self.data.deleted_markers.retain(|_, m| {
+            if !m.space_ids.iter().any(|s| s == space_id) {
+                return true;
+            }
+            removed += 1;
+            m.space_ids.retain(|s| s != space_id);
+            !m.space_ids.is_empty()
+        });
         if removed > 0 {
             self.persist();
         }
@@ -250,6 +303,20 @@ impl IdMap {
             self.data
                 .entry_shares
                 .insert(client_id.to_string(), space_ids.to_vec());
+        }
+        // A marker records that this entry left a space. Putting it back into
+        // one of those spaces is that removal being undone, so the placeholder
+        // has to go — otherwise the feed shows the live row and "stopped
+        // sharing this here" side by side, describing the same entry two ways.
+        // A copy this device dropped on its own (`local_only`) is not that: the
+        // entry never left the space, so nothing about it was undone.
+        let stale = self
+            .data
+            .deleted_markers
+            .get(client_id)
+            .is_some_and(|m| !m.local_only && space_ids.iter().any(|s| m.space_ids.contains(s)));
+        if stale {
+            self.data.deleted_markers.remove(client_id);
         }
         self.persist();
     }

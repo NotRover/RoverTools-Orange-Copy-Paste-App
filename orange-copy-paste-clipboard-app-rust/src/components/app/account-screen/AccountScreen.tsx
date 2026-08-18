@@ -88,6 +88,20 @@ const AccountScreen: React.FC = () => {
     Record<string, boolean>
   >({});
 
+  // Every device list lands through here so the overrides never outlive the
+  // rows they describe. A revoked device keeps its id when it registers again,
+  // and a stale "online" from before the revoke would then sit on top of an
+  // accurate snapshot saying otherwise.
+  const applyDevices = useCallback((ds: SyncDevice[]) => {
+    setDevices(ds);
+    setPresenceOverrides((prev) => {
+      const live = Object.fromEntries(
+        Object.entries(prev).filter(([id]) => ds.some((d) => d.id === id)),
+      );
+      return Object.keys(live).length === Object.keys(prev).length ? prev : live;
+    });
+  }, []);
+
   // Login form
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -147,7 +161,7 @@ const AccountScreen: React.FC = () => {
           .then((m) => setSyncMode(m === "passive" ? "passive" : "realtime"))
           .catch(() => {});
         invoke<SyncDevice[]>("sync_list_devices")
-          .then(setDevices)
+          .then(applyDevices)
           .catch(() => {});
         invoke<SyncStatusInfo>("sync_get_status")
           .then((s) => {
@@ -157,7 +171,7 @@ const AccountScreen: React.FC = () => {
           .catch(() => {});
       }
     });
-  }, [refreshQuota]);
+  }, [refreshQuota, applyDevices]);
 
   // ── Silent session restore (fired by App on startup) ────────────
   useEffect(() => {
@@ -166,13 +180,13 @@ const AccountScreen: React.FC = () => {
       setSyncUser(event.payload);
       refreshQuota();
       invoke<SyncDevice[]>("sync_list_devices")
-        .then(setDevices)
+        .then(applyDevices)
         .catch(() => {});
     }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
-  }, [refreshQuota]);
+  }, [refreshQuota, applyDevices]);
 
   // ── Device presence: mark devices online/offline as events arrive ──
   useEffect(() => {
@@ -221,7 +235,7 @@ const AccountScreen: React.FC = () => {
     setSyncUser(user);
     refreshQuota();
     invoke<SyncDevice[]>("sync_list_devices")
-      .then(setDevices)
+      .then(applyDevices)
       .catch(() => {});
     invoke<SyncStatusInfo>("sync_get_status")
       .then((s) => {
@@ -464,8 +478,7 @@ const AccountScreen: React.FC = () => {
       // The Rust command refuses to revoke the current device with a clear
       // message, so Remove is shown on every row and the error surfaces here.
       await invoke("sync_revoke_device", { deviceId });
-      const ds = await invoke<SyncDevice[]>("sync_list_devices");
-      setDevices(ds);
+      applyDevices(await invoke<SyncDevice[]>("sync_list_devices"));
     } catch (e) {
       setDeviceError(errMsg(e, "Could not remove the device."));
     }
