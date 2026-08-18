@@ -338,6 +338,39 @@ pub struct SpaceOut {
     pub share_history: bool,
 }
 
+/// A comment as it goes to the server: ciphertext plus the wrapped key that
+/// opens it. Mirrors `CreateCommentRequest` in the backend.
+#[derive(Debug, Serialize)]
+pub struct CreateCommentRequest {
+    pub client_id: String,
+    pub entry_type: String,
+    pub encrypted_body: String,
+    pub wrapped_key: String,
+}
+
+/// A stored comment. The body stays sealed until the space keyring opens it,
+/// so nothing here is readable without a Space Key.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommentOut {
+    pub id: String,
+    pub space_id: String,
+    pub client_id: String,
+    pub entry_type: String,
+    pub author_id: String,
+    pub encrypted_body: String,
+    pub wrapped_key: String,
+    pub created_at: i64,
+}
+
+/// One entry's tally, for the chips on the feed.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommentCountOut {
+    pub client_id: String,
+    pub entry_type: String,
+    pub count: i64,
+    pub latest_at: i64,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -1072,6 +1105,67 @@ impl SyncHttpClient {
                 &format!("/api/v1/spaces/{space_id}/entries/{client_id}"),
             )
             .map(|req| req.query(&[("entry_type", entry_type)]))
+        })
+        .await
+    }
+
+    // ── Space comments ────────────────────────────────────────────
+
+    pub async fn add_space_comment(
+        &self,
+        space_id: &str,
+        req: &CreateCommentRequest,
+    ) -> Result<CommentOut, String> {
+        self.get_json("add comment", || {
+            Ok(self
+                .authed(
+                    Method::POST,
+                    &format!("/api/v1/spaces/{space_id}/comments"),
+                )?
+                .json(req))
+        })
+        .await
+    }
+
+    pub async fn list_space_comments(
+        &self,
+        space_id: &str,
+        client_id: &str,
+        entry_type: &str,
+    ) -> Result<Vec<CommentOut>, String> {
+        self.get_json("list comments", || {
+            self.authed(
+                Method::GET,
+                &format!("/api/v1/spaces/{space_id}/comments"),
+            )
+            .map(|req| req.query(&[("client_id", client_id), ("entry_type", entry_type)]))
+        })
+        .await
+    }
+
+    pub async fn space_comment_counts(
+        &self,
+        space_id: &str,
+    ) -> Result<Vec<CommentCountOut>, String> {
+        self.get_json("comment counts", || {
+            self.authed(
+                Method::GET,
+                &format!("/api/v1/spaces/{space_id}/comments/counts"),
+            )
+        })
+        .await
+    }
+
+    pub async fn delete_space_comment(
+        &self,
+        space_id: &str,
+        comment_id: &str,
+    ) -> Result<(), String> {
+        self.get_ok("delete comment", true, || {
+            self.authed(
+                Method::DELETE,
+                &format!("/api/v1/spaces/{space_id}/comments/{comment_id}"),
+            )
         })
         .await
     }

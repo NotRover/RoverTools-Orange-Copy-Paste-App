@@ -75,6 +75,33 @@ export interface Space {
   invite_expires_at?: number;
 }
 
+/** One comment on an entry shared into a space. Mirrors `SpaceComment` in
+ *  `src-tauri/src/sync/types.rs`. The body arrives decrypted; the author is a
+ *  bare id, resolved against `Space.members` for a name and picture. */
+export interface SpaceComment {
+  id: string;
+  space_id: string;
+  client_id: string;
+  entry_type: string;
+  author_id: string;
+  /** Plain text, except for `@[Name](user-id)` spans marking a mention. */
+  body: string;
+  /** User ids named in the body, pulled out on this device. */
+  mentions: string[];
+  created_at: number;
+  /** Whether this account wrote it, which is what allows a delete. */
+  is_mine: boolean;
+}
+
+/** One entry's comment tally, for the chip on its card. */
+export interface SpaceCommentCount {
+  client_id: string;
+  entry_type: string;
+  count: number;
+  /** Newest comment, compared against this device's last visit for the dot. */
+  latest_at: number;
+}
+
 /** An item that was removed from a space. Mirrors `DeletedMarker` in
  *  `src-tauri/src/sync/id_map.rs`. Kept after the content is gone so the feed
  *  can show that something was taken down instead of a row just vanishing. */

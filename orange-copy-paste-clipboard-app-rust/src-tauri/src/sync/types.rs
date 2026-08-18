@@ -207,3 +207,39 @@ impl EntryType {
         }
     }
 }
+
+
+// ── Space comments ───────────────────────────────────────────────────
+
+/// A comment on an entry shared into a space, as the UI sees it: decrypted.
+///
+/// The author is a bare user id rather than a name — the screen already has
+/// the space's member list, and resolving there keeps one source for display
+/// names and avatars instead of two that can disagree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceComment {
+    pub id: String,
+    pub space_id: String,
+    pub client_id: String,
+    pub entry_type: String,
+    pub author_id: String,
+    pub body: String,
+    /// User ids named in the body. Resolved on this device from the ciphertext,
+    /// so the server never learns who was tagged.
+    #[serde(default)]
+    pub mentions: Vec<String>,
+    pub created_at: i64,
+    /// Whether this account wrote it — what the UI needs to offer a delete.
+    pub is_mine: bool,
+}
+
+/// One entry's comment tally, for the chips on the feed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceCommentCount {
+    pub client_id: String,
+    pub entry_type: String,
+    pub count: i64,
+    /// Newest comment's timestamp — compared against this device's last visit
+    /// to decide whether the chip shows an unread marker.
+    pub latest_at: i64,
+}

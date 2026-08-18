@@ -39,6 +39,12 @@ import {
   TrashIcon,
 } from "../../icons";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import CommentThread from "./comments/CommentThread";
+import {
+  commentKey,
+  useCommentCounts,
+  type CommentMark,
+} from "./comments/useCommentCounts";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
@@ -65,6 +71,7 @@ import {
   ShareNetwork,
   X,
   Check,
+  ChatCircle,
   Copy,
   CaretRight,
   CaretDown,
@@ -459,7 +466,14 @@ const DetailPanel: React.FC<{
   entry: ClipboardEntry;
   onClose: () => void;
   onCopy: (id: string) => void;
-}> = ({ entry, onClose, onCopy }) => {
+  /** The space it is being read in - comments belong to that, not to the
+   *  entry, so the same item in two spaces carries two conversations. */
+  space: Space;
+  selfUserId: string | null;
+  /** Tell the feed its chip is stale, for the one device the server does not
+   *  echo the event back to: the one that just wrote. */
+  onCommentsChanged: () => void;
+}> = ({ entry, onClose, onCopy, space, selfUserId, onCommentsChanged }) => {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(() => {
@@ -505,6 +519,15 @@ const DetailPanel: React.FC<{
       </div>
       <div className="sp-detail-scroll">
         <ClipDetailBody entry={entry} />
+        <CommentThread
+          spaceId={space.id}
+          clientId={entry.id}
+          entryType="clipboard"
+          members={space.members}
+          selfUserId={selfUserId ?? ""}
+          isOwner={space.is_owner}
+          onCountChange={onCommentsChanged}
+        />
       </div>
     </div>
   );
@@ -613,6 +636,25 @@ const RemovedRow: React.FC<{
 
 // ── Clipboard feed card ───────────────────────────────────────────────
 
+/* How many comments an entry has carried, and whether any of them are new to
+   this device. Only drawn once there is one: an empty chip on every card would
+   be noise, and the thread is one click away either way. */
+const CommentChip: React.FC<{ mark?: CommentMark }> = ({ mark }) =>
+  !mark || mark.count === 0 ? null : (
+    <span
+      className={`sp-cmt-chip${mark.unread ? " sp-cmt-chip--new" : ""}`}
+      data-tooltip={
+        mark.unread
+          ? "New comments"
+          : `${mark.count} comment${mark.count === 1 ? "" : "s"}`
+      }
+      data-tooltip-pos="top"
+    >
+      <ChatCircle size={10} weight={mark.unread ? "fill" : "regular"} />
+      <span className="sp-cmt-chip-n">{mark.count}</span>
+    </span>
+  );
+
 /* The same box the clipboard cards draw, so a selection reads identically on
    both screens. Every feed card shape gets it. */
 const SelectBox: React.FC = () => (
@@ -637,6 +679,8 @@ const ClipFeedCard: React.FC<{
   selected?: boolean;
   /** Toggle this card. `range` is true for a shift-click. */
   onSelect?: (range: boolean) => void;
+  /** This entry's comment tally, absent when nobody has commented. */
+  comments?: CommentMark;
 }> = ({
   entry,
   onCopy,
@@ -649,6 +693,7 @@ const ClipFeedCard: React.FC<{
   selecting = false,
   selected = false,
   onSelect,
+  comments,
 }) => {
   const [copied, setCopied] = useState(false);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
@@ -721,6 +766,7 @@ const ClipFeedCard: React.FC<{
           </span>
           <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-text">{truncateText(text, 100)}</span>
+          <CommentChip mark={comments} />
           <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
           {!selecting && (
             <button
@@ -811,6 +857,7 @@ const ClipFeedCard: React.FC<{
               )}
               <EntryTypePill kind={dk} />
               <OwnerBadge owner={owner} incoming={incoming} />
+              <CommentChip mark={comments} />
             </div>
             {copied ? (
               <span className="card-time card-time--copied">
@@ -863,6 +910,8 @@ const NoteFeedCard: React.FC<{
   selected?: boolean;
   /** Toggle this card. `range` is true for a shift-click. */
   onSelect?: (range: boolean) => void;
+  /** This note's comment tally, absent when nobody has commented. */
+  comments?: CommentMark;
 }> = ({
   note,
   entries,
@@ -875,6 +924,7 @@ const NoteFeedCard: React.FC<{
   selecting = false,
   selected = false,
   onSelect,
+  comments,
 }) => {
   const plain = extractNoteText(note.content);
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
@@ -918,6 +968,7 @@ const NoteFeedCard: React.FC<{
               <span className="sp-list-preview">{truncateText(plain, 70)}</span>
             )}
           </div>
+          <CommentChip mark={comments} />
           <span className="sp-list-time">{timeAgo(note.updated_at)}</span>
         </div>
         <FeedCardMenu
@@ -963,6 +1014,7 @@ const NoteFeedCard: React.FC<{
                 </span>
               )}
               <OwnerBadge owner={owner} incoming={incoming} />
+              <CommentChip mark={comments} />
               {note.groups.map((g) => {
                 const c = groupColor(g);
                 return (
@@ -1003,7 +1055,10 @@ const ReadOnlyNotePanel: React.FC<{
   note: Note;
   entries: ClipboardEntry[];
   onClose: () => void;
-}> = ({ note, entries, onClose }) => (
+  space: Space;
+  selfUserId: string | null;
+  onCommentsChanged: () => void;
+}> = ({ note, entries, onClose, space, selfUserId, onCommentsChanged }) => (
   <div className="sp-detail-panel">
     <div className="sp-detail-toolbar">
       <button className="sp-detail-back" onClick={onClose}>
@@ -1018,6 +1073,15 @@ const ReadOnlyNotePanel: React.FC<{
     <div className="sp-detail-scroll">
       {note.title && <h1 className="sp-detail-note-title">{note.title}</h1>}
       <NotionPreview content={note.content} entries={entries} />
+      <CommentThread
+        spaceId={space.id}
+        clientId={note.id}
+        entryType="note"
+        members={space.members}
+        selfUserId={selfUserId ?? ""}
+        isOwner={space.is_owner}
+        onCountChange={onCommentsChanged}
+      />
     </div>
   </div>
 );
@@ -1787,6 +1851,23 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
   // Never a placeholder: there is nothing to open.
   const [detailItem, setDetailItem] = useState<ContentFeedItem | null>(null);
+  const {
+    marks: commentMarks,
+    refresh: refreshCommentCounts,
+    markRead: markCommentsRead,
+  } = useCommentCounts(selectedId);
+
+  // Opening an entry is reading its thread, so the dot clears on open rather
+  // than on scroll: the thread sits at the bottom of a panel short enough that
+  // waiting for it to be scrolled to would leave the dot on forever.
+  useEffect(() => {
+    if (!detailItem) return;
+    if (detailItem.kind === "clipboard") {
+      markCommentsRead("clipboard", detailItem.entry.id);
+    } else {
+      markCommentsRead("note", detailItem.note.id);
+    }
+  }, [detailItem, markCommentsRead]);
   const [collapsedDays, setCollapsedDays] = useStickySet("sp-collapsed-days");
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -2912,12 +2993,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                   note={detailItem.note}
                   entries={entries}
                   onClose={() => setDetailItem(null)}
+                  space={selected}
+                  selfUserId={selfUserId}
+                  onCommentsChanged={refreshCommentCounts}
                 />
               ) : (
                 <DetailPanel
                   entry={detailItem.entry}
                   onClose={() => setDetailItem(null)}
                   onCopy={onCopyEntry}
+                  space={selected}
+                  selfUserId={selfUserId}
+                  onCommentsChanged={refreshCommentCounts}
                 />
               )
             ) : (
@@ -3046,6 +3133,12 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                               `clipboard:${item.entry.id}`,
                                             )
                                       }
+                                      comments={commentMarks.get(
+                                        commentKey(
+                                          "clipboard",
+                                          item.entry.id,
+                                        ),
+                                      )}
                                     />
                                   ) : (
                                     <NoteFeedCard
@@ -3087,6 +3180,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                               `note:${item.note.id}`,
                                             )
                                       }
+                                      comments={commentMarks.get(
+                                        commentKey("note", item.note.id),
+                                      )}
                                     />
                                   ),
                                 )}

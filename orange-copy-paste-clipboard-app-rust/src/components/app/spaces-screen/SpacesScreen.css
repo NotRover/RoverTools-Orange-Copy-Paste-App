@@ -2007,3 +2007,33 @@
   position: static;
   flex-shrink: 0;
 }
+
+/* ── Comment chip ──
+   How many comments an entry has carried. Sits with the other chips rather
+   than floating over the card: it is a fact about the item, not an action. */
+
+.sp-cmt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* Something arrived since this device last opened the thread. Coloured rather
+   than dotted: on a row of small chips a separate dot reads as another chip. */
+.sp-cmt-chip--new {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.sp-cmt-chip-n {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

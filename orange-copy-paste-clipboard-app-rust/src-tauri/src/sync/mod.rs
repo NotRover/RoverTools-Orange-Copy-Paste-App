@@ -38,8 +38,8 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
 use crate::sync::client::{
-    BlobUploadRequest, DistributeKeysRequest, PushEntryRequest, RegisterDeviceRequest,
-    SyncHttpClient, WrappedKeyringEntry,
+    BlobUploadRequest, CommentOut, CreateCommentRequest, DistributeKeysRequest, PushEntryRequest,
+    RegisterDeviceRequest, SyncHttpClient, WrappedKeyringEntry,
 };
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
@@ -48,7 +48,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
-    EntryType, SendFilter, SkippedEntry, Space, SpaceMember, SyncMode, SyncStatusInfo, SyncUser,
+    EntryType, SendFilter, SkippedEntry, Space, SpaceComment, SpaceCommentCount, SpaceMember,
+    SyncMode, SyncStatusInfo, SyncUser,
 };
 use crate::sync::ws_listener::WsListener;
 
@@ -2844,6 +2845,170 @@ impl SyncClient {
             }
         }
         None
+    }
+
+    // ── Space comments ────────────────────────────────────────────
+    //
+    // Comments are fetched when a thread is opened rather than merged into
+    // local storage: they are small, only ever read in one place, and skipping
+    // the local copy means a delete needs no tombstone and no merge rule.
+
+    /// What a comment's ciphertext is bound to.
+    ///
+    /// The comment id would be the obvious binding, but the server assigns it
+    /// after the write, so it does not exist yet at encrypt time. The thread
+    /// does: a ciphertext lifted onto another entry, or into another space,
+    /// fails to open.
+    fn comment_aad(space_id: &str, client_id: &str, entry_type: &str) -> String {
+        format!("{space_id}:{client_id}:{entry_type}")
+    }
+
+    /// Pull the user ids out of `@[Name](user-id)` spans.
+    ///
+    /// The markup lives inside the encrypted body, so this runs on this device
+    /// and the server never learns who was tagged. The display name is carried
+    /// along with the id deliberately: a comment is a record of what was said,
+    /// so it keeps the name that was used, even after a rename.
+    fn extract_mentions(body: &str) -> Vec<String> {
+        let mut ids = Vec::new();
+        let bytes = body.as_bytes();
+        let mut i = 0;
+        while let Some(at) = body[i..].find("@[") {
+            let open = i + at;
+            let Some(close) = body[open..].find("](") else {
+                break;
+            };
+            let id_start = open + close + 2;
+            let Some(end) = body[id_start..].find(')') else {
+                break;
+            };
+            let id = &body[id_start..id_start + end];
+            if !id.is_empty() && !ids.iter().any(|k: &String| k == id) {
+                ids.push(id.to_string());
+            }
+            i = id_start + end + 1;
+            if i >= bytes.len() {
+                break;
+            }
+        }
+        ids
+    }
+
+    /// Open one stored comment with the space keyring, newest key first.
+    ///
+    /// Returns `None` when no key in the ring opens it, which is what a member
+    /// who joined after a rekey and never received the older key would see. One
+    /// unreadable comment is dropped rather than failing the whole thread.
+    pub(crate) fn decrypt_comment(&self, c: &CommentOut) -> Option<SpaceComment> {
+        let aad = Self::comment_aad(&c.space_id, &c.client_id, &c.entry_type);
+        let ring = self.space_keys.lock().get(&c.space_id).cloned()?;
+        let body = ring.iter().find_map(|key| {
+            let cek = crypto::unwrap_key(key, &c.wrapped_key).ok()?;
+            crypto::decrypt(&cek, &c.encrypted_body, &aad).ok()
+        })?;
+        let mentions = Self::extract_mentions(&body);
+        let is_mine = self
+            .current_user()
+            .is_some_and(|u| u.user_id == c.author_id);
+        Some(SpaceComment {
+            id: c.id.clone(),
+            space_id: c.space_id.clone(),
+            client_id: c.client_id.clone(),
+            entry_type: c.entry_type.clone(),
+            author_id: c.author_id.clone(),
+            body,
+            mentions,
+            created_at: c.created_at,
+            is_mine,
+        })
+    }
+
+    /// Post a comment on an entry in a space.
+    pub async fn add_space_comment(
+        &self,
+        space_id: &str,
+        client_id: &str,
+        entry_type: &str,
+        body: &str,
+    ) -> Result<SpaceComment, String> {
+        let http = self
+            .http
+            .lock()
+            .clone()
+            .ok_or_else(|| "Not signed in".to_string())?;
+        let space_key = self
+            .space_current_key(space_id)
+            .ok_or_else(|| "No key for this space yet".to_string())?;
+
+        // Same envelope as an entry: a fresh key per comment, wrapped under the
+        // Space Key, so a rotation never strands what was written before it.
+        let cek = crypto::random_key();
+        let aad = Self::comment_aad(space_id, client_id, entry_type);
+        let req = CreateCommentRequest {
+            client_id: client_id.to_string(),
+            entry_type: entry_type.to_string(),
+            encrypted_body: crypto::encrypt(&cek, body, &aad)?,
+            wrapped_key: crypto::wrap_key(&space_key, &cek)?,
+        };
+        let out = http.add_space_comment(space_id, &req).await?;
+        self.decrypt_comment(&out)
+            .ok_or_else(|| "Could not read back the comment".to_string())
+    }
+
+    /// One entry's thread, oldest first.
+    pub async fn list_space_comments(
+        &self,
+        space_id: &str,
+        client_id: &str,
+        entry_type: &str,
+    ) -> Result<Vec<SpaceComment>, String> {
+        let http = self
+            .http
+            .lock()
+            .clone()
+            .ok_or_else(|| "Not signed in".to_string())?;
+        let rows = http
+            .list_space_comments(space_id, client_id, entry_type)
+            .await?;
+        Ok(rows.iter().filter_map(|c| self.decrypt_comment(c)).collect())
+    }
+
+    /// Comment tallies for a whole space, for the chips on the feed.
+    pub async fn space_comment_counts(
+        &self,
+        space_id: &str,
+    ) -> Result<Vec<SpaceCommentCount>, String> {
+        let http = self
+            .http
+            .lock()
+            .clone()
+            .ok_or_else(|| "Not signed in".to_string())?;
+        Ok(http
+            .space_comment_counts(space_id)
+            .await?
+            .into_iter()
+            .map(|c| SpaceCommentCount {
+                client_id: c.client_id,
+                entry_type: c.entry_type,
+                count: c.count,
+                latest_at: c.latest_at,
+            })
+            .collect())
+    }
+
+    /// Delete a comment. The server decides whether this account may: its
+    /// author, or the space owner.
+    pub async fn delete_space_comment(
+        &self,
+        space_id: &str,
+        comment_id: &str,
+    ) -> Result<(), String> {
+        let http = self
+            .http
+            .lock()
+            .clone()
+            .ok_or_else(|| "Not signed in".to_string())?;
+        http.delete_space_comment(space_id, comment_id).await
     }
 
     /// Reconcile space keyrings with the server; refreshes the cached space

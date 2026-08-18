@@ -1,0 +1,285 @@
+/* Comments on an entry shared into a space.
+   Lives at the bottom of the detail panel, below the content it is about. */
+
+.cmt-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.cmt-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cmt-head-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.cmt-head-n {
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.cmt-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cmt-note--bad {
+  color: var(--danger);
+}
+
+/* ── The list ── */
+
+.cmt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cmt-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* A comment that names you. The rail is on the left of the whole row rather
+   than around it, so a long thread still reads as one column. */
+.cmt-row--tagged {
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
+  margin-left: -8px;
+  padding-left: 6px;
+}
+
+.cmt-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.cmt-avatar--sm {
+  width: 18px;
+  height: 18px;
+  font-size: 8px;
+}
+
+.cmt-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.cmt-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cmt-author {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cmt-time {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* Kept out of the way until the row is hovered: a delete button sitting beside
+   every comment reads as an invitation. */
+.cmt-del {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.cmt-row:hover .cmt-del,
+.cmt-del:focus-visible {
+  opacity: 1;
+}
+
+.cmt-del:hover {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.cmt-body {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cmt-mention {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Being named yourself is the one mention worth catching at a glance. */
+.cmt-mention--me {
+  background: var(--accent-dim-strong);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* ── Composer ── */
+
+.cmt-composer {
+  position: relative;
+  margin-top: 4px;
+}
+
+.cmt-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 6px 6px 6px 9px;
+  transition: border-color 0.12s ease;
+}
+
+.cmt-input-row:focus-within {
+  border-color: var(--accent);
+}
+
+.cmt-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-height: 132px;
+  padding: 2px 0;
+}
+
+.cmt-input::placeholder {
+  color: var(--text-muted);
+}
+
+.cmt-send {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.cmt-send:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.cmt-send:disabled {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* ── Mention picker ── */
+
+/* Above the box rather than below it: the composer sits at the bottom of a
+   scrolling panel, so a list hanging downwards would open off-screen. */
+.cmt-picker {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 3px;
+}
+
+.cmt-picker-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cmt-picker-row--on {
+  background: var(--accent-dim);
+}
+
+.cmt-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmt-online {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
