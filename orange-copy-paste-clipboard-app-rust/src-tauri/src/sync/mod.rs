@@ -248,6 +248,22 @@ const RESTORE_TIMEOUT_SECS: u64 = 30;
 /// itself the moment the network returns, and one poll a minute is cheap.
 const RESTORE_RETRY_BACKOFF_SECS: [u64; 5] = [3, 10, 30, 60, 60];
 
+/// Backoff schedule for the space-key distribution retry, in seconds.
+///
+/// Handing a new member their copy of the Space Key is the owner's job, and it
+/// used to happen only on an event: a membership change over the socket, or the
+/// owner opening the Spaces screen. Every way that can be missed - the owner's
+/// app closed, the socket down, the member not having registered an identity
+/// key yet - left them on "waiting for key" until the owner happened to come
+/// back. This retries on its own instead, and stops as soon as nobody is
+/// waiting.
+const KEY_RETRY_BACKOFF_SECS: [u64; 6] = [5, 10, 20, 40, 60, 60];
+
+/// How many times that retry runs before giving up (~4 minutes). A member who
+/// has never registered an identity key cannot be wrapped for at all, so the
+/// loop has to end rather than poll for the life of the session.
+const KEY_RETRY_MAX_ATTEMPTS: usize = 8;
+
 /// Why a silent session restore did not produce a session.
 ///
 /// Only [`RestoreError::Transient`] is worth retrying; the other two mean the
@@ -353,6 +369,11 @@ pub struct SyncClient {
     /// True while a background session-restore retry loop is running, so a
     /// second one is never started alongside it.
     restore_retrying: Arc<std::sync::atomic::AtomicBool>,
+
+    /// True while the space-key distribution retry loop is running. Reconcile
+    /// runs from several triggers at once (screen mount, socket event, join),
+    /// and without this each one would start its own loop.
+    key_retrying: Arc<std::sync::atomic::AtomicBool>,
 
     /// When set, a settings push is pending at this instant.
     settings_push_at: Arc<Mutex<Option<Instant>>>,
@@ -474,6 +495,7 @@ impl SyncClient {
             sync_mode: Arc::new(Mutex::new(sync_mode)),
             ws_listener: Mutex::new(None),
             restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            key_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             settings_push_at,
             settings_notify,
             handle,
@@ -1639,6 +1661,75 @@ impl SyncClient {
         Ok(())
     }
 
+    /// Re-pull from the beginning of the account's history, merging only what is
+    /// new to this device.
+    ///
+    /// A normal pull asks for `server_ts > cursor`, so entries that were on the
+    /// server before this device caught up are permanently behind it. That is
+    /// exactly the situation when an owner opens a space's back catalogue: rows
+    /// that were filtered out at the time are now visible, but no delta pull
+    /// would ever ask for them again.
+    ///
+    /// The cursor is left where it was. Entries already held are dropped before
+    /// the merge rather than re-applied, which is what keeps this from
+    /// re-downloading every image blob the device already has.
+    pub async fn backfill_pull(&self) -> Result<(), String> {
+        let http = self.http.lock().clone().ok_or("not authenticated")?;
+        if !http.is_authenticated() {
+            return Err("not authenticated".into());
+        }
+        let state = self.app.state::<crate::state::AppState>();
+
+        let mut cursor = None;
+        let mut merged = 0usize;
+        loop {
+            let pull = match http.pull_entries(cursor, 200).await {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[sync] backfill pull failed: {e}");
+                    break;
+                }
+            };
+            let next_cursor = pull.next_cursor;
+            let fresh: Vec<_> = pull
+                .entries
+                .into_iter()
+                .filter(|e| {
+                    // A tombstone always applies: the local copy is exactly what
+                    // it is there to remove.
+                    if e.deleted_at.is_some() {
+                        return true;
+                    }
+                    if e.entry_type == "note" {
+                        // Notes are edited, so an older copy still has to merge.
+                        !state
+                            .notes
+                            .lock()
+                            .find(&e.client_id)
+                            .is_some_and(|n| n.updated_at >= e.updated_at)
+                    } else {
+                        // Clipboard entries are immutable once captured, so
+                        // holding one at all is enough - and re-merging an image
+                        // would download and rewrite its blob for nothing.
+                        state.history.lock().find(&e.client_id).is_none()
+                    }
+                })
+                .collect();
+            if !fresh.is_empty() {
+                merged += fresh.len();
+                self.merge_pulled(&fresh, false);
+            }
+            match next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        if merged > 0 {
+            eprintln!("[sync] backfill merged {merged} entries");
+        }
+        Ok(())
+    }
+
     // ── Status / accessors ────────────────────────────────────────
 
     pub fn current_user(&self) -> Option<SyncUser> {
@@ -2343,7 +2434,84 @@ impl SyncClient {
         }
 
         *self.spaces.lock() = out.clone();
+        if self.keys_pending(&out) {
+            Arc::clone(self).spawn_key_retry();
+        }
+        // A space that shares its earlier items but has never been swept here
+        // owes this device a backfill: the `space:history_opened` event only
+        // reaches members who were running when the owner flipped it.
+        let owed: Vec<String> = {
+            let state = self.sync_state.lock();
+            out.iter()
+                .filter(|s| {
+                    !s.is_owner && s.share_history && !state.has_history_backfilled(&s.id)
+                })
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        if !owed.is_empty() {
+            let this = Arc::clone(self);
+            self.handle.spawn(async move {
+                if this.backfill_pull().await.is_ok() {
+                    let mut state = this.sync_state.lock();
+                    for id in owed {
+                        state.mark_history_backfilled(&id);
+                    }
+                }
+            });
+        }
         out
+    }
+
+    /// Whether anyone is still waiting on a Space Key we could hand out or
+    /// receive: a member of a space we own without their wrapped copy, or a
+    /// space of someone else's that we cannot read yet.
+    fn keys_pending(&self, spaces: &[Space]) -> bool {
+        let rings = self.space_keys.lock();
+        spaces.iter().any(|s| {
+            if s.is_owner {
+                s.members.iter().any(|m| !m.has_space_key)
+            } else {
+                !matches!(rings.get(&s.id), Some(ring) if !ring.is_empty())
+            }
+        })
+    }
+
+    /// Re-run reconcile on a backoff until nobody is waiting on a key.
+    ///
+    /// Reconcile is the whole fix here - it wraps the keyring for every member
+    /// who lacks one, and recovers ours if the owner has since published it.
+    /// What was missing was anything to run it again after the one attempt an
+    /// event triggers. At most one loop runs at a time; the loop calls
+    /// reconcile, which calls this, and the flag is what stops that recursing.
+    fn spawn_key_retry(self: Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        if self
+            .key_retrying
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return; // a loop is already running
+        }
+
+        let handle = self.handle.clone();
+        handle.spawn(async move {
+            for attempt in 0..KEY_RETRY_MAX_ATTEMPTS {
+                let delay =
+                    KEY_RETRY_BACKOFF_SECS[attempt.min(KEY_RETRY_BACKOFF_SECS.len() - 1)];
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+
+                // Logged out while we slept - there is nothing to distribute.
+                if self.http.lock().is_none() {
+                    break;
+                }
+                let spaces = self.reconcile_spaces().await;
+                if !self.keys_pending(&spaces) {
+                    break;
+                }
+            }
+            self.key_retrying.store(false, Ordering::SeqCst);
+        });
     }
 
     /// `space:rekey` arrived: the server persisted a fresh wrapped keyring for

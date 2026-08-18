@@ -16,6 +16,14 @@ pub struct SyncState {
     /// Unix ms of the most recent settings blob push.  Compared with the
     /// server's `updated_at` to determine LWW winner.
     pub settings_updated_at: u64,
+    /// Spaces whose back catalogue this device has already gone back for.
+    ///
+    /// An owner opening a space's history is announced over the socket, which
+    /// only reaches members who are running at that moment. This is the durable
+    /// half: a space that allows earlier items and is not listed here still owes
+    /// this device a backfill, whenever it next signs in.
+    #[serde(default)]
+    pub history_backfilled: Vec<String>,
 }
 
 pub struct SyncStateStore {
@@ -37,6 +45,22 @@ impl SyncStateStore {
     pub fn set_last_server_ts(&mut self, ts: u64) {
         self.data.last_server_ts = Some(ts);
         self.save();
+    }
+
+    /// Record that this device has pulled a space's earlier items, so it does
+    /// not sweep the whole account again on every launch. Returns false when the
+    /// space was already recorded.
+    pub fn mark_history_backfilled(&mut self, space_id: &str) -> bool {
+        if self.data.history_backfilled.iter().any(|s| s == space_id) {
+            return false;
+        }
+        self.data.history_backfilled.push(space_id.to_string());
+        self.save();
+        true
+    }
+
+    pub fn has_history_backfilled(&self, space_id: &str) -> bool {
+        self.data.history_backfilled.iter().any(|s| s == space_id)
     }
 
     pub fn set_device_id(&mut self, id: &str) {
