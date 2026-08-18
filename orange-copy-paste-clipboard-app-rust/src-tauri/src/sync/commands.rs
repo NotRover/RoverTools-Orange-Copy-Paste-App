@@ -1067,9 +1067,10 @@ pub async fn space_remove_member(
     http.remove_space_member(&space_id, &member_user_id).await
 }
 
-/// Take someone else's shared entry down from a space we own. The author keeps
-/// their personal copy; every member is told to drop theirs over the space
-/// channel, and we drop ours here so the action lands without a round trip.
+/// Take a shared entry down from a space. The space owner can do this to any
+/// entry, and anyone can do it to their own. The author keeps their personal
+/// copy; every member is told to drop theirs over the space channel, and we
+/// drop ours here so the action lands without a round trip.
 #[tauri::command]
 pub async fn space_remove_entry(
     space_id: String,
@@ -1078,9 +1079,12 @@ pub async fn space_remove_entry(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
+    // Both paths run through here, so "did the author do this" is whether the
+    // entry is ours - not simply true because we are the one clicking.
+    let by_author = !sync.is_remote_entry(&entry_type, &client_id);
     http.remove_space_entry(&space_id, &client_id, &entry_type)
         .await?;
-    sync.drop_space_entry(&space_id, &client_id, &entry_type, true);
+    sync.drop_space_entry(&space_id, &client_id, &entry_type, by_author);
     Ok(())
 }
 

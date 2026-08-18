@@ -569,18 +569,16 @@ const RemovedRow: React.FC<{
         {isNote ? <NoteIcon size={10} /> : <Clipboard size={10} />}
       </span>
       <span className="sp-removed-text">
-        {/* Three different things, and the differences matter: one took the
-            item away, one took it out of this space, and one only dropped this
-            device's copy of something still shared with everyone else. */}
+        {/* Who did it, not what it cost us locally. The old wording keyed off
+            whether the copy went, so an author withdrawing their own post was
+            reported to every other member as a moderator takedown. */}
         {item.marker.local_only
           ? `Removed your copy of this ${what}`
-          : item.marker.content_gone
-            ? item.marker.by_author
+          : !item.marker.by_author
+            ? `A space owner took this ${what} out of the space`
+            : item.marker.content_gone && !incoming
               ? `Removed this ${what}`
-              : `This ${what} was taken down by a space owner`
-            : item.marker.by_author
-              ? `Stopped sharing this ${what} here`
-              : `A space owner took this ${what} out of the space`}
+              : `Stopped sharing this ${what} here`}
       </span>
       <span
         className="sp-removed-time"

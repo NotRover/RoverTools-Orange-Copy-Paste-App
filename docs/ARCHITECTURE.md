@@ -215,7 +215,8 @@ A pull returns the caller's own entries **plus** anything shared into a space th
 | `sync:entry` | Another device or space member pushed an entry, including tombstones | Full entry object (encrypted) |
 | `device:online` | A device in the user's own account connected | `{ device_id }` |
 | `device:offline` | A device disconnected or timed out | `{ device_id }` |
-| `user:presence` | A space member's first device connected or last one left | `{ user_id, online }` |
+| `user:presence` | A space member connected, or their last device left | `{ user_id, online }` |
+| `space:entry_removed` | An entry left a space - withdrawn by its author, or taken down by the owner | `{ space_id, client_id, entry_type, author_id, removed_by }` |
 | `space:membership_changed` | Someone joined or left a space, or the space was deleted | `{ space_id, action: "joined"\|"left"\|"deleted", user_id }` |
 | `space:rekey` | The owner distributed a wrapped keyring to this member | `{ space_id, wrapped_space_keys }` |
 | `invite:received` | Someone addressed a space invite to this user | Full invite object |

@@ -182,6 +182,7 @@ impl WsListener {
             return;
         }
         sync.set_connected(connected);
+        sync.apply_self_presence(connected);
         let _ = self
             .app
             .emit("sync:status-changed", serde_json::json!({ "connected": connected }));
@@ -266,7 +267,16 @@ impl WsListener {
                             .get("entry_type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("clipboard");
-                        sync.drop_space_entry(space_id, client_id, entry_type, false);
+                        // Who did it decides what the placeholder says. Older
+                        // servers omit `removed_by`; treating that as "not the
+                        // author" keeps their behaviour unchanged.
+                        let author_id = p.get("author_id").and_then(|v| v.as_str());
+                        let removed_by = p.get("removed_by").and_then(|v| v.as_str());
+                        let by_author = match (author_id, removed_by) {
+                            (Some(a), Some(r)) => a == r,
+                            _ => false,
+                        };
+                        sync.drop_space_entry(space_id, client_id, entry_type, by_author);
                     }
                 }
             }

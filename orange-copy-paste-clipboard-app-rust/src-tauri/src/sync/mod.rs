@@ -1605,8 +1605,26 @@ impl SyncClient {
             // Already removed here. Re-merging would resurrect an item the user
             // took out, which is exactly what a member's local removal must not
             // do — the server still holds it, so every pull would offer it.
-            if self.id_map.lock().is_deleted(&key) {
-                continue;
+            //
+            // Unless it was put back. A space removal strips the space id from
+            // the row, and pull only matches rows that still carry one of our
+            // spaces — so a row arriving with a space we removed it from is the
+            // author sharing it again, not the old copy coming round. Dropping
+            // a record only this device made (`local_only`) says nothing about
+            // the space, so those keep blocking.
+            {
+                let mut id_map = self.id_map.lock();
+                match id_map.deleted_marker(&key) {
+                    Some(m) if m.content_gone => {
+                        let reshared = !m.local_only
+                            && e.space_ids.iter().any(|s| m.space_ids.contains(s));
+                        if !reshared {
+                            continue;
+                        }
+                        id_map.clear_deleted(&key);
+                    }
+                    _ => {}
+                }
             }
 
             // Unwrap the per-entry CEK: "personal" under the UMK for our own
@@ -2052,10 +2070,11 @@ impl SyncClient {
     /// to disappear without trace, so a space could not answer "what happened
     /// to the thing I posted here" — the row simply was not there any more.
     ///
-    /// `by_me` says who did it, which is the only thing this side cannot infer:
-    /// the entry-removed event means a space owner acted, and the command means
-    /// the reader did.
-    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_me: bool) {
+    /// `by_author` says whether the person who wrote the entry is also the one
+    /// who removed it — the only thing this side cannot infer. It travels on the
+    /// entry-removed event as `removed_by`; the local command passes true,
+    /// since the reader can only unshare what they posted.
+    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_author: bool) {
         use crate::state::app_state::AppState;
         use std::sync::atomic::Ordering;
 
@@ -2079,7 +2098,7 @@ impl SyncClient {
                     space_ids: vec![space_id.to_string()],
                     owner_id: None,
                     deleted_at: now_ms(),
-                    by_author: by_me,
+                    by_author,
                     content_gone: false,
                     local_only: false,
                 },
@@ -2116,7 +2135,7 @@ impl SyncClient {
                     space_ids,
                     owner_id,
                     deleted_at: now_ms(),
-                    by_author: false,
+                    by_author,
                     content_gone: true,
                     local_only: false,
                 },
@@ -2201,6 +2220,21 @@ impl SyncClient {
                 "space:presence-changed",
                 serde_json::json!({ "user_id": user_id, "online": online }),
             );
+        }
+    }
+
+    /// Mirror our own socket state onto our row in every cached space.
+    ///
+    /// Our presence reaches other members as a `user:presence` event, but our
+    /// own copy of the member list came from a REST snapshot taken around the
+    /// same moment the socket came up — so whichever landed last won, and it
+    /// was routinely the snapshot saying we were offline while we sat there
+    /// connected. This is the one presence fact this device knows for certain,
+    /// so it stops asking the server for it.
+    pub(crate) fn apply_self_presence(&self, online: bool) {
+        let user_id = self.current_user().map(|u| u.user_id);
+        if let Some(user_id) = user_id {
+            self.apply_member_presence(&user_id, online);
         }
     }
 

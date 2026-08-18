@@ -201,6 +201,11 @@ impl IdMap {
             .is_some_and(|m| m.content_gone)
     }
 
+    /// One removal record, without cloning the whole map.
+    pub fn deleted_marker(&self, client_id: &str) -> Option<DeletedMarker> {
+        self.data.deleted_markers.get(client_id).cloned()
+    }
+
     /// Every removal, for the Spaces feed's placeholders.
     pub fn deleted_markers(&self) -> HashMap<String, DeletedMarker> {
         self.data.deleted_markers.clone()
