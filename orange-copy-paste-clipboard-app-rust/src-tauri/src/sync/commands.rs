@@ -14,7 +14,8 @@ use crate::sync::client::{CreateSpaceRequest, JoinSpaceRequest};
 use crate::sync::config::SyncConfig;
 use crate::sync::crypto;
 use crate::sync::types::{
-    SendFilter, Space, SyncDevice, SyncMode, SyncQuota, SyncStatusInfo, SyncUser,
+    SendFilter, Space, SpaceComment, SpaceCommentCount, SyncDevice, SyncMode, SyncQuota,
+    SyncStatusInfo, SyncUser,
 };
 use crate::sync::SyncClient;
 
@@ -1087,6 +1088,65 @@ pub async fn space_remove_entry(
         .await?;
     sync.drop_space_entry(&space_id, &client_id, &entry_type, by_author);
     Ok(())
+}
+
+// ── Space comments ───────────────────────────────────────────────────
+
+/// Post a comment on an entry shared into a space. Any member may.
+///
+/// `body` may carry `@[Name](user-id)` spans; they are encrypted with the rest
+/// of the text, so the server never learns who was tagged.
+#[tauri::command]
+pub async fn space_comment_add(
+    space_id: String,
+    client_id: String,
+    entry_type: String,
+    body: String,
+    state: State<'_, AppState>,
+) -> Result<SpaceComment, String> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err("Write something first".into());
+    }
+    let sync = sync_client(&state)?;
+    sync.add_space_comment(&space_id, &client_id, &entry_type, body)
+        .await
+}
+
+/// One entry's thread, oldest first.
+#[tauri::command]
+pub async fn space_comments_list(
+    space_id: String,
+    client_id: String,
+    entry_type: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SpaceComment>, String> {
+    let sync = sync_client(&state)?;
+    sync.list_space_comments(&space_id, &client_id, &entry_type)
+        .await
+}
+
+/// Comment tallies for every commented-on entry in a space, so the feed can
+/// draw its chips in one request instead of one per card.
+#[tauri::command]
+pub async fn space_comment_counts(
+    space_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SpaceCommentCount>, String> {
+    let sync = sync_client(&state)?;
+    sync.space_comment_counts(&space_id).await
+}
+
+/// Delete a comment: its author, or the space owner as moderator. The server
+/// is what enforces that; this only asks.
+#[tauri::command]
+pub async fn space_comment_delete(
+    space_id: String,
+    comment_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let sync = sync_client(&state)?;
+    sync.delete_space_comment(&space_id, &comment_id).await
 }
 
 /// Delete a space we own (dissolves it for every member).

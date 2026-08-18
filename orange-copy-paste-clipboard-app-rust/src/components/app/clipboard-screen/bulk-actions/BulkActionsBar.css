@@ -262,7 +262,7 @@
   gap: 4px;
   padding: 3px 7px 3px 5px;
   border: 1.5px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--surface-hover);
   font-size: 10px;
   font-weight: 600;

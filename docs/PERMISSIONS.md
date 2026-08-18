@@ -35,6 +35,8 @@ space (`id_map.is_remote`, surfaced to the UI as `useRemoteEntryKeys`).
 | Remove from cloud | card menu, bulk bar | yes | **hidden** | `sync_unpush_entries` skips |
 | Share to a space | card menu, bulk bar | yes | **hidden** | push guard |
 | Remove from a space | Spaces feed, bulk bar | yes (unshare) | owner only | backend `remove_entry_from_space` |
+| Comment on it | Spaces detail panel | yes | yes | backend `_require_member` |
+| Delete a comment | Spaces detail panel | yes (your own) | owner only | backend `delete_comment` |
 
 **Local only** means the change lives on this device and is never pushed. Your
 groups and pins are your filing system; they are not part of the entry as its
@@ -55,6 +57,9 @@ it anyway reported "Removing 1 item from your account" and removed nothing.
 | Leave | n/a | yes |
 | Take down any entry in the space | yes | no |
 | Take down their own entry | yes | yes |
+| Comment on any entry in the space | yes | yes |
+| Delete their own comment | yes | yes |
+| Delete anyone's comment | yes | no |
 | Set per-space send filters | yes | yes (own client, own choice) |
 
 ## Where each rule lives
@@ -81,11 +86,17 @@ Client, React — hides what is not allowed, so nothing dead is on screen:
 - `NoteEditor.tsx` — `readOnly` + `ownerName`.
 - `SpacesScreen.tsx` — `canRemoveKey` (`is_owner || !remote`) gates both the
   feed's remove item and what bulk select will act on.
+- `comments/CommentThread.tsx` — a comment's delete button is drawn on
+  `is_mine || isOwner`. Commenting itself is ungated in the UI: everyone in the
+  space may, so there is nothing to hide.
 
 Backend — the only place a rule survives a modified client:
 
 - `spaces/service.py` — `remove_entry_from_space` narrows to the caller's own
   rows for non-owners; owner-only checks on the rest of the space routes.
+- `spaces/service.py` — `_require_member` is the whole gate for reading and
+  writing comments: a space is a room, and everyone in it can talk.
+  `delete_comment` is the narrower one, author or space owner.
 
 ## What the server does not enforce
 

@@ -280,6 +280,27 @@ impl WsListener {
                     }
                 }
             }
+            // Somebody commented on an entry in a space, or took a comment
+            // back down. The ciphertext rides along with the event, so an open
+            // thread fills in without a round trip.
+            "space:comment" => {
+                if let Some(sync) = self.sync_client() {
+                    let p = &msg.payload;
+                    let action = p.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    if action == "deleted" {
+                        let _ = self.app.emit("space:comment-removed", p);
+                    } else if let Ok(row) =
+                        serde_json::from_value::<crate::sync::client::CommentOut>(p.clone())
+                    {
+                        // A comment we cannot open is one written under a key
+                        // this member never received. Dropping it is the same
+                        // outcome as never having been sent it.
+                        if let Some(comment) = sync.decrypt_comment(&row) {
+                            let _ = self.app.emit("space:comment-added", &comment);
+                        }
+                    }
+                }
+            }
             // Someone joined, left, was removed, or the space was deleted.
             "space:membership_changed" => {
                 let _ = self.app.emit("space:membership-changed", &msg.payload);
