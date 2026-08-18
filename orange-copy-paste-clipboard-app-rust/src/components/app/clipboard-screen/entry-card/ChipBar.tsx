@@ -89,9 +89,9 @@ const ChipBar: React.FC<ChipBarProps> = ({
     key: "pinned" | "saved" | "clipboard";
     width: 0;
   }> = [];
-  if (entry.pinned) optionalBases.push({ key: "pinned", width: 0 });
   if (entryGroups.includes("Saved"))
     optionalBases.push({ key: "saved", width: 0 });
+  if (entry.pinned) optionalBases.push({ key: "pinned", width: 0 });
   if (isInClipboard) optionalBases.push({ key: "clipboard", width: 0 });
 
   const visibleBases = optionalBases.slice(0, visibleBaseCount);
@@ -123,12 +123,12 @@ const ChipBar: React.FC<ChipBarProps> = ({
     let typeUsed = typeWidth > 0 ? typeWidth : 0;
 
     // Measure optional base chips
-    const baseRefs = [pinMeasureRef, savedMeasureRef, clipboardMeasureRef];
+    // Same order as `optionalBases` above - the counts index into both.
     const baseWidths: number[] = [];
-    if (entry.pinned) baseWidths.push(widthOf(baseRefs[0].current));
     if (entryGroups.includes("Saved"))
-      baseWidths.push(widthOf(baseRefs[1].current));
-    if (isInClipboard) baseWidths.push(widthOf(baseRefs[2].current));
+      baseWidths.push(widthOf(savedMeasureRef.current));
+    if (entry.pinned) baseWidths.push(widthOf(pinMeasureRef.current));
+    if (isInClipboard) baseWidths.push(widthOf(clipboardMeasureRef.current));
 
     const overflowWidth = widthOf(overflowMeasureRef.current);
     const groupWidths = displayGroups.map((_, i) =>
@@ -366,10 +366,15 @@ const ChipBar: React.FC<ChipBarProps> = ({
       <div className="card-footer">
         <div className="card-chips" ref={footerChipsRef}>
           {renderTypeChip()}
-          {visibleBases.some((b) => b.key === "pinned") && renderPinnedChip()}
           {visibleBases.some((b) => b.key === "saved") && renderSavedChip()}
+          {visibleBases.some((b) => b.key === "pinned") && renderPinnedChip()}
           {visibleBases.some((b) => b.key === "clipboard") &&
             renderClipboardChip()}
+          {owner && (
+            <span ref={ownerMeasureRef} className="card-owner-slot">
+              <OwnerChip owner={owner} />
+            </span>
+          )}
           {visibleGroups.length > 0 &&
             visibleGroups.map((g) => renderGroupChip(g, g))}
           {totalHiddenCount > 0 && (
@@ -389,17 +394,11 @@ const ChipBar: React.FC<ChipBarProps> = ({
             </button>
           )}
 
-          {owner && (
-            <span ref={ownerMeasureRef} className="card-owner-slot">
-              <OwnerChip owner={owner} />
-            </span>
-          )}
-
           {/* Hidden measurer for dynamic chip fitting */}
           <div className="card-chip-measure" aria-hidden>
             {renderTypeChip(true)}
-            {renderPinnedChip(true)}
             {renderSavedChip(true)}
+            {renderPinnedChip(true)}
             {renderClipboardChip(true)}
             {displayGroups.map((g, idx) =>
               renderGroupChip(g, `measure-${g}-${idx}`, idx),
@@ -464,8 +463,8 @@ const ChipBar: React.FC<ChipBarProps> = ({
           className="card-hidden-groups"
           onClick={(e) => e.stopPropagation()}
         >
-          {hiddenBases.some((b) => b.key === "pinned") && renderPinnedChip()}
           {hiddenBases.some((b) => b.key === "saved") && renderSavedChip()}
+          {hiddenBases.some((b) => b.key === "pinned") && renderPinnedChip()}
           {hiddenBases.some((b) => b.key === "clipboard") &&
             renderClipboardChip()}
           {hiddenGroups.map((g) => {
