@@ -3,6 +3,7 @@
 pub mod clipboard;
 pub mod health;
 pub mod notes;
+pub mod notifications;
 pub mod runtime;
 pub mod settings_file;
 pub mod state;
@@ -162,6 +163,7 @@ fn setup_runtime(
     let settings_file = path("settings.json");
     let boot_file = path("boot_id.txt");
     let notes_file = path("notes.bin");
+    let notifications_file = path("notifications.bin");
 
     // Configure the images directory so pushed images are saved to disk.
     if let Some(ref dir) = images_dir {
@@ -192,6 +194,7 @@ fn setup_runtime(
         (history_file.as_ref(), "clipboard history"),
         (saved_file.as_ref(), "clipboard history"),
         (notes_file.as_ref(), "notes"),
+        (notifications_file.as_ref(), "notifications"),
     ] {
         if let Some(p) = path {
             crate::health::recover_quarantined(p, label);
@@ -234,6 +237,15 @@ fn setup_runtime(
         let _ = app.state::<AppState>().notes.lock().load_from_file(nf);
     }
 
+    // Load the notification feed from disk.
+    if let Some(ref nf) = notifications_file {
+        let _ = app
+            .state::<AppState>()
+            .notifications
+            .lock()
+            .load_from_file(nf);
+    }
+
     // Seed the in-memory boolean flags from disk.
     let state_ref: tauri::State<'_, AppState> = app.state();
     state_ref
@@ -264,10 +276,13 @@ fn setup_runtime(
         let persist = Arc::clone(&state.keep_history);
         let notes_store = Arc::clone(&state.notes);
         let notes_dirty = Arc::clone(&state.notes_dirty);
+        let notif_store = Arc::clone(&state.notifications);
+        let notif_dirty = Arc::clone(&state.notifications_dirty);
         // Paths are stable for the app's lifetime — resolve once, not per tick.
         let history_file = history_file.clone();
         let saved_file = saved_file.clone();
         let notes_file = notes_file.clone();
+        let notifications_file = notifications_file.clone();
 
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
@@ -286,6 +301,13 @@ fn setup_runtime(
             if notes_dirty.swap(false, Ordering::Relaxed) {
                 if let Some(nf) = &notes_file {
                     let _ = notes_store.lock().save_to_file(nf);
+                }
+            }
+
+            // Flush the notification feed.
+            if notif_dirty.swap(false, Ordering::Relaxed) {
+                if let Some(nf) = &notifications_file {
+                    let _ = notif_store.lock().save_to_file(nf);
                 }
             }
 
@@ -439,6 +461,10 @@ pub fn run() {
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
         notes: Arc::new(parking_lot::Mutex::new(crate::notes::NoteStore::new())),
         notes_dirty: Arc::new(AtomicBool::new(false)),
+        notifications: Arc::new(parking_lot::Mutex::new(
+            crate::notifications::NotificationStore::new(),
+        )),
+        notifications_dirty: Arc::new(AtomicBool::new(false)),
         sync_client: parking_lot::Mutex::new(None),
     };
 
@@ -525,6 +551,13 @@ pub fn run() {
             crate::notes::commands::save_note_file,
             crate::notes::commands::get_note_attachments_dirs,
             crate::notes::commands::export_note_text,
+            crate::notifications::commands::notifications_list,
+            crate::notifications::commands::notifications_unread_count,
+            crate::notifications::commands::notifications_refresh,
+            crate::notifications::commands::notifications_mark_read,
+            crate::notifications::commands::notifications_mark_all_read,
+            crate::notifications::commands::notifications_dismiss,
+            crate::notifications::commands::notifications_clear_read,
             // Cloud sync commands
             crate::sync::commands::sync_login,
             crate::sync::commands::sync_signup,

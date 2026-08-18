@@ -129,6 +129,27 @@ export interface SyncInviteList {
   received: SyncInvite[];
 }
 
+/** What raised a notification. Drives its icon and which chip it sits under. */
+export type NotificationKind =
+  | "space_invite"
+  | "space_activity"
+  | "sync_warning"
+  | "reminder";
+
+/** One row in the notification centre. Mirrors the Rust `Notification`. */
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  created_at: number;
+  read: boolean;
+  /** Set once the row can no longer be acted on, to the outcome in words. */
+  resolved: string | null;
+  /** Kind-specific ids the actions need (invite_id, space_id, space_name). */
+  data: Record<string, string>;
+}
+
 /** One entry sync refused to send, with the reason to show the user. */
 export interface SkippedEntry {
   client_id: string;

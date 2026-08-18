@@ -140,6 +140,10 @@ src-tauri/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_notes, create/update/delete, groups)
 │   │   └── store.rs            # Note model + MessagePack persistence
+│   ├── notifications/          # Notification centre (bell popout)
+│   │   ├── mod.rs              # Module re-exports
+│   │   ├── commands.rs         # list/refresh/mark-read/dismiss; reconciles invites with the server
+│   │   └── store.rs            # Notification model + MessagePack persistence, read TTL, cap
 │   ├── sync/                   # Cloud sync module (optional, runtime-gated)
 │   │   ├── mod.rs              # SyncClient init, background Tokio runtime
 │   │   ├── client.rs           # reqwest HTTP client, Bearer + X-Device-Id injection, 401 refresh
@@ -260,6 +264,8 @@ AppState
 ├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
 ├── notes: Arc<Mutex<NoteStore>>            ← shared notes store
 ├── notes_dirty: Arc<AtomicBool>            ← triggers periodic flush to notes.bin
+├── notifications: Arc<Mutex<NotificationStore>> ← notification centre feed
+├── notifications_dirty: Arc<AtomicBool>    ← triggers periodic flush to notifications.bin
 └── sync_client: Option<Arc<SyncClient>>   ← None when sync disabled or not yet authed
 ```
 
@@ -431,6 +437,55 @@ Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sy
 - Note mutations set `notes_dirty = true`.
 - The shared background flush thread writes `notes.bin` every ~2s when dirty.
 - Notes are loaded during startup in `setup_runtime`.
+
+---
+
+### Notification Centre
+
+One surface for everything the app has to tell the user, reached from the bell in
+the sidebar bottom. It ships with space invites; `NotificationKind` is the seam
+new sources arrive through (`space_activity`, `sync_warning`, `reminder`).
+
+**The store records what the user was told, not the thing itself.** An invite
+lives on the server and can be answered on another device, revoked, or expire
+while this one is closed. So a `space_invite` notification carries the
+`invite_id` in its opaque `data` map, and `notifications_refresh` re-reads
+`GET /api/v1/invites` and retires any row that is no longer pending
+(`resolved: "Joined" | "Declined" | "No longer available"` — the row stays as
+history and drops its buttons). Signed out, refresh is a no-op rather than an
+emptying: the feed is whatever the last sign-in left.
+
+Ids are derived from the source (`invite:<invite_id>`), so ingesting the same
+server row on every reconnect updates one record instead of stacking copies, and
+`upsert` preserves the existing `read` flag and `created_at` — a refresh must
+never push a row the user has already seen back to the top as if it were new.
+
+| Command | Purpose |
+|---------|---------|
+| `notifications_list` | Whole feed, newest first |
+| `notifications_unread_count` | Badge count |
+| `notifications_refresh` | Reconcile against the server (async) |
+| `notifications_mark_read` / `notifications_mark_all_read` | Read state |
+| `notifications_dismiss` / `notifications_clear_read` | Removal |
+
+Event `notifications:changed` (no payload) fires on every real change, so the
+badge and an open popout re-read together. Read rows age out after 30 days and
+the feed is capped at 500; unread rows are exempt from the age sweep. Signing in
+as a different account clears the feed in `finalize_session` — invites are
+addressed to a person.
+
+**Popout behaviour** (`components/app/notifications/NotificationsPopout.tsx`):
+
+- Anchored to the bell in `sidebar-bottom` and portalled to `document.body`. It
+  grows upward, so its top is computed after measuring rather than passed in.
+- Rows render 15 at a time behind a "Show more" button; the count resets when
+  the filter changes or the popout reopens.
+- Filter chips only appear once more than one category is present.
+- Unread rows are marked read on the *close* edge, not on click — so the list
+  does not reflow under the cursor, and every route out (bell, click-outside,
+  Escape, a parent closing it) counts exactly once.
+- The outside-click handler ignores `[data-notif-bell]`, or the bell would close
+  the popout and then immediately reopen it with its own click.
 
 ---
 
@@ -1187,6 +1242,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Image files        | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)                      | On push to history       | Via asset protocol |
 | Settings           | `{app_data}/settings.json`             | JSON object `{ key: value }`                                     | On `set_setting`         | On startup         |
 | Notes              | `{app_data}/notes.bin`                 | MessagePack binary                                               | Every 2s when dirty      | On startup         |
+| Notifications      | `{app_data}/notifications.bin`         | MessagePack binary                                               | Every 2s when dirty      | On startup         |
 | Boot ID            | `{app_data}/boot_id.txt`               | Plain text (boot epoch seconds)                                  | On startup               | On startup         |
 | Window geometry    | `{app_data}/window-state.json`         | `{ x, y, width, height, maximized }`                             | On every move/resize     | On startup         |
 | Theme preference   | `localStorage.sc-theme`                | `"dark"` or `"light"`                                            | On toggle                | On mount           |

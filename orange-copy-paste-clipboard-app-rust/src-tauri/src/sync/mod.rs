@@ -873,6 +873,14 @@ impl SyncClient {
             if !previous.is_empty() && previous != user_id {
                 self.id_map.lock().reset();
                 state.reset_for_new_account();
+                // Invites and space activity are addressed to a person, so the
+                // feed is the previous account's mail. It is refilled from the
+                // server for whoever just signed in.
+                let app_state = self.app.state::<crate::state::AppState>();
+                app_state.notifications.lock().reset();
+                app_state
+                    .notifications_dirty
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);

@@ -1,0 +1,386 @@
+/* Notification centre popout, anchored to the sidebar bell. */
+
+.ntf-panel {
+  position: fixed;
+  z-index: 1200;
+  width: 336px;
+  max-height: 460px;
+  display: flex;
+  flex-direction: column;
+  /* Deliberately the page ground rather than --surface: the popout floats over
+     content that is already --surface, and matching it made the panel read as
+     part of the screen behind it. Rows lift off this on hover instead. */
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transform-origin: bottom left;
+  animation: ntf-pop 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ntf-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Header */
+
+.ntf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ntf-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ntf-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ntf-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.ntf-link:hover {
+  color: var(--accent);
+}
+
+/* Filter chips */
+
+.ntf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* Squircle rather than a full pill: --radius-xs is what the rest of the app
+   uses at this size, and a 999px chip read as borrowed from somewhere else. */
+.ntf-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ntf-chip:hover {
+  border-color: var(--border-light);
+  color: var(--text);
+}
+
+.ntf-chip.active {
+  background: var(--accent-dim-strong);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.ntf-chip-count {
+  font-size: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* List */
+
+.ntf-list {
+  overflow-y: auto;
+  flex: 1;
+  /* Firefox has no ::-webkit pseudo-elements, so it gets the same treatment
+     through the standard properties rather than the platform default. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+
+.ntf-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ntf-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ntf-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 999px;
+}
+
+.ntf-list::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.ntf-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 16px 12px 7px;
+  /* The panel's own ground, not a tinted band: it reads as bare text while
+     still being opaque, which sticky needs - rows scroll underneath it. */
+  background: var(--bg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* The first group sits right under the chips, so it does not need the gap that
+   separates one day from the one above it. */
+.ntf-list > div:first-child .ntf-day {
+  padding-top: 9px;
+}
+
+/* Flat rows separated by a rule. Cards with gaps between them were tried and
+   read as too busy at this width. */
+.ntf-row {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ntf-row:last-child {
+  border-bottom: none;
+}
+
+.ntf-row:hover {
+  background: var(--surface);
+}
+
+/* Unread: a tinted ground plus an accent rail, so the state survives the hover
+   background as well as a screenshot in either theme. */
+.ntf-row.unread {
+  background: var(--accent-dim);
+}
+
+.ntf-row.unread::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+/* The tint alone is easy to miss in a long feed, so the title carries the state
+   too. Read rows stay at the default weight, which is what makes the two
+   distinguishable at a glance. */
+.ntf-row.unread .ntf-row-title {
+  font-weight: 600;
+}
+
+.ntf-glyph {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ntf-glyph--accent {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+.ntf-glyph--good {
+  background: rgba(34, 197, 94, 0.13);
+  color: var(--success);
+}
+
+.ntf-glyph--warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.ntf-glyph--plain {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.ntf-body {
+  flex: 1;
+  min-width: 0;
+  /* Keeps the text clear of the dismiss button, which is pinned to the corner
+     rather than taking a column of its own. */
+  padding-right: 18px;
+}
+
+.ntf-row-title {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.ntf-row-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ntf-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Outcome of a notification that can no longer be acted on. */
+.ntf-resolved {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.ntf-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ntf-btn {
+  padding: 4px 11px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ntf-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.ntf-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.ntf-btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fff;
+}
+
+.ntf-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Dismiss - pinned to the row's top right corner, revealed on hover but always
+   reachable by keyboard. Out of the flex flow so it stays put whether the row is
+   one line or has a body and buttons under it. */
+.ntf-dismiss {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.12s ease;
+}
+
+.ntf-row:hover .ntf-dismiss,
+.ntf-dismiss:focus-visible {
+  opacity: 1;
+}
+
+.ntf-dismiss:hover {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+/* Show more - the feed pages in rather than rendering every row at once. */
+
+.ntf-more {
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ntf-more:hover {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+/* Empty state */
+
+.ntf-empty {
+  padding: 34px 20px 38px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.ntf-empty-title {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ntf-empty-body {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
