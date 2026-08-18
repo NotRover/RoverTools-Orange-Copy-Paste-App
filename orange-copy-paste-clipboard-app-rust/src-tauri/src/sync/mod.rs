@@ -905,6 +905,26 @@ impl SyncClient {
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
 
+        // One-shot: rebuild who-wrote-what from the server.
+        //
+        // Records written before bug #8 was fixed were last-write-wins, so any
+        // of them may name whoever pushed last instead of the author. Keeping
+        // one would now be worse than the original bug: the record is sticky, so
+        // a wrong name would refuse the real author's next update as if they
+        // were the impostor. Nothing local can tell a good record from a bad
+        // one, so all of them go.
+        //
+        // Rewinding the cursor is what puts them back. Pull returns rows in
+        // `server_ts` order, so the earliest row for an entry - the author's,
+        // since a rival copy can only be pushed after the original exists -
+        // arrives first and establishes them, and the rival is then refused.
+        // Nothing else would revisit these rows: both sit below the cursor.
+        if !self.sync_state.lock().data.authorship_repaired {
+            let cleared = self.id_map.lock().clear_all_entry_owners();
+            self.sync_state.lock().rewind_for_authorship_repair();
+            eprintln!("[sync] rebuilding authorship for {cleared} entries from a full pull");
+        }
+
         // 10. Start the realtime listener.  It owns `connected` from here on —
         // setting it true at login made the status pill claim "Synced" for as
         // long as the app ran, even when the socket never came up.
@@ -1592,6 +1612,25 @@ impl SyncClient {
                 e.client_id
             );
 
+            // One entry, one author. A row naming anybody else is a rival copy
+            // and is dropped whole - content, tombstone and all.
+            //
+            // Rows are keyed server-side by `(user_id, client_id, entry_type)`,
+            // so a device that pushes an entry it did not write does not update
+            // the original: it inserts a second row carrying the same
+            // `client_id` under its own account, and every member then pulls
+            // both. Merging collapses them onto one local key, so before this
+            // guard the later row won on arrival order - renaming the entry to
+            // whoever pushed last and overwriting the author's text with theirs.
+            //
+            // The push guards (`spawn_push_note`, `spawn_push_clipboard_entry`)
+            // stop this device creating such a row. This is the receiving half:
+            // rows already on the server, or written by a device that has not
+            // been updated, must not be able to take an entry over.
+            if !self.row_is_authoritative(&key, e) {
+                continue;
+            }
+
             // Tombstone → remove locally.
             if e.deleted_at.is_some() {
                 let had_local = if is_note {
@@ -2086,6 +2125,49 @@ impl SyncClient {
 
     /// Whether another member wrote this entry. Anything that edits content has
     /// to ask first: a copy shared into a space is theirs, not ours to rewrite.
+    /// Whether an incoming row speaks for the entry it names.
+    ///
+    /// True when it comes from the entry's author, or when nobody is on record
+    /// yet and this row gets to establish them. False for a rival row - the same
+    /// `client_id` under a different account - which is then dropped rather than
+    /// merged.
+    ///
+    /// Rows that carry no `user_id` are always accepted: they predate the field,
+    /// and refusing them would strand entries this device already holds.
+    fn row_is_authoritative(&self, key: &str, e: &crate::sync::client::PulledEntry) -> bool {
+        accepts_row(self.author_of(key).as_deref(), e.user_id.as_deref())
+    }
+
+    /// Who this device believes wrote `key`, or `None` when that is still open.
+    ///
+    /// Repairs one impossible state on the way past: this account recorded as
+    /// the author of an entry also flagged as having arrived from someone else.
+    /// Both cannot be true, and it is the fingerprint of the old last-write-wins
+    /// behaviour - our own stray row landing after the author's and taking their
+    /// name off it. The remote flag is the half that was never wrong (it is
+    /// sticky, and only a space-key decrypt sets it), so the owner is the half
+    /// that gets dropped, letting the author's next row put the right name back.
+    fn author_of(&self, key: &str) -> Option<String> {
+        // Read before taking the id_map lock: nothing else nests these two, and
+        // this is the one place that would want both.
+        let self_id = self.user.lock().as_ref().map(|u| u.user_id.clone());
+        let mut id_map = self.id_map.lock();
+        let recorded = id_map.owner_of(key);
+        let author = resolve_author(
+            recorded.as_deref(),
+            id_map.is_remote(key),
+            id_map.get_server_id(key).is_some(),
+            self_id.as_deref(),
+        );
+        // Released as impossible: drop it from the record too, so the author's
+        // next row can put the right name back rather than being refused by the
+        // stale one.
+        if author.is_none() && recorded.is_some() {
+            id_map.clear_entry_owner(key);
+        }
+        author
+    }
+
     pub fn is_remote_entry(&self, entry_type: &str, client_id: &str) -> bool {
         self.id_map.lock().is_remote(&format!("{entry_type}:{client_id}"))
     }
@@ -3198,6 +3280,52 @@ fn reminder_id(kind: &str) -> String {
 
 /// A short human label for an entry, used when telling the user which item
 /// sync refused to send.
+/// Whether a pulled row speaks for the entry it names.
+///
+/// Split out from [`SyncClient::row_is_authoritative`] so the rule can be tested
+/// on its own. It decided a bug that cost attribution outright (see bug #8 in
+/// `docs/BUGFIX_HISTORY.md`), and the failure was silent - the wrong answer
+/// looked exactly like an ordinary merge.
+///
+/// A row with no `user_id` predates the field. Refusing those would strand
+/// entries this device already holds, and they cannot be rival rows: the shape
+/// this guards against is created by a client new enough to always send one.
+fn accepts_row(author: Option<&str>, incoming: Option<&str>) -> bool {
+    match (author, incoming) {
+        (_, None) => true,
+        (None, Some(_)) => true,
+        (Some(author), Some(incoming)) => author == incoming,
+    }
+}
+
+/// Who a device believes wrote an entry, from what it has on record.
+///
+/// Split out from [`SyncClient::author_of`] for the same reason as
+/// [`accepts_row`]. `recorded` is the id_map's owner, `is_remote` its sticky
+/// arrived-from-elsewhere flag, `known_locally` whether this device holds the
+/// entry at all.
+///
+/// Returns `None` when authorship is open - either genuinely unknown, or
+/// recorded impossibly and released. The second case is the repair: a remote
+/// entry cannot have been written by this account, and that pairing is the
+/// residue of the old last-write-wins behaviour.
+fn resolve_author(
+    recorded: Option<&str>,
+    is_remote: bool,
+    known_locally: bool,
+    self_id: Option<&str>,
+) -> Option<String> {
+    match (recorded, self_id) {
+        (Some(owner), Some(me)) if is_remote && owner == me => None,
+        (Some(owner), _) => Some(owner.to_string()),
+        // Nobody on record. An entry this device knows and has not flagged as
+        // arriving from elsewhere is one we wrote - saying so is what stops the
+        // takeover running the other way, somebody else's row claiming ours.
+        (None, Some(me)) if !is_remote && known_locally => Some(me.to_string()),
+        (None, _) => None,
+    }
+}
+
 fn skip_label_for(entry: &ClipboardEntry) -> String {
     if let Some(label) = entry.label.as_ref().filter(|l| !l.trim().is_empty()) {
         return label.clone();
@@ -3477,6 +3605,19 @@ async fn push_entry_task(
                         "[sync] {entry_type} {client_id} rejected by the server: {}",
                         c.reason
                     );
+                    // The server refuses a push that would plant a rival copy of
+                    // an entry somebody else wrote. Reaching here means a client
+                    // guard did not hold, so it goes where the user can see it
+                    // rather than only to stderr - a silent rejection is how
+                    // this class of bug stayed hidden the first time.
+                    if c.reason == "not_your_entry" {
+                        record_skip(
+                            &ctx,
+                            &client_id,
+                            if entry_type == "note" { "A note" } else { "An item" },
+                            "Only the member who wrote this can change it in the space.".into(),
+                        );
+                    }
                 }
                 ctx.status.lock().pending_count = ctx.queue.lock().len();
                 return;
@@ -3513,4 +3654,85 @@ async fn push_entry_task(
         "sync:entry-queued",
         serde_json::json!({ "client_id": client_id, "entry_type": entry_type }),
     );
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::{accepts_row, resolve_author};
+
+    const ME: &str = "spec";
+    const THEM: &str = "hasan";
+
+    // ── Who does this device think wrote the entry ──────────────────
+
+    #[test]
+    fn a_recorded_author_stands() {
+        assert_eq!(
+            resolve_author(Some(THEM), true, true, Some(ME)).as_deref(),
+            Some(THEM)
+        );
+    }
+
+    #[test]
+    fn an_entry_we_hold_and_never_flagged_remote_is_ours() {
+        assert_eq!(
+            resolve_author(None, false, true, Some(ME)).as_deref(),
+            Some(ME)
+        );
+    }
+
+    #[test]
+    fn an_entry_we_have_never_seen_has_no_author_yet() {
+        assert_eq!(resolve_author(None, false, false, Some(ME)), None);
+    }
+
+    #[test]
+    fn we_cannot_be_the_author_of_something_that_came_from_elsewhere() {
+        // The exact residue of bug #8: our own stray row landed after the
+        // author's and took their name off the entry. Both cannot be true, and
+        // the remote flag is the half that is never wrong.
+        assert_eq!(resolve_author(Some(ME), true, true, Some(ME)), None);
+    }
+
+    #[test]
+    fn signed_out_we_claim_nothing() {
+        assert_eq!(resolve_author(None, false, true, None), None);
+        // A recorded author still stands - it says nothing about us.
+        assert_eq!(
+            resolve_author(Some(THEM), true, true, None).as_deref(),
+            Some(THEM)
+        );
+    }
+
+    // ── Which rows are allowed to touch it ──────────────────────────
+
+    #[test]
+    fn the_author_may_update_their_own_entry() {
+        assert!(accepts_row(Some(THEM), Some(THEM)));
+    }
+
+    #[test]
+    fn a_rival_row_is_refused() {
+        // The whole bug in one line: before this, arrival order decided, and
+        // pull order (server_ts ascending) put the rival last every time.
+        assert!(!accepts_row(Some(THEM), Some(ME)));
+    }
+
+    #[test]
+    fn nobody_may_take_over_an_entry_of_ours() {
+        assert!(!accepts_row(Some(ME), Some(THEM)));
+    }
+
+    #[test]
+    fn an_unclaimed_entry_accepts_the_first_row_to_name_an_author() {
+        assert!(accepts_row(None, Some(THEM)));
+    }
+
+    #[test]
+    fn a_row_without_an_author_is_always_accepted() {
+        // Predates the field. Refusing these would strand entries this device
+        // already holds.
+        assert!(accepts_row(Some(THEM), None));
+        assert!(accepts_row(None, None));
+    }
 }

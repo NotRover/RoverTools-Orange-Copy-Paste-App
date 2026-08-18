@@ -192,3 +192,49 @@ Two smaller faults made the leak invisible rather than obvious:
 - The quota is refetched whenever a bulk run finishes, and the bar is labelled "Image storage" with a note that text and notes take no space — the number not moving after clearing hundreds of text entries is correct behaviour, and used to read as a bug.
 
 **Invariant to keep**: `entry_states()` / `id_map` answer "what does *this device* know about", never "what does the account have". Anything account-wide — removal, quota, reconciliation — must ask the server. The three remaining `entry_states()` callers (`sync_push_unsynced`, `sync_preview_unsynced`, `sync_bulk_progress`) are all correctly about local items; keep it that way.
+
+---
+
+## #8 — A shared entry showed the wrong author, and the name changed depending on where you looked
+
+**Date**: 2026-08-18
+**Severity**: High (attribution — an entry read as written by someone who only edited it)
+**Symptoms**:
+
+- A note written by one member and shared into a space showed that member's name on one surface and the *viewer's* name on another, for the same note at the same moment.
+- The account showing as the author was one that had been able to edit the note earlier.
+- Which name appeared was not stable: it depended on the order rows came back from a pull.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/sync/mod.rs` (merge loop, `author_of`), `src-tauri/src/sync/id_map.rs` (`set_entry_owner`)
+
+Entries are keyed server-side by `(user_id, client_id, entry_type)`. A device that pushes an entry it did not write therefore does **not** update the author's row — it inserts a *second* row carrying the same `client_id` under its own account, and both rows fan out to every member of the space.
+
+The merge collapses both onto one local key (`note:<client_id>`), and two things then decided the outcome by arrival order:
+
+- `set_entry_owner` was a plain map insert, so the last row merged named the author.
+- The row's content was merged unconditionally, so the editor's text overwrote the author's on every device.
+
+Pull is ordered `server_ts ASC` (`src/sync/service.py:180`), so the rival row — pushed later, higher `server_ts` — always arrived last and always won. Meanwhile `mark_entry_remote` *is* sticky, so the entry stayed correctly flagged as "someone else's" for the permission guards. That split is what made the surfaces disagree: the guards said not-yours, the name said yours.
+
+The push guards in `spawn_push_note` and `spawn_push_clipboard_entry` already refuse to publish an entry flagged remote, so a current build does not create rival rows. They are the sending half only — rows already on the server, or written by a device that has not been updated, could still take an entry over on the way in.
+
+**Fix**:
+
+- `set_entry_owner` is sticky like `mark_entry_remote`: the first author on record keeps the entry, and a later row naming somebody else is refused rather than applied. It returns whether the record now names the given account, so a caller can tell agreement from refusal.
+- The merge loop drops a rival row whole — content, tombstone and all — via `row_is_authoritative`. An entry has one author; a row from anyone else is not a version of it.
+- `author_of` also answers for entries with nobody on record: one this device knows and has *not* flagged remote is one we wrote. Without that, the takeover ran the other way — another member's row could claim an entry of ours.
+- Installs already damaged are repaired once, at sign-in: every recorded author is dropped and the pull cursor is rewound, so the server rebuilds them (`clear_all_entry_owners` + `SyncState::authorship_repaired`). A narrower repair was tried first — release only the records naming *this* account on an entry flagged remote, which is the impossible pairing — but it only helps the device that did the editing. A third device that merely watched had recorded the editor's name, which is neither impossible nor locally distinguishable from the truth. Worse, with the record now sticky, that wrong name would refuse the real author's next update as if *they* were the impostor: strictly worse than the original bug. Nothing local can tell a good record from a bad one, so all of them go. The rewind is what puts them back — pull returns rows in `server_ts` order, and a rival copy can only be pushed after the original exists, so the author's row always arrives first and establishes them. **Cost: one full re-pull per install, once.**
+- `useEntryOwners` seeds from `sync_get_remote_entries` before the name map, so an entry known to be someone else's but with no name reads "A member". Dropping the chip because the name is unknown says the opposite of what is true.
+
+**How a regression is caught, not just avoided**:
+
+The bug was silent — a wrong answer looked exactly like an ordinary merge — so the fix is only worth as much as what fails when it is undone. Four layers, each closing a different way back in:
+
+1. **The rule is a pure function.** `accepts_row` and `resolve_author` take plain arguments and return a decision, so every case is covered by `sync/mod.rs::ownership_tests` — including the two that actually broke: a rival row being refused, and this account released as the author of something flagged remote. Reintroducing last-write-wins fails a named test rather than quietly changing behaviour.
+2. **Stickiness is tested at the store.** `id_map.rs::tests` asserts the first author on record keeps the entry and that `set_entry_owner` reports refusal.
+3. **The server refuses the write.** `sync/service.py::_belongs_to_someone_else` rejects a push inserting a row for a `client_id` another account holds in a space the push targets, with `not_your_entry`. This is the layer that matters most: the client guards protect a device running current code, and old builds keep running. Covered by four tests in `tests/test_spaces_invites.py`, including the two cases that must *not* be refused (the author's own edit, and one person's two accounts colliding outside a shared space).
+4. **A refusal is visible.** `push_entry_task` routes `not_your_entry` through `record_skip`, so it lands in the notification centre instead of only stderr. A guard failing silently is how this class of bug survives.
+
+**Invariant to keep**: an entry has exactly one author, and neither the recorded owner nor the entry's content may change hands on arrival order. Anything that decides authorship must be sticky or explicitly ordered — never last-write-wins.

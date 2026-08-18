@@ -29,6 +29,13 @@ pub struct SyncState {
     /// of being undone by the next refresh.
     #[serde(default)]
     pub announcements_cursor: u64,
+    /// Whether this install has rebuilt its record of who wrote what.
+    ///
+    /// False on every install that predates the fix for bug #8. Those records
+    /// were last-write-wins and may name the wrong account; they are dropped and
+    /// rebuilt from a full pull exactly once, then this stays true.
+    #[serde(default)]
+    pub authorship_repaired: bool,
 }
 
 pub struct SyncStateStore {
@@ -49,6 +56,15 @@ impl SyncStateStore {
     /// Advance the pull cursor and persist.
     pub fn set_last_server_ts(&mut self, ts: u64) {
         self.data.last_server_ts = Some(ts);
+        self.save();
+    }
+
+    /// Rewind the pull cursor so the next sync re-reads the account from the
+    /// start. Only for the one-shot authorship rebuild - ordinary syncing must
+    /// never do this.
+    pub fn rewind_for_authorship_repair(&mut self) {
+        self.data.last_server_ts = None;
+        self.data.authorship_repaired = true;
         self.save();
     }
 

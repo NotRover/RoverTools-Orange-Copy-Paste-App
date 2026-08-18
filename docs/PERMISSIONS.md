@@ -64,6 +64,10 @@ Client, Rust — the enforcement that matters, since only Rust can push:
 - `sync/mod.rs` — `is_remote_entry`, the early return in `spawn_push_note` /
   `spawn_push_clipboard_entry` (the "push guard" above), and the `is_remote`
   branch in `spawn_delete_entry` that keeps a removal local.
+- `sync/mod.rs` — `row_is_authoritative` / `author_of`, the receiving half: a
+  pulled row naming an account other than the entry's author is dropped whole.
+  The push guards stop *this* device creating a rival row; this stops one that
+  already exists taking an entry over.
 - `sync/commands.rs` — `sync_push_entries` / `sync_unpush_entries` skip entries
   you did not write, and count only what they acted on.
 - `notes/commands.rs` — `update_note` refuses outright.
@@ -84,16 +88,31 @@ Backend — the only place a rule survives a modified client:
 
 ## What the server does not enforce
 
-Worth being honest about the shape of this. The server cannot tell a legitimate
-edit from an impersonation attempt, because it never sees plaintext and rows are
-per-user. What it *does* guarantee is that nobody can write into anyone else's
-row. Everything above about pins, groups, and read-only editing is client-side:
-a modified client could push a rival copy of an entry into a space it belongs
-to. It still could not alter the author's row, and members would see two entries
-rather than a changed one.
+Worth being honest about the shape of this. The server never sees plaintext, so
+it cannot tell a good edit from a bad one. Everything above about pins, groups,
+and read-only editing is client-side, and a modified client can ignore all of it.
 
-If that ever needs closing, the fix is server-side: reject a push whose
-`client_id` already exists in the space under a different `user_id`.
+**Authorship is the exception, and is enforced server-side.** A push that would
+insert a row for a `client_id` another account already holds *in a space the
+push targets* is refused with `not_your_entry`
+(`sync/service.py:_belongs_to_someone_else`). That is a rule the server can
+enforce without reading anything: it is about which account owns a key, not
+about what the content says.
+
+It is enforced there because the client half cannot be sufficient. Bug #8 (see
+the client's `docs/BUGFIX_HISTORY.md`) was created by a client that pushed such
+a row, and every member's client then had to defend against it on the way in.
+Old builds keep running, so the write has to be refused at the only point every
+client shares.
+
+The overlap condition is deliberate: two accounts belonging to one person hold
+the same `client_id`s by construction, and neither impersonates anyone. It is
+only when both rows land in the same space that one of them is claiming to be
+the other.
+
+What the server still cannot do is tell whether the *author's own* edit is one
+the author meant. Nobody can write into anyone else's row, and that is the
+guarantee.
 
 ## Open
 
