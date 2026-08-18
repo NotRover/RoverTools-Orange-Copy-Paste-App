@@ -132,7 +132,7 @@ These bind the client and backend. Changing one side usually means changing the 
 **API versioning**
 - Client routes under `/api/v1`; admin under `/internal/v1`; `/internal/healthz` + `/internal/metrics` unversioned. Every response carries `X-API-Version`. Single source: `src/version.py`.
 
-**Migrations are written, never auto-applied.** Author Alembic migrations, but **never apply them or push DB changes without explicit approval.**
+**Migrations apply on deploy, not from your machine.** Render runs `alembic upgrade head` as a pre-deploy step, so a merged revision reaches the database on the next deploy. Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.**
 
 ## Non-Negotiable Invariants (Client App)
 
@@ -234,6 +234,7 @@ Use live code first; docs are context and may be stale — confirm behavior in c
 - Backend: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` (the definitive sync/crypto/contract reference), `TODO.md`.
 - Root `docs/ARCHITECTURE.md` — shared/workspace-level context. Read selectively; if it conflicts with code, trust the code.
 - Root `docs/RELEASING.md` — the release pipeline: setup, channels, safety rails, smoke test. Read before touching `.github/workflows/release.yml`.
+- Root `docs/PERMISSIONS.md` — who can do what to an entry (yours vs another member's) and inside a space, with where each rule is enforced. Read before adding any action to a card menu, bulk bar, or space route; add the new action to its table.
 
 ## Token-Saving
 

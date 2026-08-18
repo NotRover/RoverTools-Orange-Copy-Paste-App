@@ -559,6 +559,10 @@ pub fn sync_push_entries(
     let sync = sync_client(&state)?;
     let mut pushed = 0;
     for id in client_ids {
+        // Not ours to publish; the push would be dropped anyway.
+        if sync.is_remote_entry(&entry_type, &id) {
+            continue;
+        }
         if entry_type == "note" {
             let note = state.notes.lock().all().iter().find(|n| n.id == id).cloned();
             if let Some(note) = note {
@@ -593,8 +597,16 @@ pub fn sync_unpush_entries(
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
     let sync = sync_client(&state)?;
-    let count = client_ids.len();
+    // Entries another member wrote have no server copy of ours to take down,
+    // so they are skipped rather than counted - the caller reports this number
+    // back to the user, and counting the whole request claimed removals that
+    // never happened.
+    let mut count = 0usize;
     for id in client_ids {
+        if sync.is_remote_entry(&entry_type, &id) {
+            continue;
+        }
+        count += 1;
         if entry_type == "note" {
             sync.on_delete_note(id);
         } else {

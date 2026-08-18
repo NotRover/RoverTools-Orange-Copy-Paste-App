@@ -1255,6 +1255,12 @@ impl SyncClient {
         umk: Zeroizing<[u8; 32]>,
         is_update: bool,
     ) {
+        // Not ours to publish - see the note push for why a second row is worse
+        // than no push at all.
+        if self.is_remote_entry("clipboard", &entry.id) {
+            return;
+        }
+
         let ctx = self.push_ctx();
         // CEK envelope: content encrypts once under a per-entry key, which is
         // wrapped for "personal" (UMK) plus every target space.
@@ -1366,6 +1372,13 @@ impl SyncClient {
         is_update: bool,
         wire_updated_at: Option<u64>,
     ) {
+        // Someone else wrote it, so it is not ours to publish. Rows are keyed by
+        // owner, so this would not update theirs - it would insert a second row
+        // under the same client_id and hand every member a rival copy.
+        if self.is_remote_entry("note", &note.id) {
+            return;
+        }
+
         let ctx = self.push_ctx();
         let targets =
             self.share_targets("note", &note.id, &note.groups, "note", |f| f.includes_notes());
@@ -1434,6 +1447,7 @@ impl SyncClient {
                     deleted_at: now_ms(),
                     by_author: !is_remote,
                     content_gone: true,
+                    local_only: is_remote,
                 },
             );
         }
@@ -1580,6 +1594,7 @@ impl SyncClient {
                             deleted_at: e.deleted_at.unwrap_or_else(now_ms),
                             by_author: true,
                             content_gone: true,
+                            local_only: false,
                         },
                     );
                 }
@@ -1998,6 +2013,12 @@ impl SyncClient {
         self.id_map.lock().entry_owners()
     }
 
+    /// Whether another member wrote this entry. Anything that edits content has
+    /// to ask first: a copy shared into a space is theirs, not ours to rewrite.
+    pub fn is_remote_entry(&self, entry_type: &str, client_id: &str) -> bool {
+        self.id_map.lock().is_remote(&format!("{entry_type}:{client_id}"))
+    }
+
     /// Record that our own entry was pulled back out of these spaces, so each
     /// one keeps a placeholder where the item used to be. The entry itself is
     /// untouched: it is still ours, and still in whatever spaces remain.
@@ -2010,6 +2031,7 @@ impl SyncClient {
                 deleted_at: now_ms(),
                 by_author: true,
                 content_gone: false,
+                local_only: false,
             },
         );
     }
@@ -2059,6 +2081,7 @@ impl SyncClient {
                     deleted_at: now_ms(),
                     by_author: by_me,
                     content_gone: false,
+                    local_only: false,
                 },
             );
             drop(id_map);
@@ -2095,6 +2118,7 @@ impl SyncClient {
                     deleted_at: now_ms(),
                     by_author: false,
                     content_gone: true,
+                    local_only: false,
                 },
             );
             id_map.remove_entry(&key);

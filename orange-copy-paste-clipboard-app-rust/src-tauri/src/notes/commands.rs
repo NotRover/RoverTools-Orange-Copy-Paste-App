@@ -155,6 +155,14 @@ pub fn create_note(state: State<'_, AppState>) -> Note {
 
 #[tauri::command]
 pub fn update_note(state: State<'_, AppState>, id: String, title: String, content: String) -> bool {
+    // A note shared into a space belongs to whoever wrote it. The editor is
+    // read-only for those, so reaching here means something bypassed it -
+    // refuse rather than let the local copy drift away from the original.
+    let sync = state.sync_client.lock().clone();
+    if sync.is_some_and(|s| s.is_remote_entry("note", &id)) {
+        return false;
+    }
+
     let ok = state.notes.lock().update(&id, title, content);
     if ok {
         after_note_update(&state, &id);

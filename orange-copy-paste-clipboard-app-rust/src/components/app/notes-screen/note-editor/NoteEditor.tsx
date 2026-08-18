@@ -38,6 +38,7 @@ import {
   PaintBucketIcon,
   DownloadSimpleIcon,
   CopyIcon,
+  LockSimpleIcon,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
@@ -110,6 +111,10 @@ interface NoteEditorProps {
   onSetGroups: (id: string, groups: string[]) => void;
   onCopyEntry?: (id: string) => void;
   onBack: () => void;
+  /** Someone else wrote this note; show it, but do not let it be edited. */
+  readOnly?: boolean;
+  /** Their display name, for the line explaining why it is locked. */
+  ownerName?: string;
 }
 
 const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -121,6 +126,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   onPin,
   onSetGroups,
   onBack,
+  readOnly = false,
+  ownerName,
 }) => {
   const titleRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<NotionEditorHandle>(null);
@@ -181,12 +188,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const save = useCallback(
     (content: string) => {
+      // Rust refuses the write for someone else's note anyway; stopping here
+      // keeps a doomed save off the debounce timer entirely.
+      if (readOnly) return;
       const title = deriveNoteTitle(titleRef.current?.value ?? "", content);
       if (titleRef.current && titleRef.current.value !== title)
         titleRef.current.value = title;
       onUpdate(note.id, title, content);
     },
-    [note.id, onUpdate],
+    [note.id, onUpdate, readOnly],
   );
 
   const handleEditorChange = useCallback(
@@ -600,6 +610,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             placeholder="Note title"
             defaultValue={initialTitle}
             key={note.id}
+            readOnly={readOnly}
             onChange={() => {
               if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
               saveTimerRef.current = setTimeout(() => {
@@ -729,8 +740,20 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
         </div>
 
+        {readOnly && (
+          <div className="ns-readonly-bar">
+            <LockSimpleIcon size={12} />
+            <span>
+              {ownerName ? `${ownerName} shared this note.` : "Shared with you."}{" "}
+              Only they can edit it.
+            </span>
+          </div>
+        )}
+
         {/* Formatting toolbar */}
-        <div className="ns-format-bar">
+        <div
+          className={`ns-format-bar${readOnly ? " ns-format-bar--locked" : ""}`}
+        >
           {/* Inline marks */}
           <div className="ns-fmt-group">
           <button
@@ -1497,6 +1520,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             onChange={handleEditorChange}
             onSelectionChange={refreshActive}
             onStatsChange={setStats}
+            readOnly={readOnly}
           />
         </div>
 

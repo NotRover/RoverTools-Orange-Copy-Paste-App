@@ -99,6 +99,7 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
                 <span className="ns-chip-label">Pinned</span>
               </span>
             )}
+            {owner && <OwnerChip owner={owner} />}
             {note.groups.map((g) => {
               const c = groupColor(g);
               return (
@@ -116,7 +117,6 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
           {/* Where this note went, sat next to the time exactly as on a
               clipboard card: cloud for your own devices, share for other
               people. */}
-          {owner && <OwnerChip owner={owner} />}
           {sharedSpaceNames.length > 0 && (
             <span
               className="ns-card-sync ns-card-sync--shared"
