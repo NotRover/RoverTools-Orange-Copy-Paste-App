@@ -51,6 +51,45 @@ fn system_boot_epoch_secs() -> u64 {
     0
 }
 
+/// Write every dirty store to disk, once.
+///
+/// The single flush implementation: the background timer calls it every couple
+/// of seconds, and every way out of the process calls it last — `RunEvent::Exit`
+/// for ordinary quits, and the two restart commands, which bypass the event
+/// loop. Without the exit calls, everything captured since the previous tick
+/// (up to `FLUSH_INTERVAL_MS`) died with the process on every normal quit.
+///
+/// Idempotent and cheap when clean: each dirty flag is swapped off before its
+/// write, so overlapping callers do the work once. Every save funnels through
+/// `health::write_state`, so degraded and sealed files stay protected here the
+/// same as everywhere else.
+pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let Ok(app_data) = app.path().app_data_dir() else {
+        return;
+    };
+    let state: tauri::State<'_, AppState> = app.state();
+
+    if state.keep_history.load(Ordering::Relaxed)
+        && state.history_dirty.swap(false, Ordering::Relaxed)
+    {
+        let _ = state.history.lock().save_all_to_file(&app_data.join("history.bin"));
+        let _ = state
+            .history
+            .lock()
+            .save_saved_to_file(&app_data.join("pinned_entries.bin"));
+    }
+    if state.notes_dirty.swap(false, Ordering::Relaxed) {
+        let _ = state.notes.lock().save_to_file(&app_data.join("notes.bin"));
+    }
+    if state.notifications_dirty.swap(false, Ordering::Relaxed) {
+        let _ = state
+            .notifications
+            .lock()
+            .save_to_file(&app_data.join("notifications.bin"));
+    }
+}
+
 /// Read every boolean flag from one already-loaded settings map.
 ///
 /// One read for the whole startup rather than one per key: nine reads of the
@@ -205,20 +244,38 @@ fn setup_runtime(
     if keep_enabled {
         if let (Some(hf), Some(pf), Some(bf)) = (&history_file, &saved_file, &boot_file) {
             let current_boot = system_boot_epoch_secs();
-            let previous_boot: u64 = std::fs::read_to_string(bf)
-                .ok()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(0);
+            // A marker that is absent is a first run; a marker that is there and
+            // will not read is a fault, and the two must not decide the same
+            // thing. Reading it as "no previous boot" makes `same_boot` false and
+            // sends the restore down the branch that strips every unsaved entry -
+            // so one refused read costs the user their history on what was an
+            // ordinary restart. When it cannot be read, keep what is on disk.
+            let marker = crate::health::read_state(bf);
+            let previous_boot: u64 = match &marker {
+                Ok(Some(raw)) => String::from_utf8_lossy(raw)
+                    .trim()
+                    .parse()
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            let marker_unreadable = marker.is_err();
 
             let same_boot = current_boot.abs_diff(previous_boot) < 5;
 
-            if same_boot && hf.exists() {
-                // Same boot session — restore everything.
+            if (same_boot || marker_unreadable) && hf.exists() {
+                // Same boot session — restore everything. Also the safe branch
+                // when the marker is unreadable: keeping entries the user may
+                // have expected to be dropped is recoverable, dropping entries
+                // they expected to keep is not.
                 let _ = history.lock().load_all_from_file(hf);
             } else if hf.exists() {
-                // New boot — load full history then strip unsaved entries.
-                let _ = history.lock().load_all_from_file(hf);
-                history.lock().clear();
+                // New boot — load full history then strip unsaved entries. Only
+                // reached when the load succeeded, since a sealed history is
+                // empty for reasons that have nothing to do with the boot.
+                let loaded = history.lock().load_all_from_file(hf).is_ok();
+                if loaded {
+                    history.lock().clear();
+                }
             } else {
                 // Fallback: first run with keep enabled.
                 let _ = history.lock().load_saved_from_file(pf);
@@ -246,6 +303,59 @@ fn setup_runtime(
             .load_from_file(nf);
     }
 
+    // Fold in whatever a sealed session set aside - captures made while a state
+    // file existed but would not read. Merged by id after the normal loads, so
+    // the main file wins any overlap; the leftover is only discarded once a
+    // save that includes it has landed, and a still-sealed file refuses that
+    // save, so nothing here can lose either copy.
+    {
+        let state_ref: tauri::State<'_, AppState> = app.state();
+        if let Some(hf) = &history_file {
+            if let Some(bytes) = crate::health::sealed_leftover(hf) {
+                match state_ref.history.lock().merge_leftover(&bytes) {
+                    Some(0) => crate::health::discard_sealed_leftover(hf),
+                    Some(_) if state_ref.history.lock().save_all_to_file(hf).is_ok() => {
+                        crate::health::discard_sealed_leftover(hf)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some(pf) = &saved_file {
+            if let Some(bytes) = crate::health::sealed_leftover(pf) {
+                match state_ref.history.lock().merge_leftover(&bytes) {
+                    Some(0) => crate::health::discard_sealed_leftover(pf),
+                    Some(_) if state_ref.history.lock().save_saved_to_file(pf).is_ok() => {
+                        crate::health::discard_sealed_leftover(pf)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some(nf) = &notes_file {
+            if let Some(bytes) = crate::health::sealed_leftover(nf) {
+                match state_ref.notes.lock().merge_leftover(&bytes) {
+                    Some(0) => crate::health::discard_sealed_leftover(nf),
+                    Some(_) if state_ref.notes.lock().save_to_file(nf).is_ok() => {
+                        crate::health::discard_sealed_leftover(nf)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some(nf) = &notifications_file {
+            if let Some(bytes) = crate::health::sealed_leftover(nf) {
+                match state_ref.notifications.lock().merge_leftover(&bytes) {
+                    Some(0) => crate::health::discard_sealed_leftover(nf),
+                    Some(_) if state_ref.notifications.lock().save_to_file(nf).is_ok() => {
+                        crate::health::discard_sealed_leftover(nf)
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     // Seed the in-memory boolean flags from disk.
     let state_ref: tauri::State<'_, AppState> = app.state();
     state_ref
@@ -268,49 +378,14 @@ fn setup_runtime(
     // Set up system tray icon and menu.
     crate::runtime::tray::setup_tray(app)?;
 
-    // Background flush thread: coalesces rapid mutations into a single disk write.
+    // Background flush thread: coalesces rapid mutations into a single disk
+    // write. The body is the same `flush_dirty_stores` every exit path calls,
+    // so there is exactly one flush to reason about.
     {
-        let hist = Arc::clone(history);
-        let state: tauri::State<'_, AppState> = app.state();
-        let dirty = Arc::clone(&state.history_dirty);
-        let persist = Arc::clone(&state.keep_history);
-        let notes_store = Arc::clone(&state.notes);
-        let notes_dirty = Arc::clone(&state.notes_dirty);
-        let notif_store = Arc::clone(&state.notifications);
-        let notif_dirty = Arc::clone(&state.notifications_dirty);
-        // Paths are stable for the app's lifetime — resolve once, not per tick.
-        let history_file = history_file.clone();
-        let saved_file = saved_file.clone();
-        let notes_file = notes_file.clone();
-        let notifications_file = notifications_file.clone();
-
+        let handle = app.handle().clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
-
-            // Flush clipboard history (plus the saved-entries file).
-            if persist.load(Ordering::Relaxed) && dirty.swap(false, Ordering::Relaxed) {
-                if let Some(hf) = &history_file {
-                    let _ = hist.lock().save_all_to_file(hf);
-                }
-                if let Some(pf) = &saved_file {
-                    let _ = hist.lock().save_saved_to_file(pf);
-                }
-            }
-
-            // Flush notes.
-            if notes_dirty.swap(false, Ordering::Relaxed) {
-                if let Some(nf) = &notes_file {
-                    let _ = notes_store.lock().save_to_file(nf);
-                }
-            }
-
-            // Flush the notification feed.
-            if notif_dirty.swap(false, Ordering::Relaxed) {
-                if let Some(nf) = &notifications_file {
-                    let _ = notif_store.lock().save_to_file(nf);
-                }
-            }
-
+            flush_dirty_stores(&handle);
             // Reached only by taking and releasing every state lock above, so it
             // doubles as proof that none of them are wedged. The watchdog warns
             // the user if these stop arriving.
@@ -499,6 +574,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
+            crate::health::health_sealed_notice,
             crate::health::health_trouble,
             crate::health::health_recovery_notice,
             crate::health::health_restart_app,
@@ -678,6 +754,14 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // The last thing the process does with user data. `app.exit(0)` on
+            // window destroy lands here too; only `app.restart()` bypasses the
+            // event loop, and both restart sites flush for themselves.
+            if let tauri::RunEvent::Exit = event {
+                flush_dirty_stores(app);
+            }
+        });
 }

@@ -304,6 +304,19 @@ const App: React.FC = () => {
           );
       })
       .catch(() => {});
+    // A state file that exists but would not read at startup. The store behind
+    // it is shown empty, and Rust holds the file itself untouched for the whole
+    // session - so the one honest thing to say is that the data is not gone.
+    invoke<string | null>("health_sealed_notice")
+      .then((notice) => {
+        if (!cancelled && notice)
+          showToast(
+            `Could not read your ${notice} file. It is safe on disk and untouched; restart the app to try again`,
+            "error",
+            { duration: 0, key: "sealed", glyph: "warning" },
+          );
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };

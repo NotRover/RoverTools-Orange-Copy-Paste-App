@@ -405,6 +405,9 @@ pub fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     };
 
     pending.update.install(bytes).map_err(|e| e.to_string())?;
+    // `restart` bypasses the event loop's exit-time flush - run it here so the
+    // last seconds of captures survive into the new version.
+    crate::flush_dirty_stores(&app);
     app.restart()
 }
 

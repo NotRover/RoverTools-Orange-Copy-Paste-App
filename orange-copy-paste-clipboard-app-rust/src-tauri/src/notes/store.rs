@@ -85,13 +85,14 @@ fn save_notes_binary(notes: &[Note], path: &std::path::Path) -> Result<(), std::
     crate::health::write_state(path, &msgpack)
 }
 
+/// Same shared read contract as clipboard history: missing file means no notes
+/// yet, a good load refreshes `.bak`, and a file that will not load is sealed
+/// with the backup shown instead.
 fn load_notes_binary(path: &std::path::Path) -> Result<Vec<Note>, std::io::Error> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let data = std::fs::read(path)?;
-    rmp_serde::from_slice(&data)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    let parsed = crate::health::load_state(path, &|bytes| {
+        rmp_serde::from_slice(bytes).map_err(|e| e.to_string())
+    })?;
+    Ok(parsed.unwrap_or_default())
 }
 
 // ── NoteStore ───────────────────────────────────────────────────────
@@ -207,6 +208,24 @@ impl NoteStore {
                 }
             }
         }
+    }
+
+    /// Fold in notes a sealed session captured while it could not read this
+    /// file. LWW by `updated_at`, same as the sync merge, and idempotent, so
+    /// the leftover can outlive a failed save and merge again next start.
+    /// `None` means the bytes did not parse and the file is kept; `Some(0)`
+    /// means it held nothing new and is safely redundant.
+    pub fn merge_leftover(&mut self, bytes: &[u8]) -> Option<usize> {
+        let Ok(notes) = rmp_serde::from_slice::<Vec<Note>>(bytes) else {
+            return None;
+        };
+        advance_id_past(&notes);
+        let before = self.notes.len();
+        for note in notes {
+            self.upsert_synced(note);
+        }
+        self.sort_recent();
+        Some(self.notes.len() - before)
     }
 
     // ── Persistence ─────────────────────────────────────────────────
