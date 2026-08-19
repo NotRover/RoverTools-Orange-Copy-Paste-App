@@ -714,6 +714,13 @@ pub struct ServerBreakdown {
     pub clipboard: usize,
     pub notes: usize,
     pub total: usize,
+    /// Clipboard rows by kind, using the server's plaintext `kind` label. The
+    /// local bar splits URLs, documents and folders out of text as well, but
+    /// those are read from the content, which the server cannot see.
+    pub text: usize,
+    pub image: usize,
+    pub file: usize,
+    pub html: usize,
 }
 
 /// What this account holds on the server, by kind.
@@ -728,11 +735,26 @@ pub async fn sync_server_breakdown(
     state: State<'_, AppState>,
 ) -> Result<ServerBreakdown, String> {
     let sync = sync_client(&state)?;
-    let keys = sync.server_entry_keys().await?;
-    let notes = keys.iter().filter(|k| k.starts_with("note:")).count();
+    let keys = sync.server_entries().await?;
+    let notes = keys.iter().filter(|(k, _)| k.starts_with("note:")).count();
+    let count = |want: &str| {
+        keys.iter()
+            .filter(|(k, kind)| !k.starts_with("note:") && kind == want)
+            .count()
+    };
+    let image = count("image");
+    let file = count("file");
+    let html = count("html");
     Ok(ServerBreakdown {
         clipboard: keys.len() - notes,
         notes,
+        // Whatever is not one of the three named kinds is text: an older client
+        // that pushed no kind at all should land somewhere, and the bar must
+        // add up to the total it is drawn against.
+        text: keys.len() - notes - image - file - html,
+        image,
+        file,
+        html,
         total: keys.len(),
     })
 }
@@ -1136,6 +1158,9 @@ pub async fn sync_get_quota(state: State<'_, AppState>) -> Result<SyncQuota, Str
     Ok(SyncQuota {
         used_bytes: q.used_bytes,
         quota_bytes: q.quota_bytes,
+        entry_count: q.entry_count,
+        entry_limit: q.entry_limit,
+        max_entry_bytes: q.max_entry_bytes,
     })
 }
 

@@ -490,6 +490,14 @@ pub struct BlobDownloadResponse {
 pub struct QuotaResponse {
     pub used_bytes: u64,
     pub quota_bytes: u64,
+    /// Live rows on the account, and the ceiling they run into. Defaulted so a
+    /// build talking to a server from before these existed still parses.
+    #[serde(default)]
+    pub entry_count: u64,
+    #[serde(default)]
+    pub entry_limit: u64,
+    #[serde(default)]
+    pub max_entry_bytes: u64,
 }
 
 // ── Client ───────────────────────────────────────────────────────────

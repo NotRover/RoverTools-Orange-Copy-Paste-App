@@ -144,6 +144,14 @@ impl SendFilter {
 pub struct SyncQuota {
     pub used_bytes: u64,
     pub quota_bytes: u64,
+    /// Row count against `max_entries_per_user`, and the per-entry size cap.
+    /// Both are refusal reasons the user would otherwise only meet as an error,
+    /// so the account screen shows them beside the storage bar. Zero means the
+    /// server did not report one - the UI hides the figure rather than drawing
+    /// a bar that reads as full.
+    pub entry_count: u64,
+    pub entry_limit: u64,
+    pub max_entry_bytes: u64,
 }
 
 // ── Devices (presence UI) ───────────────────────────────────────────

@@ -2323,6 +2323,23 @@ impl SyncClient {
     /// so a tombstone of ours would not remove theirs, it would insert one
     /// carrying the same spaces and take the item down for everybody.
     pub async fn server_entry_keys(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .server_entries()
+            .await?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect())
+    }
+
+    /// The same sweep, keeping each row's `kind` so the account screen can show
+    /// what is in the cloud by type the way it does for this device.
+    ///
+    /// `kind` is one of the plaintext wire labels (`"text"`, `"image"`,
+    /// `"file"`, `"html"`, `"note"`) - it is metadata the server routes on, not
+    /// content, so counting by it costs no decryption. It is coarser than the
+    /// local bar, which derives URL, document and folder from the content this
+    /// device can read; the server cannot tell those apart and must not.
+    pub async fn server_entries(&self) -> Result<Vec<(String, String)>, String> {
         let http = self
             .http
             .lock()
@@ -2331,7 +2348,7 @@ impl SyncClient {
             .ok_or("not signed in")?;
         let me = self.current_user().map(|u| u.user_id);
         let mut after: Option<u64> = None;
-        let mut keys: Vec<String> = Vec::new();
+        let mut keys: Vec<(String, String)> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         // Rows pushed in the same millisecond share a server_ts, and the cursor
         // is exclusive, so a page that cannot advance it would loop forever.
@@ -2354,7 +2371,12 @@ impl SyncClient {
                 };
                 let key = format!("{kind}:{}", e.client_id);
                 if seen.insert(key.clone()) {
-                    keys.push(key);
+                    let label = e
+                        .kind
+                        .clone()
+                        .filter(|k| !k.is_empty())
+                        .unwrap_or_else(|| if kind == "note" { "note" } else { "text" }.to_string());
+                    keys.push((key, label));
                 }
             }
             match next {
@@ -4086,13 +4108,30 @@ async fn push_entry_task(
                     // guard did not hold, so it goes where the user can see it
                     // rather than only to stderr - a silent rejection is how
                     // this class of bug stayed hidden the first time.
-                    if c.reason == "not_your_entry" {
-                        record_skip(
-                            &ctx,
-                            &client_id,
-                            if entry_type == "note" { "A note" } else { "An item" },
-                            "Only the member who wrote this can change it in the space.".into(),
-                        );
+                    let what = if entry_type == "note" { "A note" } else { "An item" };
+                    // Every reason the server can refuse for gets a sentence the
+                    // user can act on. Anything unrecognised still lands in the
+                    // list rather than only in stderr: an unexplained refusal is
+                    // how this class of bug stayed hidden the first time.
+                    let told = match c.reason.as_str() {
+                        "not_your_entry" => {
+                            "Only the member who wrote this can change it in the space.".to_string()
+                        }
+                        "entry_too_large" => {
+                            "Too big to sync. It stays on this device.".to_string()
+                        }
+                        "account_full" => {
+                            "Your account is full. Remove some synced items to make room."
+                                .to_string()
+                        }
+                        // A push the server considered older than what it holds.
+                        // Not worth a row in the list: the newer copy is the one
+                        // the user wants, and it is already there.
+                        "stale_update" => String::new(),
+                        other => format!("The server refused this ({other})."),
+                    };
+                    if !told.is_empty() {
+                        record_skip(&ctx, &client_id, what, told);
                     }
                 }
                 ctx.status.lock().pending_count = ctx.queue.lock().len();
