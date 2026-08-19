@@ -198,6 +198,42 @@ pub async fn sync_reset_password(
     sync.reset_password(email).await
 }
 
+/// Finish a password reset started from the emailed link.
+///
+/// `startOver` is the deliberate escape hatch: it mints a fresh encryption key
+/// when this machine cannot produce the old one, and everything synced under the
+/// old key stops being readable. The UI only offers it after the plain attempt
+/// has failed and said why.
+#[tauri::command]
+pub async fn sync_complete_password_reset(
+    code: String,
+    new_password: String,
+    device_name: String,
+    start_over: bool,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<SyncUser, String> {
+    let sync = get_or_create_client(&state, &app)?;
+    let user = sync
+        .complete_password_reset(code, new_password, device_name, start_over)
+        .await?;
+    Arc::clone(&sync).trigger_initial_sync();
+    Ok(user)
+}
+
+/// Change the password of the account this app is signed into.
+///
+/// Nothing is re-derived and nothing can be lost: the key is already in memory,
+/// so this only re-wraps it. The lossless path, which is why the account screen
+/// points a signed-in user here rather than at a reset link.
+#[tauri::command]
+pub async fn sync_change_password(
+    new_password: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    sync_client(&state)?.change_password(new_password).await
+}
+
 /// What a startup restore attempt concluded.
 ///
 /// Two outcomes used to share one `null`: "there is nothing to restore, show the

@@ -125,6 +125,10 @@ interface AccountScreenProps {
   /** Rust is retrying a session restore that failed for a transient reason.
    *  The credentials are good, so this screen must not ask for a password. */
   restoringSession: boolean;
+  /** One-time code from an `orange://reset?code=...` link, held by App because
+   *  this screen is usually not mounted when the mail is opened. */
+  resetCode?: string | null;
+  onResetCodeConsumed?: () => void;
 }
 
 /** The order kinds are shown in, and the order they stack in the bar. Fixed
@@ -146,6 +150,8 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   notes,
   onNavigate,
   restoringSession,
+  resetCode,
+  onResetCodeConsumed,
 }) => {
   // ── Cloud Sync ─────────────────────────────────────────────────
   const [syncEnabled, setSyncEnabled] = useState(false);
@@ -212,6 +218,19 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+
+  // Finishing a reset from the emailed link: the code arrives as a prop, the
+  // new password is typed here, and startOver is only offered once the plain
+  // attempt has failed for want of the encryption key.
+  const [newPassword, setNewPassword] = useState("");
+  const [newConfirm, setNewConfirm] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetStageError, setResetStageError] = useState<string | null>(null);
+  const [offerStartOver, setOfferStartOver] = useState(false);
+
+  // Changing the password while signed in - the path that cannot lose anything.
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [changeDone, setChangeDone] = useState(false);
 
   // Devices
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -551,6 +570,64 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       );
     } finally {
       setResetLoading(false);
+    }
+  };
+
+  const closeResetStage = () => {
+    setNewPassword("");
+    setNewConfirm("");
+    setResetStageError(null);
+    setOfferStartOver(false);
+    setChangeOpen(false);
+    onResetCodeConsumed?.();
+  };
+
+  /// Finish the reset, or change the password of the signed-in account - the
+  /// same two fields either way, so the same handler.
+  const submitNewPassword = async (startOver: boolean) => {
+    if (newPassword.length < 8) {
+      setResetStageError("Use at least 8 characters.");
+      return;
+    }
+    if (newPassword !== newConfirm) {
+      setResetStageError("The two passwords do not match.");
+      return;
+    }
+    setResetBusy(true);
+    setResetStageError(null);
+    try {
+      if (changeOpen) {
+        await invoke("sync_change_password", { newPassword });
+        setChangeDone(true);
+        setNewPassword("");
+        setNewConfirm("");
+        setChangeOpen(false);
+        return;
+      }
+      const user = await invoke<SyncUser>("sync_complete_password_reset", {
+        code: resetCode,
+        newPassword,
+        deviceName: `Orange CP - ${navigator.platform || "Desktop"}`,
+        startOver,
+      });
+      // A reset can be finished with sync switched off - the link opens the app
+      // whatever its settings say. Leaving it off would show the "enable sync"
+      // hero over a session that just came back, which reads as the reset having
+      // done nothing.
+      if (!syncEnabled) {
+        setSyncEnabled(true);
+        invoke("sync_set_enabled", { enabled: true }).catch(() => {});
+      }
+      closeResetStage();
+      loadPostLogin(user);
+    } catch (e) {
+      const msg =
+        typeof e === "string" ? e : "Could not set the new password.";
+      setResetStageError(msg);
+      // Rust says so in the one case where a fresh key is the only way through.
+      if (/never held your encryption key/i.test(msg)) setOfferStartOver(true);
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -1033,7 +1110,10 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
 
   // Short states (enable hero / signed-out auth) get centered vertically and
   // rely on the card's own heading, so the page header is hidden there.
-  const centered = !syncEnabled || !syncUser;
+  // A reset from the emailed link, or a deliberate password change, takes over
+  // the screen: both are one thing the user came here to finish.
+  const resetStage = Boolean(resetCode) || changeOpen;
+  const centered = !syncEnabled || !syncUser || resetStage;
 
   // ── Render ──────────────────────────────────────────────────────
   return (
@@ -1052,7 +1132,88 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
           </header>
         )}
 
-        {!syncEnabled ? (
+        {resetStage ? (
+          /* ── Set a new password: from the reset link, or by choice ── */
+          <div className="auth-card">
+            <div className="auth-brand">
+              <div className="auth-brand-badge">
+                <CloudCheck size={20} />
+              </div>
+              <h3 className="auth-title">
+                {changeOpen ? "Change your password" : "Set a new password"}
+              </h3>
+              <p className="auth-subtitle">
+                {changeOpen
+                  ? "Your synced items stay readable - the key does not change, only what wraps it."
+                  : "This also unlocks what you have already synced, so nothing is lost."}
+              </p>
+            </div>
+            <div className="auth-form">
+              <label className="auth-field">
+                <span className="auth-label">New password</span>
+                <input
+                  className="auth-input"
+                  type="password"
+                  placeholder="At least 8 characters"
+                  value={newPassword}
+                  autoFocus
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={resetBusy}
+                />
+              </label>
+              <label className="auth-field">
+                <span className="auth-label">Confirm password</span>
+                <input
+                  className="auth-input"
+                  type="password"
+                  placeholder="Repeat the password"
+                  value={newConfirm}
+                  onChange={(e) => setNewConfirm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void submitNewPassword(false);
+                  }}
+                  disabled={resetBusy}
+                />
+              </label>
+              {resetStageError && (
+                <span className="auth-error">{resetStageError}</span>
+              )}
+              <button
+                type="button"
+                className="auth-submit"
+                onClick={() => void submitNewPassword(false)}
+                disabled={resetBusy || !newPassword || !newConfirm}
+              >
+                {resetBusy ? "Saving..." : "Save password"}
+              </button>
+              {offerStartOver && (
+                <div className="auth-startover">
+                  <p className="auth-note">
+                    Starting over gives this account a new encryption key. You
+                    get back in, but anything synced under the old key can no
+                    longer be read on any device.
+                  </p>
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--quiet acct-btn--danger"
+                    onClick={() => void submitNewPassword(true)}
+                    disabled={resetBusy}
+                  >
+                    Start over with a new key
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                className="auth-textlink auth-textlink--center"
+                onClick={closeResetStage}
+                disabled={resetBusy}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : !syncEnabled ? (
           /* ── Sync disabled: enable hero ── */
           <div className="acct-card acct-hero">
             <div className="acct-hero-badge">
@@ -1236,9 +1397,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                     </>
                   )}
                   <p className="auth-note">
-                    Because your data is end-to-end encrypted, resetting your
-                    password restores sign-in but can't recover previously
-                    synced data unless another device is still signed in.
+                    Open the link on a device you have signed in on before and
+                    your synced items stay readable - the new password re-wraps
+                    the same encryption key. On a device that has never signed
+                    in, the key is not there to re-wrap, and the only way in is
+                    a new one.
                   </p>
                   <button
                     type="button"
@@ -1429,6 +1592,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                     : ""}
                 </span>
                 {queueNote && <span className="acct-id-note">{queueNote}</span>}
+                {changeDone && (
+                  <span className="acct-id-note">
+                    Password changed. Use it on your other devices from now on.
+                  </span>
+                )}
                 {skippedCount > 0 && (
                   <button
                     type="button"
@@ -1452,6 +1620,16 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                   disabled={syncNowLoading}
                 >
                   {syncNowLoading ? "Refreshing..." : "Refresh"}
+                </button>
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--quiet"
+                  onClick={() => {
+                    setChangeDone(false);
+                    setChangeOpen(true);
+                  }}
+                >
+                  Change password
                 </button>
                 <button
                   type="button"

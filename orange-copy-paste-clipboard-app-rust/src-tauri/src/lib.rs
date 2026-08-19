@@ -462,23 +462,39 @@ fn parse_trigger_action(args: &[String]) -> Option<String> {
     None
 }
 
-/// The space invite code carried by an `orange://join?code=...` URL.
-fn parse_join_code(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("orange://")?;
-    let query = rest.split_once('?').map(|(_, q)| q)?;
-    for pair in query.split('&') {
-        if let Some(code) = pair.strip_prefix("code=") {
-            let code = code.trim();
-            if !code.is_empty() {
-                return Some(code.to_string());
-            }
-        }
-    }
-    None
+/// What an `orange://` URL is asking for.
+#[derive(Debug, PartialEq)]
+enum DeepLink {
+    /// `orange://join?code=<invite code>`
+    Join(String),
+    /// `orange://reset?code=<one-time code>` - the password-reset mail, by way of
+    /// the web page the link actually points at.
+    Reset(String),
 }
 
-/// Hand an opened `orange://` URL to the UI. Only invite links carry an action;
-/// anything else is ignored rather than surfacing an error for a URL the user
+/// Read an `orange://` URL.
+///
+/// Keyed on the host, with one deliberate exception: anything other than `reset`
+/// that carries a code is a join. Invite links in the wild predate the host being
+/// meaningful (`orange://join?code=`, and older lax forms), and they have been
+/// pasted into mail that is not going to be re-sent.
+fn parse_deep_link(url: &str) -> Option<DeepLink> {
+    let rest = url.strip_prefix("orange://")?;
+    let (host, query) = rest.split_once('?')?;
+    let code = query.split('&').find_map(|pair| {
+        let value = pair.strip_prefix("code=")?.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })?;
+    let host = host.trim_end_matches('/');
+    Some(if host == "reset" {
+        DeepLink::Reset(code)
+    } else {
+        DeepLink::Join(code)
+    })
+}
+
+/// Hand an opened `orange://` URL to the UI. A URL that asks for nothing we
+/// recognize is ignored rather than surfacing an error for something the user
 /// never typed.
 ///
 /// Raising the window happens *before* the parse, so a bare `orange://` is a
@@ -489,10 +505,15 @@ fn dispatch_deep_link(app: &tauri::AppHandle, url: &str) {
         let _ = w.show();
         let _ = w.set_focus();
     }
-    let Some(code) = parse_join_code(url) else {
-        return;
-    };
-    let _ = app.emit("spaces:join-code", serde_json::json!({ "code": code }));
+    match parse_deep_link(url) {
+        Some(DeepLink::Join(code)) => {
+            let _ = app.emit("spaces:join-code", serde_json::json!({ "code": code }));
+        }
+        Some(DeepLink::Reset(code)) => {
+            let _ = app.emit("sync:password-reset", serde_json::json!({ "code": code }));
+        }
+        None => {}
+    }
 }
 
 /// Dispatch a forwarded CLI invocation to the matching popup handler.
@@ -646,6 +667,8 @@ pub fn run() {
             crate::sync::commands::sync_oauth_cancel,
             crate::sync::commands::sync_oauth_pending,
             crate::sync::commands::sync_reset_password,
+            crate::sync::commands::sync_complete_password_reset,
+            crate::sync::commands::sync_change_password,
             crate::sync::commands::sync_restore_session,
             crate::sync::commands::sync_logout,
             crate::sync::commands::sync_get_user,
@@ -771,4 +794,52 @@ pub fn run() {
                 flush_dirty_stores(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_deep_link, DeepLink};
+
+    #[test]
+    fn reset_links_are_told_apart_from_invites() {
+        assert_eq!(
+            parse_deep_link("orange://reset?code=abc123"),
+            Some(DeepLink::Reset("abc123".into()))
+        );
+        assert_eq!(
+            parse_deep_link("orange://join?code=KX7Q2M4X"),
+            Some(DeepLink::Join("KX7Q2M4X".into()))
+        );
+    }
+
+    /// Links already in the wild predate the host carrying meaning, so anything
+    /// with a code that is not a reset must still join.
+    #[test]
+    fn an_unknown_host_with_a_code_still_joins() {
+        assert_eq!(
+            parse_deep_link("orange://anything?code=KX7Q2M4X"),
+            Some(DeepLink::Join("KX7Q2M4X".into()))
+        );
+        assert_eq!(
+            parse_deep_link("orange://?code=KX7Q2M4X"),
+            Some(DeepLink::Join("KX7Q2M4X".into()))
+        );
+    }
+
+    #[test]
+    fn a_bare_link_carries_no_action() {
+        // Still raises the window - that happens before this parse.
+        assert_eq!(parse_deep_link("orange://"), None);
+        assert_eq!(parse_deep_link("orange://reset"), None);
+        assert_eq!(parse_deep_link("orange://join?code="), None);
+        assert_eq!(parse_deep_link("https://example.com/?code=x"), None);
+    }
+
+    #[test]
+    fn a_code_is_read_from_any_position_and_stops_at_the_separator() {
+        assert_eq!(
+            parse_deep_link("orange://reset?type=recovery&code=abc123"),
+            Some(DeepLink::Reset("abc123".into()))
+        );
+    }
 }

@@ -848,7 +848,137 @@ impl SyncClient {
     /// existing data only remains decryptable if the UMK is re-wrapped from a
     /// still-signed-in device (a future recovery path).
     pub async fn reset_password(&self, email: String) -> Result<(), String> {
-        self.supabase.recover(&email).await
+        // The verifier is stored before the mail is sent, not after: if the write
+        // fails there is nothing that can redeem the link, and a reset mail the
+        // user cannot use is worse than an error here.
+        let (verifier, challenge) = crypto::pkce_pair();
+        crypto::store_reset_verifier(&verifier).await?;
+        let redirect_to = format!("{}/reset", self.server_url.trim_end_matches('/'));
+        self.supabase
+            .recover(&email, &redirect_to, &challenge)
+            .await
+    }
+
+    /// Finish the reset the emailed link started: set the new password and keep
+    /// the account's encryption key, so previously synced items still decrypt.
+    ///
+    /// The whole point of this path is that the password is only a *wrapping*
+    /// key. Changing it means re-wrapping the same UMK, not minting a new one -
+    /// and the UMK has to come from somewhere the server cannot reach. In order:
+    ///
+    /// 1. the UMK already in memory, if this app is signed in;
+    /// 2. this machine's device wrap, which needs only the keychain key;
+    /// 3. nothing - and then the caller has to choose `start_over`, which mints a
+    ///    fresh key and leaves everything synced under the old one unreadable.
+    ///
+    /// A recovery code will slot in as a third source between 2 and 3; that is
+    /// the only way to keep the data on a machine that has never signed in.
+    ///
+    /// Ends by signing in normally with the new password, so device registration,
+    /// key registration and the device wrap all run through the one path that
+    /// owns them rather than a second copy here.
+    pub async fn complete_password_reset(
+        &self,
+        code: String,
+        new_password: String,
+        device_name: String,
+        start_over: bool,
+    ) -> Result<SyncUser, String> {
+        let verifier = crypto::load_reset_verifier().ok_or(
+            "this reset link was requested on another device or has already been used.              Ask for a new one from this app.",
+        )?;
+
+        let session = self.supabase.exchange_code_pkce(&code, &verifier).await;
+        // The code is one-time whatever happened, so the verifier is spent either
+        // way - leaving it behind only keeps a capability for a dead link.
+        crypto::clear_reset_verifier();
+        let session = session?;
+
+        let user_id = session.user.id.clone();
+        let email = session.user.email.clone();
+        let access_token = session.access_token.clone();
+
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        http.set_access_token(session.access_token, session.expires_in);
+        http.set_refresh_token(session.refresh_token);
+        http.set_user_id(user_id.clone());
+
+        let boot = http.bootstrap(None).await?;
+        let kdf_salt = B64
+            .decode(&boot.kdf_salt)
+            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+
+        let umk = match self.recover_umk_for_reset(&user_id, &http).await {
+            Some(umk) => umk,
+            None if start_over => crypto::random_key(),
+            None => {
+                return Err(
+                    "this device has never held your encryption key, so a new password cannot                      unlock what you synced before. Sign in on a device you have used, or start                      over with a new key."
+                        .into(),
+                )
+            }
+        };
+
+        // Order matters. The envelope goes up first: if the password changed and
+        // the re-wrap then failed, the account would have a password that opens
+        // nothing - signed in, and unable to decrypt. This way a failure leaves
+        // the old password working and the user can simply ask again.
+        let wrapped = crypto::wrap_umk(&crypto::derive_kek(&new_password, &kdf_salt), &umk)?;
+        http.set_wrapped_umk(wrapped).await?;
+        self.supabase
+            .update_password(&access_token, &new_password)
+            .await?;
+
+        self.perform_login(email, new_password, device_name).await
+    }
+
+    /// Change the password of the account this app is signed into.
+    ///
+    /// The lossless path, and the one to prefer: the UMK is already in memory, so
+    /// nothing has to be recovered and nothing can be lost. Same two steps in the
+    /// same order as the reset - envelope first, password second.
+    pub async fn change_password(&self, new_password: String) -> Result<(), String> {
+        let http = self.http().ok_or("not signed in")?;
+        let umk = self
+            .umk
+            .lock()
+            .clone()
+            .ok_or("the encryption key is not loaded, sign in again")?;
+        // Refreshed first: the token is handed to Supabase directly rather than
+        // through the client's own retry path, so an expired one here is a plain
+        // 401 with no second attempt.
+        http.ensure_fresh_access_token().await;
+        let boot = http.bootstrap(None).await?;
+        let access_token = http.current_access_token().ok_or("not signed in")?;
+        let kdf_salt = B64
+            .decode(&boot.kdf_salt)
+            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+
+        let wrapped = crypto::wrap_umk(&crypto::derive_kek(&new_password, &kdf_salt), &umk)?;
+        http.set_wrapped_umk(wrapped).await?;
+        self.supabase
+            .update_password(&access_token, &new_password)
+            .await
+    }
+
+    /// The UMK, from any source that does not involve the password being reset.
+    ///
+    /// `None` is not an error worth surfacing per source: each is expected to be
+    /// absent in ordinary cases (not signed in; a machine that never registered),
+    /// and the caller has one message to give either way.
+    async fn recover_umk_for_reset(
+        &self,
+        user_id: &str,
+        http: &Arc<SyncHttpClient>,
+    ) -> Option<Zeroizing<[u8; 32]>> {
+        if let Some(umk) = self.umk.lock().clone() {
+            return Some(umk);
+        }
+        let device_priv = crypto::load_device_private_key(user_id).ok().flatten()?;
+        let wrapped = http.get_device_wrapped_umk().await.ok().flatten()?;
+        let device_pub = crypto::device_public_key(&device_priv);
+        let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
+        crypto::unwrap_key(&shared, &wrapped).ok()
     }
 
     /// Shared post-authentication flow for both login and signup.

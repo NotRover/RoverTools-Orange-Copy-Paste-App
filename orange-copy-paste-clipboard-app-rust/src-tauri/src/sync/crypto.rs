@@ -440,6 +440,36 @@ pub fn clear_session_pointer() {
     delete_secret("session", INSTALL_SCOPE);
 }
 
+/// Keep the PKCE verifier for a password-reset link that has just been emailed.
+///
+/// The keychain rather than a field in memory, because the two halves of a reset
+/// are separated by however long the user takes to open their mail - usually a
+/// later run of the app, often after a restart. It is a capability, not a scratch
+/// value: whoever holds it can redeem the code in that email, which is exactly
+/// why it never leaves this machine and never goes in app data.
+///
+/// Install-scoped: a reset is requested while signed out, so there is no user id
+/// to key it by. Only one reset can be in flight per install, which matches how
+/// GoTrue treats the code anyway - a second request invalidates the first.
+pub async fn store_reset_verifier(verifier: &str) -> Result<(), String> {
+    write_secret("pkce_reset", INSTALL_SCOPE, verifier).await
+}
+
+/// The verifier for the reset link this install requested, if it requested one.
+pub fn load_reset_verifier() -> Option<String> {
+    read_secret("pkce_reset", INSTALL_SCOPE)
+        .ok()
+        .flatten()
+        .filter(|v| !v.is_empty())
+}
+
+/// Spend the verifier. Called once the code has been exchanged, successfully or
+/// not: the code is one-time either way, so keeping the verifier only leaves a
+/// capability lying around for a link that can no longer be redeemed.
+pub fn clear_reset_verifier() {
+    delete_secret("pkce_reset", INSTALL_SCOPE);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
