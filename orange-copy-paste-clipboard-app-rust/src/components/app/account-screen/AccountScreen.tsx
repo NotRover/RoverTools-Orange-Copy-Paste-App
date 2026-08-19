@@ -813,7 +813,8 @@ Keep this. It is the only way back into your synced items if you forget your pas
   const formatLastSynced = (ts: number | null) => {
     if (!ts) return null;
     const diff = Date.now() - ts;
-    if (diff < 60_000) return "Just now";
+    // Lowercase because every caller embeds it mid-sentence ("last seen ...").
+    if (diff < 60_000) return "just now";
     const mins = Math.floor(diff / 60_000);
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
@@ -1750,85 +1751,116 @@ Keep this. It is the only way back into your synced items if you forget your pas
           <>
             {/* Identity band */}
             <div className="acct-card acct-idband">
-              <UserAvatar
-                className="acct-avatar"
-                url={syncUser.avatar_url}
-                label={syncUser.display_name || syncUser.email || "?"}
-                glyphSize={18}
-              />
-              <div className="acct-id-text">
-                <span className="acct-id-email">
-                  {syncUser.email || syncUser.display_name || "Your account"}
-                </span>
-                <span
-                  className={`acct-id-status acct-id-status--${status.kind}`}
-                >
-                  <span className="acct-id-dot" />
-                  {status.label}
-                  {status.kind === "connected" && lastSynced
-                    ? ` - ${formatLastSynced(lastSynced)}`
-                    : ""}
-                  {/* Presence is only trustworthy while this device is connected. */}
-                  {status.kind === "connected" && devices.length > 0
-                    ? ` - ${onlineDevices} device${onlineDevices === 1 ? "" : "s"} online`
-                    : ""}
-                </span>
-                {queueNote && <span className="acct-id-note">{queueNote}</span>}
-                {changeDone && (
-                  <span className="acct-id-note">
-                    Password changed. Use it on your other devices from now on.
+              {/* Two rows on purpose. The four actions used to sit in one row
+                  beside the address, which is more than the card is wide: they
+                  wrapped into a detached block under the avatar. Now the top row
+                  carries identity and the two buttons people press, and the
+                  facts that change on their own move to a quieter second row
+                  next to the actions you use once. */}
+              <div className="acct-id-main">
+                <UserAvatar
+                  className="acct-avatar"
+                  url={syncUser.avatar_url}
+                  label={syncUser.display_name || syncUser.email || "?"}
+                  glyphSize={18}
+                />
+                <div className="acct-id-text">
+                  <span className="acct-id-email">
+                    {syncUser.email || syncUser.display_name || "Your account"}
                   </span>
-                )}
-                {skippedCount > 0 && (
+                  <span
+                    className={`acct-id-status acct-id-status--${status.kind}`}
+                  >
+                    <span className="acct-id-dot" />
+                    {status.label}
+                  </span>
+                  {queueNote && <span className="acct-id-note">{queueNote}</span>}
+                  {changeDone && (
+                    <span className="acct-id-note">
+                      Password changed. Use it on your other devices from now on.
+                    </span>
+                  )}
+                  {skippedCount > 0 && (
+                    <button
+                      type="button"
+                      className="acct-id-note acct-id-note--warn acct-id-note--action"
+                      onClick={() => setShowSkipped((v) => !v)}
+                    >
+                      {skippedCount} not synced
+                      {showSkipped ? (
+                        <CaretUp size={10} weight="bold" />
+                      ) : (
+                        <CaretDown size={10} weight="bold" />
+                      )}
+                    </button>
+                  )}
+                </div>
+                <div className="acct-id-actions">
                   <button
                     type="button"
-                    className="acct-id-note acct-id-note--warn acct-id-note--action"
-                    onClick={() => setShowSkipped((v) => !v)}
+                    className="acct-btn"
+                    onClick={handleSyncNow}
+                    disabled={syncNowLoading}
                   >
-                    {skippedCount} not synced
-                    {showSkipped ? (
-                      <CaretUp size={10} weight="bold" />
-                    ) : (
-                      <CaretDown size={10} weight="bold" />
-                    )}
+                    {syncNowLoading ? "Refreshing..." : "Refresh"}
                   </button>
-                )}
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--quiet acct-btn--danger"
+                    onClick={handleLogout}
+                  >
+                    Sign out
+                  </button>
+                </div>
               </div>
-              <div className="acct-id-actions">
+
+              <div className="acct-id-meta">
+                {/* Presence and last-sync are only trustworthy while this device
+                    is connected, so they are absent rather than stale. */}
+                {status.kind === "connected" && lastSynced && (
+                  <span className="acct-id-fact">
+                    Last sync {formatLastSynced(lastSynced)}
+                  </span>
+                )}
+                {status.kind === "connected" && devices.length > 0 && (
+                  <span className="acct-id-fact">
+                    {onlineDevices} device{onlineDevices === 1 ? "" : "s"} online
+                  </span>
+                )}
+                <div className="acct-id-meta-actions">
+                  <button
+                    type="button"
+                    className="acct-link"
+                    onClick={() => {
+                      setChangeDone(false);
+                      setChangeOpen(true);
+                    }}
+                  >
+                    Change password
+                  </button>
+                </div>
+              </div>
+
+              {/* The recovery code gets its own line rather than a third link.
+                  Replacing one invalidates the copy the user already saved, which
+                  is not the same kind of action as opening a dialog, and the line
+                  is the only place that says what the code is for. */}
+              <div className="acct-id-recovery">
+                <Key size={15} className="acct-id-recovery-icon" />
+                <span className="acct-id-recovery-text">
+                  {recoveryNeeded === false
+                    ? "Recovery code saved. It is the only way back in without your password."
+                    : "A recovery code is the only way back in without your password."}
+                </span>
                 <button
                   type="button"
-                  className="acct-btn"
-                  onClick={handleSyncNow}
-                  disabled={syncNowLoading}
-                >
-                  {syncNowLoading ? "Refreshing..." : "Refresh"}
-                </button>
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--quiet"
-                  onClick={() => {
-                    setChangeDone(false);
-                    setChangeOpen(true);
-                  }}
-                >
-                  Change password
-                </button>
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--quiet"
+                  className="acct-btn acct-btn--sm acct-btn--quiet"
                   onClick={() => {
                     setRecoveryNeeded(true);
                     void mintRecoveryCode();
                   }}
                 >
-                  New recovery code
-                </button>
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--quiet acct-btn--danger"
-                  onClick={handleLogout}
-                >
-                  Sign out
+                  {recoveryNeeded === false ? "Replace" : "New code"}
                 </button>
               </div>
             </div>

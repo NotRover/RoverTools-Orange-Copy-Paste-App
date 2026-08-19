@@ -95,6 +95,17 @@
   flex-direction: column;
   gap: 9px;
   animation: setSectionIn 0.26s ease both;
+  /* The animation below animates `transform`, and `both` keeps its last frame
+     applied forever - so every section is permanently a stacking context. That
+     traps an open dropdown inside its own section no matter how high its
+     z-index goes, and the next section paints over it. Positioning the section
+     lets the rule below lift the whole section instead. */
+  position: relative;
+}
+
+/* Only while a select is open, so the sections otherwise keep document order. */
+.set-section:has(.settings-select-wrap.open) {
+  z-index: 5;
 }
 
 .set-section:nth-child(3) { animation-delay: 0.03s; }
@@ -263,6 +274,8 @@
   padding: 3px;
   gap: 1px;
   z-index: 100;
+  max-height: 230px;
+  overflow-y: auto;
   animation: selectFadeIn 0.1s ease;
 }
 
