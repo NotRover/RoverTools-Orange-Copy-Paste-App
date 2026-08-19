@@ -1885,7 +1885,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [showRemoved, setShowRemoved] = useState<Record<string, boolean>>(
     cache.showRemoved,
   );
+  // Two homes, because there are two panels. `spaceError` belongs to whatever
+  // space is open and renders inside its detail panel; `listError` belongs to
+  // the list column - creating, joining, and answering an invite all happen
+  // there. One shared state rendered in both places meant an invite refusal
+  // appeared three times at once: above the list, above the invite field, and
+  // in a toast.
   const [spaceError, setSpaceError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   // Sticky, like the clipboard and notes filters: this screen unmounts on a
   // switch, and coming back to an unfiltered feed with every day expanded
   // undoes work the user did on purpose.
@@ -2612,7 +2619,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const handleCreate = useCallback(
     async (name: string, shareHistory: boolean) => {
       setFormLoading(true);
-      setSpaceError(null);
+      setListError(null);
       try {
         const space = await invoke<Space>("space_create", {
           name,
@@ -2622,7 +2629,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         setSelectedId(space.id);
         setShowCreate(false);
       } catch (e) {
-        setSpaceError(errMsg(e, "Could not create the space."));
+        setListError(errMsg(e, "Could not create the space."));
       } finally {
         setFormLoading(false);
       }
@@ -2633,13 +2640,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const handleJoin = useCallback(
     async (inviteCode: string) => {
       setFormLoading(true);
-      setSpaceError(null);
+      setListError(null);
       try {
         await invoke("space_join", { inviteCode });
         setShowJoin(false);
         reloadSpaces();
       } catch (e) {
-        setSpaceError(errMsg(e, "Could not join with that code."));
+        setListError(errMsg(e, "Could not join with that code."));
       } finally {
         setFormLoading(false);
       }
@@ -2824,13 +2831,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
 
   const handleAcceptInvite = useCallback(
     async (inviteId: string) => {
-      setSpaceError(null);
+      setListError(null);
       try {
         await invoke("sync_accept_invite", { inviteId });
         refreshInvites();
         reloadSpaces();
       } catch (e) {
-        setSpaceError(errMsg(e, "Could not accept the invite."));
+        setListError(errMsg(e, "Could not accept the invite."));
       }
     },
     [refreshInvites, reloadSpaces],
@@ -2846,7 +2853,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           try {
             await invoke("sync_decline_invite", { inviteId });
           } catch (e) {
-            setSpaceError(errMsg(e, "Could not decline the invite."));
+            setListError(errMsg(e, "Could not decline the invite."));
             throw e;
           } finally {
             await refreshInvites();
@@ -3390,8 +3397,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         </div>
 
         <div className="sp-panel-scroll">
-          {spaceError && (
-            <span className="sp-settings-error">{spaceError}</span>
+          {listError && (
+            <span className="sp-settings-error">{listError}</span>
           )}
 
           {/* Nothing until the first read answers: "No spaces yet" is a claim,
@@ -3539,7 +3546,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 onClick={() => {
                   setShowCreate(true);
                   setShowJoin(false);
-                  setSpaceError(null);
+                  setListError(null);
                 }}
                 data-tooltip={
                   signedIn
@@ -3557,7 +3564,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 onClick={() => {
                   setShowJoin(true);
                   setShowCreate(false);
-                  setSpaceError(null);
+                  setListError(null);
                 }}
                 data-tooltip={
                   signedIn
