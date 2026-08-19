@@ -45,7 +45,7 @@ import NoteCard from "./note-card/NoteCard";
 import NotesFilterDropdown, {
   useNotesFilter,
 } from "./notes-filter/NotesFilterDropdown";
-import { isNoteExpandable } from "./notes-utils";
+import { deriveNoteTitle, isNoteExpandable } from "./notes-utils";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
 
@@ -165,10 +165,17 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
       switch (sort) {
         case "oldest":
           return a.updated_at - b.updated_at;
+        // Sorted by the title the cards show, so a note the user left
+        // untitled sorts under its first line rather than piling in with
+        // every other empty title.
         case "a-z":
-          return (a.title || "").localeCompare(b.title || "");
+          return deriveNoteTitle(a.title, a.content).localeCompare(
+            deriveNoteTitle(b.title, b.content),
+          );
         case "z-a":
-          return (b.title || "").localeCompare(a.title || "");
+          return deriveNoteTitle(b.title, b.content).localeCompare(
+            deriveNoteTitle(a.title, a.content),
+          );
         default:
           return b.updated_at - a.updated_at;
       }

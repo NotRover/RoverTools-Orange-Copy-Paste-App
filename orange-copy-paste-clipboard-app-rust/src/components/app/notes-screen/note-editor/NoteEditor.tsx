@@ -179,10 +179,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const cellBgPickerRef = useRef<HTMLDivElement>(null);
 
   const initialContent = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
-  const initialTitle = useMemo(
-    () => deriveNoteTitle(note.title, note.content),
-    [note.id], // eslint-disable-line
-  );
+  // The note's own title, not a derived one. Seeding the box with the title
+  // the cards fall back to made that fallback real the moment anything saved,
+  // and there was then no way to get rid of it: clearing the box only derived
+  // it again. The placeholder covers an empty box; deriving is for display.
+  const initialTitle = useMemo(() => note.title, [note.id]); // eslint-disable-line
 
   // ── Save ──────────────────────────────────────────────────────────────
 
@@ -191,10 +192,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       // Rust refuses the write for someone else's note anyway; stopping here
       // keeps a doomed save off the debounce timer entirely.
       if (readOnly) return;
-      const title = deriveNoteTitle(titleRef.current?.value ?? "", content);
-      if (titleRef.current && titleRef.current.value !== title)
-        titleRef.current.value = title;
-      onUpdate(note.id, title, content);
+      // Stored exactly as typed, empty included. Writing a derived title back
+      // into the box fought the user for the field: every keystroke that
+      // emptied it put the first line of the note back.
+      onUpdate(note.id, (titleRef.current?.value ?? "").trim(), content);
     },
     [note.id, onUpdate, readOnly],
   );
@@ -260,7 +261,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       saveTimerRef.current = null;
     }
     const c = editorRef.current?.getContent() ?? note.content;
-    if (!hasMeaningfulContent(c)) {
+    // A title on its own is a note. Only the body used to count, so writing a
+    // heading and closing to come back to it threw the note away.
+    const t = (titleRef.current?.value ?? "").trim();
+    if (!t && !hasMeaningfulContent(c)) {
       onDelete(note.id);
       onBack();
       return;
