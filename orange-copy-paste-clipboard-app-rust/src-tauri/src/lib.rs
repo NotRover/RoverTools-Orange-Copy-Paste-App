@@ -677,6 +677,7 @@ pub fn run() {
             crate::sync::commands::spaces_cached,
             crate::sync::commands::space_create,
             crate::sync::commands::space_join,
+            crate::sync::commands::space_invite_link,
             crate::sync::commands::space_leave,
             crate::sync::commands::space_delete,
             crate::sync::commands::space_remove_member,

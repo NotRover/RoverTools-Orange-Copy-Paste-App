@@ -1263,6 +1263,24 @@ const SpaceSettings: React.FC<{
     copyTimer.current = setTimeout(() => setCopied(null), 1600);
   };
 
+  // The https form, built in Rust from the configured server URL: mail and chat
+  // clients strip an orange:// link, and the page it lands on offers the app plus
+  // a download when it is not installed. Falls back to the deep link if the
+  // command fails, which is what shipped before.
+  const copyInviteLink = async (code: string) => {
+    let link = `orange://join?code=${code}`;
+    try {
+      // Dashed, so the URL reads the way the code is shown everywhere else; the
+      // backend normalizes it either way.
+      link = await invoke<string>("space_invite_link", {
+        inviteCode: formatInviteCode(code),
+      });
+    } catch {
+      // keep the deep link
+    }
+    copy("link", link);
+  };
+
   const sendInvite = async () => {
     if (!email.trim()) return;
     setInviting(true);
@@ -1608,7 +1626,7 @@ const SpaceSettings: React.FC<{
                   type="button"
                   className="sp-btn sp-btn--icon"
                   onClick={() =>
-                    copy("link", `orange://join?code=${space.invite_code}`)
+                    void copyInviteLink(space.invite_code!)
                   }
                   data-tooltip="Copy invite link"
                   data-tooltip-pos="top"

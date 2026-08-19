@@ -996,6 +996,20 @@ fn extract_invite_code(input: &str) -> String {
     trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
 }
 
+/// The shareable https link for a space's invite code.
+///
+/// Built here rather than in the UI so the base URL stays in one place - the same
+/// place the sync client reads it from - and a self-hosted deployment produces
+/// links to itself. The `orange://` deep link still works and is what the page at
+/// the other end uses; it is not what gets shared, because mail and chat clients
+/// strip a custom scheme.
+#[tauri::command]
+pub fn space_invite_link(invite_code: String, state: State<'_, AppState>) -> Result<String, String> {
+    let sync = sync_client(&state)?;
+    let base = sync.server_url.trim_end_matches('/').to_string();
+    Ok(format!("{base}/join/{}", extract_invite_code(&invite_code)))
+}
+
 #[tauri::command]
 pub async fn space_leave(space_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
