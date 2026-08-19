@@ -306,6 +306,46 @@
   color: var(--text-muted, #9ca3af);
 }
 
+/* The recovery code itself. Monospace and wide-tracked because it gets read off
+   this screen and typed back somewhere else; selectable as one unit so a
+   click-drag cannot take half of it. */
+.acct-recovery-code {
+  margin: 2px 0 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-align: center;
+  word-break: break-all;
+  user-select: all;
+}
+
+.acct-recovery-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.acct-recovery-actions .acct-btn {
+  flex: 1;
+}
+
+.acct-recovery-ack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.acct-recovery-ack input {
+  accent-color: var(--accent);
+}
+
 /* The last resort on the reset panel: only drawn once the plain attempt has
    failed, and set apart from the primary button so it cannot be hit by reflex -
    it is the one action here that makes data unreadable. */

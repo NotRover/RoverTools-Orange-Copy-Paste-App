@@ -79,6 +79,98 @@ pub fn unwrap_umk(kek: &[u8; 32], wrapped_b64: &str) -> Result<Zeroizing<[u8; 32
     Ok(umk)
 }
 
+/// Alphabet for a recovery code. These get read off a screen, written on paper,
+/// and typed back months later, so the look-alikes are gone: no `O` or `0`, no
+/// `I` or `1`. `L` stays - with `1` and `I` both absent there is nothing left for
+/// it to be confused with.
+///
+/// 24 letters plus 8 digits is exactly 32 symbols, so each character carries 5
+/// bits with no modulo bias when sampling a random byte's low 5 bits.
+const RECOVERY_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/// Groups of five, six groups: 30 characters, 150 bits of entropy.
+const RECOVERY_GROUPS: usize = 6;
+const RECOVERY_GROUP_LEN: usize = 5;
+
+/// AAD binding the recovery envelope to its purpose, separate from
+/// [`UMK_WRAP_AAD`].
+///
+/// Both envelopes hold the same UMK and share the account's `kdf_salt` - the
+/// difference is only which secret derives the key. The distinct tag is what
+/// makes feeding one envelope to the other's unwrap fail loudly instead of
+/// looking like a wrong password.
+const UMK_RECOVERY_AAD: &str = "umk-recovery-v1";
+
+/// Mint a recovery code, in the dash-separated form the user is shown.
+///
+/// 150 bits from the OS RNG - not derived from anything, because a code derived
+/// from the password would be lost with it, which is the whole point of having
+/// one.
+pub fn generate_recovery_code() -> Zeroizing<String> {
+    let mut raw = Zeroizing::new([0u8; RECOVERY_GROUPS * RECOVERY_GROUP_LEN]);
+    OsRng.fill_bytes(raw.as_mut());
+    let mut out = String::with_capacity(RECOVERY_GROUPS * (RECOVERY_GROUP_LEN + 1));
+    for (i, byte) in raw.iter().enumerate() {
+        if i > 0 && i % RECOVERY_GROUP_LEN == 0 {
+            out.push('-');
+        }
+        out.push(RECOVERY_ALPHABET[(byte & 0x1f) as usize] as char);
+    }
+    Zeroizing::new(out)
+}
+
+/// Canonical form of a code the user typed: dashes and spaces out, uppercased.
+///
+/// Whatever they paste - with the dashes, without them, in lower case, with a
+/// stray space from a mail client - has to derive the same key, or a correct code
+/// reads as a wrong one.
+pub fn normalize_recovery_code(input: &str) -> Zeroizing<String> {
+    Zeroizing::new(
+        input
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '-')
+            .flat_map(char::to_uppercase)
+            .collect(),
+    )
+}
+
+/// Wrap the UMK under a key derived from `recovery_code`.
+///
+/// Same salt and same KDF as the password envelope; only the secret and the AAD
+/// differ. The caller passes the code as typed - normalizing happens here, so no
+/// call site can forget it.
+pub fn wrap_umk_recovery(
+    recovery_code: &str,
+    kdf_salt: &[u8],
+    umk: &[u8; 32],
+) -> Result<String, String> {
+    let key = derive_kek(&normalize_recovery_code(recovery_code), kdf_salt);
+    Ok(B64.encode(encrypt_bytes(&key, umk, UMK_RECOVERY_AAD)?))
+}
+
+/// Recover the UMK from the recovery envelope.
+///
+/// A GCM failure here means the code is wrong (or belongs to another account),
+/// which is indistinguishable and is reported as one thing.
+pub fn unwrap_umk_recovery(
+    recovery_code: &str,
+    kdf_salt: &[u8],
+    wrapped_b64: &str,
+) -> Result<Zeroizing<[u8; 32]>, String> {
+    let key = derive_kek(&normalize_recovery_code(recovery_code), kdf_salt);
+    let combined = B64
+        .decode(wrapped_b64)
+        .map_err(|e| format!("recovery envelope base64: {e}"))?;
+    let bytes = decrypt_bytes(&key, &combined, UMK_RECOVERY_AAD)
+        .map_err(|_| "That recovery code does not match this account.".to_string())?;
+    if bytes.len() != 32 {
+        return Err("unwrapped UMK has an unexpected length".into());
+    }
+    let mut umk = Zeroizing::new([0u8; 32]);
+    umk.copy_from_slice(&bytes);
+    Ok(umk)
+}
+
 /// Generate a fresh random 32-byte symmetric key (used as a Live Share /
 /// pool Group Key).  Returned in a `Zeroizing` wrapper.
 pub fn random_key() -> Zeroizing<[u8; 32]> {
@@ -507,6 +599,74 @@ mod tests {
         let unwrapped = unwrap_key(&shared, &wrapped).expect("unwrap");
 
         assert_eq!(*unwrapped, *group_key);
+    }
+
+    /// The shape the user is shown, and the entropy behind it.
+    #[test]
+    fn recovery_code_is_six_groups_of_five_from_the_safe_alphabet() {
+        let code = generate_recovery_code();
+        let groups: Vec<&str> = code.split('-').collect();
+        assert_eq!(groups.len(), 6);
+        assert!(groups.iter().all(|g| g.len() == 5));
+        assert!(code
+            .chars()
+            .filter(|c| *c != '-')
+            .all(|c| RECOVERY_ALPHABET.contains(&(c as u8))));
+        // Two codes in a row must not match; a fixed code would be catastrophic.
+        assert_ne!(*code, *generate_recovery_code());
+    }
+
+    /// However the user types it back, the same key has to come out.
+    #[test]
+    fn recovery_code_normalizes_dashes_spaces_and_case() {
+        let canonical = normalize_recovery_code("ABCDE-FGHJK");
+        assert_eq!(*canonical, "ABCDEFGHJK");
+        assert_eq!(*normalize_recovery_code("abcde fghjk"), *canonical);
+        assert_eq!(*normalize_recovery_code(" abcdefghjk "), *canonical);
+    }
+
+    /// The recovery envelope opens with the code, in any of its typed forms.
+    #[test]
+    fn recovery_envelope_roundtrips_however_the_code_was_typed() {
+        let umk = random_key();
+        let salt = b"account-kdf-salt";
+        let code = generate_recovery_code();
+
+        let wrapped = wrap_umk_recovery(&code, salt, &umk).expect("wrap");
+        let recovered = unwrap_umk_recovery(&code, salt, &wrapped).expect("unwrap");
+        assert_eq!(*recovered, *umk);
+
+        let retyped = code.to_lowercase().replace('-', " ");
+        let recovered = unwrap_umk_recovery(&retyped, salt, &wrapped).expect("unwrap retyped");
+        assert_eq!(*recovered, *umk);
+    }
+
+    /// A wrong code fails, and so does the right code against another account's
+    /// salt - the salt is part of what binds an envelope to its account.
+    #[test]
+    fn recovery_envelope_rejects_a_wrong_code_or_salt() {
+        let umk = random_key();
+        let salt = b"account-kdf-salt";
+        let code = generate_recovery_code();
+        let wrapped = wrap_umk_recovery(&code, salt, &umk).expect("wrap");
+
+        assert!(unwrap_umk_recovery(&generate_recovery_code(), salt, &wrapped).is_err());
+        assert!(unwrap_umk_recovery(&code, b"another-salt", &wrapped).is_err());
+    }
+
+    /// The two envelopes share the account salt, so only the AAD keeps them
+    /// apart. Feeding one to the other's unwrap must fail rather than half-work.
+    #[test]
+    fn password_and_recovery_envelopes_are_not_interchangeable() {
+        let umk = random_key();
+        let salt = b"account-kdf-salt";
+        let secret = "the-same-string-as-both";
+
+        let pw_envelope = wrap_umk(&derive_kek(secret, salt), &umk).expect("wrap pw");
+        let rec_envelope = wrap_umk_recovery(secret, salt, &umk).expect("wrap recovery");
+
+        assert!(unwrap_umk_recovery(secret, salt, &pw_envelope).is_err());
+        assert!(unwrap_umk(&derive_kek(secret, salt), &rec_envelope).is_err());
     }
 
     /// A member who was never wrapped for cannot unwrap someone else's blob.

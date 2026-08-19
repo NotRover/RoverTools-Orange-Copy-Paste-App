@@ -208,6 +208,7 @@ pub async fn sync_reset_password(
 pub async fn sync_complete_password_reset(
     code: String,
     new_password: String,
+    recovery_code: Option<String>,
     device_name: String,
     start_over: bool,
     state: State<'_, AppState>,
@@ -215,7 +216,7 @@ pub async fn sync_complete_password_reset(
 ) -> Result<SyncUser, String> {
     let sync = get_or_create_client(&state, &app)?;
     let user = sync
-        .complete_password_reset(code, new_password, device_name, start_over)
+        .complete_password_reset(code, new_password, recovery_code, device_name, start_over)
         .await?;
     Arc::clone(&sync).trigger_initial_sync();
     Ok(user)
@@ -232,6 +233,26 @@ pub async fn sync_change_password(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     sync_client(&state)?.change_password(new_password).await
+}
+
+/// Mint a recovery code and store its envelope, returning the code once.
+///
+/// The only time the code exists outside the user's own records: it is not stored
+/// anywhere, and asking again produces a different one which invalidates this.
+#[tauri::command]
+pub async fn sync_create_recovery_code(state: State<'_, AppState>) -> Result<String, String> {
+    sync_client(&state)?.create_recovery_code().await
+}
+
+/// Whether this account has a recovery code saved. `None` means not known yet
+/// (no session), which the UI must not treat as "no".
+#[tauri::command]
+pub async fn sync_has_recovery_code(state: State<'_, AppState>) -> Result<Option<bool>, String> {
+    let sync = state.sync_client.lock().clone();
+    Ok(match sync {
+        Some(sync) => sync.has_recovery_code().await,
+        None => None,
+    })
 }
 
 /// What a startup restore attempt concluded.

@@ -228,9 +228,23 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   const [resetStageError, setResetStageError] = useState<string | null>(null);
   const [offerStartOver, setOfferStartOver] = useState(false);
 
+  // Typed on the reset panel when this machine cannot produce the key by itself.
+  const [recoveryEntry, setRecoveryEntry] = useState("");
+
   // Changing the password while signed in - the path that cannot lose anything.
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeDone, setChangeDone] = useState(false);
+
+  // Saving a recovery code. `recoveryNeeded` is null until asked, and only a
+  // definite false answer is allowed to suppress the panel - guessing would put
+  // a blocking screen in front of an account that already has a code.
+  const [recoveryNeeded, setRecoveryNeeded] = useState<boolean | null>(null);
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [recoveryAck, setRecoveryAck] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoverySavedTo, setRecoverySavedTo] = useState<string | null>(null);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // Devices
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -421,6 +435,44 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       .catch(() => {});
   }, []);
 
+  /// Mint a code and show it. Used both for the forced first save and for a
+  /// deliberate regenerate, which are the same operation server-side.
+  const mintRecoveryCode = useCallback(async () => {
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    setRecoveryAck(false);
+    setRecoverySavedTo(null);
+    setRecoveryCopied(false);
+    try {
+      const code = await invoke<string>("sync_create_recovery_code");
+      setRecoveryCode(code);
+    } catch (e) {
+      setRecoveryError(
+        typeof e === "string" ? e : "Could not create a recovery code.",
+      );
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }, []);
+
+  // Ask once per session whether this account has a recovery code, and mint one
+  // if it has not. Every account predating this has none, and they are exactly
+  // the accounts a forgotten password would strand.
+  useEffect(() => {
+    if (!syncUser || recoveryNeeded !== null) return;
+    let cancelled = false;
+    invoke<boolean | null>("sync_has_recovery_code")
+      .then((has) => {
+        if (cancelled || has === null) return;
+        setRecoveryNeeded(!has);
+        if (!has) void mintRecoveryCode();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [syncUser, recoveryNeeded, mintRecoveryCode]);
+
   const clearOauthTimer = () => {
     if (oauthTimer.current !== null) {
       window.clearTimeout(oauthTimer.current);
@@ -573,11 +625,30 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
     }
   };
 
+  const saveRecoveryToFile = async () => {
+    if (!recoveryCode) return;
+    try {
+      const path = await invoke<string>("export_note_text", {
+        text: `Orange Copy Paste recovery code
+
+${recoveryCode}
+
+Keep this. It is the only way back into your synced items if you forget your password.
+`,
+        filename: "orange-copy-paste-recovery-code.txt",
+      });
+      setRecoverySavedTo(path);
+    } catch (e) {
+      setRecoveryError(typeof e === "string" ? e : "Could not save the file.");
+    }
+  };
+
   const closeResetStage = () => {
     setNewPassword("");
     setNewConfirm("");
     setResetStageError(null);
     setOfferStartOver(false);
+    setRecoveryEntry("");
     setChangeOpen(false);
     onResetCodeConsumed?.();
   };
@@ -607,6 +678,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       const user = await invoke<SyncUser>("sync_complete_password_reset", {
         code: resetCode,
         newPassword,
+        recoveryCode: recoveryEntry.trim() || null,
         deviceName: `Orange CP - ${navigator.platform || "Desktop"}`,
         startOver,
       });
@@ -1113,7 +1185,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   // A reset from the emailed link, or a deliberate password change, takes over
   // the screen: both are one thing the user came here to finish.
   const resetStage = Boolean(resetCode) || changeOpen;
-  const centered = !syncEnabled || !syncUser || resetStage;
+  // The recovery-code panel blocks this screen only. Clipboard, notes and capture
+  // keep working - a modal that stops the product from working is a worse failure
+  // than an unsaved code.
+  const recoveryStage = Boolean(syncUser) && !resetStage && recoveryNeeded === true;
+  const centered = !syncEnabled || !syncUser || resetStage || recoveryStage;
 
   // ── Render ──────────────────────────────────────────────────────
   return (
@@ -1132,7 +1208,90 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
           </header>
         )}
 
-        {resetStage ? (
+        {recoveryStage ? (
+          /* ── Save your recovery code ── */
+          <div className="auth-card">
+            <div className="auth-brand">
+              <div className="auth-brand-badge">
+                <Key size={20} />
+              </div>
+              <h3 className="auth-title">Save your recovery code</h3>
+              <p className="auth-subtitle">
+                If you forget your password, this code is the only thing that can
+                unlock your synced items on a new device. We cannot recover them
+                for you.
+              </p>
+            </div>
+            <div className="auth-form">
+              {recoveryCode ? (
+                <>
+                  <p className="acct-recovery-code">{recoveryCode}</p>
+                  <div className="acct-recovery-actions">
+                    <button
+                      type="button"
+                      className="acct-btn"
+                      onClick={() => {
+                        navigator.clipboard
+                          .writeText(recoveryCode)
+                          .catch(() => {});
+                        setRecoveryCopied(true);
+                      }}
+                    >
+                      {recoveryCopied ? "Copied" : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      className="acct-btn"
+                      onClick={() => void saveRecoveryToFile()}
+                    >
+                      Save as file
+                    </button>
+                  </div>
+                  {recoverySavedTo && (
+                    <span className="acct-id-note">
+                      Saved to {recoverySavedTo}
+                    </span>
+                  )}
+                  <label className="acct-recovery-ack">
+                    <input
+                      type="checkbox"
+                      checked={recoveryAck}
+                      onChange={(e) => setRecoveryAck(e.target.checked)}
+                    />
+                    <span>I saved my recovery code</span>
+                  </label>
+                </>
+              ) : (
+                <p className="auth-hint">
+                  {recoveryBusy ? "Creating your code..." : "No code yet."}
+                </p>
+              )}
+              {recoveryError && (
+                <span className="auth-error">{recoveryError}</span>
+              )}
+              <button
+                type="button"
+                className="auth-submit"
+                onClick={() => {
+                  setRecoveryNeeded(false);
+                  setRecoveryCode(null);
+                }}
+                disabled={!recoveryCode || !recoveryAck}
+              >
+                Continue
+              </button>
+              {!recoveryCode && !recoveryBusy && (
+                <button
+                  type="button"
+                  className="auth-textlink auth-textlink--center"
+                  onClick={() => void mintRecoveryCode()}
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+          </div>
+        ) : resetStage ? (
           /* ── Set a new password: from the reset link, or by choice ── */
           <div className="auth-card">
             <div className="auth-brand">
@@ -1186,6 +1345,29 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
               >
                 {resetBusy ? "Saving..." : "Save password"}
               </button>
+              {offerStartOver && (
+                <label className="auth-field">
+                  <span className="auth-label">Recovery code</span>
+                  <input
+                    className="auth-input"
+                    type="text"
+                    placeholder="ABCDE-FGHJK-..."
+                    value={recoveryEntry}
+                    onChange={(e) => setRecoveryEntry(e.target.value)}
+                    disabled={resetBusy}
+                  />
+                </label>
+              )}
+              {offerStartOver && recoveryEntry.trim() && (
+                <button
+                  type="button"
+                  className="auth-submit"
+                  onClick={() => void submitNewPassword(false)}
+                  disabled={resetBusy}
+                >
+                  {resetBusy ? "Unlocking..." : "Unlock with the code"}
+                </button>
+              )}
               {offerStartOver && (
                 <div className="auth-startover">
                   <p className="auth-note">
@@ -1630,6 +1812,16 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                   }}
                 >
                   Change password
+                </button>
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--quiet"
+                  onClick={() => {
+                    setRecoveryNeeded(true);
+                    void mintRecoveryCode();
+                  }}
+                >
+                  New recovery code
                 </button>
                 <button
                   type="button"

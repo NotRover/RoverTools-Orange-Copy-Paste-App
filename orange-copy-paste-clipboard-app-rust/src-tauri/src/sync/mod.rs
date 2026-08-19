@@ -868,11 +868,10 @@ impl SyncClient {
     ///
     /// 1. the UMK already in memory, if this app is signed in;
     /// 2. this machine's device wrap, which needs only the keychain key;
-    /// 3. nothing - and then the caller has to choose `start_over`, which mints a
+    /// 3. the recovery code, if one was supplied - the only source that works on a
+    ///    machine which has never signed in;
+    /// 4. nothing - and then the caller has to choose `start_over`, which mints a
     ///    fresh key and leaves everything synced under the old one unreadable.
-    ///
-    /// A recovery code will slot in as a third source between 2 and 3; that is
-    /// the only way to keep the data on a machine that has never signed in.
     ///
     /// Ends by signing in normally with the new password, so device registration,
     /// key registration and the device wrap all run through the one path that
@@ -881,6 +880,7 @@ impl SyncClient {
         &self,
         code: String,
         new_password: String,
+        recovery_code: Option<String>,
         device_name: String,
         start_over: bool,
     ) -> Result<SyncUser, String> {
@@ -908,15 +908,36 @@ impl SyncClient {
             .decode(&boot.kdf_salt)
             .map_err(|e| format!("kdf_salt b64: {e}"))?;
 
-        let umk = match self.recover_umk_for_reset(&user_id, &http).await {
-            Some(umk) => umk,
-            None if start_over => crypto::random_key(),
-            None => {
-                return Err(
-                    "this device has never held your encryption key, so a new password cannot                      unlock what you synced before. Sign in on a device you have used, or start                      over with a new key."
-                        .into(),
-                )
+        // A supplied recovery code is checked first and its failure is returned:
+        // the user typed something specific, and silently falling through to
+        // "this device has never held your key" would hide a typo.
+        let umk = match recovery_code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+            Some(recovery) => {
+                let envelope = boot
+                    .recovery_wrapped_umk
+                    .as_deref()
+                    .ok_or("no recovery code was ever saved for this account")?;
+                crypto::unwrap_umk_recovery(recovery, &kdf_salt, envelope)?
             }
+            None => match self.recover_umk_for_reset(&user_id, &http).await {
+                Some(umk) => umk,
+                None if start_over => {
+                    // The recovery envelope still holds the key being abandoned,
+                    // so it has to go: left in place it would hand a later
+                    // recovery a key that decrypts nothing. Clearing it is also
+                    // what makes the account screen ask for a fresh code.
+                    if let Err(e) = http.clear_recovery_wrapped_umk().await {
+                        eprintln!("[sync] stale recovery envelope not cleared: {e}");
+                    }
+                    crypto::random_key()
+                }
+                None => {
+                    return Err(
+                        "this device has never held your encryption key, so a new password cannot                          unlock what you synced before. Enter your recovery code, sign in on a                          device you have used, or start over with a new key."
+                            .into(),
+                    )
+                }
+            },
         };
 
         // Order matters. The envelope goes up first: if the password changed and
@@ -959,6 +980,46 @@ impl SyncClient {
         self.supabase
             .update_password(&access_token, &new_password)
             .await
+    }
+
+    /// Mint a recovery code, wrap the account's UMK under it, and store the
+    /// envelope. Returns the code - the only time it exists anywhere.
+    ///
+    /// Generated and wrapped here rather than in the UI because this is key
+    /// material: the code never crosses the boundary except as the string the
+    /// user is asked to save, and the envelope is all the server ever sees.
+    ///
+    /// Also how regenerating works. Storing replaces the previous envelope, so
+    /// the old code stops opening anything the moment this returns.
+    pub async fn create_recovery_code(&self) -> Result<String, String> {
+        let http = self.http().ok_or("not signed in")?;
+        let umk = self
+            .umk
+            .lock()
+            .clone()
+            .ok_or("the encryption key is not loaded, sign in again")?;
+        let boot = http.bootstrap(None).await?;
+        let kdf_salt = B64
+            .decode(&boot.kdf_salt)
+            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+
+        let code = crypto::generate_recovery_code();
+        let envelope = crypto::wrap_umk_recovery(&code, &kdf_salt, &umk)?;
+        // Stored before the code is handed over: a code the user saved that opens
+        // nothing is worse than an error they can retry.
+        http.set_recovery_wrapped_umk(envelope).await?;
+        Ok(code.to_string())
+    }
+
+    /// Whether this account has a recovery code saved.
+    ///
+    /// `None` when there is no session to ask about, which the UI reads as "not
+    /// yet known" rather than "no code" - prompting on a guess would put a
+    /// blocking panel in front of an account that already has one.
+    pub async fn has_recovery_code(&self) -> Option<bool> {
+        let http = self.http()?;
+        let boot = http.bootstrap(None).await.ok()?;
+        Some(boot.recovery_wrapped_umk.is_some())
     }
 
     /// The UMK, from any source that does not involve the password being reset.
