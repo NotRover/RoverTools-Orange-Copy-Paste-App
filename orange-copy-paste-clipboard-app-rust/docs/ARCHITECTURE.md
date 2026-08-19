@@ -616,10 +616,97 @@ as a trigger so the running instance is not replaced.
 
 `dispatch_deep_link` raises the window **first**, then parses. That order is what
 makes a bare `orange://` a usable "come to the front" link, which is what the
-OAuth result page uses. Only one shape carries an action today:
-`orange://join?code=<CODE>` emits `spaces:join-code`, which `SpacesScreen`
-consumes and joins with. The parser ignores the host, so `orange://anything?code=`
-also joins - kept deliberately, since links already sent out rely on it.
+OAuth result page uses. `parse_deep_link` then returns one of two shapes, keyed on
+the host:
+
+| URL | Event | Consumed by |
+| --- | --- | --- |
+| `orange://join?code=<CODE>` | `spaces:join-code` | `SpacesScreen`, which joins |
+| `orange://reset?code=<CODE>` | `sync:password-reset` | `AccountScreen`, which sets the new password |
+
+Anything other than `reset` that carries a code is a join, host ignored - so
+`orange://anything?code=` still works. Kept deliberately: invite links already
+sent out rely on it and cannot be re-sent.
+
+Both events are held by `App`, not by the screen that uses them, because neither
+screen is usually mounted when the link arrives. `App` stores the code and
+switches screens; the screen reads it as a prop and calls back when it is done
+with it.
+
+#### Password reset, and change password
+
+The password is only a wrapping key (see the backend's ARCHITECTURE section 7.1),
+so a reset that mints a new one would leave everything already synced unreadable.
+Both flows therefore re-wrap the **same** UMK.
+
+The emailed link is PKCE, not the implicit flow: `recover()` sends
+`redirect_to = {server_url}/reset` plus an S256 challenge, and the verifier goes
+into the **OS keychain** - install-scoped, because a reset is requested while
+signed out, and the two halves are usually separated by an app restart. The link
+lands on the backend page, which hands the code to `orange://reset?code=`. The
+code alone is useless: redeeming it needs the verifier, which never left the
+machine that asked.
+
+`complete_password_reset` then recovers the UMK from the first source that has it:
+
+| Source | Needs | When it applies |
+| --- | --- | --- |
+| In memory | already signed in | resetting from a running, signed-in app |
+| Device wrap | this machine's keychain key | any machine that has signed in before |
+| Recovery code | the code the user saved | the only source that works on a machine which has never signed in |
+| Start over | nothing | last resort, and loses access to everything synced under the old key |
+
+A supplied recovery code is tried first and its failure is returned rather than
+falling through, so a typo reads as a typo instead of "this device has never held
+your key".
+
+#### Recovery code
+
+A second account-wide envelope holding the same UMK, wrapped under a secret the
+user keeps rather than one they remember. 30 characters in six groups of five -
+150 bits - from a 32-symbol alphabet with `O`, `0`, `I` and `1` removed. Exactly 32
+symbols so each character is 5 unbiased bits from one random byte.
+
+`derive_kek` and the account's own `kdf_salt` are reused; only the secret and the
+AAD differ (`umk-recovery-v1` against `umk-envelope-v1`). Sharing the salt is
+deliberate, and the distinct AAD is what makes feeding one envelope to the other's
+unwrap fail loudly rather than half-work - there is a test for exactly that.
+
+The code is generated in Rust and returned once. It is not stored anywhere: only
+its envelope goes to the server, and the envelope is uploaded **before** the code
+is handed to the UI, so a code the user saves always opens something. Regenerating
+replaces the envelope, which is what revokes the previous code - one is live at a
+time.
+
+Forced at the next sign-in when `bootstrap` reports `recovery_wrapped_umk: null`,
+which is true of every account predating this. The panel blocks **only the account
+screen**; clipboard, notes and capture keep working, because a modal that stops the
+product is a worse failure than an unsaved code. Continue needs the "I saved my
+recovery code" box ticked, and "Save as file" reuses `export_note_text`, which
+writes to Downloads.
+
+Starting over with a new key **clears** the envelope
+(`DELETE /auth/umk/recovery`): it holds the key being abandoned, and left in place
+it would hand a later recovery a key that decrypts nothing. Clearing it is also
+what makes the panel ask for a fresh code.
+
+Two ordering rules, both learned the hard way in the OAuth flow:
+
+- The **envelope goes up before the password changes**. The other order can leave
+  an account whose password opens nothing.
+- The reset **ends by signing in normally** with the new password, so device
+  registration, key registration and the device wrap all run through the single
+  path that owns them.
+
+`change_password` is the same thing minus the code exchange, for a user who is
+already signed in - nothing has to be recovered, so nothing can be lost. It is
+what the account screen offers, and why the reset link is the fallback rather than
+the route.
+
+**Requires one dashboard entry:** `{public_base_url}/reset` must be in Supabase
+Authentication -> URL Configuration -> Redirect URLs. Without it GoTrue ignores
+the redirect and falls back to the Site URL, which is how this used to mail a
+localhost link.
 
 #### Overview
 
@@ -712,6 +799,11 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `x25519_shared_secret(privkey, peer_pubkey) → [u8; 32]` | ECDH for device key handshake and space key wrapping     |
 | `random_key() → [u8; 32]`                               | Random key: the UMK, a space key, or a per-entry CEK     |
 | `wrap_key(wrapping_key, key) → String` / `unwrap_key(…)` | Wrap/unwrap a CEK or space key; failure means wrong key  |
+| `pkce_pair() → (verifier, challenge)`                   | S256 pair for an OAuth or password-reset hop             |
+| `store_reset_verifier` / `load_reset_verifier` / `clear_reset_verifier` | The reset verifier in the OS keychain, install-scoped - the two halves of a reset are usually separated by a restart |
+| `generate_recovery_code() → Zeroizing<String>`          | 150 bits, six groups of five, look-alike characters removed |
+| `normalize_recovery_code(input)`                        | Dashes and spaces out, uppercased - whatever the user types back derives the same key |
+| `wrap_umk_recovery` / `unwrap_umk_recovery`             | The recovery envelope: `derive_kek(code, kdf_salt)` with AAD `umk-recovery-v1` |
 | `wrap_key(wrapping_key, key_to_wrap) → String`          | AES-256-GCM encrypt key material                        |
 | `unwrap_key(wrapping_key, wrapped_b64) → [u8; 32]`      | Reverse of wrap_key                                     |
 
@@ -735,6 +827,11 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `sync_push_settings`   | `() → ()`                                           | Encrypt current settings blob and `PUT /settings`; internally debounced (2s)             |
 | `sync_pull_settings`          | `() → ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
 | `sync_receive_local_settings` | `(json: String) → ()`                                  | Receives `localStorage` settings from React in response to `sync:collect-settings` event; merged into the next `sync_push_settings` call |
+| `sync_reset_password`  | `(email: String) → Result<()>`                       | Mint a PKCE pair, keep the verifier in the keychain, ask Supabase to mail a link at `{server_url}/reset` |
+| `sync_complete_password_reset` | `(code, new_password, recovery_code?, device_name, start_over) → Result<SyncUser>` | Redeem the emailed code, recover the UMK, re-wrap it under the new password, then sign in. `start_over` mints a new key and gives up the old data |
+| `sync_change_password` | `(new_password: String) → Result<()>`                | Signed-in password change: re-wrap the in-memory UMK, then set the password. Cannot lose anything |
+| `sync_create_recovery_code` | `() → Result<String>`                           | Mint a code, wrap the UMK under it, store the envelope, return the code once. Also how regenerating works - storing revokes the previous code |
+| `sync_has_recovery_code` | `() → Result<Option<bool>>`                        | Whether the account has an envelope. `None` = not known (no session), which the UI must not read as "no" |
 
 **Space commands** (all sharing goes through these):
 

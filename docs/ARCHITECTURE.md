@@ -158,6 +158,16 @@ Development: http://localhost:8000/api/v1
 Self-hosted: configurable via Settings → Cloud Sync → Server URL
 ```
 
+The same origin, minus the `/api/v1` prefix, also serves two **human-facing HTML
+pages** - `/join/{code}` for a space invite and `/reset` for the password-reset
+mail. They exist because a mail or chat client strips an `orange://` link: each page
+hands the link to the app through the deep-link scheme and offers a download when
+the app is not installed. Backend `settings.public_base_url` is the single source
+for every shared link the server generates (invite emails, the Supabase
+`redirect_to`); the client builds the same link from its configured server URL via
+the `space_invite_link` command, so nothing hardcodes a base URL in the UI. Details
+in the backend's ARCHITECTURE section 2.8.
+
 ### 4.4 Entry push payload (desktop → server)
 ```jsonc
 {

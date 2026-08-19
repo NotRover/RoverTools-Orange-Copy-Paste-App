@@ -224,6 +224,7 @@ const App: React.FC = () => {
   // Spaces screen because that screen is only mounted while it is active, so a
   // link opened from any other screen would arrive with nobody listening.
   const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [resetCode, setResetCode] = useState<string | null>(null);
   const clearJoinCode = useCallback(() => setJoinCode(null), []);
   // Bumped whenever a merge lands, to briefly show a "syncing" pulse.
   const [syncTick, setSyncTick] = useState(0);
@@ -576,6 +577,17 @@ const App: React.FC = () => {
         if (cancelled || !code) return;
         setJoinCode(code);
         setScreen("spaces");
+      }),
+    );
+    // The password-reset link, opened from the user's mail. Held here rather
+    // than listened for on the account screen because that screen is usually
+    // not mounted when the link arrives.
+    track(
+      listen<{ code: string }>("sync:password-reset", (event) => {
+        const code = event.payload?.code?.trim();
+        if (cancelled || !code) return;
+        setResetCode(code);
+        setScreen("account");
       }),
     );
     return () => {
@@ -1325,6 +1337,8 @@ const App: React.FC = () => {
             entries={entries}
             notes={notes}
             restoringSession={restoringSession}
+            resetCode={resetCode}
+            onResetCodeConsumed={() => setResetCode(null)}
             onNavigate={(s) => {
               setScreen(s);
               if (s === "clipboard" || s === "notes" || s === "spaces") {

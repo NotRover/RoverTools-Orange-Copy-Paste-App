@@ -299,3 +299,35 @@ The `sync:oauth-ready` event and the `sync_oauth_pending` probe exist to keep th
 - The loopback result page is rebuilt in the app's own visual language (the `App.css` tokens and the sign-in screen's accent badge) and links to `orange://` as a manual fallback for anyone whose window manager ignores a programmatic focus. It also no longer uses a Unicode check mark, which broke the ASCII-only copy rule — the tick and cross are drawn as inline SVG.
 
 **Invariant to keep**: whenever a flow hands the user off to the browser and expects them back, the app raises itself when the browser half returns. Both outcomes, not just the happy one.
+
+---
+
+## #11 — The password-reset email linked to localhost, and resetting would have lost the data anyway
+
+**Date**: 2026-08-19
+**Severity**: Critical (password reset was unusable; the only account-wide envelope was tied to a password nobody could change)
+
+**Symptoms**: "Send reset link" reported success and the email arrived, pointing at `http://localhost:3000/...`. Nothing served that, so the link was dead on every machine. A user who forgot their password had no way back into their account.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/sync/supabase.rs` (`recover`), `src-tauri/src/sync/mod.rs` (`reset_password`), `src-tauri/src/lib.rs` (`parse_deep_link`)
+
+Two independent causes, and the second only became visible once the first was fixed.
+
+1. `recover()` sent `{ "email": ... }` and nothing else - no `redirect_to`. GoTrue falls back to the project's Site URL when no redirect is given, and that was a development localhost value. There was also nowhere for a link to land: the backend served no HTML at all.
+
+2. Even with a working link, the reset would have been destructive. The password is only a wrapping key: the UMK is a random account-wide key kept in one envelope, `pw_wrapped_umk`. Setting a new password without re-wrapping that envelope produces an account you can sign into and cannot decrypt - and the old envelope is gone. The account screen said as much, in a note admitting data would be lost.
+
+**Fix**:
+
+- The backend serves `/reset` (and `/join/{code}`), so there is a real page to land on. `recover()` now sends `redirect_to = {server_url}/reset` plus an S256 PKCE challenge, with the verifier in the OS keychain - install-scoped, because the request happens while signed out and the two halves are usually separated by an app restart.
+- PKCE rather than the implicit flow: the emailed link carries a one-time code in the query instead of a live access token in the fragment, and the code cannot be redeemed without the verifier, which never left the machine that asked for the reset.
+- `parse_deep_link` replaces `parse_join_code` and distinguishes `orange://reset?code=` from `orange://join?code=`. Any other host carrying a code is still a join, because invite links already sent out rely on that.
+- `complete_password_reset` re-wraps the **same** UMK, recovered from memory if signed in, otherwise from this machine's device wrap. Only if neither is available does it offer to start over with a new key, and it says plainly what that costs.
+- Envelope first, password second. The reverse order can leave an account whose password opens nothing, which is exactly the failure bug #9 fixed in the OAuth path.
+- `change_password` for a signed-in user is the same steps minus the code exchange, and cannot lose anything. It is what the account screen offers; the reset link is the fallback.
+
+**Requires one dashboard entry**: `{public_base_url}/reset` must be in Supabase Authentication -> URL Configuration -> Redirect URLs, or GoTrue ignores the redirect and mails the Site URL again.
+
+**Invariant to keep**: a password change is a re-wrap, never a new key. Any path that sets a password must have the UMK in hand first, and must write the new envelope before the credential changes.

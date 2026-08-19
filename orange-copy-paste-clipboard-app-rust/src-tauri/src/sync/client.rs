@@ -113,11 +113,21 @@ pub struct BootstrapResponse {
     /// its GCM tag doubles as the password verifier on unwrap.
     #[serde(default)]
     pub wrapped_umk: Option<String>,
+    /// base64 envelope holding the same UMK wrapped under the recovery-code key.
+    /// `None` means no recovery code has been saved for this account, which is
+    /// what makes the account screen ask for one.
+    #[serde(default)]
+    pub recovery_wrapped_umk: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SetWrappedUmkRequest {
     pub wrapped_umk: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetRecoveryUmkRequest {
+    pub recovery_wrapped_umk: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -948,6 +958,30 @@ impl SyncHttpClient {
         let body = SetWrappedUmkRequest { wrapped_umk };
         self.get_ok("set wrapped umk", false, || {
             Ok(self.authed(Method::PUT, "/api/v1/auth/umk")?.json(&body))
+        })
+        .await
+    }
+
+    /// Store the recovery-code-wrapped UMK envelope for this account.
+    ///
+    /// Replacing it is how a regenerated code revokes the previous one: the blob
+    /// the old code could open stops existing.
+    pub async fn set_recovery_wrapped_umk(&self, recovery_wrapped_umk: String) -> Result<(), String> {
+        let body = SetRecoveryUmkRequest { recovery_wrapped_umk };
+        self.get_ok("set recovery umk", false, || {
+            Ok(self
+                .authed(Method::PUT, "/api/v1/auth/umk/recovery")?
+                .json(&body))
+        })
+        .await
+    }
+
+    /// Drop the recovery envelope, for an account that just started over with a
+    /// fresh UMK - the old envelope would otherwise hand a recovering client a
+    /// key that decrypts nothing.
+    pub async fn clear_recovery_wrapped_umk(&self) -> Result<(), String> {
+        self.get_ok("clear recovery umk", false, || {
+            self.authed(Method::DELETE, "/api/v1/auth/umk/recovery")
         })
         .await
     }

@@ -197,3 +197,18 @@ guarantee.
   again, and the merge clears the marker rather than blocking on it. A copy you
   dropped yourself (`local_only`) keeps blocking, since nothing about the space
   changed.
+
+## Recovery code
+
+Account-scoped, never space-scoped: a recovery code opens the account's own
+encryption key and has nothing to do with membership of anything.
+
+| Action | Who can do it | Enforced where |
+| --- | --- | --- |
+| Save a recovery code | the account holder, on a signed-in device | `sync_create_recovery_code` needs the UMK in memory; `PUT /auth/umk/recovery` needs the account's own JWT |
+| Regenerate one | the same | the same route; storing replaces the envelope, so the previous code stops working |
+| Use one | anyone holding the code, on any machine | client-side only - the server stores a blob it cannot open |
+| Clear one | the account holder | `DELETE /auth/umk/recovery`, used when an account starts over with a new key |
+
+There is deliberately no route that lets the server, an admin, or another member
+recover somebody's key. That would end the end-to-end guarantee.

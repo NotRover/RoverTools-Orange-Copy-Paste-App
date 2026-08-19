@@ -3,9 +3,11 @@
   The page the browser tab lands on when a Google sign-in comes back.
 
   Served by the loopback listener in oauth.rs, which embeds this file with
-  include_str! and substitutes one placeholder: __STATE__ becomes "ok" or
-  "fail". Both outcomes live here, and CSS shows the matching half, so all the
-  copy is in one place and the two states cannot drift apart.
+  include_str! and substitutes one placeholder - the state class on <main> below
+  becomes "ok" or "fail". Both outcomes live here, and CSS shows the matching
+  half, so all the copy is in one place and the two states cannot drift apart.
+  The placeholder name is not written out in this comment: the substitution
+  replaces every occurrence in the file, comments included.
 
   Deliberately the app's own visual language: the tokens below are lifted from
   src/components/app/App.css, the badge is the sign-in screen's accent tile, and

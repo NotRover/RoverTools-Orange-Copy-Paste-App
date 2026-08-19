@@ -198,6 +198,63 @@ pub async fn sync_reset_password(
     sync.reset_password(email).await
 }
 
+/// Finish a password reset started from the emailed link.
+///
+/// `startOver` is the deliberate escape hatch: it mints a fresh encryption key
+/// when this machine cannot produce the old one, and everything synced under the
+/// old key stops being readable. The UI only offers it after the plain attempt
+/// has failed and said why.
+#[tauri::command]
+pub async fn sync_complete_password_reset(
+    code: String,
+    new_password: String,
+    recovery_code: Option<String>,
+    device_name: String,
+    start_over: bool,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<SyncUser, String> {
+    let sync = get_or_create_client(&state, &app)?;
+    let user = sync
+        .complete_password_reset(code, new_password, recovery_code, device_name, start_over)
+        .await?;
+    Arc::clone(&sync).trigger_initial_sync();
+    Ok(user)
+}
+
+/// Change the password of the account this app is signed into.
+///
+/// Nothing is re-derived and nothing can be lost: the key is already in memory,
+/// so this only re-wraps it. The lossless path, which is why the account screen
+/// points a signed-in user here rather than at a reset link.
+#[tauri::command]
+pub async fn sync_change_password(
+    new_password: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    sync_client(&state)?.change_password(new_password).await
+}
+
+/// Mint a recovery code and store its envelope, returning the code once.
+///
+/// The only time the code exists outside the user's own records: it is not stored
+/// anywhere, and asking again produces a different one which invalidates this.
+#[tauri::command]
+pub async fn sync_create_recovery_code(state: State<'_, AppState>) -> Result<String, String> {
+    sync_client(&state)?.create_recovery_code().await
+}
+
+/// Whether this account has a recovery code saved. `None` means not known yet
+/// (no session), which the UI must not treat as "no".
+#[tauri::command]
+pub async fn sync_has_recovery_code(state: State<'_, AppState>) -> Result<Option<bool>, String> {
+    let sync = state.sync_client.lock().clone();
+    Ok(match sync {
+        Some(sync) => sync.has_recovery_code().await,
+        None => None,
+    })
+}
+
 /// What a startup restore attempt concluded.
 ///
 /// Two outcomes used to share one `null`: "there is nothing to restore, show the
@@ -994,6 +1051,20 @@ fn extract_invite_code(input: &str) -> String {
         return rest.split(&['&', '#'][..]).next().unwrap_or(rest).to_string();
     }
     trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
+}
+
+/// The shareable https link for a space's invite code.
+///
+/// Built here rather than in the UI so the base URL stays in one place - the same
+/// place the sync client reads it from - and a self-hosted deployment produces
+/// links to itself. The `orange://` deep link still works and is what the page at
+/// the other end uses; it is not what gets shared, because mail and chat clients
+/// strip a custom scheme.
+#[tauri::command]
+pub fn space_invite_link(invite_code: String, state: State<'_, AppState>) -> Result<String, String> {
+    let sync = sync_client(&state)?;
+    let base = sync.server_url.trim_end_matches('/').to_string();
+    Ok(format!("{base}/join/{}", extract_invite_code(&invite_code)))
 }
 
 #[tauri::command]

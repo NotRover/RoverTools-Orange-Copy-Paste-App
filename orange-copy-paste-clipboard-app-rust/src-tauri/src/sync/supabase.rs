@@ -266,16 +266,35 @@ impl SupabaseAuth {
         Ok(())
     }
 
-    /// Request a password-reset email: `POST /recover`.  GoTrue emails the user a
-    /// recovery link (targeting the project's Site URL).  Returns `Ok` on 200
+    /// Request a password-reset email: `POST /recover`.  Returns `Ok` on 200
     /// even though the body is empty, so we don't route through `send_json`.
-    pub async fn recover(&self, email: &str) -> Result<(), String> {
+    ///
+    /// PKCE, same shape as [`Self::authorize_url`]: the emailed link comes back
+    /// carrying `?code=` in the query, and that code is useless without the
+    /// verifier, which stays in this machine's keychain. The alternative - the
+    /// implicit flow - puts a live access token in the URL fragment, where it
+    /// reaches the browser, its history, and any extension reading the page.
+    ///
+    /// `redirect_to` must be in the project's Redirect URLs allow-list or GoTrue
+    /// refuses it and falls back to the Site URL, which is how this used to mail
+    /// a localhost link: the call passed no redirect at all.
+    pub async fn recover(
+        &self,
+        email: &str,
+        redirect_to: &str,
+        code_challenge: &str,
+    ) -> Result<(), String> {
         self.ensure_configured()?;
         let resp = self
             .inner
             .post(self.url("/recover"))
+            .query(&[("redirect_to", redirect_to)])
             .header("apikey", &self.anon_key)
-            .json(&serde_json::json!({ "email": email }))
+            .json(&serde_json::json!({
+                "email": email,
+                "code_challenge": code_challenge,
+                "code_challenge_method": "s256",
+            }))
             .send()
             .await
             .map_err(|e| format!("supabase recover: {e}"))?;
