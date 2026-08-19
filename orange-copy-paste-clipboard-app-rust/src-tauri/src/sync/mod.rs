@@ -5,7 +5,7 @@
 //! "sync-worker") so that background tasks — the WebSocket listener, debounce
 //! timer, pending-queue flusher — never block clipboard capture or the UI.
 //!
-//! # Invariants (see ARCHITECTURE.md §Cross-System Invariants)
+//! # Invariants (see the Cross-System Invariants section in ARCHITECTURE.md)
 //! - UMK is in-memory only; never written to any file or log.
 //! - Sync runtime never calls `block_on` on Tauri's runtime.
 //! - Capture pipeline is untouched; hooks fire only after a confirmed push.

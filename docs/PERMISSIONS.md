@@ -111,8 +111,8 @@ belong to. Two consequences follow, and both are intended:
 - **Removing a member is not retroactive** for anything they already pulled. See
   "What the server does not enforce" below - the same limit applies to bytes.
 
-Backend detail: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` §2.4 and
-§6.3.
+Backend detail: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` sections 2.4
+and 6.3.
 
 ## Where each rule lives
 

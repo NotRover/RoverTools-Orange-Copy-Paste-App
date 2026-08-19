@@ -207,7 +207,7 @@ pub fn device_public_key(privkey: &[u8; 32]) -> [u8; 32] {
 
 /// Derive the per-user **identity** X25519 keypair deterministically from the
 /// UMK.  Because the UMK is identical on every one of a user's devices (shared
-/// via §7.3 wrapping), so is this keypair — no cross-device distribution and no
+/// via section 7.3 wrapping), so is this keypair — no cross-device distribution and no
 /// server-side storage of the private half are needed.  Only the public key is
 /// registered (`POST /auth/keys/register`) so peers can wrap Group Keys for us.
 ///

@@ -149,6 +149,9 @@ These bind the client and backend. Changing one side usually means changing the 
 
 ## Code Conventions
 
+**Everywhere — docs, comments, copy, commits**
+- **Never write the section sign (U+00A7).** Reference a section by number or name instead: "section 7.4", "sections 5.1-5.6", "the Cross-System Invariants section". Unlike the copy rules below, this one covers everything you write: markdown docs, code comments, commit messages, PR bodies, and chat replies.
+
 **Client — the Rust/React boundary**
 - Rust owns state, persistence, and **all** crypto; React is UI. Never reimplement encryption, key handling, or merge logic in TypeScript.
 - Frontend → Rust: `invoke<T>("command_name", { camelCaseArgs })` from `@tauri-apps/api/core`. Commands are snake_case and domain-prefixed (`spaces_list`, `space_set_send_filter`, `get_setting`); register new ones in `lib.rs`.
@@ -161,7 +164,7 @@ These bind the client and backend. Changing one side usually means changing the 
 
 Covers every string a user reads: labels, buttons, empty states, toasts, errors, emails, landing copy. Not code comments, commit messages, or PR bodies.
 
-- ASCII punctuation only. No `—`, `–`, `“ ” ‘ ’`, `…`, `•`, `→`, `×`, `✓`, `★`, `✨`, non-breaking spaces. Hyphens are fine ("real-time"). Emoji only if the design calls for it, never as an icon.
+- ASCII punctuation only. No `—`, `–`, `“ ” ‘ ’`, `…`, `•`, `→`, `×`, `✓`, `★`, `✨`, non-breaking spaces, the section sign. Hyphens are fine ("real-time"). Emoji only if the design calls for it, never as an icon.
 - No stock AI words: delve, tapestry, landscape, seamless, robust, elevate, empower, unlock, transform, unleash, supercharge, leverage, utilize, harness, journey, effortless.
 - No stock shapes: "It's not just X, it's Y", three-adjective lists, "In today's ... world", Furthermore/Moreover openers, two-abstract-noun feature titles ("Seamless Integration").
 - Short, specific, concrete. Name the real action or number. Cut any sentence that can go without losing meaning.

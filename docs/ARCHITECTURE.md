@@ -108,7 +108,7 @@ Two features, deliberately separate:
 - Sync cursors (per-device high-water marks)
 - Space definitions and membership (no member cap; `role` is `owner` or `member`)
 - Blob metadata and pre-signed URL generation
-- Per-member wrapped Space Key *keyrings* — opaque blobs the server cannot open (§10)
+- Per-member wrapped Space Key *keyrings* — opaque blobs the server cannot open (section 10)
 - Addressed space invites (one row per space + invitee email, with status)
 - Encrypted user settings blob (`user_settings` table — one row per user, server never decrypts)
 
@@ -173,7 +173,7 @@ Self-hosted: configurable via Settings → Cloud Sync → Server URL
     "deleted_at": null,                  // set for tombstones; keep space_ids on them
     "blob_key": null,                    // S3 key for image/file/video entries (≤ 5 MB)
     "space_ids": [],                      // spaces to fan this entry out to; [] = personal only
-    "wrapped_keys": "{\"personal\":\"…\",\"<space_id>\":\"…\"}"   // CEK envelope (§8)
+    "wrapped_keys": "{\"personal\":\"…\",\"<space_id>\":\"…\"}"   // CEK envelope (section 8)
   }]
 }
 ```
@@ -546,7 +546,7 @@ Member removed, or leaves:
   4. Each member receives space:rekey and caches the whole ring
 
 Entries only ever encrypt content under their own CEK; the Space Key wraps that
-CEK (§8). Nothing is re-encrypted on a rekey.
+CEK (section 8). Nothing is re-encrypted on a rekey.
 ```
 
 Space Keys live in client memory only. Restart recovery comes from `GET /spaces`, which returns the caller's own `my_wrapped_space_keys` — `space:rekey` is fire-and-forget and nothing retries it.
@@ -726,7 +726,7 @@ These constraints must be preserved across any change to either submodule:
 | 5 | **Tombstones always propagate.** A `deleted_at` value on a sync entry must be honoured by the receiving device. Deletion wins over concurrent update. |
 | 6 | **Capture pipeline is untouched.** The clipboard watcher and suppress-flag flow must not be modified by sync logic. Sync is a post-capture side-effect. |
 | 7 | **Pin/group operations sync bidirectionally.** A pin or group change on any device must propagate to all other devices for that entry. |
-| 8 | **Space Key rotation on member removal.** Removing a member (or a member leaving) must clear every remaining member's wrapped keyring, and the owner's client must mint a new Space Key and redistribute. Rotation is best-effort by design (§10.4) — do not document or present it as airtight. |
+| 8 | **Space Key rotation on member removal.** Removing a member (or a member leaving) must clear every remaining member's wrapped keyring, and the owner's client must mint a new Space Key and redistribute. Rotation is best-effort by design (section 10.4) — do not document or present it as airtight. |
 | 9 | **Cursor advances only on confirmed receipt.** `POST /sync/cursor` is only called after entries are successfully decrypted and merged into local store. |
 | 10 | **ID mapping is maintained.** The `client_id → server_id` mapping must be preserved across restarts. Losing it causes duplicate entries on the next push. |
 | 11 | **Sharing is always opt-in.** No entry carries a space id unless the user shared it explicitly or that space's send filter is on and matches. Nothing enters a space by default. |
