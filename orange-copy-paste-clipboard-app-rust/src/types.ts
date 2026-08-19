@@ -67,6 +67,11 @@ export interface Space {
   name: string;
   owner_id: string;
   is_owner: boolean;
+  /** Whether this device holds the Space Key. False right after joining, until
+   *  the owner's app hands it over. Nothing can be written to a space without
+   *  it - content is encrypted under that key - so the write controls are off
+   *  while it is false, rather than accepting a share that would go nowhere. */
+  has_key: boolean;
   /** Whether members who join later can read entries shared before they joined. */
   share_history: boolean;
   member_count: number;

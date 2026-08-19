@@ -3078,7 +3078,21 @@ impl SyncClient {
 
     /// The cached space list (refreshed by [`Self::reconcile_spaces`]).
     pub fn spaces(&self) -> Vec<Space> {
-        self.spaces.lock().clone()
+        let mut spaces = self.spaces.lock().clone();
+        self.stamp_keys(&mut spaces);
+        spaces
+    }
+
+    /// Refresh `has_key` against the keyrings held right now.
+    ///
+    /// Not stored on the cached list: a key can land between two reads (the
+    /// owner's app comes back, the retry loop succeeds), and a stale `false`
+    /// would keep the UI refusing writes that would now work.
+    fn stamp_keys(&self, spaces: &mut [Space]) {
+        let rings = self.space_keys.lock();
+        for space in spaces.iter_mut() {
+            space.has_key = matches!(rings.get(&space.id), Some(ring) if !ring.is_empty());
+        }
     }
 
     /// Flip a member's presence across every cached space they appear in,
@@ -3325,6 +3339,12 @@ impl SyncClient {
         Some(crypto::derive_identity_keypair(&umk))
     }
 
+    /// Whether this device can encrypt for a space. The one gate on writing:
+    /// commands refuse rather than push something the space cannot read.
+    pub fn has_space_key(&self, space_id: &str) -> bool {
+        self.space_current_key(space_id).is_some()
+    }
+
     /// The current (newest) key for a space, if we hold its keyring.
     fn space_current_key(&self, space_id: &str) -> Option<[u8; 32]> {
         self.space_keys
@@ -3530,7 +3550,9 @@ impl SyncClient {
             .ok_or_else(|| "Not signed in".to_string())?;
         let space_key = self
             .space_current_key(space_id)
-            .ok_or_else(|| "No key for this space yet".to_string())?;
+            .ok_or_else(|| {
+                "This space has not handed you its key yet, so you cannot post here.".to_string()
+            })?;
 
         // Same envelope as an entry: a fresh key per comment, wrapped under the
         // Space Key, so a rotation never strands what was written before it.
@@ -3776,6 +3798,8 @@ impl SyncClient {
 
             out.push(Space {
                 is_owner: s.owner_id == me,
+                // Stamped below, once the whole list is built.
+                has_key: false,
                 member_count: s.members.len() as u32,
                 members: s
                     .members
@@ -3798,6 +3822,7 @@ impl SyncClient {
             });
         }
 
+        self.stamp_keys(&mut out);
         *self.spaces.lock() = out.clone();
         if self.keys_pending(&out) {
             Arc::clone(self).spawn_key_retry();

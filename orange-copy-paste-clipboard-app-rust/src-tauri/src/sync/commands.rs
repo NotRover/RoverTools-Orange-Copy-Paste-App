@@ -1010,8 +1010,12 @@ pub async fn space_create(
     // Creator is the sole member at this point; surface the invite code so the
     // UI can share it.
     let me = sync.current_user().map(|u| u.user_id).unwrap_or_default();
+    let space_id = created.space_id;
     Ok(Space {
-        id: created.space_id,
+        // Minted by the reconcile above; false only if that could not reach the
+        // server, in which case the UI correctly refuses to write here yet.
+        has_key: sync.has_space_key(&space_id),
+        id: space_id,
         name,
         owner_id: me,
         is_owner: true,
@@ -1096,6 +1100,21 @@ pub fn space_set_entry_shares(
         return Err(format!("unknown entry type: {entry_type}"));
     }
     let sync = sync_client(&state)?;
+    // Refuse rather than half-do it. The push path drops a space it holds no key
+    // for - encrypting under a key nobody has would produce an entry nobody can
+    // read - so going ahead here records a share locally that never reaches the
+    // space, and the user is told it worked.
+    if let Some(blocked) = space_ids.iter().find(|id| !sync.has_space_key(id)) {
+        let name = sync
+            .spaces()
+            .into_iter()
+            .find(|s| &s.id == blocked)
+            .map(|s| s.name)
+            .unwrap_or_else(|| "That space".to_string());
+        return Err(format!(
+            "{name} has not handed you its key yet, so nothing can be shared there.              It arrives on its own once the owner's app is running."
+        ));
+    }
     let key = format!("{entry_type}:{entry_id}");
     // Spaces this gesture takes the entry out of. Each one keeps a placeholder,
     // so the feed there says the item was pulled back rather than losing the

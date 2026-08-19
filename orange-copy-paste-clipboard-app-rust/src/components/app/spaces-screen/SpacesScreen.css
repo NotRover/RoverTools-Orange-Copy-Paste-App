@@ -1607,6 +1607,30 @@
   color: var(--danger);
 }
 
+/* A space that cannot be written to yet. Amber, matching the "waiting for key"
+   badge on the member row, because it is the same fact from the other side. */
+.sp-waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-xs);
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.sp-waiting-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #f59e0b;
+}
+
+.sp-waiting-desc {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 .sp-settings-block {
   display: flex;
   flex-direction: column;

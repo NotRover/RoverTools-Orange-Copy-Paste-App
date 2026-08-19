@@ -90,6 +90,25 @@ so the damage was one-sided and invisible from the other end.
 | Delete their own comment | yes | yes |
 | Delete anyone's comment | yes | no |
 | Set per-space send filters | yes | yes (own client, own choice) |
+| Share an entry into the space | yes | yes |
+
+**Every write in that table needs the Space Key first.** A member who has just joined
+does not hold it until the owner's app wraps a copy for them, and content in a space is
+encrypted under it - so until it arrives there is nothing readable and nothing that can
+be written. This is a capability, not a role: it applies to an owner too, in the window
+between creating a space and minting its key.
+
+The client refuses those writes rather than half-doing them, because the push path drops
+a space it holds no key for: going ahead would record a share locally, report success,
+and never reach the space. `Space.has_key` carries the state to the UI, stamped from the
+live keyring on every read since the key can land at any moment.
+
+| Attempted while waiting for the key | What happens |
+|---|---|
+| Share an entry in (card menu, bulk bar) | row disabled, reason on hover; the command also refuses |
+| Turn on "Share new items out" | toggle disabled, and the space's panel says why |
+| Comment on an entry | command refuses; nothing is readable to comment on anyway |
+| Read the feed | empty - the entries cannot be decrypted yet |
 
 ## Who pays for what
 
@@ -136,6 +155,13 @@ Client, Rust — the enforcement that matters, since only Rust can push:
   of the tombstone branch in `merge_pulled`. This is what makes "keep the local
   copy" true when the device's own tombstone comes back.
 - `notes/commands.rs` — `update_note` refuses outright.
+- `sync/mod.rs` — `has_space_key`, and `sync/commands.rs` — the check at the
+  top of `space_set_entry_shares`. A space whose key has not arrived cannot be
+  written to at all, by anyone, so this one is a capability rather than a role.
+  `space_comment_add` refuses on the same condition.
+- `sync/mod.rs` — `stamp_keys`, which sets `Space::has_key` from the live
+  keyring on every read. It is what the UI below draws from, and it is stamped
+  rather than stored because the key can arrive at any moment.
 
 Client, React — hides what is not allowed, so nothing dead is on screen:
 
@@ -149,6 +175,10 @@ Client, React — hides what is not allowed, so nothing dead is on screen:
 - `comments/CommentThread.tsx` — a comment's delete button is drawn on
   `is_mine || isOwner`. Commenting itself is ungated in the UI: everyone in the
   space may, so there is nothing to hide.
+- `SpacesScreen.tsx`, `card-menu/CardMenu.tsx`,
+  `clipboard-screen/bulk-actions/BulkActionsBar.tsx` — `space.has_key` disables
+  every share control for a space still waiting on its key, and the space panel
+  says so in words rather than leaving a dead toggle.
 
 Backend — the only place a rule survives a modified client:
 
