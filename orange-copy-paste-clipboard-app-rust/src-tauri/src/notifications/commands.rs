@@ -106,8 +106,15 @@ pub async fn notifications_refresh(app: tauri::AppHandle) -> Result<(), String> 
                     let mut n = Notification::new(
                         id,
                         NotificationKind::SpaceInvite,
-                        format!("{} invited you to {}", invite.inviter_name, invite.space_name),
+                        format!(
+                            "{} invited you to \"{}\"",
+                            invite.inviter_name, invite.space_name
+                        ),
                     )
+                    .with_body(format!(
+                        "Join to get what is shared in \"{}\", or decline to clear this.",
+                        invite.space_name
+                    ))
                     .with_data("invite_id", invite.id.clone())
                     .with_data("space_id", invite.space_id.clone())
                     .with_data("space_name", invite.space_name.clone());

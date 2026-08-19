@@ -27,6 +27,25 @@ pub fn raise(app: &tauri::AppHandle, notification: Notification) {
     commands::commit(app, changed);
 }
 
+/// Mark a notification as answered, from wherever the answer was given.
+///
+/// The row stays in the feed as history and drops its buttons. Called the
+/// moment the server confirms rather than left to the next reconcile: until
+/// this lands the row still offers Join and Decline for something that has
+/// already been settled, and pressing one of them is how a decline reached an
+/// invite that was accepted a second earlier.
+///
+/// A no-op when the row is not there, which is the case for an invite this
+/// device was never told about.
+pub fn resolve(app: &tauri::AppHandle, id: &str, outcome: &str) {
+    let changed = app
+        .state::<crate::state::AppState>()
+        .notifications
+        .lock()
+        .resolve(id, outcome);
+    commands::commit(app, changed);
+}
+
 /// Raise a rolling summary, where new text means a new event. See
 /// [`NotificationStore::announce`].
 pub fn raise_rolling(app: &tauri::AppHandle, notification: Notification) {

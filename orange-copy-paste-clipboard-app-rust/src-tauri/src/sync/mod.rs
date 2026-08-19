@@ -68,6 +68,12 @@ const REMINDER_SWEEP_INTERVAL_SECS: u64 = 30 * 60;
 /// Share of the storage quota that counts as nearly full.
 const STORAGE_WARN_RATIO: f64 = 0.9;
 
+/// How long the same membership change counts as already reported.
+///
+/// Long enough to cover the same event arriving on two channels, short enough
+/// that someone genuinely leaving and rejoining still reads as two events.
+const ACTIVITY_REPEAT_MS: u64 = 30_000;
+
 /// Settings key holding the per-space send filters (JSON map keyed by space
 /// id).  Lives in settings.json and rides in the encrypted settings blob so
 /// filters roam across devices without the server ever seeing them.
@@ -432,6 +438,12 @@ pub struct SyncClient {
     send_filters: Arc<Mutex<HashMap<String, SendFilter>>>,
     /// Cloud-sync mode for personal entries. Spaces are realtime regardless.
     sync_mode: Arc<Mutex<SyncMode>>,
+    /// When each membership change was last written to the notification feed,
+    /// keyed by `{space}:{action}:{actor}`. One change can reach this device
+    /// down more than one channel - the space's own fan-out and the personal
+    /// one a removal also goes to - and each arrival used to become its own
+    /// row, so the user read the same sentence twice.
+    noted_activity: Arc<Mutex<HashMap<String, u64>>>,
 
     /// WebSocket listener — replaced on reconnect.
     ws_listener: Mutex<Option<Arc<WsListener>>>,
@@ -586,6 +598,7 @@ impl SyncClient {
             space_keys: Arc::new(Mutex::new(HashMap::new())),
             send_filters: Arc::new(Mutex::new(send_filters)),
             sync_mode: Arc::new(Mutex::new(sync_mode)),
+            noted_activity: Arc::new(Mutex::new(HashMap::new())),
             ws_listener: Mutex::new(None),
             restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             key_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2351,24 +2364,48 @@ impl SyncClient {
         // Doing it yourself is not news - you watched it happen and the screen
         // already changed under you. Losing your own membership is the one
         // exception, and it is the case this exists for.
-        let title = match (action, by_me) {
-            ("joined", false) => format!("{actor_name} joined {space_name}"),
-            ("left", true) => format!("You are no longer in {space_name}"),
-            ("left", false) => format!("{actor_name} left {space_name}"),
-            ("deleted", false) => format!("{space_name} was deleted"),
+        let (title, body) = match (action, by_me) {
+            ("joined", false) => (
+                format!("{actor_name} joined \"{space_name}\""),
+                format!("They can now see what is shared in \"{space_name}\"."),
+            ),
+            ("left", true) => (
+                format!("You are no longer in \"{space_name}\""),
+                format!("Nothing new arrives from \"{space_name}\". Copies you already have stay on this device."),
+            ),
+            ("left", false) => (
+                format!("{actor_name} left \"{space_name}\""),
+                format!("They stop receiving anything new shared in \"{space_name}\"."),
+            ),
+            ("deleted", false) => (
+                format!("\"{space_name}\" was deleted"),
+                format!("The owner deleted \"{space_name}\". Copies you already have stay on this device."),
+            ),
             _ => return,
         };
 
-        // Each occurrence is its own row, so the id carries the time. Nothing
-        // replays these - they arrive once, live, over the socket.
-        let id = format!("space-activity:{space_id}:{action}:{actor_id}:{}", now_ms());
+        // Each occurrence is its own row, so the id carries the time. One
+        // change can still arrive twice - the same event reaches this device
+        // down the space channel and the personal one - so a repeat within the
+        // window below is the same news, not a second event.
+        let key = format!("{space_id}:{action}:{actor_id}");
+        let now = now_ms();
+        {
+            let mut noted = self.noted_activity.lock();
+            if noted.get(&key).is_some_and(|at| now.saturating_sub(*at) < ACTIVITY_REPEAT_MS) {
+                return;
+            }
+            noted.retain(|_, at| now.saturating_sub(*at) < ACTIVITY_REPEAT_MS);
+            noted.insert(key, now);
+        }
         crate::notifications::raise(
             &self.app,
             crate::notifications::Notification::new(
-                id,
+                format!("space-activity:{space_id}:{action}:{actor_id}:{now}"),
                 crate::notifications::NotificationKind::SpaceActivity,
                 title,
             )
+            .with_body(body)
             .with_data("space_id", space_id.to_string()),
         );
     }
@@ -2390,7 +2427,7 @@ impl SyncClient {
                 // same removal twice.
                 format!("space-removed:{space_id}:{entry_type}:{client_id}"),
                 crate::notifications::NotificationKind::SpaceActivity,
-                format!("A space owner removed your {what} from {space_name}"),
+                format!("A space owner removed your {what} from \"{space_name}\""),
             )
             .with_body("You still have your copy. It is only out of that space.")
             .with_data("space_id", space_id.to_string()),
@@ -2421,7 +2458,7 @@ impl SyncClient {
                 // a reconnect that replays it must not add a second line.
                 format!("invite-answered:{invite_id}"),
                 crate::notifications::NotificationKind::SpaceActivity,
-                format!("Your invite to {space_name} was {verb}"),
+                format!("Your invite to \"{space_name}\" was {verb}"),
             )
             .with_data("space_id", space_id.to_string()),
         );

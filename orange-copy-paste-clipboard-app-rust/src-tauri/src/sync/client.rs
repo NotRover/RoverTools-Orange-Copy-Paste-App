@@ -880,10 +880,22 @@ impl SyncHttpClient {
     where
         F: Fn() -> Result<reqwest::RequestBuilder, String>,
     {
-        self.run(tag, allow_404, factory)
+        self.get_ok_classified(tag, allow_404, factory)
             .await
-            .map(|_| ())
             .map_err(String::from)
+    }
+
+    /// Same, keeping the HTTP status for a caller that acts on it.
+    async fn get_ok_classified<F>(
+        &self,
+        tag: &str,
+        allow_404: bool,
+        factory: F,
+    ) -> Result<(), ApiError>
+    where
+        F: Fn() -> Result<reqwest::RequestBuilder, String>,
+    {
+        self.run(tag, allow_404, factory).await.map(|_| ())
     }
 
     // ── Auth (profile / devices / keys) ───────────────────────────
@@ -1346,8 +1358,11 @@ impl SyncHttpClient {
     }
 
     /// Accept an invite addressed to us; joins its space server-side.
-    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinSpaceResponse, String> {
-        self.get_json("accept invite", || {
+    /// Classified so the caller can tell "already answered" (409) from a real
+    /// failure: the invite is settled either way, and only the second is worth
+    /// putting in front of the user.
+    pub async fn accept_invite(&self, invite_id: &str) -> Result<JoinSpaceResponse, ApiError> {
+        self.get_json_classified("accept invite", || {
             Ok(self
                 .authed(Method::POST, &format!("/api/v1/invites/{invite_id}/accept"))?
                 .json(&serde_json::json!({})))
@@ -1355,8 +1370,9 @@ impl SyncHttpClient {
         .await
     }
 
-    pub async fn decline_invite(&self, invite_id: &str) -> Result<(), String> {
-        self.get_ok("decline invite", true, || {
+    /// See [`Self::accept_invite`] for why this is classified.
+    pub async fn decline_invite(&self, invite_id: &str) -> Result<(), ApiError> {
+        self.get_ok_classified("decline invite", true, || {
             Ok(self
                 .authed(Method::POST, &format!("/api/v1/invites/{invite_id}/decline"))?
                 .json(&serde_json::json!({})))
@@ -1364,8 +1380,9 @@ impl SyncHttpClient {
         .await
     }
 
-    pub async fn revoke_invite(&self, invite_id: &str) -> Result<(), String> {
-        self.get_ok("revoke invite", true, || {
+    /// See [`Self::accept_invite`] for why this is classified.
+    pub async fn revoke_invite(&self, invite_id: &str) -> Result<(), ApiError> {
+        self.get_ok_classified("revoke invite", true, || {
             self.authed(Method::DELETE, &format!("/api/v1/invites/{invite_id}"))
         })
         .await

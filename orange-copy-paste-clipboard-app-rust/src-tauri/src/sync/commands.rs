@@ -1233,13 +1233,45 @@ pub async fn sync_send_invite(
     http.send_space_invite(&space_id, &email).await
 }
 
+/// One answer, told to every surface that is showing the invite.
+///
+/// The invite lists on the Spaces screen and the row in the notification centre
+/// used to find out separately, and only by asking the server again - so an
+/// invite accepted in one of them still offered Join and Decline in the other,
+/// and pressing Decline there is what produced "Invite already accepted".
+/// Answering it is now what settles it, wherever the answer came from.
+/// Swallow a 409 on an invite answer.
+///
+/// The server says 409 when the invite has already been answered - from
+/// another device, or from the app's other surface a moment earlier. The user
+/// asked for it to be gone and it is gone, so this is the outcome they wanted,
+/// not a failure to put in front of them. The caller still settles the row, so
+/// the stale buttons it was pressed on go away.
+fn already_answered<T>(result: Result<T, crate::sync::client::ApiError>) -> Result<(), String> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) if e.status == Some(409) => Ok(()),
+        Err(e) => Err(String::from(e)),
+    }
+}
+
+fn settle_invite(app: &tauri::AppHandle, invite_id: &str, status: &str, outcome: &str) {
+    crate::notifications::resolve(app, &format!("invite:{invite_id}"), outcome);
+    let _ = app.emit(
+        "sync:invite-answered",
+        serde_json::json!({ "invite_id": invite_id, "status": status }),
+    );
+}
+
 #[tauri::command]
 pub async fn sync_accept_invite(
     invite_id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
-    http.accept_invite(&invite_id).await?;
+    already_answered(http.accept_invite(&invite_id).await)?;
+    settle_invite(&app, &invite_id, "accepted", "Joined");
     // Catch up in the background: receive the keyring once the owner wraps it,
     // then pull the space's history (subject to its share_history policy).
     let sync2 = Arc::clone(&sync);
@@ -1253,19 +1285,25 @@ pub async fn sync_accept_invite(
 #[tauri::command]
 pub async fn sync_decline_invite(
     invite_id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
-    http.decline_invite(&invite_id).await
+    already_answered(http.decline_invite(&invite_id).await)?;
+    settle_invite(&app, &invite_id, "declined", "Declined");
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn sync_revoke_invite(
     invite_id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
-    http.revoke_invite(&invite_id).await
+    already_answered(http.revoke_invite(&invite_id).await)?;
+    settle_invite(&app, &invite_id, "revoked", "Withdrawn");
+    Ok(())
 }
 
 // ── Settings sync commands ────────────────────────────────────────────
