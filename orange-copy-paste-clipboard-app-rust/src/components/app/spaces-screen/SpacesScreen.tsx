@@ -2739,17 +2739,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         await invoke("sync_send_invite", { spaceId, email });
         refreshInvites();
       } catch (e) {
-        // The three the server can be specific about. An invite has to reach
-        // someone inside the app, so an address with no account is a dead end
-        // and saying so beats a generic failure the owner cannot act on.
-        const raw = typeof e === "string" ? e : "";
-        if (/404/.test(raw))
-          setSpaceError("No RoverTools account uses that email. Ask them to sign up first.");
-        else if (/409/.test(raw))
-          setSpaceError("They are already in this space.");
-        else if (/400/.test(raw))
-          setSpaceError("That is your own email.");
-        else setSpaceError(errMsg(e, "Could not send the invite."));
+        // `sync_send_invite` already turned the status into a reason the owner
+        // can act on, so this shows it instead of guessing from the text - the
+        // guess was a regex over the error string, and any rewording on the Rust
+        // side quietly turned every reason into the generic fallback. The panel
+        // is easy to miss while typing in the field below it, so the same
+        // sentence also goes out as a toast.
+        const msg = typeof e === "string" && e ? e : "Could not send the invite.";
+        setSpaceError(msg);
+        showToast(msg, "error");
       }
     },
     [refreshInvites],

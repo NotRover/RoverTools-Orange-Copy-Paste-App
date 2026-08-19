@@ -1425,9 +1425,17 @@ impl SyncHttpClient {
     }
 
     /// Send an addressed invite for a space we own (also emails the code).
-    pub async fn send_space_invite(&self, space_id: &str, email: &str) -> Result<InviteOut, String> {
+    /// Classified, unlike most calls: every refusal here is something the owner
+    /// can act on (no account, already a member, own address), and the status is
+    /// the only stable way to tell them apart - the frontend used to sniff the
+    /// message text, which broke silently whenever the wording moved.
+    pub async fn send_space_invite(
+        &self,
+        space_id: &str,
+        email: &str,
+    ) -> Result<InviteOut, ApiError> {
         let body = SendInviteRequest { email: email.to_string() };
-        self.get_json("send invite", || {
+        self.get_json_classified("send invite", || {
             Ok(self
                 .authed(Method::POST, &format!("/api/v1/spaces/{space_id}/invites"))?
                 .json(&body))

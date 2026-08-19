@@ -1409,7 +1409,45 @@ pub async fn sync_send_invite(
     state: State<'_, AppState>,
 ) -> Result<crate::sync::client::InviteOut, String> {
     let (_sync, http) = sync_http(&state)?;
-    http.send_space_invite(&space_id, &email).await
+    http.send_space_invite(&space_id, &email)
+        .await
+        .map_err(invite_refusal)
+}
+
+/// Say why an invite was refused, in words the owner can act on.
+///
+/// Every one of these is a normal outcome rather than a fault: the address has
+/// no account, they are already in, it is your own address. The reason lived in
+/// the frontend as a regex over the error string, so any rewording in
+/// `client.rs` silently downgraded all of them to "Could not send the invite."
+/// The status is the stable fact and it is only available here.
+///
+/// 404 is deliberately not decided on status alone - the server uses it for both
+/// an unknown invitee and a space that is gone, and telling someone to have
+/// their friend sign up when the space was deleted is worse than saying nothing.
+fn invite_refusal(err: crate::sync::client::ApiError) -> String {
+    let detail = strip_call_tag(&err.message);
+    match err.status {
+        Some(404) if detail.to_lowercase().contains("space") => {
+            "That space no longer exists. Refresh the list and try again.".to_string()
+        }
+        Some(404) => "No account uses that email yet. Ask them to sign up first.".to_string(),
+        Some(409) => "They are already in this space.".to_string(),
+        Some(400) => "That is your own email.".to_string(),
+        Some(403) => "Only the owner can invite people to this space.".to_string(),
+        Some(401) => "Your session expired. Sign in again on the Account screen.".to_string(),
+        Some(429) => "Too many invites just now. Try again in a moment.".to_string(),
+        _ => format!("Could not send the invite. {detail}"),
+    }
+}
+
+/// Drop the `"<call> <status>: "` prefix `client.rs` puts on an error. It is
+/// there for the log, and reads as noise to whoever is looking at the screen.
+fn strip_call_tag(message: &str) -> &str {
+    match message.split_once(": ") {
+        Some((head, detail)) if head.ends_with(|c: char| c.is_ascii_digit()) => detail,
+        _ => message,
+    }
 }
 
 /// One answer, told to every surface that is showing the invite.
