@@ -91,6 +91,29 @@ so the damage was one-sided and invisible from the other end.
 | Delete anyone's comment | yes | no |
 | Set per-space send filters | yes | yes (own client, own choice) |
 
+## Who pays for what
+
+Ownership decides cost the same way it decides editing: **an account is charged for
+what it uploaded, and for nothing else.**
+
+| Resource | Charged to | A member who received it |
+|---|---|---|
+| Image bytes in R2 (50 MB quota) | the uploader | costs them nothing - no `blobs` row exists |
+| A `sync_entries` row (3,000 per account) | the author | costs them nothing - it is the author's row |
+| Entry ciphertext (512 KB per entry) | the author | n/a |
+
+A shared image is never copied. The reader gets a one-hour presigned GET on the
+owner's key, granted only while a live entry carries that blob into a space they both
+belong to. Two consequences follow, and both are intended:
+
+- **The owner deleting the entry breaks it for everyone.** The blob is released, the
+  hourly sweep removes the object, and a member who had not fetched it yet gets a 404.
+- **Removing a member is not retroactive** for anything they already pulled. See
+  "What the server does not enforce" below - the same limit applies to bytes.
+
+Backend detail: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` §2.4 and
+§6.3.
+
 ## Where each rule lives
 
 Client, Rust — the enforcement that matters, since only Rust can push:
