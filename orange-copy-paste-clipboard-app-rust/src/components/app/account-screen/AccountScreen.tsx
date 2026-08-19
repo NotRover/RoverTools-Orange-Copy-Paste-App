@@ -43,6 +43,10 @@ import { ClipboardIcon, GoogleIcon, NotesIcon } from "../../icons";
 import { deferDestructive } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
 import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
+import {
+  NETWORK_REFOCUS_MS,
+  useWindowRefocus,
+} from "../../../hooks/useWindowRefocus";
 import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
@@ -273,6 +277,22 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       }
     });
   }, [refreshQuota, refreshCloudCount, applyDevices]);
+
+  // Devices, presence and quota all move while the app sits in the background,
+  // and none of them arrive over the socket. Deliberately not the server
+  // breakdown: it pages the account 500 rows at a time and has its own cache
+  // plus a refresh control.
+  useWindowRefocus(() => {
+    if (!syncUser) return;
+    invoke<SyncDevice[]>("sync_list_devices").then(applyDevices).catch(() => {});
+    invoke<SyncStatusInfo>("sync_get_status")
+      .then((s) => {
+        setSyncStatus(s);
+        if (s.last_synced_at) setLastSynced(s.last_synced_at);
+      })
+      .catch(() => {});
+    refreshQuota();
+  }, NETWORK_REFOCUS_MS);
 
   // ── Silent session restore (fired by App on startup) ────────────
   useEffect(() => {

@@ -28,6 +28,12 @@ use crate::sync::client::{PulledEntry, SyncHttpClient};
 const INITIAL_BACKOFF_SECS: u64 = 5;
 const MAX_BACKOFF_SECS: u64 = 60;
 
+/// A half-open socket - laptop sleep, NAT recycle, a dropped link - never
+/// resolves its read future, so without a deadline the listener waits forever
+/// while the UI still shows "Live". The server pings every 25s of silence, so
+/// three missed pings is a dead connection worth replacing.
+const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(70);
+
 // ── WS event payloads from server ────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
@@ -145,8 +151,18 @@ impl WsListener {
 
         let (mut write, mut read) = ws_stream.split();
 
-        while let Some(msg) = read.next().await {
-            match msg {
+        loop {
+            let next = match tokio::time::timeout(WS_IDLE_TIMEOUT, read.next()).await {
+                Ok(Some(msg)) => msg,
+                Ok(None) => break,
+                Err(_) => {
+                    return Ok(format!(
+                        "no traffic for {}s",
+                        WS_IDLE_TIMEOUT.as_secs()
+                    ));
+                }
+            };
+            match next {
                 Ok(Message::Text(text)) => {
                     self.dispatch(&text, &mut write).await;
                 }

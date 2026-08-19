@@ -2038,7 +2038,11 @@ impl SyncClient {
             }
         }
 
-        self.status.lock().pending_count = self.pending_queue.lock().len();
+        {
+            let mut status = self.status.lock();
+            status.pending_count = self.pending_queue.lock().len();
+            status.last_synced_at = Some(now_ms());
+        }
         Ok(())
     }
 

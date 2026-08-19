@@ -663,6 +663,7 @@ pub fn run() {
             crate::sync::commands::space_clear_removed,
             crate::sync::commands::sync_get_entry_states,
             crate::sync::commands::sync_now,
+            crate::sync::commands::sync_catch_up,
             crate::sync::commands::sync_set_enabled,
             crate::sync::commands::sync_get_connection,
             crate::sync::commands::sync_receive_local_settings,

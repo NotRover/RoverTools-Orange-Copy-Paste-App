@@ -756,6 +756,37 @@ pub async fn sync_now(state: State<'_, AppState>) -> Result<(), String> {
     sync.flush_and_pull().await
 }
 
+/// Shortest gap between two catch-ups. Several screens can ask at once when the
+/// window comes back; one pull covers all of them.
+const CATCH_UP_MIN_SECS: u64 = 20;
+
+/// Re-read the account after the window comes back to the foreground.
+///
+/// The socket is the only live channel, and a screen that has been sitting in
+/// the background may have missed everything on it. This is the cheap
+/// fallback: silent when sync is off, when nobody is signed in, or when a sync
+/// already landed within `CATCH_UP_MIN_SECS`.
+#[tauri::command]
+pub async fn sync_catch_up(state: State<'_, AppState>) -> Result<(), String> {
+    let Some(sync) = state.sync_client.lock().clone() else {
+        return Ok(());
+    };
+    if sync.current_user().is_none() {
+        return Ok(());
+    }
+    if let Some(at) = sync.status_info().last_synced_at {
+        let now = crate::sync::now_ms();
+        if now.saturating_sub(at) < CATCH_UP_MIN_SECS * 1000 {
+            return Ok(());
+        }
+    }
+    sync.flush_and_pull().await?;
+    // Spaces, members and invites come from REST, not the socket, so a delta
+    // pull alone leaves the Spaces screen showing what it loaded on mount.
+    sync.reconcile_spaces().await;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn sync_set_enabled(
     enabled: bool,

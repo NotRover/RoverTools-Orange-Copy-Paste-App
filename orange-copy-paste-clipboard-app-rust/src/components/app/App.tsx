@@ -41,6 +41,10 @@ import UpdateBanner from "./update-banner/UpdateBanner";
 import { useHealthWarning } from "../../hooks/useHealthWarning";
 import { useUpdater } from "../../hooks/useUpdater";
 import {
+  NETWORK_REFOCUS_MS,
+  useWindowRefocus,
+} from "../../hooks/useWindowRefocus";
+import {
   TrashIcon,
   UndoIcon,
   PinIcon,
@@ -434,28 +438,6 @@ const App: React.FC = () => {
     invoke<Note[]>("get_notes").then(setNotes);
   }, []);
 
-  // Re-sync notes when window regains focus.
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    const win = getCurrentWindow();
-    win
-      .listen("tauri://focus", () => {
-        if (cancelled) return;
-        invoke<Note[]>("get_notes").then((ns) => {
-          if (!cancelled) setNotes(ns);
-        });
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
   // Reload local state whenever the sync engine merges entries from another
   // device. Rust holds the UMK, so it decrypts + writes the store directly
   // (on delta pull and on live WebSocket fan-out) and then emits these events;
@@ -502,40 +484,23 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Re-sync with the Rust history whenever the main window regains focus or
-  // becomes visible. This is a safety-net: if an event was missed for any
-  // reason, the clipboard screen catches up as soon as the user switches back
-  // to it. visibilitychange covers the "shown from tray/hotkey" path where
-  // tauri://focus alone may not fire.
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    const win = getCurrentWindow();
+  // Coming back to the window is the safety net for everything the app holds:
+  // any event missed while it sat in the background - or while a socket was
+  // quietly dead - is picked up here rather than waiting for the user to
+  // switch screens. `sync_catch_up` is throttled in Rust, so the screens that
+  // also subscribe cost one pull between them.
+  useWindowRefocus(() => {
+    invoke<ClipboardEntry[]>("get_history").then(setEntries).catch(() => {});
+    invoke<Note[]>("get_notes").then(setNotes).catch(() => {});
+  });
 
-    const syncHistory = () => {
-      if (cancelled) return;
-      invoke<ClipboardEntry[]>("get_history").then((history) => {
-        if (cancelled) return;
-        setEntries(history);
-      });
-    };
-
-    win.listen("tauri://focus", syncHistory).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") syncHistory();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
+  // Server-backed, so on the slow gate. `notifications_refresh` reconciles
+  // invites against the server and emits `notifications:changed`, which the
+  // effect below turns back into a list read - there is no second read here.
+  useWindowRefocus(() => {
+    invoke("sync_catch_up").catch(() => {});
+    invoke("notifications_refresh").catch(() => {});
+  }, NETWORK_REFOCUS_MS);
 
   // Track cloud sync connection state.
   useEffect(() => {
