@@ -2143,8 +2143,20 @@ impl SyncClient {
                         continue;
                     };
                     let space_ids = req.space_ids.clone();
+                    // A queued image push carries the blob it uploaded when it
+                    // was first attempted. If the server refuses the entry now,
+                    // the op is dropped and nothing will ever reference that
+                    // object, so give it back here too.
+                    let queued_blob = req.blob_key.clone();
                     match http.push_entries(vec![req]).await {
                         Ok(result) => {
+                            if let (Some(key), true) =
+                                (queued_blob, !result.conflicts.is_empty())
+                            {
+                                if let Err(e) = http.release_blob_upload(&key).await {
+                                    eprintln!("[sync] release stranded blob {key}: {e}");
+                                }
+                            }
                             for r in result.accepted {
                                 // Key by the op's own type. Hardcoding
                                 // "clipboard" filed every flushed note under a
@@ -3991,6 +4003,65 @@ impl Drop for InFlightGuard {
     }
 }
 
+/// Gives an uploaded image back when the entry that would have owned it never
+/// lands on the server.
+///
+/// `upload_image_blob` runs *inside* the push and confirms the upload before
+/// this task starts, so the object is already costing the account's quota while
+/// the row that points at it does not exist yet. Only two endings leave it in
+/// good hands: the server accepted the entry, or the push was queued (the queued
+/// job carries the same `blob_key`, so the retry reuses this object rather than
+/// minting another). Every other ending - a conflict, an encryption or serialize
+/// failure, a path nobody has written yet - strands the object, and the server's
+/// unreferenced sweep only collects it a week later.
+///
+/// So the release is a `Drop`, disarmed on the two safe endings, for the same
+/// reason [`InFlightGuard`] is one: it has to cover the paths that get added
+/// after this comment. Releasing is best-effort - the server refuses (409) while
+/// a live entry references the key, so it can never take an image away from an
+/// entry that is using it, and nothing the user sees depends on it succeeding.
+struct BlobReleaseGuard {
+    http: Option<Arc<SyncHttpClient>>,
+    /// Set while the object still needs giving back; `None` once disarmed.
+    blob_key: Option<String>,
+    size: u64,
+    budget: BlobBudget,
+}
+
+impl BlobReleaseGuard {
+    fn disarm(&mut self) {
+        self.blob_key = None;
+    }
+}
+
+impl Drop for BlobReleaseGuard {
+    fn drop(&mut self) {
+        let Some(key) = self.blob_key.take() else {
+            return;
+        };
+        let Some(http) = self.http.clone() else {
+            return;
+        };
+        // Drop cannot await, and this runs on the sync runtime's worker.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let (size, budget) = (self.size, Arc::clone(&self.budget));
+        handle.spawn(async move {
+            match http.release_blob_upload(&key).await {
+                Ok(()) => {
+                    // Those bytes are spendable again, so a bulk upload that hit
+                    // a wall does not keep refusing images locally.
+                    if let Some(remaining) = budget.lock().as_mut() {
+                        *remaining = remaining.saturating_add(size);
+                    }
+                }
+                Err(e) => eprintln!("[sync] release stranded blob {key}: {e}"),
+            }
+        });
+    }
+}
+
 async fn push_entry_task(
     ctx: PushCtx,
     enc_key: Zeroizing<[u8; 32]>,
@@ -4029,6 +4100,15 @@ async fn push_entry_task(
         key: entry_key_flight,
         app: ctx.app.clone(),
         entry_type,
+    };
+
+    // Armed for image entries only - everything else keeps its content inline
+    // and has no blob to give back.
+    let mut blob_guard = BlobReleaseGuard {
+        http: ctx.http.clone(),
+        blob_key: blob_key.clone(),
+        size: blob_size.unwrap_or(0),
+        budget: Arc::clone(&ctx.budget),
     };
 
     let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
@@ -4075,6 +4155,8 @@ async fn push_entry_task(
         match http.push_entries(vec![push_req.clone()]).await {
             Ok(result) => {
                 if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
+                    // The row owns the blob now.
+                    blob_guard.disarm();
                     if entry_type == "note" {
                         ctx.id_map
                             .lock()
@@ -4160,6 +4242,9 @@ async fn push_entry_task(
             entry_type: entry_type.into(),
         }
     };
+    // The queued job carries the same blob_key, so the retry reuses this
+    // object instead of uploading a second copy.
+    blob_guard.disarm();
     ctx.queue.lock().push(op);
     ctx.status.lock().pending_count = ctx.queue.lock().len();
     // Nothing else fires when a push falls back to the queue, so without this

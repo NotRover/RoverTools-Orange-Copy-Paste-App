@@ -1251,6 +1251,24 @@ impl SyncHttpClient {
         Ok(())
     }
 
+    /// Give an upload back when the entry that would own it never landed.
+    ///
+    /// The server refuses (409) while a live entry still references the blob, so
+    /// this cannot take an image away from an entry that is using it. Failure is
+    /// the caller's to ignore: the hourly unreferenced sweep is the backstop, and
+    /// nothing the user sees depends on this call succeeding.
+    pub async fn release_blob_upload(&self, blob_key: &str) -> Result<(), String> {
+        let body = BlobConfirmRequest {
+            blob_key: blob_key.to_string(),
+        };
+        self.get_ok("blob release", false, || {
+            Ok(self
+                .authed(Method::POST, "/api/v1/blobs/release")?
+                .json(&body))
+        })
+        .await
+    }
+
     pub async fn confirm_blob_upload(&self, blob_key: &str) -> Result<(), String> {
         let body = BlobConfirmRequest {
             blob_key: blob_key.to_string(),
