@@ -48,6 +48,20 @@ const SERVER_RETRY_ATTEMPTS: u32 = 3;
 /// mid-flight.
 const TOKEN_REFRESH_SKEW_SECS: u64 = 120;
 
+/// What the server said about this device's copy of the master key.
+///
+/// The two answers have to stay apart: [`Self::Present`] restores a session
+/// silently, [`Self::Absent`] ends one. Anything else - including a 404 that did
+/// not come from the key-wrap route - is an error, not an answer.
+#[derive(Debug, Clone)]
+pub enum DeviceWrap {
+    /// The UMK, wrapped for this device's public key.
+    Present(String),
+    /// This device has no wrap: never stored, or revoked. Only a fresh sign-in
+    /// recovers from it.
+    Absent,
+}
+
 /// A failed backend call, keeping the HTTP status alongside the message.
 ///
 /// Same reason as [`crate::sync::supabase::AuthError`]: session restore must
@@ -796,13 +810,17 @@ impl SyncHttpClient {
     /// refresh if the backend responds 401.  `factory` is re-invoked on retry
     /// so the rebuilt request picks up the refreshed `Authorization` header.
     ///
-    /// With `allow_404`, a 404 yields `Ok(None)` instead of an error.
+    /// With `allow_404`, a 404 is returned as a response rather than an error,
+    /// and the caller reads the status. It used to collapse to `Ok(None)`, which
+    /// threw away the one thing that tells a deliberate 404 apart from any other
+    /// - see `get_device_wrapped_umk`, where the difference decides whether a
+    /// user keeps their session.
     async fn run<F>(
         &self,
         tag: &str,
         allow_404: bool,
         factory: F,
-    ) -> Result<Option<reqwest::Response>, ApiError>
+    ) -> Result<reqwest::Response, ApiError>
     where
         F: Fn() -> Result<reqwest::RequestBuilder, String>,
     {
@@ -852,7 +870,7 @@ impl SyncHttpClient {
                 continue;
             }
             if allow_404 && code == 404 {
-                return Ok(None);
+                return Ok(resp);
             }
             // The server is up but could not serve this request right now.
             // Back off and try again: the alternative is a skipped entry that
@@ -870,7 +888,7 @@ impl SyncHttpClient {
                     message: format!("{tag} {code}: {}", error_detail(code, &body)),
                 });
             }
-            return Ok(Some(resp));
+            return Ok(resp);
         }
     }
 
@@ -893,10 +911,7 @@ impl SyncHttpClient {
         T: serde::de::DeserializeOwned,
         F: Fn() -> Result<reqwest::RequestBuilder, String>,
     {
-        let resp = self
-            .run(tag, false, factory)
-            .await?
-            .expect("404 not allowed here");
+        let resp = self.run(tag, false, factory).await?;
         // The call succeeded; only the body was unreadable, so leave the status
         // off rather than let it read as a verdict on our credentials.
         // A 2xx whose body we cannot read is almost always a proxy that
@@ -1065,19 +1080,20 @@ impl SyncHttpClient {
     }
 
     pub async fn pull_settings(&self) -> Result<Option<SettingsPullResponse>, String> {
-        match self
+        let resp = self
             .run("settings pull", true, || {
                 self.authed(Method::GET, "/api/v1/settings")
             })
-            .await?
-        {
-            None => Ok(None),
-            Some(resp) => resp
-                .json::<SettingsPullResponse>()
-                .await
-                .map(Some)
-                .map_err(|e| format!("settings pull parse: {e}")),
+            .await?;
+        // Nothing stored yet for this account, which is the normal first-run
+        // answer rather than a failure.
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
         }
+        resp.json::<SettingsPullResponse>()
+            .await
+            .map(Some)
+            .map_err(|e| format!("settings pull parse: {e}"))
     }
 
     // ── Spaces ────────────────────────────────────────────────────
@@ -1360,24 +1376,45 @@ impl SyncHttpClient {
             .await
     }
 
-    /// The UMK wrapped for this device (silent restore path); `None` when no
-    /// wrap is stored or the device was revoked.
-    pub async fn get_device_wrapped_umk(&self) -> Result<Option<String>, ApiError> {
-        match self
+    /// The UMK wrapped for this device - the silent restore path.
+    ///
+    /// Three answers, not two. [`DeviceWrap::Absent`] ends the session and sends
+    /// the user back to a password field, so it is only ever returned when the
+    /// server said so in as many words: the route stamps its own 404 with
+    /// `X-Wrap-Absent`. A 404 without that header did not come from the handler
+    /// - a proxy, a rewritten path, a deployment older than the route - and is
+    /// reported as unreachable instead, because the credentials in the keychain
+    /// are still perfectly good and the retry loop will get the session back.
+    pub async fn get_device_wrapped_umk(&self) -> Result<DeviceWrap, ApiError> {
+        let resp = self
             .run("device umk", true, || {
                 self.authed(Method::GET, "/api/v1/auth/umk/device")
             })
-            .await?
-        {
-            None => Ok(None),
-            Some(resp) => resp
-                .json::<serde_json::Value>()
-                .await
-                .map_err(|e| ApiError {
-                    status: None,
-                    message: format!("device umk parse: {e}"),
-                })
-                .map(|v| v.get("wrapped_umk").and_then(|w| w.as_str()).map(String::from)),
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            if resp.headers().contains_key("x-wrap-absent") {
+                return Ok(DeviceWrap::Absent);
+            }
+            // No status: `ApiError::is_transient` reads a missing status as "the
+            // request never reached what we asked", which is exactly the case
+            // here and is the classification the caller needs.
+            return Err(ApiError {
+                status: None,
+                message: "device umk: 404 from something other than the key-wrap route".into(),
+            });
+        }
+        let body = resp.json::<serde_json::Value>().await.map_err(|e| ApiError {
+            status: None,
+            message: format!("device umk parse: {e}"),
+        })?;
+        match body.get("wrapped_umk").and_then(|w| w.as_str()) {
+            Some(wrapped) => Ok(DeviceWrap::Present(wrapped.to_string())),
+            // A 200 with no wrap in it is not the documented shape, so it is a
+            // broken reply rather than a verdict on this device.
+            None => Err(ApiError {
+                status: None,
+                message: "device umk: reply carried no wrap".into(),
+            }),
         }
     }
 

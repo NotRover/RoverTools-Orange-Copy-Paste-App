@@ -1036,7 +1036,12 @@ impl SyncClient {
             return Some(umk);
         }
         let device_priv = crypto::load_device_private_key(user_id).ok().flatten()?;
-        let wrapped = http.get_device_wrapped_umk().await.ok().flatten()?;
+        let wrapped = match http.get_device_wrapped_umk().await {
+            Ok(crate::sync::client::DeviceWrap::Present(wrapped)) => wrapped,
+            // Absent or unreachable are the same to this caller: it has other
+            // sources to try, and one message for having exhausted them.
+            _ => return None,
+        };
         let device_pub = crypto::device_public_key(&device_priv);
         let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
         crypto::unwrap_key(&shared, &wrapped).ok()
@@ -1361,15 +1366,24 @@ impl SyncClient {
         let boot = http.bootstrap(None).await.map_err(RestoreError::from_api)?;
 
         // Recover the UMK from the device wrap — no password involved.
-        let wrapped = http
+        //
+        // Only an explicit `Absent` is terminal. Every other unhappy answer,
+        // including an unmarked 404, arrives as an `Err` classified transient, so
+        // an outage or a half-finished deploy costs this attempt and not the
+        // session: the keychain still holds working credentials, and the retry
+        // loop uses them.
+        let wrapped = match http
             .get_device_wrapped_umk()
             .await
             .map_err(RestoreError::from_api)?
-            .ok_or_else(|| {
-                RestoreError::Terminal(
+        {
+            crate::sync::client::DeviceWrap::Present(wrapped) => wrapped,
+            crate::sync::client::DeviceWrap::Absent => {
+                return Err(RestoreError::Terminal(
                     "no device key wrap (revoked or never stored), log in again".into(),
-                )
-            })?;
+                ))
+            }
+        };
         let device_pub = crypto::device_public_key(&device_priv);
         let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
         let umk = crypto::unwrap_key(&shared, &wrapped).map_err(RestoreError::Terminal)?;

@@ -331,3 +331,31 @@ Two independent causes, and the second only became visible once the first was fi
 **Requires one dashboard entry**: `{public_base_url}/reset` must be in Supabase Authentication -> URL Configuration -> Redirect URLs, or GoTrue ignores the redirect and mails the Site URL again.
 
 **Invariant to keep**: a password change is a re-wrap, never a new key. Any path that sets a password must have the UMK in hand first, and must write the new envelope before the credential changes.
+
+---
+
+## #12 — Any stray 404 on one route signed the user out and demanded a password
+
+**Date**: 2026-08-19
+**Severity**: High (a recoverable session was thrown away; the user had to retype a password they had not forgotten)
+
+**Symptoms**: reported as sessions ending around backend deploys. The app came back at the sign-in screen with credentials still in the keychain and nothing wrong with them.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/sync/client.rs` (`run`, `get_device_wrapped_umk`), `src-tauri/src/sync/mod.rs` (`try_restore_session`, `recover_umk_for_reset`), backend `src/auth/router.py`
+
+Silent restore recovers the master key from `GET /api/v1/auth/umk/device`. The client called it through `run(tag, allow_404: true, ...)`, which collapsed a 404 into `Ok(None)` and dropped the response, and `try_restore_session` turned that `None` straight into `RestoreError::Terminal` - the one class that is never retried and always ends in a password prompt.
+
+The backend does answer 404 there deliberately: it is how revoking a device cuts it off, so the terminal handling was right for that case. It was wrong for every other 404. Nothing in `Ok(None)` said which had happened, so a proxy answering for the service, a rewritten path, or a deployment older than the route all read as "this device was revoked".
+
+The rest of the restore path was already careful about this distinction - transport errors, 429, and every 5xx classify as transient and retry unboundedly - which is why the cause was not the deploy itself. A redeploy cannot end a session on its own: the backend stores no session state, it only verifies Supabase JWTs.
+
+**Fix**:
+
+- The route stamps its own 404 with `X-Wrap-Absent: 1`, and the header is documented as part of the contract.
+- `get_device_wrapped_umk` returns a three-state `DeviceWrap` instead of an `Option`. Only a 404 carrying that header is `Absent`; an unmarked 404, and a 200 without a wrap in it, come back as errors with no status, which `ApiError::is_transient` reads as retryable.
+- `run` hands back the response on an allowed 404 rather than collapsing it to `Ok(None)`, so a caller can still see what it was told. `pull_settings` reads the status for the same answer it read from `None` before, and one `expect("404 not allowed here")` panic path disappeared with the `Option`.
+- The header is a marker, not prose. Sniffing the detail string would have worked today and broken the next time the wording moved, which is the failure this repo already had once in the invite path.
+
+**Invariant to keep**: ending a session is a terminal act and needs a positive answer from the server. Absence of a successful reply is never one - if the credentials in the keychain could still work, the restore retries instead of asking for a password.
