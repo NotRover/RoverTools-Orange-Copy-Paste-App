@@ -37,6 +37,7 @@ import {
   HardDrives,
   Laptop,
   Key,
+  Stack,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { ClipboardIcon, GoogleIcon, NotesIcon } from "../../icons";
@@ -622,6 +623,14 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
     }
   };
 
+  // `handleSyncNow` is rebuilt every render, and the cloud rows need a stable
+  // callback or the composition memo they live in recomputes on each one. A ref
+  // keeps the latest without making it a dependency.
+  const handleSyncNowRef = useRef(handleSyncNow);
+  useEffect(() => {
+    handleSyncNowRef.current = handleSyncNow;
+  });
+
   const errMsg = (e: unknown, fallback: string) =>
     typeof e === "string" ? e : fallback;
 
@@ -719,6 +728,131 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
     return { rows, total };
   }, [entries, notes, onNavigate]);
 
+  // The server count is cached for the session because counting pages the
+  // account 500 rows at a time. That cache went stale the moment anything
+  // synced in the background, and the row then contradicted its own subtitle -
+  // "0" beside "18 of them synced from this device". This device knows when its
+  // own tally moved, which is exactly when the cached number cannot be trusted,
+  // so recount then and only then.
+  const syncedHere = Object.keys(entryStates).length;
+  const countedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!syncUser) return;
+    if (countedAt.current === null) {
+      countedAt.current = syncedHere;
+      return;
+    }
+    if (countedAt.current === syncedHere) return;
+    countedAt.current = syncedHere;
+    refreshCloudCount(true);
+  }, [syncedHere, syncUser, refreshCloudCount]);
+
+  // The server labels a row "text" / "image" / "html" / "file"; the local
+  // screen filters on display kinds, which are finer - a URL is a text entry,
+  // a folder is a file entry, and the server never sees enough to tell. So a
+  // cloud row opens the display kinds its server kind can turn into. The two
+  // counts can differ by a few as a result: an image dragged in as a file is
+  // "file" on the server and "image" here.
+  const CLOUD_KIND_FILTER: Record<string, DisplayKind[]> = {
+    text: ["text", "url"],
+    image: ["image"],
+    html: ["html"],
+    file: ["file", "folder", "document", "video"],
+  };
+
+  // Opening a cloud row syncs first. The screen it lands on filters the local
+  // list, and the local list is only the account's once a pull has run - going
+  // straight there would show the cloud's count beside the device's contents.
+  const [cloudOpening, setCloudOpening] = useState<string | null>(null);
+  const openCloudRow = useCallback(
+    async (key: string) => {
+      setCloudOpening(key);
+      try {
+        await handleSyncNowRef.current();
+      } finally {
+        setCloudOpening(null);
+      }
+      // Navigate even when the sync failed: a filtered screen showing what did
+      // arrive beats being held on this one with nothing to look at.
+      if (key === "notes") {
+        onNavigate("notes");
+        return;
+      }
+      showOnlyKinds(CLOUD_KIND_FILTER[key] ?? [], { cloud: "in" });
+      onNavigate("clipboard");
+    },
+    // CLOUD_KIND_FILTER is a literal rebuilt each render; it is read inside the
+    // callback rather than closed over as state, so it is not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onNavigate],
+  );
+
+  // The same bar as "On this device", for what the account holds on the
+  // server. Kinds come from the server's plaintext `kind` label, so this is
+  // coarser than the local one on purpose - URL, document and folder are read
+  // out of content the server never sees.
+  const cloudComposition = useMemo(() => {
+    if (!cloudCount || cloudCount.total === 0) return null;
+    const rows: {
+      key: string;
+      tint: string;
+      label: string;
+      count: number;
+      open: () => void;
+    }[] = [
+      {
+        key: "text",
+        tint: "text",
+        label: TYPE_LABELS.text,
+        count: cloudCount.text,
+        open: () => openCloudRow("text"),
+      },
+      {
+        key: "image",
+        tint: "image",
+        label: TYPE_LABELS.image,
+        count: cloudCount.image,
+        open: () => openCloudRow("image"),
+      },
+      {
+        key: "html",
+        tint: "html",
+        label: TYPE_LABELS.html,
+        count: cloudCount.html,
+        open: () => openCloudRow("html"),
+      },
+      {
+        key: "file",
+        tint: "file",
+        label: TYPE_LABELS.file,
+        count: cloudCount.file,
+        open: () => openCloudRow("file"),
+      },
+      {
+        key: "notes",
+        tint: "notes",
+        label: "Notes",
+        count: cloudCount.notes,
+        open: () => openCloudRow("notes"),
+      },
+    ].filter((r) => r.count > 0);
+    return { rows, total: cloudCount.total };
+  }, [cloudCount, openCloudRow]);
+
+  // Only the queue is shown now that the per-row subtitles are gone; the split
+  // by kind went with them.
+  const [statsView, setStatsView] = useState<"device" | "cloud">("device");
+  const shownComp =
+    statsView === "cloud"
+      ? cloudComposition
+      : composition.total > 0
+        ? composition
+        : null;
+
+  // Split by kind and by whether it is still queued: the meta line on each
+  // cloud row says how much of that figure came from this device, and this
+  // device is the only place that can answer it (`entry_states` is its own
+  // record, never the account's).
   const deviceTally = Object.entries(entryStates).reduce(
     (acc, [key, state]) => {
       const isNote = key.startsWith("note:");
@@ -732,13 +866,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       }
       return acc;
     },
-    {
-      clipboard: 0,
-      notes: 0,
-      waiting: 0,
-      waitingClipboard: 0,
-      waitingNotes: 0,
-    },
+    { clipboard: 0, notes: 0, waiting: 0, waitingClipboard: 0, waitingNotes: 0 },
   );
 
   // Presence resolves from the server snapshot unless a WS event overrode it;
@@ -1611,68 +1739,112 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                 <span className="acct-zone-label">Storage and activity</span>
               </div>
 
-              {/* What is actually on this device, by kind. Sits above the
-                  cloud figures because it answers the first question - what is
-                  in here - before the second, how much of it is backed up. */}
-              {composition.total > 0 && (
-                <div className="acct-card acct-comp">
-                  <div className="acct-comp-head">
-                    <span className="acct-row-name">On this device</span>
-                    <span className="acct-comp-total">
-                      {composition.total} item
-                      {composition.total === 1 ? "" : "s"}
-                    </span>
-                  </div>
-
-                  {/* Widths are the shares themselves, so the bar and the
-                      percentages below it cannot drift apart. */}
-                  <div className="acct-comp-bar">
-                    {composition.rows.map((r) => (
-                      <span
-                        key={r.key}
-                        className={`acct-comp-seg type-tint--${r.tint}`}
-                        style={{
-                          width: `${(r.count / composition.total) * 100}%`,
-                        }}
-                        title={`${r.label}: ${r.count}`}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="acct-comp-legend">
-                    {composition.rows.map((r) => (
-                      <button
-                        key={r.key}
-                        type="button"
-                        className="acct-comp-row"
-                        onClick={r.open}
-                      >
-                        <span
-                          className={`acct-comp-dot type-tint--${r.tint}`}
-                        />
-                        <span className="acct-comp-label">{r.label}</span>
-                        <span className="acct-comp-count">{r.count}</span>
-                        <span className="acct-comp-pct">
-                          {Math.round((r.count / composition.total) * 100)}%
-                        </span>
-                        <CaretRight
-                          size={11}
-                          weight="bold"
-                          className="acct-comp-go"
-                        />
-                      </button>
-                    ))}
-                  </div>
-
-                  <p className="acct-comp-note">
-                    Pick a row to open it with that filter already on.
-                  </p>
-                </div>
-              )}
-
+              {/* One card for everything storage-related: what you hold, what
+                  it costs, and the account totals. They were three cards saying
+                  three parts of one answer, and the gaps between them read as
+                  bigger breaks than the subjects deserved. */}
               <div className="acct-card acct-card--rows">
                 <div className="acct-list">
-                  {quota &&
+                {/* One bar, two sources. Drawing both at once said the same
+                    thing twice for an account where everything is synced, and the
+                    interesting question is the difference between them - which is
+                    easier to see by switching one bar than by reading two. */}
+                <div className="acct-comp">
+                  <div className="acct-comp-head">
+                    <div className="acct-seg" role="tablist">
+                      {(["device", "cloud"] as const).map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          role="tab"
+                          aria-selected={statsView === v}
+                          className={`acct-seg-pill${statsView === v ? " active" : ""}`}
+                          onClick={() => setStatsView(v)}
+                        >
+                          {v === "device" ? "This device" : "Cloud"}
+                        </button>
+                      ))}
+                    </div>
+                    {shownComp && (
+                      <span className="acct-comp-total">
+                        {shownComp.total} item{shownComp.total === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+
+                  {!shownComp ? (
+                    <p className="acct-comp-note">
+                      {statsView === "cloud"
+                        ? cloudCounting
+                          ? "Counting what is on the server."
+                          : cloudCount === null
+                            ? "Not counted yet."
+                            : "Nothing of yours is in the cloud yet."
+                        : "Nothing on this device yet."}
+                    </p>
+                  ) : (
+                    <>
+                      {/* Widths are the shares themselves, so the bar and the
+                          percentages below it cannot drift apart. */}
+                      <div className="acct-comp-bar">
+                        {shownComp.rows.map((r) => (
+                          <span
+                            key={r.key}
+                            className={`acct-comp-seg type-tint--${r.tint}`}
+                            style={{
+                              width: `${(r.count / shownComp.total) * 100}%`,
+                            }}
+                            title={`${r.label}: ${r.count}`}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="acct-comp-legend">
+                        {/* Every row leads somewhere now: a device row opens
+                            the local list filtered to that kind, a cloud row
+                            syncs and then opens the same list narrowed to what
+                            has a copy on the server. */}
+                        {shownComp.rows.map((r) => (
+                          <button
+                            key={r.key}
+                            type="button"
+                            className="acct-comp-row"
+                            onClick={r.open}
+                            disabled={cloudOpening !== null}
+                          >
+                            <span
+                              className={`acct-comp-dot type-tint--${r.tint}`}
+                            />
+                            <span className="acct-comp-label">{r.label}</span>
+                            <span className="acct-comp-count">{r.count}</span>
+                            <span className="acct-comp-pct">
+                              {Math.round((r.count / shownComp.total) * 100)}%
+                            </span>
+                            <CaretRight
+                              size={11}
+                              weight="bold"
+                              className="acct-comp-go"
+                            />
+                          </button>
+                        ))}
+                      </div>
+
+                      <p className="acct-comp-note">
+                        {cloudOpening
+                          ? "Syncing first, then opening the filtered list."
+                          : statsView === "device"
+                            ? "Pick a row to open it with that filter already on."
+                            : "Only what you uploaded. Picking a row syncs first, then opens it."}
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                  {/* Storage is a cloud number, so it only stands with the
+                      cloud view. On the device view it was answering a question
+                      the panel was not asking. */}
+                  {statsView === "cloud" &&
+                    quota &&
                     (() => {
                       const pct =
                         quota.quota_bytes > 0
@@ -1689,10 +1861,14 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                         <div className="acct-quota">
                           <div className="acct-quota-head">
                             <HardDrives size={13} />
-                            <span>Image storage</span>
+                            <span>Cloud image storage</span>
+                            {/* The share is the part that says whether this
+                                matters; the bytes say by how much. */}
                             <span className="acct-quota-value">
-                              {formatBytes(quota.used_bytes)} of{" "}
-                              {formatBytes(quota.quota_bytes)}
+                              {pct < 1 && quota.used_bytes > 0
+                                ? "under 1%"
+                                : `${Math.round(pct)}%`}{" "}
+                              of {formatBytes(quota.quota_bytes)}
                             </span>
                           </div>
                           <div className="acct-quota-track">
@@ -1705,110 +1881,156 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                               why clearing a few hundred text entries leaves it
                               where it was. */}
                           <p className="acct-quota-note">
-                            {formatBytes(free)} free. Only copied images count
-                            here. Text and notes take no storage.
+                            {formatBytes(quota.used_bytes)} used,{" "}
+                            {formatBytes(free)} free. Only images you uploaded
+                            count here. Text and notes take no storage, and
+                            images other people shared with you stay on their
+                            account.
                           </p>
                         </div>
                       );
                     })()}
 
-                  {/* One row per kind, each carrying its own scope in the
-                      meta line. This device only ever knows what it pushed or
-                      pulled itself, so its totals sit below the account's
-                      whenever another device has synced something - saying so
-                      per row beats one footnote the reader has to map back
-                      onto four numbers. */}
-                  <div className="acct-row">
-                    <span className="acct-row-icon">
-                      <ClipboardIcon size={15} />
-                    </span>
-                    <div className="acct-row-main">
-                      <span className="acct-row-name">Clipboard</span>
-                      <span className="acct-row-meta">
-                        {cloudCounting
-                          ? "Counting what is on the server"
-                          : `${deviceTally.clipboard} of them synced from this device`}
-                      </span>
-                    </div>
-                    <span className="acct-stat-value">
-                      {cloudCount === null ? "-" : cloudCount.clipboard}
-                    </span>
-                  </div>
+                  {/* The other ceiling. Storage fills up in megabytes, this one
+                      in rows, and an account of small text entries hits this
+                      long before it hits the bar above - so it gets a bar of
+                      its own rather than a footnote on that one. A server too
+                      old to report a limit sends zero, which draws nothing. */}
+                  {statsView === "cloud" &&
+                    quota &&
+                    quota.entry_limit > 0 &&
+                    (() => {
+                      const pct = Math.min(
+                        100,
+                        (quota.entry_count / quota.entry_limit) * 100,
+                      );
+                      return (
+                        <div className="acct-quota">
+                          <div className="acct-quota-head">
+                            <Stack size={13} />
+                            <span>Synced items</span>
+                            <span className="acct-quota-value">
+                              {pct < 1 && quota.entry_count > 0
+                                ? "under 1%"
+                                : `${Math.round(pct)}%`}{" "}
+                              of {quota.entry_limit.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="acct-quota-track">
+                            <div
+                              className={`acct-quota-fill${pct >= 85 ? " acct-quota-fill--warn" : ""}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <p className="acct-quota-note">
+                            {quota.entry_count.toLocaleString()} of{" "}
+                            {quota.entry_limit.toLocaleString()} rows used.
+                            Deleted items stop counting once the delete reaches
+                            the server.
+                            {quota.max_entry_bytes > 0
+                              ? ` A single entry can be up to ${formatBytes(quota.max_entry_bytes)}; anything larger is left on this device.`
+                              : ""}
+                          </p>
+                        </div>
+                      );
+                    })()}
 
-                  <div className="acct-row">
-                    <span className="acct-row-icon">
-                      <NotesIcon size={15} />
-                    </span>
-                    <div className="acct-row-main">
-                      <span className="acct-row-name">Notes</span>
-                      <span className="acct-row-meta">
-                        {cloudCounting
-                          ? "Counting what is on the server"
-                          : `${deviceTally.notes} of them synced from this device`}
-                      </span>
-                    </div>
-                    <span className="acct-stat-value">
-                      {cloudCount === null ? "-" : cloudCount.notes}
-                    </span>
-                  </div>
-
-                  {/* A failed or never-run count is not zero, so the number is
-                      withheld and the action offered in its place. */}
-                  {cloudCount === null && !cloudCounting && (
-                    <div className="acct-row">
-                      <span className="acct-row-icon">
-                        <Cloud size={15} />
-                      </span>
-                      <div className="acct-row-main">
-                        <span className="acct-row-name">Server totals</span>
-                        <span className="acct-row-meta">
-                          Not counted yet
+                  {/* All four are cloud figures, so they stand with the cloud
+                      view and are rows rather than a single line of numbers:
+                      each one carries its own scope in the meta line, which
+                      needs the width a row has. This device only ever knows
+                      what it pushed or pulled itself, so its share sits below
+                      the account's whenever another device has synced
+                      something - saying so per row beats one footnote the
+                      reader has to map back onto four numbers. A count that has
+                      not run yet is not zero, so the number is withheld and the
+                      action offered in its place. */}
+                  {statsView === "cloud" && (
+                    <>
+                      <div className="acct-row">
+                        <span className="acct-row-icon">
+                          <ClipboardIcon size={13} />
+                        </span>
+                        <div className="acct-row-main">
+                          <span className="acct-row-name">Clipboard</span>
+                          <span className="acct-row-meta">
+                            {cloudCounting
+                              ? "Counting what is on the server"
+                              : `${deviceTally.clipboard} of them synced from this device`}
+                          </span>
+                        </div>
+                        <span className="acct-stat-value">
+                          {cloudCounting ? (
+                            "..."
+                          ) : cloudCount === null ? (
+                            <button
+                              type="button"
+                              className="acct-btn acct-btn--sm"
+                              onClick={() => refreshCloudCount(true)}
+                            >
+                              Count
+                            </button>
+                          ) : (
+                            cloudCount.clipboard
+                          )}
                         </span>
                       </div>
-                      <div className="acct-row-actions">
-                        <button
-                          type="button"
-                          className="acct-btn acct-btn--sm"
-                          onClick={() => refreshCloudCount(true)}
-                        >
-                          Count
-                        </button>
+
+                      <div className="acct-row">
+                        <span className="acct-row-icon">
+                          <NotesIcon size={13} />
+                        </span>
+                        <div className="acct-row-main">
+                          <span className="acct-row-name">Notes</span>
+                          <span className="acct-row-meta">
+                            {cloudCounting
+                              ? "Counting what is on the server"
+                              : `${deviceTally.notes} of them synced from this device`}
+                          </span>
+                        </div>
+                        <span className="acct-stat-value">
+                          {cloudCounting || cloudCount === null
+                            ? "-"
+                            : cloudCount.notes}
+                        </span>
                       </div>
-                    </div>
+
+                      <div className="acct-row">
+                        <span className="acct-row-icon">
+                          <CloudArrowUp size={13} />
+                        </span>
+                        <div className="acct-row-main">
+                          <span className="acct-row-name">
+                            Waiting to upload
+                          </span>
+                          <span className="acct-row-meta">
+                            {deviceTally.waiting === 0
+                              ? "Nothing queued on this device"
+                              : `${deviceTally.waitingClipboard} clipboard, ${deviceTally.waitingNotes} notes, queued on this device`}
+                          </span>
+                        </div>
+                        <span className="acct-stat-value">
+                          {deviceTally.waiting}
+                        </span>
+                      </div>
+
+                      <div className="acct-row">
+                        <span className="acct-row-icon">
+                          <Desktop size={13} />
+                        </span>
+                        <div className="acct-row-main">
+                          <span className="acct-row-name">Devices</span>
+                          <span className="acct-row-meta">
+                            {onlineDevices} online
+                            {lastSynced
+                              ? ` - last synced ${formatLastSynced(lastSynced)}`
+                              : ""}
+                          </span>
+                        </div>
+                        <span className="acct-stat-value">{devices.length}</span>
+                      </div>
+                    </>
                   )}
-
-                  <div className="acct-row">
-                    <span className="acct-row-icon">
-                      <CloudArrowUp size={15} />
-                    </span>
-                    <div className="acct-row-main">
-                      <span className="acct-row-name">Waiting to upload</span>
-                      <span className="acct-row-meta">
-                        {deviceTally.waiting === 0
-                          ? "Nothing queued on this device"
-                          : `${deviceTally.waitingClipboard} clipboard, ${deviceTally.waitingNotes} notes, queued on this device`}
-                      </span>
-                    </div>
-                    <span className="acct-stat-value">
-                      {deviceTally.waiting}
-                    </span>
-                  </div>
-
-                  <div className="acct-row">
-                    <span className="acct-row-icon">
-                      <Desktop size={15} />
-                    </span>
-                    <div className="acct-row-main">
-                      <span className="acct-row-name">Devices</span>
-                      <span className="acct-row-meta">
-                        {onlineDevices} online
-                        {lastSynced
-                          ? ` - last synced ${formatLastSynced(lastSynced)}`
-                          : ""}
-                      </span>
-                    </div>
-                    <span className="acct-stat-value">{devices.length}</span>
-                  </div>
                 </div>
               </div>
             </section>

@@ -149,6 +149,12 @@ export interface SyncInvite {
 export interface SyncQuota {
   used_bytes: number;
   quota_bytes: number;
+  /** Live rows on the account against the per-account cap, and the per-entry
+   *  size cap. Zero means the server did not report it - show nothing rather
+   *  than a bar that reads as full. */
+  entry_count: number;
+  entry_limit: number;
+  max_entry_bytes: number;
 }
 
 /** What the account holds on the server, split by kind. Account-wide, unlike
@@ -157,6 +163,13 @@ export interface SyncServerBreakdown {
   clipboard: number;
   notes: number;
   total: number;
+  /** Clipboard rows by the server's plaintext `kind`. Coarser than the local
+   *  bar, which reads URL / document / folder out of content the server
+   *  cannot see. */
+  text: number;
+  image: number;
+  file: number;
+  html: number;
 }
 
 export interface SyncInviteList {

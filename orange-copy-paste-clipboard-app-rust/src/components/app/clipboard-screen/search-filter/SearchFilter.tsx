@@ -186,10 +186,18 @@ const FILTER_KEYS = [
  *  will read these on its way in. Everything else is cleared first - arriving
  *  with a stale date range still on would show a filtered slice of the thing
  *  the user just clicked a count of. */
-export function showOnlyKinds(kinds: DisplayKind[]): void {
+export function showOnlyKinds(
+  kinds: DisplayKind[],
+  opts: { cloud?: CloudFilter } = {},
+): void {
   try {
     for (const key of FILTER_KEYS) localStorage.removeItem(key);
     localStorage.setItem("sc-f-kinds", JSON.stringify(kinds));
+    // A caller counting what is on the server wants the screen narrowed to
+    // that, not to every local entry of the same kind.
+    if (opts.cloud && opts.cloud !== "any") {
+      localStorage.setItem("sc-f-cloud", JSON.stringify(opts.cloud));
+    }
   } catch {
     /* Storage blocked: the screen opens unfiltered, which is not wrong. */
   }
