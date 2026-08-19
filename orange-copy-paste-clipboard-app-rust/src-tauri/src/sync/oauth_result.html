@@ -1,0 +1,113 @@
+<!doctype html>
+<!--
+  The page the browser tab lands on when a Google sign-in comes back.
+
+  Served by the loopback listener in oauth.rs, which embeds this file with
+  include_str! and substitutes one placeholder: __STATE__ becomes "ok" or
+  "fail". Both outcomes live here, and CSS shows the matching half, so all the
+  copy is in one place and the two states cannot drift apart.
+
+  Deliberately the app's own visual language: the tokens below are lifted from
+  src/components/app/App.css, the badge is the sign-in screen's accent tile, and
+  the button is the --cta treatment .auth-submit uses. No panel or border -
+  there is one thing on this page, and a card would only draw a box for its own
+  sake. Dark is the default for the same reason it is in the app; a browser has
+  no data-theme to read, so light comes from prefers-color-scheme.
+
+  Everything is inline. The socket closes right after this response, so a second
+  request for a stylesheet could never arrive.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orange Copy Paste sign-in</title>
+<style>
+  /* Dark theme (default) */
+  :root {
+    --bg: #0e0e0e;
+    --text: #f0f0f0;
+    --text-muted: #606060;
+    --accent: #ff3e1c;
+    --accent-dim: #ff3e1c1a;
+    --cta: #ff5535;
+    --cta-hover: #ff6b4d;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f0f0f0;
+      --text: #111111;
+      --text-muted: #909090;
+      --accent-dim: rgba(255, 62, 28, 0.08);
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    width: 100%;
+    max-width: 340px;
+    text-align: center;
+  }
+  .badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 11px;
+    border-radius: 11px;
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+  h1 {
+    margin-bottom: 5px;
+    font-size: 16.5px;
+    font-weight: 650;
+    letter-spacing: -0.2px;
+  }
+  .sub { font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+  .cta {
+    display: inline-block;
+    margin-top: 18px;
+    padding: 8px 15px;
+    border-radius: 8px;
+    background: var(--cta);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .cta:hover { background: var(--cta-hover); }
+  .cta:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .fine { margin-top: 14px; font-size: 11px; color: var(--text-muted); }
+
+  /* One state is shown, the other is removed. */
+  .ok .on-fail, .fail .on-ok { display: none; }
+</style>
+<main class="__STATE__">
+  <div class="badge">
+    <!--
+      Drawn rather than typed: a tick and a cross as glyphs would be non-ASCII,
+      and currentColor lets the badge tint them like every other icon in the app.
+    -->
+    <svg class="on-ok" width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>
+    <svg class="on-fail" width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+  </div>
+
+  <h1 class="on-ok">Signed in</h1>
+  <h1 class="on-fail">Sign-in did not finish</h1>
+
+  <p class="sub on-ok">Orange Copy Paste is asking for your account password next, so it can unlock your synced items on this device.</p>
+  <p class="sub on-fail">Nothing changed on your account. Start again from the app when you are ready.</p>
+
+  <a class="cta" href="orange://">Return to Orange Copy Paste</a>
+  <p class="fine">You can close this tab.</p>
+</main>

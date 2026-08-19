@@ -477,17 +477,21 @@ fn parse_join_code(url: &str) -> Option<String> {
     None
 }
 
-/// Hand an opened `orange://` URL to the UI. Only invite links are understood;
+/// Hand an opened `orange://` URL to the UI. Only invite links carry an action;
 /// anything else is ignored rather than surfacing an error for a URL the user
 /// never typed.
+///
+/// Raising the window happens *before* the parse, so a bare `orange://` is a
+/// usable "bring the app forward" link. The OAuth callback page in the browser
+/// uses exactly that as its manual fallback.
 fn dispatch_deep_link(app: &tauri::AppHandle, url: &str) {
-    let Some(code) = parse_join_code(url) else {
-        return;
-    };
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
     }
+    let Some(code) = parse_join_code(url) else {
+        return;
+    };
     let _ = app.emit("spaces:join-code", serde_json::json!({ "code": code }));
 }
 

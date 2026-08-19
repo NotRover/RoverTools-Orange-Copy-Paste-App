@@ -245,8 +245,26 @@ fn tombstone_req(
 
 // ── OAuth (Google, etc.) ─────────────────────────────────────────────
 
+/// Show and focus the main window.
+///
+/// Used after the browser half of an OAuth sign-in: the desktop app has been in
+/// the background for the whole handshake, and whatever comes next - the password
+/// step or the failure - is in the app, not the tab.
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+
 /// An OAuth login that has completed the provider handshake but still needs the
 /// account password (the E2E secret) before the session can be finalized.
+///
+/// `Clone` so a password attempt can work on a copy: the stash has to survive a
+/// wrong password, or the only way to get a second guess is another trip through
+/// the browser.
+#[derive(Clone)]
 struct PendingOAuth {
     session: SupabaseSession,
     email: String,
@@ -712,11 +730,18 @@ impl SyncClient {
         oauth::open_browser(&auth_url)?;
 
         // The accept loop is blocking; run it off the async worker.
-        let code = self
+        let captured = self
             .handle
             .spawn_blocking(move || loopback.wait_for_code(cancel))
             .await
-            .map_err(|e| format!("oauth capture task: {e}"))??;
+            .map_err(|e| format!("oauth capture task: {e}"))?;
+
+        // The browser has the foreground at this point and the user is done with
+        // it. Bring the app forward either way - a failed sign-in needs to be
+        // read in the app too, and the alternative is a tab that says "return to
+        // the app" and no app in sight.
+        focus_main_window(&self.app);
+        let code = captured?;
 
         let session = self.supabase.exchange_code_pkce(&code, &verifier).await?;
         let email = session.user.email.clone();
@@ -749,26 +774,49 @@ impl SyncClient {
     /// back to Supabase so the account gains a real credential usable for later
     /// email+password login; on return it is verified against the stored
     /// identity key inside [`Self::finalize_session`].
+    ///
+    /// Two things here are deliberate, and both used to be wrong.
+    ///
+    /// The stash is *cloned*, and only cleared once everything succeeded. It used
+    /// to be taken before the password was checked, so one typo threw the session
+    /// away: the retry the UI was still offering answered "no pending sign-in,
+    /// start again" and the only way forward was another trip through Google.
+    ///
+    /// And on a first sign-in the envelope is written *before* the Supabase
+    /// password. The other order left a window where the account had a new
+    /// credential and no envelope that matched it - signable in, undecryptable -
+    /// and this way a failed attempt changes nothing server-side.
     pub async fn complete_oauth(&self, password: String) -> Result<SyncUser, String> {
         let pending = self
             .pending_oauth
             .lock()
-            .take()
+            .clone()
             .ok_or("no pending sign-in, start again")?;
 
-        if pending.is_new {
-            self.supabase
-                .update_password(&pending.session.access_token, &password)
-                .await?;
+        let is_new = pending.is_new;
+        let access_token = pending.session.access_token.clone();
+        let user = self
+            .finalize_session(
+                pending.session,
+                &pending.email,
+                &password,
+                pending.device_name,
+            )
+            .await?;
+
+        // Not fatal, and deliberately not returned as an error: the sign-in above
+        // already succeeded, so failing here would leave the app signed in while
+        // the UI still showed the password step. All that is lost is the ability
+        // to sign in later with email and password - Google still works, and the
+        // envelope matches what the user just typed either way.
+        if is_new {
+            if let Err(e) = self.supabase.update_password(&access_token, &password).await {
+                eprintln!("[sync] account password not stored with Supabase: {e}");
+            }
         }
 
-        self.finalize_session(
-            pending.session,
-            &pending.email,
-            &password,
-            pending.device_name,
-        )
-        .await
+        *self.pending_oauth.lock() = None;
+        Ok(user)
     }
 
     /// The stashed OAuth attempt, if the browser handshake already landed.

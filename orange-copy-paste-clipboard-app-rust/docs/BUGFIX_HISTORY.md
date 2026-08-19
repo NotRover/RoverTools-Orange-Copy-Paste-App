@@ -238,3 +238,64 @@ The bug was silent — a wrong answer looked exactly like an ordinary merge — 
 4. **A refusal is visible.** `push_entry_task` routes `not_your_entry` through `record_skip`, so it lands in the notification centre instead of only stderr. A guard failing silently is how this class of bug survives.
 
 **Invariant to keep**: an entry has exactly one author, and neither the recorded owner nor the entry's content may change hands on arrival order. Anything that decides authorship must be sticky or explicitly ordered — never last-write-wins.
+
+---
+
+## #9 — One typo in the password after a Google sign-in meant doing the whole Google sign-in again
+
+**Date**: 2026-08-19
+**Severity**: High (a dead end in the sign-in flow, hit by anyone who mistypes once)
+**Symptoms**:
+
+- Sign in with Google, get to the account-password step, mistype the password. The error is correct: "Incorrect password. It does not match the one this account was encrypted with."
+- The field stays live, so retyping it looks like the obvious next move. The second attempt answers **"no pending sign-in, start again"** no matter what is typed.
+- The only way to get one more attempt is to go back and repeat the entire browser round trip through Google.
+- Closing and reopening the app did not help either: the step could not be restored.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/sync/mod.rs` (`complete_oauth`), `src/components/app/account-screen/AccountScreen.tsx` (the password stage)
+
+OAuth is two phases. `begin_oauth` finishes the provider handshake and stashes the resulting session in `pending_oauth`, because the session alone is not enough — the account password is the E2E secret and has to come from the user. `complete_oauth` is phase two.
+
+It opened with `.take()` on the stash, *before* the password was validated. The session moved into a local binding, went into `finalize_session` by value, and was dropped when that returned `Err`. Nothing put it back. So the first wrong password did not just fail — it consumed the one session that could have been retried.
+
+Two things then made it look like a bug in the password check rather than a lost session:
+
+- The frontend only calls `resetOauth()` on success, so the stage stayed open with a live input. Correct on its own, and exactly what makes the dead end visible.
+- `pending_oauth()` reads the same stash, so the mount-time `sync_oauth_pending` probe could not restore the step after a restart.
+
+A second defect sat next to it. On a first-ever OAuth sign-in the flow also has to give the account a real password, and `update_password` ran *before* `finalize_session` wrote the envelope. A failure in between — a dropped connection on `set_wrapped_umk`, say — left the account with a new Supabase credential and no envelope wrapped under it: signable in, undecryptable. Worse, the next attempt with a *different* password would then be checked against the first one.
+
+**Fix**:
+
+- `PendingOAuth` derives `Clone`, and `complete_oauth` reads a clone. The stash is cleared only after the whole thing has succeeded, so a wrong password leaves the retry the UI is already offering actually working — and a restart can still restore the step.
+- The order is reversed for a first sign-in: `finalize_session` writes the envelope first, then `update_password` sets the Supabase credential. A failed attempt now changes nothing server-side, which is what makes the retry safe.
+- `update_password` failing is no longer fatal. Sign-in has already succeeded at that point, and returning an error would leave the app signed in while the UI still showed the password step. It logs, and the only thing lost is email-and-password login for that account; Google still works and the envelope matches what was typed either way.
+
+**Invariant to keep**: nothing may be consumed or written server-side before the password that has to match it is verified. The stash outlives every failed attempt, and for a new account the envelope is written before the credential — never the other way round.
+
+---
+
+## #10 — After a Google sign-in the app stayed in the background
+
+**Date**: 2026-08-19
+**Severity**: Medium (every OAuth sign-in, and the flow cannot continue until the user finds the window)
+
+**Symptoms**: the browser tab said to return to the app, and the app was still behind everything else. The password step was waiting, unseen. A sign-in that *failed* was worse: the tab said so, the app said nothing, and nothing had focus.
+
+**Root Cause**:
+
+**Files**: `src-tauri/src/sync/mod.rs` (`begin_oauth`), `src-tauri/src/lib.rs` (`dispatch_deep_link`), `src-tauri/src/sync/oauth.rs` (the result page)
+
+OAuth does not use the `orange://` deep link — it uses a short-lived loopback server on `127.0.0.1:53170-53172` as the redirect target. The deep-link path had always raised the window (`show` + `set_focus`); the loopback path never did, because it never went through the dispatcher. There was no `set_focus` anywhere in `sync/`.
+
+The `sync:oauth-ready` event and the `sync_oauth_pending` probe exist to keep the *UI state* correct across the browser hop, and they worked. Neither of them brings a window forward.
+
+**Fix**:
+
+- `focus_main_window` in `sync/mod.rs`, called as soon as the loopback capture returns, on both the success and failure paths.
+- `dispatch_deep_link` raises the window *before* parsing the URL, so a bare `orange://` is a usable "bring the app forward" link rather than a silent no-op.
+- The loopback result page is rebuilt in the app's own visual language (the `App.css` tokens and the sign-in screen's accent badge) and links to `orange://` as a manual fallback for anyone whose window manager ignores a programmatic focus. It also no longer uses a Unicode check mark, which broke the ASCII-only copy rule — the tick and cross are drawn as inline SVG.
+
+**Invariant to keep**: whenever a flow hands the user off to the browser and expects them back, the app raises itself when the browser half returns. Both outcomes, not just the happy one.
