@@ -318,6 +318,17 @@
   text-align: left;
 }
 
+/* A space whose key has not arrived: visible, so its absence is not a mystery,
+   but not clickable. */
+.card-menu-space-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.card-menu-space-row:disabled:hover {
+  background: transparent;
+}
+
 .card-menu-space-row:hover {
   background: var(--surface-hover);
 }

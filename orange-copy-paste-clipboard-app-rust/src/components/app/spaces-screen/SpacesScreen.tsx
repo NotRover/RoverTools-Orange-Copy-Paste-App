@@ -1247,6 +1247,19 @@ const SpaceSettings: React.FC<{
   const shownMembers = space.members.filter(
     (m) => !pendingGone.has(`member:${space.id}:${m.user_id}`),
   );
+  // Only the owner's app can hand out a Space Key, so a member waiting on one
+  // is waiting on a specific person, not on the service. Name them - "the
+  // owner" reads as a system component and gives nobody to go and nudge - and
+  // say whether their app is up, because that is the difference between "a few
+  // seconds" and "whenever they next open it". Presence is live here: a
+  // `space:presence-changed` event reloads this list, so the wording flips on
+  // its own. A missing display name (a profile that never set one) falls back.
+  const owner = space.members.find((m) => m.user_id === space.owner_id);
+  const ownerName = owner?.display_name?.trim() || "";
+  const ownerLabel = ownerName ? `${ownerName}'s app` : "The owner's app";
+  const waitingReason = owner?.online
+    ? `${ownerLabel} is online, so the key should land in a moment.`
+    : `${ownerLabel} is not running. The key arrives on its own once they open it, even if it only sits in the tray.`;
 
   useEffect(
     () => () => {
@@ -1369,6 +1382,21 @@ const SpaceSettings: React.FC<{
       <div className="sp-rules-body">
         {error && <span className="sp-settings-error">{error}</span>}
 
+        {/* A joined space is not usable until its key arrives: everything in it
+            is encrypted under that key, so until then there is nothing to read
+            and nothing that can be written. Said once, here, with the controls
+            it affects switched off - the alternative is a share that reports
+            success and never lands. */}
+        {!space.has_key && (
+          <div className="sp-waiting">
+            <span className="sp-waiting-title">Waiting for this space's key</span>
+            <span className="sp-waiting-desc">
+              {waitingReason} Until then you cannot read this space or share
+              anything into it, and you do not need to rejoin.
+            </span>
+          </div>
+        )}
+
         {/* Rules: what the space does with items, in and out. */}
         <div className="sp-settings-block">
           <div className="sp-settings-label">
@@ -1395,15 +1423,18 @@ const SpaceSettings: React.FC<{
             <span className="sp-toggle-text">
               <span className="sp-toggle-title">Share new items out</span>
               <span className="sp-toggle-desc">
-                {filter.enabled
-                  ? "New items that match the rules below are shared here. Older items are untouched."
-                  : "Off. Only items you share by hand go into this space."}
+                {!space.has_key
+                  ? "Available once this space's key arrives."
+                  : filter.enabled
+                    ? "New items that match the rules below are shared here. Older items are untouched."
+                    : "Off. Only items you share by hand go into this space."}
               </span>
             </span>
             <input
               type="checkbox"
               className="sp-switch"
               checked={filter.enabled}
+              disabled={!space.has_key}
               onChange={(e) =>
                 onFilter({ ...filter, enabled: e.target.checked })
               }

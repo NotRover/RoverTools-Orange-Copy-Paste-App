@@ -1540,7 +1540,10 @@ gone because they had drifted — verify anything load-bearing in the source.
 - **Auth** — Supabase Auth for password login, signup, refresh, and recovery, plus
   Google via loopback PKCE. `POST /api/v1/auth/bootstrap` supplies `kdf_salt` and the
   password-wrapped UMK; `POST /api/v1/auth/devices` supplies the `device_id` sent as
-  `X-Device-Id`. `GET /api/v1/auth/umk/device` backs silent session restore.
+  `X-Device-Id`. `GET /api/v1/auth/umk/device` backs silent session restore, and
+  only its own 404 - the one stamped `X-Wrap-Absent` - ends a session; every other
+  failure, an unmarked 404 included, is retried, because the keychain credentials
+  are still good and a forced password prompt would be the app's own fault.
 - **Mutation hooks** — capture (watcher and hotkey), single and bulk deletes, pin and
   group changes, `clear_history`, and note CRUD all notify `SyncClient`. Bulk paths
   funnel through `finish_bulk_update` in `clipboard/commands.rs`.

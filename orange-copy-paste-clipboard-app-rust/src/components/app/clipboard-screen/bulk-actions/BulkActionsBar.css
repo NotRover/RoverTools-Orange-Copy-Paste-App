@@ -377,6 +377,16 @@
   text-align: left;
 }
 
+/* Same as the card menu: shown, disabled, with the reason on hover. */
+.bulk-popup-space-row:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bulk-popup-space-row:disabled:hover {
+  background: transparent;
+}
+
 .bulk-popup-space-row:hover {
   background: var(--surface-hover);
 }

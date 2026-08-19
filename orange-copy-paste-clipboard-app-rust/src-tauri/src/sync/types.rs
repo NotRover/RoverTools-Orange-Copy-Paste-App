@@ -95,6 +95,15 @@ pub struct Space {
     pub owner_id: String,
     /// True when the current user owns this space (may invite/remove/delete).
     pub is_owner: bool,
+    /// Whether *this device* holds the Space Key, which is what decides whether
+    /// anything can be written here: content is encrypted under that key, so
+    /// without it a share would either be dropped or produce an entry nobody
+    /// can read. Stamped from the live keyring on every read rather than stored,
+    /// because the key can arrive at any moment - see `space:key-received`.
+    /// Distinct from a member's `has_space_key`, which is the server's record of
+    /// having handed a copy over and can be true while the unwrap here failed.
+    #[serde(default)]
+    pub has_key: bool,
     pub share_history: bool,
     pub member_count: u32,
     pub members: Vec<SpaceMember>,

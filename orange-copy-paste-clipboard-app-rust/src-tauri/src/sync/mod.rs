@@ -1036,7 +1036,12 @@ impl SyncClient {
             return Some(umk);
         }
         let device_priv = crypto::load_device_private_key(user_id).ok().flatten()?;
-        let wrapped = http.get_device_wrapped_umk().await.ok().flatten()?;
+        let wrapped = match http.get_device_wrapped_umk().await {
+            Ok(crate::sync::client::DeviceWrap::Present(wrapped)) => wrapped,
+            // Absent or unreachable are the same to this caller: it has other
+            // sources to try, and one message for having exhausted them.
+            _ => return None,
+        };
         let device_pub = crypto::device_public_key(&device_priv);
         let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
         crypto::unwrap_key(&shared, &wrapped).ok()
@@ -1361,15 +1366,24 @@ impl SyncClient {
         let boot = http.bootstrap(None).await.map_err(RestoreError::from_api)?;
 
         // Recover the UMK from the device wrap — no password involved.
-        let wrapped = http
+        //
+        // Only an explicit `Absent` is terminal. Every other unhappy answer,
+        // including an unmarked 404, arrives as an `Err` classified transient, so
+        // an outage or a half-finished deploy costs this attempt and not the
+        // session: the keychain still holds working credentials, and the retry
+        // loop uses them.
+        let wrapped = match http
             .get_device_wrapped_umk()
             .await
             .map_err(RestoreError::from_api)?
-            .ok_or_else(|| {
-                RestoreError::Terminal(
+        {
+            crate::sync::client::DeviceWrap::Present(wrapped) => wrapped,
+            crate::sync::client::DeviceWrap::Absent => {
+                return Err(RestoreError::Terminal(
                     "no device key wrap (revoked or never stored), log in again".into(),
-                )
-            })?;
+                ))
+            }
+        };
         let device_pub = crypto::device_public_key(&device_priv);
         let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
         let umk = crypto::unwrap_key(&shared, &wrapped).map_err(RestoreError::Terminal)?;
@@ -3064,7 +3078,21 @@ impl SyncClient {
 
     /// The cached space list (refreshed by [`Self::reconcile_spaces`]).
     pub fn spaces(&self) -> Vec<Space> {
-        self.spaces.lock().clone()
+        let mut spaces = self.spaces.lock().clone();
+        self.stamp_keys(&mut spaces);
+        spaces
+    }
+
+    /// Refresh `has_key` against the keyrings held right now.
+    ///
+    /// Not stored on the cached list: a key can land between two reads (the
+    /// owner's app comes back, the retry loop succeeds), and a stale `false`
+    /// would keep the UI refusing writes that would now work.
+    fn stamp_keys(&self, spaces: &mut [Space]) {
+        let rings = self.space_keys.lock();
+        for space in spaces.iter_mut() {
+            space.has_key = matches!(rings.get(&space.id), Some(ring) if !ring.is_empty());
+        }
     }
 
     /// Flip a member's presence across every cached space they appear in,
@@ -3311,6 +3339,12 @@ impl SyncClient {
         Some(crypto::derive_identity_keypair(&umk))
     }
 
+    /// Whether this device can encrypt for a space. The one gate on writing:
+    /// commands refuse rather than push something the space cannot read.
+    pub fn has_space_key(&self, space_id: &str) -> bool {
+        self.space_current_key(space_id).is_some()
+    }
+
     /// The current (newest) key for a space, if we hold its keyring.
     fn space_current_key(&self, space_id: &str) -> Option<[u8; 32]> {
         self.space_keys
@@ -3516,7 +3550,9 @@ impl SyncClient {
             .ok_or_else(|| "Not signed in".to_string())?;
         let space_key = self
             .space_current_key(space_id)
-            .ok_or_else(|| "No key for this space yet".to_string())?;
+            .ok_or_else(|| {
+                "This space has not handed you its key yet, so you cannot post here.".to_string()
+            })?;
 
         // Same envelope as an entry: a fresh key per comment, wrapped under the
         // Space Key, so a rotation never strands what was written before it.
@@ -3762,6 +3798,8 @@ impl SyncClient {
 
             out.push(Space {
                 is_owner: s.owner_id == me,
+                // Stamped below, once the whole list is built.
+                has_key: false,
                 member_count: s.members.len() as u32,
                 members: s
                     .members
@@ -3784,6 +3822,7 @@ impl SyncClient {
             });
         }
 
+        self.stamp_keys(&mut out);
         *self.spaces.lock() = out.clone();
         if self.keys_pending(&out) {
             Arc::clone(self).spawn_key_retry();
