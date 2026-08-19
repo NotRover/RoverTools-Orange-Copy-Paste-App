@@ -11,6 +11,7 @@
     ]
   },
   "enabledMcpjsonServers": [
-    "supabase"
+    "supabase",
+    "render"
   ]
 }
