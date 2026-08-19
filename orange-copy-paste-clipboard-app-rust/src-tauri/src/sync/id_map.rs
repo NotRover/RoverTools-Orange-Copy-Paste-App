@@ -32,6 +32,21 @@ struct IdMapData {
     /// so this stays empty for a single-user account.
     #[serde(default)]
     entry_owners: HashMap<String, String>,
+    /// Entries this device deliberately took off the server while keeping the
+    /// local copy - "Remove from cloud". Keyed like `entries`.
+    ///
+    /// A removal and a deletion look identical on the wire: both are a push
+    /// with `deleted_at` set, because the server has no delete route. So the
+    /// tombstone this device just pushed comes back on the next pull as an
+    /// ordinary "this entry is deleted", and applying it wipes the local copy
+    /// the action promised to keep. Echo suppression by `device_id` was meant
+    /// to prevent that and cannot be relied on: the server records the device
+    /// that *created* a row and never updates it, so any entry pushed before
+    /// the current sign-in comes back wearing an older device's id. This set is
+    /// the device's own record of what it meant, and it does not depend on the
+    /// server agreeing.
+    #[serde(default)]
+    unpushed: HashSet<String>,
     /// Items removed from a space, keyed like `entries`.
     ///
     /// Two jobs. It is what the Spaces feed renders as a placeholder, so a
@@ -125,6 +140,8 @@ impl IdMap {
         self.data
             .entries
             .insert(client_id.to_string(), server_id.to_string());
+        // Back on the server, so a tombstone for it is a real deletion again.
+        self.data.unpushed.remove(client_id);
         self.persist();
     }
 
@@ -153,6 +170,20 @@ impl IdMap {
         self.persist();
     }
 
+    /// Drop this device's copy of an entry another member wrote, while keeping
+    /// the record that they wrote it.
+    ///
+    /// [`Self::remove_entry`] is for an entry that is going away entirely, so
+    /// it clears authorship too. Doing that here would make the item look like
+    /// an ordinary local one that sync has never seen - which is exactly what
+    /// "Upload" looks for, so the next bulk upload would publish someone else's
+    /// item under this account and hand every member a rival copy.
+    pub fn forget_received_copy(&mut self, client_id: &str) {
+        self.data.entries.remove(client_id);
+        self.data.entry_shares.remove(client_id);
+        self.persist();
+    }
+
     // ── Direction ─────────────────────────────────────────────────
 
     /// Record that `client_id` arrived from another member. Idempotent: only a
@@ -163,6 +194,30 @@ impl IdMap {
         }
     }
 
+    // ── Removed from the cloud, kept here ─────────────────────────
+
+    /// Record that the user took this entry off the server on purpose and
+    /// wants the local copy. Survives [`Self::remove_entry`], which runs on the
+    /// same action to drop the now-meaningless server id.
+    pub fn mark_unpushed(&mut self, client_id: &str) {
+        if self.data.unpushed.insert(client_id.to_string()) {
+            self.persist();
+        }
+    }
+
+    /// Forget that, because the entry is being deleted for real or has been
+    /// uploaded again.
+    pub fn clear_unpushed(&mut self, client_id: &str) {
+        if self.data.unpushed.remove(client_id) {
+            self.persist();
+        }
+    }
+
+    /// Whether a tombstone for this entry must leave the local copy alone.
+    pub fn is_unpushed(&self, client_id: &str) -> bool {
+        self.data.unpushed.contains(client_id)
+    }
+
     /// Keys of every entry that came from another member.
     pub fn remote_entries(&self) -> Vec<String> {
         self.data.remote_entries.iter().cloned().collect()
@@ -171,6 +226,23 @@ impl IdMap {
     /// Whether another member wrote this one.
     pub fn is_remote(&self, client_id: &str) -> bool {
         self.data.remote_entries.contains(client_id)
+    }
+
+    /// Keys of every entry this account wrote, of the ones this device knows
+    /// about.
+    ///
+    /// The list any account-wide action must be built from. The obvious
+    /// alternative - every key in `entries` - is wrong, because this map
+    /// records what the device pushed *or pulled*, so it includes items other
+    /// members shared into a space. Sweeping those took away the user's copy of
+    /// someone else's item in an action that only promised to clear the server.
+    pub fn owned_keys(&self) -> Vec<String> {
+        self.data
+            .entries
+            .keys()
+            .filter(|k| !self.data.remote_entries.contains(*k))
+            .cloned()
+            .collect()
     }
 
     /// Spaces one entry is shared into, without cloning the whole map.
@@ -401,6 +473,79 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("id_map_test_{}", crate::sync::now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         IdMap::load(dir.join("id_map.json"))
+    }
+
+    /// The rule an account-wide sweep depends on. `entries` holds what this
+    /// device pushed *and* what it pulled, so the received ones have to come
+    /// back out or a "remove everything of mine" action reaches them.
+    #[test]
+    fn owned_keys_leaves_out_what_other_members_wrote() {
+        let mut m = map();
+        m.set_entry("clipboard:mine", "srv-1");
+        m.set_entry("clipboard:theirs", "srv-2");
+        m.mark_entry_remote("clipboard:theirs");
+
+        let owned = m.owned_keys();
+        assert_eq!(owned, vec!["clipboard:mine".to_string()]);
+    }
+
+    /// An account with nothing of its own sweeps nothing, rather than falling
+    /// back to "everything".
+    #[test]
+    fn owned_keys_is_empty_when_every_entry_was_received() {
+        let mut m = map();
+        m.set_entry("note:theirs", "srv-1");
+        m.mark_entry_remote("note:theirs");
+        assert!(m.owned_keys().is_empty());
+    }
+
+    /// Dropping our copy of someone else's item must not make it look like an
+    /// unsynced local one, or the next bulk upload publishes it as ours.
+    #[test]
+    fn dropping_a_received_copy_keeps_the_author_on_record() {
+        let mut m = map();
+        m.set_entry("clipboard:theirs", "srv-1");
+        m.mark_entry_remote("clipboard:theirs");
+        m.set_entry_owner("clipboard:theirs", "hasan");
+
+        m.forget_received_copy("clipboard:theirs");
+
+        assert!(m.get_server_id("clipboard:theirs").is_none());
+        assert!(m.is_remote("clipboard:theirs"));
+        assert_eq!(m.owner_of("clipboard:theirs").as_deref(), Some("hasan"));
+        assert!(m.owned_keys().is_empty());
+    }
+
+    /// The invariant behind "Remove from cloud keeps your copy". The action
+    /// drops the server id on the same pass, so the record of what the user
+    /// meant has to outlive that.
+    #[test]
+    fn removing_from_the_cloud_is_remembered_after_the_server_id_goes() {
+        let mut m = map();
+        m.set_entry("clipboard:a", "srv-1");
+        m.mark_unpushed("clipboard:a");
+        m.remove_entry("clipboard:a");
+        assert!(m.is_unpushed("clipboard:a"));
+    }
+
+    /// Uploading it again puts it back under the ordinary rules: a tombstone
+    /// after that is a real deletion and must be applied.
+    #[test]
+    fn uploading_again_makes_the_entry_deletable_again() {
+        let mut m = map();
+        m.mark_unpushed("clipboard:a");
+        m.set_entry("clipboard:a", "srv-2");
+        assert!(!m.is_unpushed("clipboard:a"));
+    }
+
+    /// And so does deleting it for real, which is what `clear_unpushed` is
+    /// called for on the `ThisItem` path.
+    #[test]
+    fn deleting_for_real_clears_the_keep_it_here_record() {
+        let mut m = map();
+        m.mark_unpushed("note:a");
+        m.clear_unpushed("note:a");
+        assert!(!m.is_unpushed("note:a"));
     }
 
     #[test]

@@ -198,24 +198,39 @@ pub async fn sync_reset_password(
     sync.reset_password(email).await
 }
 
+/// What a startup restore attempt concluded.
+///
+/// Two outcomes used to share one `null`: "there is nothing to restore, show the
+/// sign-in form" and "the credentials are fine, the server is just not reachable
+/// yet". The second one is not a sign-out, but the UI could not tell and drew a
+/// password field anyway - so the user typed their password for a session that
+/// was about to come back on its own.
+#[derive(serde::Serialize)]
+pub struct RestoreOutcome {
+    pub user: Option<SyncUser>,
+    /// A background retry is running and expected to succeed. Ends with
+    /// `sync:session-restored` or `sync:restore-gave-up`.
+    pub restoring: bool,
+}
+
 /// Silently restore the previous session (refresh token + device-wrapped UMK).
-/// Called once on app startup; returns null when there's nothing to restore so
-/// the UI can show the login screen without an error.
+/// Called once on app startup.
 #[tauri::command]
 pub async fn sync_restore_session(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<Option<SyncUser>, String> {
+) -> Result<RestoreOutcome, String> {
+    let idle = || RestoreOutcome { user: None, restoring: false };
     let config = SyncConfig::load(&app);
     if !config.enabled || !config.is_configured() {
-        return Ok(None);
+        return Ok(idle());
     }
     let sync = get_or_create_client(&state, &app)?;
     match sync.try_restore_session().await {
         Ok(user) => {
             Arc::clone(&sync).trigger_initial_sync();
             let _ = app.emit("sync:session-restored", &user);
-            Ok(Some(user))
+            Ok(RestoreOutcome { user: Some(user), restoring: false })
         }
         Err(e) if e.is_transient() => {
             // The stored credentials are still good, we just could not reach
@@ -226,7 +241,7 @@ pub async fn sync_restore_session(
             // `sync:session-restored`.
             eprintln!("[sync] session restore deferred, will retry: {e}");
             Arc::clone(&sync).spawn_session_restore_retry();
-            Ok(None)
+            Ok(RestoreOutcome { user: None, restoring: true })
         }
         Err(e) => {
             // Expected on first run / after logout, and the UI just shows the
@@ -239,7 +254,7 @@ pub async fn sync_restore_session(
             if let crate::sync::RestoreError::Terminal(reason) = &e {
                 crate::health::note("sync restore: credentials rejected", reason);
             }
-            Ok(None)
+            Ok(idle())
         }
     }
 }
@@ -418,6 +433,22 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
     Ok(retried)
 }
 
+/// Whether a bulk upload may send this key.
+///
+/// "The server has never seen it" is not enough on its own. A copy of another
+/// member's item that this device has dropped is also absent from
+/// `entry_states`, and publishing one would insert a rival row under this
+/// account for an entry someone else wrote - see `docs/PERMISSIONS.md`. The
+/// push guard would refuse it, but the key would still be counted and the
+/// progress bar would wait forever for something that is never going to send.
+fn sendable(
+    key: &str,
+    known: &std::collections::HashMap<String, &'static str>,
+    received: &std::collections::HashSet<String>,
+) -> bool {
+    !known.contains_key(key) && !received.contains(key)
+}
+
 /// Push every local item the server has never seen. Sync only ever picks up
 /// items as they are created, so anything captured before signing in (or while
 /// sync was off) stays local forever without this. Already-synced items are
@@ -431,13 +462,14 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, Str
     let sync = sync_client(&state)?;
     sync.invalidate_blob_budget();
     let known = sync.entry_states();
+    let received: std::collections::HashSet<String> = sync.remote_entries().into_iter().collect();
 
     let entries: Vec<_> = state
         .history
         .lock()
         .all()
         .iter()
-        .filter(|e| !known.contains_key(&format!("clipboard:{}", e.id)))
+        .filter(|e| sendable(&format!("clipboard:{}", e.id), &known, &received))
         .cloned()
         .collect();
     let notes: Vec<_> = state
@@ -445,7 +477,7 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, Str
         .lock()
         .all()
         .iter()
-        .filter(|n| !known.contains_key(&format!("note:{}", n.id)))
+        .filter(|n| sendable(&format!("note:{}", n.id), &known, &received))
         .cloned()
         .collect();
 
@@ -500,6 +532,7 @@ fn image_upload_size(content: &str) -> u64 {
 pub async fn sync_preview_unsynced(state: State<'_, AppState>) -> Result<UnsyncedPreview, String> {
     let (sync, http) = sync_http(&state)?;
     let known = sync.entry_states();
+    let received: std::collections::HashSet<String> = sync.remote_entries().into_iter().collect();
 
     // Sizes first, so no store lock is held across the quota request.
     let image_sizes: Vec<u64> = {
@@ -507,7 +540,7 @@ pub async fn sync_preview_unsynced(state: State<'_, AppState>) -> Result<Unsynce
         history
             .all()
             .iter()
-            .filter(|e| !known.contains_key(&format!("clipboard:{}", e.id)))
+            .filter(|e| sendable(&format!("clipboard:{}", e.id), &known, &received))
             .filter(|e| e.kind == crate::clipboard::history::EntryKind::Image)
             .map(|e| image_upload_size(&e.content))
             .collect()
@@ -517,14 +550,14 @@ pub async fn sync_preview_unsynced(state: State<'_, AppState>) -> Result<Unsynce
         .lock()
         .all()
         .iter()
-        .filter(|e| !known.contains_key(&format!("clipboard:{}", e.id)))
+        .filter(|e| sendable(&format!("clipboard:{}", e.id), &known, &received))
         .count();
     let notes_total = state
         .notes
         .lock()
         .all()
         .iter()
-        .filter(|n| !known.contains_key(&format!("note:{}", n.id)))
+        .filter(|n| sendable(&format!("note:{}", n.id), &known, &received))
         .count();
 
     let quota = http.blob_quota().await?;
@@ -610,9 +643,9 @@ pub fn sync_unpush_entries(
         }
         count += 1;
         if entry_type == "note" {
-            sync.on_delete_note(id);
+            sync.on_unpush_owned_note(id);
         } else {
-            sync.on_delete_clipboard_entry(id);
+            sync.on_unpush_owned_clipboard_entry(id);
         }
     }
     Ok(count)
@@ -632,10 +665,19 @@ pub fn sync_unpush_entries(
 #[tauri::command]
 pub async fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let sync = sync_client(&state)?;
-    let mut keys: Vec<String> = sync.entry_states().into_keys().collect();
+    // `owned_entry_keys`, not `entry_states`: the latter covers everything this
+    // device pushed *or pulled*, so it includes items other members shared into
+    // a space. Sweeping those took the user's copy of someone else's item away
+    // and left a "Removed your copy of this item" placeholder, from an action
+    // that only promises to clear this account off the server.
+    let mut keys = sync.owned_entry_keys();
     if let Ok(remote) = sync.server_entry_keys().await {
         for key in remote {
-            if !keys.contains(&key) {
+            // That sweep already narrows to rows owned by this account, but it
+            // can only do so when the server reports an owner; the same filter
+            // is applied here so an older server that omits one cannot put a
+            // received item back into the list.
+            if !sync.is_remote_key(&key) && !keys.contains(&key) {
                 keys.push(key);
             }
         }
@@ -645,9 +687,9 @@ pub async fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, 
             continue;
         };
         if kind == "note" {
-            sync.on_delete_note(id.to_string());
+            sync.on_unpush_owned_note(id.to_string());
         } else {
-            sync.on_delete_clipboard_entry(id.to_string());
+            sync.on_unpush_owned_clipboard_entry(id.to_string());
         }
     }
     Ok(keys)
@@ -672,6 +714,13 @@ pub struct ServerBreakdown {
     pub clipboard: usize,
     pub notes: usize,
     pub total: usize,
+    /// Clipboard rows by kind, using the server's plaintext `kind` label. The
+    /// local bar splits URLs, documents and folders out of text as well, but
+    /// those are read from the content, which the server cannot see.
+    pub text: usize,
+    pub image: usize,
+    pub file: usize,
+    pub html: usize,
 }
 
 /// What this account holds on the server, by kind.
@@ -686,11 +735,26 @@ pub async fn sync_server_breakdown(
     state: State<'_, AppState>,
 ) -> Result<ServerBreakdown, String> {
     let sync = sync_client(&state)?;
-    let keys = sync.server_entry_keys().await?;
-    let notes = keys.iter().filter(|k| k.starts_with("note:")).count();
+    let keys = sync.server_entries().await?;
+    let notes = keys.iter().filter(|(k, _)| k.starts_with("note:")).count();
+    let count = |want: &str| {
+        keys.iter()
+            .filter(|(k, kind)| !k.starts_with("note:") && kind == want)
+            .count()
+    };
+    let image = count("image");
+    let file = count("file");
+    let html = count("html");
     Ok(ServerBreakdown {
         clipboard: keys.len() - notes,
         notes,
+        // Whatever is not one of the three named kinds is text: an older client
+        // that pushed no kind at all should land somewhere, and the bar must
+        // add up to the total it is drawn against.
+        text: keys.len() - notes - image - file - html,
+        image,
+        file,
+        html,
         total: keys.len(),
     })
 }
@@ -754,6 +818,37 @@ pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> Bulk
 pub async fn sync_now(state: State<'_, AppState>) -> Result<(), String> {
     let sync = sync_client(&state)?;
     sync.flush_and_pull().await
+}
+
+/// Shortest gap between two catch-ups. Several screens can ask at once when the
+/// window comes back; one pull covers all of them.
+const CATCH_UP_MIN_SECS: u64 = 20;
+
+/// Re-read the account after the window comes back to the foreground.
+///
+/// The socket is the only live channel, and a screen that has been sitting in
+/// the background may have missed everything on it. This is the cheap
+/// fallback: silent when sync is off, when nobody is signed in, or when a sync
+/// already landed within `CATCH_UP_MIN_SECS`.
+#[tauri::command]
+pub async fn sync_catch_up(state: State<'_, AppState>) -> Result<(), String> {
+    let Some(sync) = state.sync_client.lock().clone() else {
+        return Ok(());
+    };
+    if sync.current_user().is_none() {
+        return Ok(());
+    }
+    if let Some(at) = sync.status_info().last_synced_at {
+        let now = crate::sync::now_ms();
+        if now.saturating_sub(at) < CATCH_UP_MIN_SECS * 1000 {
+            return Ok(());
+        }
+    }
+    sync.flush_and_pull().await?;
+    // Spaces, members and invites come from REST, not the socket, so a delta
+    // pull alone leaves the Spaces screen showing what it loaded on mount.
+    sync.reconcile_spaces().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1063,6 +1158,9 @@ pub async fn sync_get_quota(state: State<'_, AppState>) -> Result<SyncQuota, Str
     Ok(SyncQuota {
         used_bytes: q.used_bytes,
         quota_bytes: q.quota_bytes,
+        entry_count: q.entry_count,
+        entry_limit: q.entry_limit,
+        max_entry_bytes: q.max_entry_bytes,
     })
 }
 
@@ -1071,10 +1169,20 @@ pub async fn sync_list_devices(state: State<'_, AppState>) -> Result<Vec<SyncDev
     let (sync, http) = sync_http(&state)?;
     let my_device = sync.device_id();
     let devices = http.list_devices().await?;
+    // Rows this machine registered before (an older install, a sign-out and
+    // back in on a build that still minted a fresh row). Marking them lets the
+    // user clear them out without guessing which "Spect-PC" is which.
+    let my_fingerprint = devices
+        .iter()
+        .find(|d| my_device.as_deref() == Some(d.id.as_str()))
+        .and_then(|d| d.fingerprint.clone());
     Ok(devices
         .into_iter()
         .map(|d| SyncDevice {
             is_current: my_device.as_deref() == Some(d.id.as_str()),
+            same_machine: my_device.as_deref() != Some(d.id.as_str())
+                && my_fingerprint.is_some()
+                && d.fingerprint == my_fingerprint,
             id: d.id,
             device_name: d.device_name,
             platform: d.platform,

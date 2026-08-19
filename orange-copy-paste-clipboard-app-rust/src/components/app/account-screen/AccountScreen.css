@@ -909,13 +909,18 @@
 .acct-comp {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px 11px;
+  gap: 9px;
+  padding: 11px 14px 10px;
+  border-top: 1px solid var(--border);
 }
 
+.acct-list > .acct-comp:first-child { border-top: none; }
+
+/* Centred rather than baseline-aligned: the switcher is a control with its own
+   box, and a baseline lines its text up while leaving the track sitting low. */
 .acct-comp-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 
@@ -968,6 +973,18 @@
 
 .acct-comp-row:hover {
   background: var(--surface-hover);
+}
+
+/* Rows are disabled while a cloud row is mid-sync, so nothing starts a second
+   one. Dimming the whole legend says the wait belongs to the card, not to the
+   one row that was clicked. */
+.acct-comp-row:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.acct-comp-row:disabled:hover {
+  background: none;
 }
 
 .acct-comp-dot {
@@ -1130,3 +1147,30 @@
   color: var(--text, #e8e8e8);
   background: var(--surface-hover, rgba(255, 255, 255, .06));
 }
+
+/* Waiting on a background session restore. No form, so the badge carries the
+   card and the link sits directly under the copy. */
+.auth-card--waiting {
+  text-align: center;
+}
+
+.auth-card--waiting .auth-brand-badge {
+  animation: acctWaitPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes acctWaitPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card--waiting .auth-brand-badge {
+    animation: none;
+  }
+}
+

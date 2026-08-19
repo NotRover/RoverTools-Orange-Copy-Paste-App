@@ -1355,7 +1355,7 @@ Applied to all three windows:
 
 ## Cross-System Invariants
 
-The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee. The canonical list lives in `docs/ARCHITECTURE.md` (workspace root, §13); this is the app-side view.
+The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee. The canonical list lives in `docs/ARCHITECTURE.md` (workspace root, section 13); this is the app-side view.
 
 | #   | Invariant                                      | App-side implication                                                                                                                                                  |
 | --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

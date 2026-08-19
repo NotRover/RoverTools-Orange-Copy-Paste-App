@@ -99,6 +99,10 @@ import {
   toastError,
 } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
+import {
+  NETWORK_REFOCUS_MS,
+  useWindowRefocus,
+} from "../../../hooks/useWindowRefocus";
 import { useSticky, useStickySet } from "../../../hooks/useSticky";
 import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
@@ -2186,6 +2190,22 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch(() => setLoaded(true));
   }, []);
 
+  // Everything this screen shows that comes from the server. Spaces, members
+  // and invites arrive over REST, not the socket, so nothing on screen updates
+  // itself while the window is in the background - which is why leaving the
+  // screen and coming back used to be the only way to see a change.
+  const reloadAll = useCallback(() => {
+    reloadSpaces();
+    refreshShares();
+    refreshInvites();
+    invoke<Record<string, SendFilter>>("space_get_send_filters")
+      .then(setSendFilters)
+      .catch(() => {});
+    invoke<{ user_id: string } | null>("sync_get_user")
+      .then((u) => setSelfUserId(u?.user_id ?? null))
+      .catch(() => setSelfUserId(null));
+  }, [reloadSpaces, refreshShares, refreshInvites]);
+
   useEffect(() => {
     // First visit of the launch: the local list lands in one call, while
     // spaces_list goes to the server and recovers keyrings on the way.
@@ -2197,16 +2217,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         })
         .catch(() => {});
     }
-    reloadSpaces();
-    refreshShares();
-    refreshInvites();
-    invoke<Record<string, SendFilter>>("space_get_send_filters")
-      .then(setSendFilters)
-      .catch(() => {});
-    invoke<{ user_id: string } | null>("sync_get_user")
-      .then((u) => setSelfUserId(u?.user_id ?? null))
-      .catch(() => setSelfUserId(null));
-  }, [syncConnected, reloadSpaces, refreshShares, refreshInvites]);
+    reloadAll();
+  }, [syncConnected, reloadAll]);
+
+  useWindowRefocus(reloadAll, NETWORK_REFOCUS_MS);
 
   // Auto-copy and the placeholder toggle are per device, so both are read from
   // local settings per space.

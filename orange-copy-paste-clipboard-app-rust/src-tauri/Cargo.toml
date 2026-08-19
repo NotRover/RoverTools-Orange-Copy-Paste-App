@@ -96,6 +96,10 @@ open = "5"
 #  NOTE: keep this target table LAST — any `dep = ...` lines after a target
 #  table header belong to that table, so cross-platform deps must precede it.
 [target.'cfg(windows)'.dependencies]
+# Reads HKLM MachineGuid for the device fingerprint (see sync/device_id.rs).
+# Already in the tree transitively and builds on the same windows-sys 0.59
+# below, so this promotes an existing crate rather than adding one.
+winreg = "0.55"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",
