@@ -127,6 +127,11 @@ pub struct RegisterDeviceRequest {
     pub app_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_pubkey: Option<String>,
+    /// Salted hash of this machine's id (see `sync::device_id`). A grouping
+    /// hint for the device list, never proof - the server matches on
+    /// `device_pubkey`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +150,10 @@ pub struct DeviceOut {
     /// Presence snapshot at list time; live updates arrive over WS.
     #[serde(default)]
     pub online: bool,
+    /// This row's machine fingerprint, or `None` for rows registered before
+    /// fingerprints existed. Lets the UI group one machine's registrations.
+    #[serde(default)]
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -629,6 +638,15 @@ impl SyncHttpClient {
 
     pub fn set_refresh_token(&self, token: String) {
         *self.refresh_token.lock() = Some(token);
+    }
+
+    /// The newest refresh token this client holds.
+    ///
+    /// Not the one its caller started with: [`Self::refresh_access_token`]
+    /// rotates it mid-flight, so anything persisting the token has to ask for
+    /// the current value rather than reuse the one it was handed at sign-in.
+    pub fn refresh_token(&self) -> Option<String> {
+        self.refresh_token.lock().clone()
     }
 
     pub fn set_device_id(&self, device_id: String) {

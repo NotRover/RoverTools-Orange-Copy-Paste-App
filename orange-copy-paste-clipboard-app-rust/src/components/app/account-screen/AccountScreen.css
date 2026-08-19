@@ -1130,3 +1130,29 @@
   color: var(--text, #e8e8e8);
   background: var(--surface-hover, rgba(255, 255, 255, .06));
 }
+
+/* Waiting on a background session restore. No form, so the badge carries the
+   card and the link sits directly under the copy. */
+.auth-card--waiting {
+  text-align: center;
+}
+
+.auth-card--waiting .auth-brand-badge {
+  animation: acctWaitPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes acctWaitPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card--waiting .auth-brand-badge {
+    animation: none;
+  }
+}

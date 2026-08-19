@@ -212,6 +212,9 @@ export interface SyncDevice {
   online: boolean;
   /** True when this row is the device the app is running on. */
   is_current: boolean;
+  /** True when this row came from the same machine as the current device but
+   *  is an older registration. A hint for the device list, not proof. */
+  same_machine: boolean;
   last_seen_at: number;
 }
 

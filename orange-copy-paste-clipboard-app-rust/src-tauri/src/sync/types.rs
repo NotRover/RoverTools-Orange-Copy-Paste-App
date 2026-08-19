@@ -159,6 +159,11 @@ pub struct SyncDevice {
     pub online: bool,
     /// True when this row is the device the app is running on.
     pub is_current: bool,
+    /// True when this row was registered from the same physical machine as the
+    /// current device, but is not the current device. Derived by comparing the
+    /// server's opaque fingerprints, so it is a hint for the device list only -
+    /// never a claim of identity, which only the device keypair can make.
+    pub same_machine: bool,
 }
 
 // ── Sync status info ────────────────────────────────────────────────
@@ -196,6 +201,20 @@ pub struct SyncStatusInfo {
 pub enum EntryType {
     Clipboard,
     Notes,
+}
+
+/// What a removal is allowed to reach.
+///
+/// An entry belongs to whoever wrote it (see `docs/PERMISSIONS.md`), and this
+/// is how that rule is carried to the one function that performs a removal,
+/// instead of each caller remembering to filter its own list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovalScope {
+    /// The user acted on this one item, whoever wrote it.
+    ThisItem,
+    /// A sweep over everything this account owns. Items other members shared
+    /// in are not part of that set and are refused outright.
+    OwnedOnly,
 }
 
 impl EntryType {

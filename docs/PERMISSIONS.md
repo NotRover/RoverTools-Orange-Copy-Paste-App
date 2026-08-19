@@ -33,6 +33,7 @@ space (`id_map.is_remote`, surfaced to the UI as `useRemoteEntryKeys`).
 | Delete locally | card menu, bulk bar | yes | yes, local only | `spawn_delete_entry` skips the tombstone |
 | Upload to cloud | card menu, bulk bar | yes | **hidden** | `sync_push_entries` skips |
 | Remove from cloud | card menu, bulk bar | yes | **hidden** | `sync_unpush_entries` skips |
+| Remove everything from cloud | Account screen | yes | **never reached** | `sync_unpush_all` builds from `owned_keys`; `spawn_delete_entry` refuses `OwnedOnly` |
 | Share to a space | card menu, bulk bar | yes | **hidden** | push guard |
 | Remove from a space | Spaces feed, bulk bar | yes (unshare) | owner only | backend `remove_entry_from_space` |
 | Comment on it | Spaces detail panel | yes | yes | backend `_require_member` |
@@ -45,6 +46,34 @@ author published it.
 **Hidden** means the row is not rendered at all, rather than shown disabled. A
 control that cannot work should not be offered — the version of this that showed
 it anyway reported "Removing 1 item from your account" and removed nothing.
+
+**Never reached** is for account-wide actions, which have no per-item control to
+hide. They are the dangerous shape: nobody picked the items, so nothing on
+screen shows what is about to be touched, and a list built one field too wide
+takes things away silently. Two rules, both required:
+
+1. Build the list from `IdMap::owned_keys()` — never `entry_states()`, which
+   records what this device pushed **and** what it pulled, so it includes items
+   other members shared in.
+2. Pass `RemovalScope::OwnedOnly`, so `spawn_delete_entry` refuses a received
+   item even if the list is wrong. Rule 1 is the intent; rule 2 is what makes
+   getting it wrong inert instead of destructive.
+
+A removal must also survive the round trip. "Remove from cloud" keeps the local
+copy, but the only wire shape a removal has is a tombstone - a push with
+`deleted_at` set, the same message a real deletion sends - so it comes back on
+the next pull as "this entry is deleted" and, applied, wipes the copy the action
+promised to keep. The device records what it meant (`IdMap::mark_unpushed`) and
+`merge_pulled` skips the local delete for those keys. Do not rely on echo
+suppression by `device_id` for this: a row records the device that pushed it,
+and an entry pushed under an earlier sign-in comes back wearing an id this
+install no longer has.
+
+This is written down because it has already gone wrong once: "Remove from
+cloud" on the Account screen swept `entry_states()`, so it dropped the user's
+copies of items other people had shared with them. The authors kept theirs — the
+removal stayed local, as `spawn_delete_entry` intends for someone else's item —
+so the damage was one-sided and invisible from the other end.
 
 ## Spaces
 
@@ -75,6 +104,14 @@ Client, Rust — the enforcement that matters, since only Rust can push:
   already exists taking an entry over.
 - `sync/commands.rs` — `sync_push_entries` / `sync_unpush_entries` skip entries
   you did not write, and count only what they acted on.
+- `sync/types.rs` — `RemovalScope`, and `sync/mod.rs` — the `OwnedOnly` refusal
+  at the top of `spawn_delete_entry`. The scope travels with the call, so an
+  account-wide action cannot reach another member's entry by forgetting to
+  filter; `IdMap::owned_keys` is the list it should have been built from.
+- `sync/commands.rs` — `sync_unpush_all`, the account-wide sweep, applies both.
+- `sync/id_map.rs` — `mark_unpushed` / `is_unpushed`, and the guard at the top
+  of the tombstone branch in `merge_pulled`. This is what makes "keep the local
+  copy" true when the device's own tombstone comes back.
 - `notes/commands.rs` — `update_note` refuses outright.
 
 Client, React — hides what is not allowed, so nothing dead is on screen:

@@ -15,6 +15,7 @@ pub mod client;
 pub mod commands;
 pub mod config;
 pub mod crypto;
+pub mod device_id;
 pub mod id_map;
 pub mod oauth;
 pub mod pending_queue;
@@ -48,8 +49,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
-    EntryType, SendFilter, SkippedEntry, Space, SpaceComment, SpaceCommentCount, SpaceMember,
-    SyncMode, SyncStatusInfo, SyncUser,
+    EntryType, RemovalScope, SendFilter, SkippedEntry, Space, SpaceComment, SpaceCommentCount,
+    SpaceMember, SyncMode, SyncStatusInfo, SyncUser,
 };
 use crate::sync::ws_listener::WsListener;
 
@@ -452,6 +453,21 @@ pub struct SyncClient {
     /// second one is never started alongside it.
     restore_retrying: Arc<std::sync::atomic::AtomicBool>,
 
+    /// Held for the whole of [`Self::try_restore_session`].
+    ///
+    /// Supabase rotates the refresh token on every use and revokes the entire
+    /// token family if a spent one is presented again. Two restores running at
+    /// once - the startup command and the retry loop below it, or the command
+    /// again after a window reload - each read the same stored token and spend
+    /// it, and the second one kills the session for good. That is the sign-out
+    /// users see repeat, and only a password fixes it.
+    ///
+    /// `restore_retrying` does not cover this: it stops a second *loop*, not a
+    /// second attempt. A Tokio mutex rather than `parking_lot` because the
+    /// guard is held across awaits, the same reason `refresh_lock` in
+    /// [`crate::sync::client::SyncHttpClient`] is one.
+    restore_lock: tokio::sync::Mutex<()>,
+
     /// True while the space-key distribution retry loop is running. Reconcile
     /// runs from several triggers at once (screen mount, socket event, join),
     /// and without this each one would start its own loop.
@@ -489,24 +505,40 @@ impl Drop for SyncClient {
 
 /// Upload this device's wrapped UMK, retrying on the schedule above.
 ///
-/// Free-standing and holding only what it needs, so a retry that outlives the
-/// login cannot pin the whole `SyncClient` (and its runtime) alive.
-async fn store_device_wrap(http: Arc<SyncHttpClient>, device_id: String, wrapped: String) {
+/// Awaited by the login it belongs to, and its `Err` fails that login. This is
+/// the only passwordless copy of the master key: a login that returns without it
+/// leaves the install asking for a password on every launch thereafter, with no
+/// path back. A login that fails outright is the recoverable outcome.
+///
+/// Free-standing and holding only what it needs, so the retries cannot pin the
+/// whole `SyncClient` (and its runtime) alive.
+async fn store_device_wrap(
+    http: Arc<SyncHttpClient>,
+    device_id: String,
+    wrapped: String,
+) -> Result<(), String> {
     // A leading zero so the first attempt runs immediately and the schedule
     // below describes only the waits after it.
+    let mut last = String::new();
     for delay in std::iter::once(0).chain(DEVICE_WRAP_RETRY_BACKOFF_SECS) {
         if delay > 0 {
             tokio::time::sleep(Duration::from_secs(delay)).await;
         }
         match http.store_device_wrapped_umk(&device_id, wrapped.clone()).await {
-            Ok(()) => return,
-            Err(e) => eprintln!("[sync] store device umk failed: {e}"),
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("[sync] store device umk failed: {e}");
+                last = e.to_string();
+            }
         }
     }
     crate::health::note(
         "sync: device key wrap never stored",
-        "silent restore is off for this device until the next sign-in",
+        "the login was refused rather than leaving this device unable to restore",
     );
+    Err(format!(
+        "could not finish setting up this device: {last}. Check your connection and sign in again."
+    ))
 }
 
 impl SyncClient {
@@ -601,6 +633,7 @@ impl SyncClient {
             noted_activity: Arc::new(Mutex::new(HashMap::new())),
             ws_listener: Mutex::new(None),
             restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            restore_lock: tokio::sync::Mutex::new(()),
             key_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             settings_push_at,
             settings_notify,
@@ -818,41 +851,40 @@ impl SyncClient {
         let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
         let identity_pub_b64 = B64.encode(identity_pub);
 
-        // 5. Register this device — or reuse the identity from a previous login
-        //    on this install, so re-logins stop minting a new device row every
-        //    time. Reuse requires all three to line up: same user, a stored
-        //    device id the server still lists (not revoked), and the device
-        //    private key still in the keychain.
-        let stored = {
-            let s = self.sync_state.lock();
-            (s.data.user_id.clone(), s.data.device_id.clone())
-        };
-        let mut reused: Option<(Zeroizing<[u8; 32]>, [u8; 32], String)> = None;
-        if stored.0 == user_id && !stored.1.is_empty() {
-            if let Ok(Some(privk)) = crypto::load_device_private_key(&user_id) {
-                if let Ok(devices) = http.list_devices().await {
-                    if devices.iter().any(|d| d.id == stored.1) {
-                        let pubk = crypto::device_public_key(&privk);
-                        reused = Some((privk, pubk, stored.1.clone()));
-                    }
-                }
+        // 5. Register this device.
+        //
+        //    The device keypair is the identity - its private half is in this
+        //    machine's keychain and is the only thing that can decrypt this
+        //    device's wrapped UMK - so keep the existing one whenever it is
+        //    there. Registration is keyed on the public half server-side and
+        //    returns the row that key already has, which is what stops a
+        //    re-login minting a duplicate device.
+        //
+        //    This used to reuse a device id read from sync_state.json and
+        //    verified with a `list_devices` round trip. That made the identity
+        //    depend on a file in app data: lose it and the install registered
+        //    afresh, orphaning the wrap it still needed. The keychain holds the
+        //    key either way, so it is the better place to ask.
+        let (device_priv, device_pub) = match crypto::load_device_private_key(&user_id) {
+            Ok(Some(privk)) => {
+                let pubk = crypto::device_public_key(&privk);
+                (privk, pubk)
             }
-        }
-        let (device_priv, device_pub, device_id) = match reused {
-            Some(t) => t,
-            None => {
-                let (privk, pubk) = crypto::generate_device_keypair();
-                let dev = http
-                    .register_device(RegisterDeviceRequest {
-                        device_name,
-                        platform: std::env::consts::OS.to_string(),
-                        app_version: env!("CARGO_PKG_VERSION").to_string(),
-                        device_pubkey: Some(B64.encode(pubk)),
-                    })
-                    .await?;
-                (privk, pubk, dev.device_id)
-            }
+            _ => crypto::generate_device_keypair(),
         };
+        let device_id = http
+            .register_device(RegisterDeviceRequest {
+                device_name,
+                platform: std::env::consts::OS.to_string(),
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                device_pubkey: Some(B64.encode(device_pub)),
+                // A hint for grouping this machine's rows in the device list,
+                // never proof: a revoked row is excluded server-side, so a
+                // revoked device registering again correctly gets a new one.
+                fingerprint: Some(device_id::fingerprint(&user_id).await),
+            })
+            .await?
+            .device_id;
         http.set_device_id(device_id.clone());
 
         // 6. Register public keys for E2E space-key exchange.  The identity key
@@ -869,31 +901,36 @@ impl SyncClient {
         }
 
         // 7. Persist secrets to the OS keychain.
+        //
+        // The token comes from `http`, not from `session`: steps 3-6 each make a
+        // request, and any of them can hit a 401 and rotate the token underneath
+        // us. Storing the value captured at step 2 would put the spent one back
+        // over the live one that `refresh_access_token` already wrote, and the
+        // next launch would present a dead token.
         crypto::store_device_private_key(&user_id, &device_priv).await?;
-        crypto::store_refresh_token(&user_id, &session.refresh_token).await?;
+        let live_refresh = http
+            .refresh_token()
+            .unwrap_or_else(|| session.refresh_token.clone());
+        crypto::store_refresh_token(&user_id, &live_refresh).await?;
 
         // 7b. Store the UMK wrapped for this device so future launches can
         //     restore the session without the password (see
         //     [`Self::try_restore_session`]). X25519 with our own public half
         //     is a valid self-shared secret, same pattern as group keys.
-        //     Best-effort: failure only means the next launch asks to log in.
-        //     Not best-effort in practice: until this lands, every later launch
-        //     finds no wrap and has to ask for a password again, which is the
-        //     sign-out users see repeat. A network blip in the seconds after a
-        //     login is enough to cause it, so retry in the background rather
-        //     than leaving it to the next login to fix.
+        //
+        //     Awaited, and fatal to the login if it never lands. This upload is
+        //     the only passwordless copy of the master key, and it used to be
+        //     spawned: a login could report success having lost it, and from
+        //     then on every launch asked for a password with nothing anywhere
+        //     able to repair it. Failing the login instead is recoverable - the
+        //     user retries and gets a session that is actually durable - and it
+        //     is why this sits above step 8, so a login that cannot promise a
+        //     passwordless next launch does not rewrite sync_state.json either.
         {
             let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
-            match crypto::wrap_key(&shared, &umk) {
-                Ok(wrapped) => {
-                    self.handle.spawn(store_device_wrap(
-                        Arc::clone(&http),
-                        device_id.clone(),
-                        wrapped,
-                    ));
-                }
-                Err(e) => eprintln!("[sync] wrap device umk failed: {e}"),
-            }
+            let wrapped = crypto::wrap_key(&shared, &umk)
+                .map_err(|e| format!("could not wrap the device key: {e}"))?;
+            store_device_wrap(Arc::clone(&http), device_id.clone(), wrapped).await?;
         }
 
         // 8. Update persisted sync state.
@@ -919,6 +956,15 @@ impl SyncClient {
             }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);
+        }
+
+        // 8b. And a copy beside the credentials themselves. sync_state.json is
+        //     app data - an uninstall, a reset, or a health quarantine takes it
+        //     - and it holds the only pointer to a keychain that is otherwise
+        //     still perfectly good, so losing it used to cost a password. Not a
+        //     secret; it is here for the storage lifetime, not the protection.
+        if let Err(e) = crypto::store_session_pointer(&user_id, &device_id).await {
+            eprintln!("[sync] session pointer not stored: {e}");
         }
 
         // 9. Wire in-memory state.
@@ -980,13 +1026,30 @@ impl SyncClient {
                 .ok_or_else(|| RestoreError::NoSession("no session".into()));
         }
 
+        // One restore at a time, whatever asks. See `restore_lock`: the stored
+        // refresh token is single-use, so a concurrent attempt does not merely
+        // duplicate work, it destroys the session.
+        let _restoring = self.restore_lock.lock().await;
+        // Re-checked inside the lock: whoever we queued behind may have just
+        // established the session we were about to spend the token to get.
+        if let Some(user) = self.current_user() {
+            return Ok(user);
+        }
+
         let (stored_user, stored_device) = {
             let s = self.sync_state.lock();
             (s.data.user_id.clone(), s.data.device_id.clone())
         };
-        if stored_user.is_empty() || stored_device.is_empty() {
-            return Err(RestoreError::NoSession("no previous session".into()));
-        }
+        // Fall back to the keychain copy: sync_state.json can be lost on its own
+        // while every credential survives, and that used to read as a sign-out.
+        let (stored_user, stored_device) = if stored_user.is_empty() || stored_device.is_empty() {
+            match crypto::load_session_pointer() {
+                Some(pair) => pair,
+                None => return Err(RestoreError::NoSession("no previous session".into())),
+            }
+        } else {
+            (stored_user, stored_device)
+        };
         // An absent entry and an unreachable store are different problems and
         // must not be collapsed. Nothing stored means the user really does have
         // to sign in. A store that would not answer usually means this launch
@@ -997,15 +1060,22 @@ impl SyncClient {
         // like a logout, permanently, until the user retyped a password.
         let unreachable =
             |e: String| RestoreError::Unavailable(format!("keychain unavailable: {e}"));
+        //
+        // Absent is `NoSession`, not `Terminal`. `logout()` clears these entries
+        // but leaves `user_id` in sync_state.json - deliberately, so the next
+        // login can reuse this install's device row - so "signed out" and
+        // "nothing stored" are the same state. Calling it `Terminal` made every
+        // launch after an ordinary sign-out write "credentials rejected" to
+        // crash.log, which is what sent earlier attempts at this bug off course.
         let refresh = crypto::load_refresh_token(&stored_user)
             .map_err(unreachable)?
             .ok_or_else(|| {
-                RestoreError::Terminal(format!("no stored credentials for user {stored_user}"))
+                RestoreError::NoSession(format!("no stored credentials for user {stored_user}"))
             })?;
         let device_priv = crypto::load_device_private_key(&stored_user)
             .map_err(unreachable)?
             .ok_or_else(|| {
-                RestoreError::Terminal(format!("no stored device key for user {stored_user}"))
+                RestoreError::NoSession(format!("no stored device key for user {stored_user}"))
             })?;
 
         // Fresh tokens from Supabase; the refresh token rotates, so persist it.
@@ -1014,18 +1084,29 @@ impl SyncClient {
             .refresh(&refresh)
             .await
             .map_err(RestoreError::from_auth)?;
-        // The refresh token has now been spent and rotated. Aborting here would
-        // be the worst of both outcomes: no session now, and a stored token that
-        // is already dead for the next launch. So carry on with the session we
-        // just earned and record that the next launch may have to ask for a
-        // password.
-        if let Err(e) =
-            crypto::store_refresh_token(&stored_user, &session.refresh_token).await
-        {
-            crate::health::note(
-                "sync restore: rotated refresh token not stored",
-                &format!("{e} - the next launch may have to sign in again"),
-            );
+        // The refresh token has now been spent and rotated. The replacement must
+        // reach the keychain, and be readable again afterwards: if the old one
+        // is left in place, the next launch presents a spent token, Supabase
+        // reuse detection revokes the whole family, and the account needs a
+        // password. Writing is not enough to know it landed - `set_password`
+        // can report success for a value a later read does not return - so this
+        // one secret is read back.
+        //
+        // Failing here as `Unavailable` costs this attempt but keeps the session
+        // recoverable: the class is retryable and capped, so the retry loop
+        // tries the store again while the app is still running, and the token it
+        // will use is the one now held by `http`.
+        crypto::store_refresh_token(&stored_user, &session.refresh_token)
+            .await
+            .map_err(|e| unreachable(format!("rotated refresh token not stored: {e}")))?;
+        match crypto::load_refresh_token(&stored_user) {
+            Ok(Some(stored)) if stored == session.refresh_token => {}
+            Ok(_) => {
+                return Err(RestoreError::Unavailable(
+                    "rotated refresh token did not survive the write".into(),
+                ))
+            }
+            Err(e) => return Err(unreachable(format!("rotated refresh token unreadable: {e}"))),
         }
 
         let http = SyncHttpClient::with_timeout(
@@ -1055,11 +1136,24 @@ impl SyncClient {
         let umk = crypto::unwrap_key(&shared, &wrapped).map_err(RestoreError::Terminal)?;
 
         let user = SyncUser {
-            user_id: stored_user,
+            user_id: stored_user.clone(),
             email: session.user.email.clone(),
             display_name: boot.display_name,
             avatar_url: boot.avatar_url,
         };
+        // Put back whatever the fallback above stood in for, so the rest of the
+        // app - which scopes the id map and the cursor by these - is not running
+        // against an empty state file for the whole session.
+        {
+            let mut state = self.sync_state.lock();
+            if state.data.user_id.is_empty() {
+                state.set_user_id(&stored_user);
+            }
+            if state.data.device_id.is_empty() {
+                state.set_device_id(&stored_device);
+            }
+        }
+
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
@@ -1146,6 +1240,11 @@ impl SyncClient {
                             "sync restore: gave up",
                             &format!("after {attempt} retries: {e}"),
                         );
+                        // The Account screen is showing "reconnecting" on the
+                        // strength of this loop. Say when it stops, or that is
+                        // where the screen stays and the user is left with no
+                        // way to sign in.
+                        let _ = self.app.emit("sync:restore-gave-up", serde_json::Value::Null);
                         break;
                     }
                 }
@@ -1181,6 +1280,10 @@ impl SyncClient {
         if !user_id.is_empty() {
             crypto::delete_keychain_entries(&user_id);
         }
+        // The pointer outlives sync_state.json by design, so it has to be
+        // cleared explicitly - otherwise the next launch tries to restore the
+        // account the user just deliberately left.
+        crypto::clear_session_pointer();
 
         let http = self.http.lock().take();
         if let Some(http) = http {
@@ -1275,8 +1378,22 @@ impl SyncClient {
         self.spawn_push_clipboard_entry(entry, umk, true, PushOrigin::Automatic);
     }
 
+    /// The user removed this one item. An item another member wrote is dropped
+    /// from this device and leaves a placeholder in the space; nothing is
+    /// pushed, because the row belongs to its author.
     pub fn on_delete_clipboard_entry(&self, client_id: String) {
-        self.spawn_delete_entry(client_id, EntryType::Clipboard);
+        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::ThisItem);
+    }
+
+    /// One step of a sweep over everything this account has on the server.
+    ///
+    /// Separate from [`Self::on_delete_clipboard_entry`] so the scope is part
+    /// of the call rather than something the caller had to remember to filter
+    /// for: an item another member wrote is not this account's to remove, and
+    /// [`Self::spawn_delete_entry`] refuses to touch one under this scope even
+    /// if a caller puts it in the list.
+    pub fn on_unpush_owned_clipboard_entry(&self, client_id: String) {
+        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::OwnedOnly);
     }
 
     pub fn on_new_note(&self, note: Note) {
@@ -1314,8 +1431,15 @@ impl SyncClient {
         self.spawn_push_note(note, umk, true, Some(at), PushOrigin::UserInitiated);
     }
 
+    /// The user removed this one note. See [`Self::on_delete_clipboard_entry`].
     pub fn on_delete_note(&self, note_id: String) {
-        self.spawn_delete_entry(note_id, EntryType::Notes);
+        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::ThisItem);
+    }
+
+    /// One step of an account-wide sweep. See
+    /// [`Self::on_unpush_owned_clipboard_entry`].
+    pub fn on_unpush_owned_note(&self, note_id: String) {
+        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::OwnedOnly);
     }
 
     // ── Internal spawn helpers ────────────────────────────────────
@@ -1540,7 +1664,12 @@ impl SyncClient {
         });
     }
 
-    fn spawn_delete_entry(&self, client_id: String, entry_type: EntryType) {
+    fn spawn_delete_entry(
+        &self,
+        client_id: String,
+        entry_type: EntryType,
+        scope: RemovalScope,
+    ) {
         let http = self.http.lock().clone();
         let umk = self.umk.lock().clone();
         let queue = Arc::clone(&self.pending_queue);
@@ -1559,6 +1688,22 @@ impl SyncClient {
                 map.owner_of(&map_key),
             )
         };
+
+        // An account-wide action has no business here at all. Rows are keyed by
+        // owner, so this account has no server copy of someone else's item to
+        // take down - the only thing a sweep could do is drop the local copy,
+        // which is not what "remove my things from the cloud" asks for and is
+        // not something the user chose for this item. Refusing at the sink
+        // means a caller that builds its list wrongly does nothing, instead of
+        // quietly taking items away; `owned_keys` is how the list should be
+        // built, and this is the backstop for when it is not.
+        if scope == RemovalScope::OwnedOnly && is_remote {
+            debug_assert!(
+                false,
+                "account-wide removal reached {map_key}, which another member wrote"
+            );
+            return;
+        }
 
         // A removal in a space leaves a placeholder, so the item does not just
         // disappear from under the other members.
@@ -1582,8 +1727,29 @@ impl SyncClient {
         // same space ids, and take the item down for every member. The marker
         // above is what stops the next pull handing it straight back.
         if is_remote {
-            self.id_map.lock().remove_entry(&map_key);
+            // Authorship is kept: `forget_received_copy` drops the copy but not
+            // the record of who wrote it, so the entry can never be mistaken
+            // later for an unsynced local one and published under this account.
+            self.id_map.lock().forget_received_copy(&map_key);
             return;
+        }
+
+        // What this removal means, written down before the tombstone leaves.
+        //
+        // A tombstone is the only wire shape a removal has, so "take it off the
+        // server, keep it here" and "delete it everywhere" are the same message
+        // and come back indistinguishable. The intent has to be recorded on the
+        // device that had it. Done before the push (not on success) because the
+        // tombstone is queued when offline and flushed later, by which point
+        // this scope is gone.
+        {
+            let mut id_map = self.id_map.lock();
+            match scope {
+                RemovalScope::OwnedOnly => id_map.mark_unpushed(&map_key),
+                // A real deletion. Clears any earlier "keep it here" so the
+                // entry is deletable again after having been unpushed.
+                RemovalScope::ThisItem => id_map.clear_unpushed(&map_key),
+            }
         }
 
         // Claimed here, before the task starts, so a removal is visible for its
@@ -1705,6 +1871,14 @@ impl SyncClient {
 
             // Tombstone → remove locally.
             if e.deleted_at.is_some() {
+                // Unless this device is the one that took it off the server and
+                // asked to keep its copy. Without this the app deletes the
+                // user's own data on the next pull, which is the exact opposite
+                // of what "Remove from cloud" says it does. The id_map row is
+                // already gone, so there is nothing else to clean up here.
+                if self.id_map.lock().is_unpushed(&key) {
+                    continue;
+                }
                 let had_local = if is_note {
                     let gone = state.notes.lock().delete(&e.client_id);
                     notes_changed |= gone;
@@ -2277,6 +2451,19 @@ impl SyncClient {
 
     pub fn is_remote_entry(&self, entry_type: &str, client_id: &str) -> bool {
         self.id_map.lock().is_remote(&format!("{entry_type}:{client_id}"))
+    }
+
+    /// The same question for a key that is already `"{kind}:{id}"`, which is
+    /// the shape account-wide lists are built in.
+    pub fn is_remote_key(&self, key: &str) -> bool {
+        self.id_map.lock().is_remote(key)
+    }
+
+    /// Keys of the entries this account wrote, of the ones this device knows
+    /// about. What every account-wide action builds its list from - see
+    /// `IdMap::owned_keys`.
+    pub fn owned_entry_keys(&self) -> Vec<String> {
+        self.id_map.lock().owned_keys()
     }
 
     /// Record that our own entry was pulled back out of these spaces, so each

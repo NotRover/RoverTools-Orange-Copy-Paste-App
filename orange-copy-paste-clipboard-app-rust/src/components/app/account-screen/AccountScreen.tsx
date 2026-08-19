@@ -121,6 +121,9 @@ interface AccountScreenProps {
   notes: Note[];
   /** Used by the composition rows to open what they are counting. */
   onNavigate: (screen: AppScreen) => void;
+  /** Rust is retrying a session restore that failed for a transient reason.
+   *  The credentials are good, so this screen must not ask for a password. */
+  restoringSession: boolean;
 }
 
 /** The order kinds are shown in, and the order they stack in the bar. Fixed
@@ -141,6 +144,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   entries,
   notes,
   onNavigate,
+  restoringSession,
 }) => {
   // ── Cloud Sync ─────────────────────────────────────────────────
   const [syncEnabled, setSyncEnabled] = useState(false);
@@ -182,6 +186,9 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  // Set when the user asks for the sign-in form while a restore is still
+  // running - switching accounts, or simply out of patience.
+  const [signInAnyway, setSignInAnyway] = useState(false);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   // OAuth (Google) — two-step: browser handshake, then account password.
@@ -936,6 +943,29 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
               Enable Cloud Sync
             </button>
           </div>
+        ) : !syncUser && restoringSession && !signInAnyway ? (
+          /* ── Credentials are fine, the server is not reachable yet ──
+             Drawing a password field here is what made users sign in again
+             for a session that was about to come back on its own. */
+          <div className="auth-card auth-card--waiting">
+            <div className="auth-brand">
+              <div className="auth-brand-badge">
+                <CloudArrowUp size={20} />
+              </div>
+              <h3 className="auth-title">Reconnecting to your account</h3>
+              <p className="auth-subtitle">
+                You are still signed in. This device is waiting for the server
+                and will pick up where it left off.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="auth-textlink auth-textlink--center"
+              onClick={() => setSignInAnyway(true)}
+            >
+              Sign in with a password instead
+            </button>
+          </div>
         ) : !syncUser ? (
           /* ── Enabled but signed out: auth card + advanced ── */
           <>
@@ -1531,6 +1561,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
                               {d.is_current && (
                                 <span className="acct-badge acct-badge--owner">
                                   this device
+                                </span>
+                              )}
+                              {d.same_machine && (
+                                <span className="acct-badge">
+                                  this computer, older sign-in
                                 </span>
                               )}
                             </span>

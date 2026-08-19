@@ -285,8 +285,12 @@ fn entry_for(purpose: &str, user_id: &str) -> Result<keyring::Entry, String> {
 /// profile is still coming up. A write that is dropped here is not a cosmetic
 /// failure - it leaves a rotated refresh token spent with nothing on disk, which
 /// signs the user out on the next launch.
-const KEYCHAIN_WRITE_ATTEMPTS: u32 = 3;
-const KEYCHAIN_WRITE_BACKOFF_MS: u64 = 40;
+/// Roughly 40ms, then doubling, for a total of about 2.5s across six tries.
+/// Three tries at a flat 40ms only spanned ~120ms, which covers a store that is
+/// a moment behind the app but not one held by an antivirus scanner or a user
+/// profile still coming up. The cost of losing one of these writes is the whole
+/// session, and a couple of seconds inside a sign-in is not felt.
+const KEYCHAIN_WRITE_BACKOFF_MS: [u64; 5] = [40, 80, 200, 600, 1500];
 
 /// Read one secret, telling "there is no such entry" apart from "the store would
 /// not answer".
@@ -314,9 +318,11 @@ async fn write_secret(purpose: &'static str, user_id: &str, secret: &str) -> Res
     let secret = secret.to_string();
     tokio::task::spawn_blocking(move || {
         let mut last = String::new();
-        for attempt in 0..KEYCHAIN_WRITE_ATTEMPTS {
-            if attempt > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(KEYCHAIN_WRITE_BACKOFF_MS));
+        // A leading zero so the first attempt runs immediately and the schedule
+        // describes only the waits after it.
+        for delay in std::iter::once(0).chain(KEYCHAIN_WRITE_BACKOFF_MS) {
+            if delay > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
             }
             match entry_for(purpose, &user_id)
                 .and_then(|entry| entry.set_password(&secret).map_err(|e| e.to_string()))
@@ -377,6 +383,61 @@ pub fn load_refresh_token(user_id: &str) -> Result<Option<String>, String> {
 pub fn delete_keychain_entries(user_id: &str) {
     delete_secret("refresh_token", user_id);
     delete_secret("device_key", user_id);
+}
+
+/// The account slot for secrets that belong to the install rather than to any
+/// one user. Not a user id, and cannot collide with one: user ids are UUIDs.
+const INSTALL_SCOPE: &str = "_install";
+
+/// A random per-install value standing in for a machine id the OS will not give
+/// us (a container, a blank registry, a hardened host).
+///
+/// Generated once and kept in the keychain rather than a file, so it outlives a
+/// reset of the app data directory - which is exactly the case the fingerprint
+/// exists to survive. A write failure is not fatal: the caller gets a usable
+/// value for this run, and the worst case is a fingerprint that changes next
+/// launch, which costs a duplicate device row and nothing more.
+pub async fn machine_seed() -> String {
+    if let Ok(Some(seed)) = read_secret("fp_seed", INSTALL_SCOPE) {
+        if !seed.is_empty() {
+            return seed;
+        }
+    }
+    let seed = B64.encode(random_key().as_slice());
+    if let Err(e) = write_secret("fp_seed", INSTALL_SCOPE, &seed).await {
+        eprintln!("[sync] fingerprint seed not stored: {e}");
+    }
+    seed
+}
+
+/// Remember which account and device this install last signed in as.
+///
+/// A mirror of the same two fields in `sync_state.json`. That file is app data:
+/// an uninstall, a reset, or a health quarantine takes it, and with it the only
+/// pointer to the credentials sitting untouched in the keychain - so a launch
+/// with everything intact still asks for a password. Keeping a copy beside the
+/// credentials themselves closes that.
+///
+/// Deliberately not a secret; it lives here for the storage lifetime, not for
+/// the protection.
+pub async fn store_session_pointer(user_id: &str, device_id: &str) -> Result<(), String> {
+    write_secret("session", INSTALL_SCOPE, &format!("{user_id}:{device_id}")).await
+}
+
+/// The `(user_id, device_id)` of the last sign-in on this install.
+pub fn load_session_pointer() -> Option<(String, String)> {
+    let raw = read_secret("session", INSTALL_SCOPE).ok().flatten()?;
+    let (user, device) = raw.split_once(':')?;
+    if user.is_empty() || device.is_empty() {
+        return None;
+    }
+    Some((user.to_string(), device.to_string()))
+}
+
+/// Forget the last sign-in. Called on an explicit sign-out, so the next launch
+/// does not try to restore an account the user deliberately left.
+pub fn clear_session_pointer() {
+    delete_secret("session", INSTALL_SCOPE);
 }
 
 #[cfg(test)]
