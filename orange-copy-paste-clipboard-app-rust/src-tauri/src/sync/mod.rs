@@ -245,8 +245,26 @@ fn tombstone_req(
 
 // ── OAuth (Google, etc.) ─────────────────────────────────────────────
 
+/// Show and focus the main window.
+///
+/// Used after the browser half of an OAuth sign-in: the desktop app has been in
+/// the background for the whole handshake, and whatever comes next - the password
+/// step or the failure - is in the app, not the tab.
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+
 /// An OAuth login that has completed the provider handshake but still needs the
 /// account password (the E2E secret) before the session can be finalized.
+///
+/// `Clone` so a password attempt can work on a copy: the stash has to survive a
+/// wrong password, or the only way to get a second guess is another trip through
+/// the browser.
+#[derive(Clone)]
 struct PendingOAuth {
     session: SupabaseSession,
     email: String,
@@ -712,11 +730,18 @@ impl SyncClient {
         oauth::open_browser(&auth_url)?;
 
         // The accept loop is blocking; run it off the async worker.
-        let code = self
+        let captured = self
             .handle
             .spawn_blocking(move || loopback.wait_for_code(cancel))
             .await
-            .map_err(|e| format!("oauth capture task: {e}"))??;
+            .map_err(|e| format!("oauth capture task: {e}"))?;
+
+        // The browser has the foreground at this point and the user is done with
+        // it. Bring the app forward either way - a failed sign-in needs to be
+        // read in the app too, and the alternative is a tab that says "return to
+        // the app" and no app in sight.
+        focus_main_window(&self.app);
+        let code = captured?;
 
         let session = self.supabase.exchange_code_pkce(&code, &verifier).await?;
         let email = session.user.email.clone();
@@ -749,26 +774,49 @@ impl SyncClient {
     /// back to Supabase so the account gains a real credential usable for later
     /// email+password login; on return it is verified against the stored
     /// identity key inside [`Self::finalize_session`].
+    ///
+    /// Two things here are deliberate, and both used to be wrong.
+    ///
+    /// The stash is *cloned*, and only cleared once everything succeeded. It used
+    /// to be taken before the password was checked, so one typo threw the session
+    /// away: the retry the UI was still offering answered "no pending sign-in,
+    /// start again" and the only way forward was another trip through Google.
+    ///
+    /// And on a first sign-in the envelope is written *before* the Supabase
+    /// password. The other order left a window where the account had a new
+    /// credential and no envelope that matched it - signable in, undecryptable -
+    /// and this way a failed attempt changes nothing server-side.
     pub async fn complete_oauth(&self, password: String) -> Result<SyncUser, String> {
         let pending = self
             .pending_oauth
             .lock()
-            .take()
+            .clone()
             .ok_or("no pending sign-in, start again")?;
 
-        if pending.is_new {
-            self.supabase
-                .update_password(&pending.session.access_token, &password)
-                .await?;
+        let is_new = pending.is_new;
+        let access_token = pending.session.access_token.clone();
+        let user = self
+            .finalize_session(
+                pending.session,
+                &pending.email,
+                &password,
+                pending.device_name,
+            )
+            .await?;
+
+        // Not fatal, and deliberately not returned as an error: the sign-in above
+        // already succeeded, so failing here would leave the app signed in while
+        // the UI still showed the password step. All that is lost is the ability
+        // to sign in later with email and password - Google still works, and the
+        // envelope matches what the user just typed either way.
+        if is_new {
+            if let Err(e) = self.supabase.update_password(&access_token, &password).await {
+                eprintln!("[sync] account password not stored with Supabase: {e}");
+            }
         }
 
-        self.finalize_session(
-            pending.session,
-            &pending.email,
-            &password,
-            pending.device_name,
-        )
-        .await
+        *self.pending_oauth.lock() = None;
+        Ok(user)
     }
 
     /// The stashed OAuth attempt, if the browser handshake already landed.
@@ -2143,8 +2191,20 @@ impl SyncClient {
                         continue;
                     };
                     let space_ids = req.space_ids.clone();
+                    // A queued image push carries the blob it uploaded when it
+                    // was first attempted. If the server refuses the entry now,
+                    // the op is dropped and nothing will ever reference that
+                    // object, so give it back here too.
+                    let queued_blob = req.blob_key.clone();
                     match http.push_entries(vec![req]).await {
                         Ok(result) => {
+                            if let (Some(key), true) =
+                                (queued_blob, !result.conflicts.is_empty())
+                            {
+                                if let Err(e) = http.release_blob_upload(&key).await {
+                                    eprintln!("[sync] release stranded blob {key}: {e}");
+                                }
+                            }
                             for r in result.accepted {
                                 // Key by the op's own type. Hardcoding
                                 // "clipboard" filed every flushed note under a
@@ -3991,6 +4051,65 @@ impl Drop for InFlightGuard {
     }
 }
 
+/// Gives an uploaded image back when the entry that would have owned it never
+/// lands on the server.
+///
+/// `upload_image_blob` runs *inside* the push and confirms the upload before
+/// this task starts, so the object is already costing the account's quota while
+/// the row that points at it does not exist yet. Only two endings leave it in
+/// good hands: the server accepted the entry, or the push was queued (the queued
+/// job carries the same `blob_key`, so the retry reuses this object rather than
+/// minting another). Every other ending - a conflict, an encryption or serialize
+/// failure, a path nobody has written yet - strands the object, and the server's
+/// unreferenced sweep only collects it a week later.
+///
+/// So the release is a `Drop`, disarmed on the two safe endings, for the same
+/// reason [`InFlightGuard`] is one: it has to cover the paths that get added
+/// after this comment. Releasing is best-effort - the server refuses (409) while
+/// a live entry references the key, so it can never take an image away from an
+/// entry that is using it, and nothing the user sees depends on it succeeding.
+struct BlobReleaseGuard {
+    http: Option<Arc<SyncHttpClient>>,
+    /// Set while the object still needs giving back; `None` once disarmed.
+    blob_key: Option<String>,
+    size: u64,
+    budget: BlobBudget,
+}
+
+impl BlobReleaseGuard {
+    fn disarm(&mut self) {
+        self.blob_key = None;
+    }
+}
+
+impl Drop for BlobReleaseGuard {
+    fn drop(&mut self) {
+        let Some(key) = self.blob_key.take() else {
+            return;
+        };
+        let Some(http) = self.http.clone() else {
+            return;
+        };
+        // Drop cannot await, and this runs on the sync runtime's worker.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let (size, budget) = (self.size, Arc::clone(&self.budget));
+        handle.spawn(async move {
+            match http.release_blob_upload(&key).await {
+                Ok(()) => {
+                    // Those bytes are spendable again, so a bulk upload that hit
+                    // a wall does not keep refusing images locally.
+                    if let Some(remaining) = budget.lock().as_mut() {
+                        *remaining = remaining.saturating_add(size);
+                    }
+                }
+                Err(e) => eprintln!("[sync] release stranded blob {key}: {e}"),
+            }
+        });
+    }
+}
+
 async fn push_entry_task(
     ctx: PushCtx,
     enc_key: Zeroizing<[u8; 32]>,
@@ -4029,6 +4148,15 @@ async fn push_entry_task(
         key: entry_key_flight,
         app: ctx.app.clone(),
         entry_type,
+    };
+
+    // Armed for image entries only - everything else keeps its content inline
+    // and has no blob to give back.
+    let mut blob_guard = BlobReleaseGuard {
+        http: ctx.http.clone(),
+        blob_key: blob_key.clone(),
+        size: blob_size.unwrap_or(0),
+        budget: Arc::clone(&ctx.budget),
     };
 
     let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
@@ -4075,6 +4203,8 @@ async fn push_entry_task(
         match http.push_entries(vec![push_req.clone()]).await {
             Ok(result) => {
                 if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
+                    // The row owns the blob now.
+                    blob_guard.disarm();
                     if entry_type == "note" {
                         ctx.id_map
                             .lock()
@@ -4160,6 +4290,9 @@ async fn push_entry_task(
             entry_type: entry_type.into(),
         }
     };
+    // The queued job carries the same blob_key, so the retry reuses this
+    // object instead of uploading a second copy.
+    blob_guard.disarm();
     ctx.queue.lock().push(op);
     ctx.status.lock().pending_count = ctx.queue.lock().len();
     // Nothing else fires when a push falls back to the queue, so without this

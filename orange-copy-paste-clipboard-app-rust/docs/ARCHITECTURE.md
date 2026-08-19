@@ -572,6 +572,55 @@ that was left or deleted is gone afterwards. The fresher answer wins.
 > `POST /api/v1/spaces/{id}/keys` to hand out wrapped space keys. See
 > `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
 
+#### Google sign-in (two phases, and why)
+
+The provider handshake does not use the `orange://` deep link. `sync/oauth.rs`
+binds a loopback server on the first free port of `127.0.0.1:53170-53172`, uses
+that bare origin as the PKCE `redirect_to`, opens the system browser, and reads
+the `code` off the request line of the single request that comes back. Each of
+those three ports has to be in the Supabase redirect allow-list.
+
+Then it stops, because the session alone cannot decrypt anything - the account
+password is the E2E secret and only the user has it:
+
+1. `begin_oauth` finishes the handshake, probes `bootstrap` to learn whether the
+   account already has an envelope (`is_new`), and stashes the session in
+   `pending_oauth`. It returns `OAuthBegin` *and* emits `sync:oauth-ready`, since
+   the command's reply is lost if the window was hidden or reloaded during the
+   browser hop; `sync_oauth_pending` lets a freshly mounted UI pick the step back
+   up.
+2. `complete_oauth` takes the password, writes the envelope, and finalizes.
+
+Three rules in phase 2, each of which was once broken - see bugs #9 and #10 in
+`BUGFIX_HISTORY.md`:
+
+- The stash is **cloned**, not taken, and cleared only on success. A wrong
+  password has to leave a retry possible, or the only way to guess again is
+  another trip through the browser.
+- For a new account the **envelope is written before** the Supabase credential.
+  The other order can leave an account that signs in and cannot decrypt.
+- `focus_main_window` runs the moment the loopback capture returns, on both the
+  success and failure paths. The browser owns the foreground through the whole
+  handshake, and whatever happens next is in the app.
+
+The loopback serves a result page built from the same `App.css` tokens as the
+sign-in screen, linking `orange://` as a manual way back.
+
+#### Deep links
+
+One scheme, `orange`, declared under `plugins.deep-link.desktop.schemes` in
+`tauri.conf.json`. Two ingress routes, because a URL opened while the app is
+already running arrives as argv rather than through the plugin: the plugin
+callback in `setup`, and the single-instance handler, which also marks the launch
+as a trigger so the running instance is not replaced.
+
+`dispatch_deep_link` raises the window **first**, then parses. That order is what
+makes a bare `orange://` a usable "come to the front" link, which is what the
+OAuth result page uses. Only one shape carries an action today:
+`orange://join?code=<CODE>` emits `spaces:join-code`, which `SpacesScreen`
+consumes and joins with. The parser ignores the host, so `orange://anything?code=`
+also joins - kept deliberately, since links already sent out rely on it.
+
 #### Overview
 
 The sync module runs entirely in a dedicated background Tokio runtime (separate from Tauri's internal runtime) so it can never block clipboard capture or the UI.

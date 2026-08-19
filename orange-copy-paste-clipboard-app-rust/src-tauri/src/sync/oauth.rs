@@ -126,17 +126,24 @@ fn parse_redirect(target: &str) -> Result<String, String> {
     }
 }
 
-/// Send a minimal HTML page so the browser tab shows a friendly result.
+/// The page the browser tab lands on once the handshake is done.
+///
+/// A real `.html` file rather than a string literal, so it can be opened, edited
+/// and previewed as a page - see `oauth_result.html` for the styling and the
+/// copy. `include_str!` bakes it into the binary at compile time, so a shipped
+/// build still has no file to find at runtime.
+///
+/// It carries both outcomes and shows one of them from CSS. The only
+/// substitution is `__STATE__`.
+const RESULT_PAGE: &str = include_str!("oauth_result.html");
+
+fn result_page(ok: bool) -> String {
+    RESULT_PAGE.replace("__STATE__", if ok { "ok" } else { "fail" })
+}
+
+/// Send the result page so the browser tab shows where the user stands.
 fn write_response(stream: &mut std::net::TcpStream, ok: bool) {
-    let body = if ok {
-        "<!doctype html><meta charset=utf-8><title>Signed in</title>\
-         <body style=\"font-family:system-ui;text-align:center;padding-top:4rem\">\
-         <h2>You're signed in \u{2713}</h2><p>You can close this tab and return to the app.</p>"
-    } else {
-        "<!doctype html><meta charset=utf-8><title>Sign-in failed</title>\
-         <body style=\"font-family:system-ui;text-align:center;padding-top:4rem\">\
-         <h2>Sign-in didn't complete</h2><p>You can close this tab and try again in the app.</p>"
-    };
+    let body = result_page(ok);
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),

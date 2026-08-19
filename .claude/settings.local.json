@@ -9,5 +9,8 @@
       "Bash(ty check *)",
       "Bash(ruff check *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }
