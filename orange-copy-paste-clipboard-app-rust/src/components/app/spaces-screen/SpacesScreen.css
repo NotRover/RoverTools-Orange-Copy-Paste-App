@@ -1882,39 +1882,7 @@
 
 /* Neutral until hovered: it does something, rather than sitting in the accent
    like a live setting would. */
-/* Right rail: received invites, space flags, sent invites */
-
-.sp-invite-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.sp-invite-card {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 10px;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: var(--accent-dim);
-}
-
-.sp-invite-icon {
-  color: var(--accent);
-}
-
-.sp-invite-text {
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--text);
-}
-
-.sp-invite-actions {
-  display: flex;
-  gap: 6px;
-}
+/* Right rail: space flags */
 
 .sp-space-card-flags {
   display: flex;
@@ -1932,46 +1900,6 @@
   border-radius: 50%;
   background: var(--accent-dim);
   color: var(--accent);
-}
-
-.sp-sent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-
-.sp-sent-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 10.5px;
-}
-
-.sp-sent-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-linkbtn {
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--accent);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.sp-linkbtn--danger {
-  color: var(--danger);
 }
 
 /* Create form: history checkbox */

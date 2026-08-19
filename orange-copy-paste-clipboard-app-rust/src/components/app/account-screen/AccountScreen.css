@@ -882,6 +882,145 @@
 
 .acct-quota-fill--warn { background: var(--acct-warn); }
 
+/* ── Storage and activity ── */
+
+/* The quota bar now opens its own card rather than closing the device list,
+   so it drops the rule that separated it from the row above. */
+.acct-card > .acct-quota:first-child { border-top: none; }
+
+/* The count on the right of a stat row. Same metrics as .acct-row-name, so a
+   number reads as the row's own subject rather than as a headline sitting on
+   top of it - the largest text on this screen stays 13px. */
+.acct-stat-value {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+  /* These change under the user while the panel is open - lining figures keep
+     them from shifting sideways as digits change width. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Composition ──
+   What this device holds, by kind. The colours come from --type-color, the
+   same token the entry pills use, so a row here and a card in the list read as
+   the same kind without a second palette to keep in step. */
+
+.acct-comp {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 11px;
+}
+
+.acct-comp-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.acct-comp-total {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-muted, #909090);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One track, segments sized by share. The gap is drawn by a border rather
+   than flex gap, which would take width away from the shares it separates. */
+.acct-comp-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.acct-comp-seg {
+  height: 100%;
+  background: var(--type-color);
+  box-shadow: inset -1px 0 0 var(--card-bg, var(--surface));
+}
+
+.acct-comp-seg:last-child { box-shadow: none; }
+
+.acct-comp-legend {
+  display: flex;
+  flex-direction: column;
+}
+
+.acct-comp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  margin: 0 -6px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.acct-comp-row:hover {
+  background: var(--surface-hover);
+}
+
+.acct-comp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  background: var(--type-color);
+}
+
+.acct-comp-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acct-comp-count {
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fixed width so the column of percentages lines up however wide the numbers
+   beside it get. */
+.acct-comp-pct {
+  width: 34px;
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--text-muted, #909090);
+  font-variant-numeric: tabular-nums;
+}
+
+.acct-comp-go {
+  flex-shrink: 0;
+  color: var(--text-muted, #909090);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.acct-comp-row:hover .acct-comp-go,
+.acct-comp-row:focus-visible .acct-comp-go {
+  opacity: 1;
+}
+
+.acct-comp-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted, #909090);
+  opacity: 0.75;
+}
+
 /* Trust closer for the signed-in column — the same line the auth card ends on. */
 .acct-secure-foot {
   margin: -6px 0 0;

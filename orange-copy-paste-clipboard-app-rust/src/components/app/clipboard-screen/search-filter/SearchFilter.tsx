@@ -162,6 +162,39 @@ export interface SearchFilterState {
   searchInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
+/** Every key a clipboard filter is stored under, listed next to the hooks that
+ *  own them so a reset cannot fall behind a filter added later. */
+const FILTER_KEYS = [
+  "sc-f-search",
+  "sc-f-cloud",
+  "sc-f-share",
+  "sc-f-spaces",
+  "sc-f-received",
+  "sc-f-kinds",
+  "sc-f-pinned",
+  "sc-f-date",
+  "sc-f-date-after",
+  "sc-f-date-before",
+  "sc-f-groups",
+] as const;
+
+/** Point the clipboard screen at one set of kinds, for a caller that is about
+ *  to navigate there.
+ *
+ *  Writes the storage the filters mount from rather than any live state: one
+ *  screen is mounted at a time, so the clipboard screen does not exist yet and
+ *  will read these on its way in. Everything else is cleared first - arriving
+ *  with a stale date range still on would show a filtered slice of the thing
+ *  the user just clicked a count of. */
+export function showOnlyKinds(kinds: DisplayKind[]): void {
+  try {
+    for (const key of FILTER_KEYS) localStorage.removeItem(key);
+    localStorage.setItem("sc-f-kinds", JSON.stringify(kinds));
+  } catch {
+    /* Storage blocked: the screen opens unfiltered, which is not wrong. */
+  }
+}
+
 export function useSearchFilter(
   entries: ClipboardEntry[],
   cloud: CloudFilterContext | null = null,

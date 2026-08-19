@@ -80,7 +80,6 @@ import {
   CaretDown,
   Prohibit,
   Circle,
-  Envelope,
   Note as NoteIcon,
   File,
   MagnifyingGlass,
@@ -105,6 +104,7 @@ import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
 import "../clipboard-screen/entry-card/EntryCard.css";
+import InvitesPopover from "./invites/InvitesPopover";
 import "./SpacesScreen.css";
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -1842,6 +1842,16 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     localStorage.getItem(SELECTED_KEY),
   );
   const [invites, setInvites] = useState<SyncInviteList>(cache.invites);
+  const [invitesOpen, setInvitesOpen] = useState(false);
+  const [invitesAnchor, setInvitesAnchor] = useState({ x: 0, y: 0 });
+  // Answering the last one takes the button away with it, so the popover has
+  // to go too rather than hang under a control that is no longer there.
+  const invitesEmpty =
+    invites.received.every((i) => i.status !== "pending") &&
+    invites.sent.every((i) => i.status !== "pending");
+  useEffect(() => {
+    if (invitesEmpty) setInvitesOpen(false);
+  }, [invitesEmpty]);
   const [sendFilters, setSendFilters] = useState<Record<string, SendFilter>>(
     cache.filters,
   );
@@ -2286,6 +2296,22 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         reloadSpaces();
       }),
     );
+    // Answered here or from the notification centre, it is the same invite.
+    // Dropped from the list on the spot rather than waiting for the refresh:
+    // for the seconds in between, the buttons were still there to be pressed,
+    // and pressing Decline on one already accepted is what the server answers
+    // with "Invite already accepted".
+    track(
+      listen<{ invite_id: string }>("sync:invite-answered", (event) => {
+        const gone = event.payload.invite_id;
+        setInvites((prev) => ({
+          sent: prev.sent.filter((i) => i.id !== gone),
+          received: prev.received.filter((i) => i.id !== gone),
+        }));
+        refreshInvites();
+        reloadSpaces();
+      }),
+    );
     return () => {
       cancelled = true;
       unlisteners.forEach((fn) => fn());
@@ -2681,7 +2707,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         await invoke("sync_send_invite", { spaceId, email });
         refreshInvites();
       } catch (e) {
-        setSpaceError(errMsg(e, "Could not send the invite."));
+        // The three the server can be specific about. An invite has to reach
+        // someone inside the app, so an address with no account is a dead end
+        // and saying so beats a generic failure the owner cannot act on.
+        const raw = typeof e === "string" ? e : "";
+        if (/404/.test(raw))
+          setSpaceError("No RoverTools account uses that email. Ask them to sign up first.");
+        else if (/409/.test(raw))
+          setSpaceError("They are already in this space.");
+        else if (/400/.test(raw))
+          setSpaceError("That is your own email.");
+        else setSpaceError(errMsg(e, "Could not send the invite."));
       }
     },
     [refreshInvites],
@@ -3324,34 +3360,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         </div>
 
         <div className="sp-panel-scroll">
-          {receivedPending.length > 0 && (
-            <div className="sp-invite-strip">
-              {receivedPending.map((inv) => (
-                <div key={inv.id} className="sp-invite-card">
-                  <Envelope size={14} className="sp-invite-icon" />
-                  <span className="sp-invite-text">
-                    <strong>{inv.inviter_name || "Someone"}</strong> invited you
-                    to {inv.space_name}
-                  </span>
-                  <div className="sp-invite-actions">
-                    <button
-                      className="sp-btn sp-btn--primary"
-                      onClick={() => handleAcceptInvite(inv.id)}
-                    >
-                      Accept
-                    </button>
-                    <button
-                      className="sp-btn"
-                      onClick={() => handleDeclineInvite(inv.id)}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
           {spaceError && (
             <span className="sp-settings-error">{spaceError}</span>
           )}
@@ -3453,29 +3461,32 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 </React.Fragment>
               ))}
 
-              {sentPending.length > 0 && (
-                <div className="sp-sent-list">
-                  {sentPending.map((inv) => (
-                    <div key={inv.id} className="sp-sent-row">
-                      <Envelope size={12} />
-                      <span className="sp-sent-text">
-                        {inv.invitee_email} invited to {inv.space_name}
-                      </span>
-                      <button
-                        className="sp-linkbtn sp-linkbtn--danger"
-                        onClick={() => handleRevokeInvite(inv.id)}
-                      >
-                        Revoke
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>
 
         <div className="sp-panel-actions">
+          {(receivedPending.length > 0 || sentPending.length > 0) && (
+            <button
+              type="button"
+              data-invites-trigger
+              className={`sp-invites-btn${invitesOpen ? " active" : ""}`}
+              onClick={(e) => {
+                const r = (
+                  e.currentTarget as HTMLElement
+                ).getBoundingClientRect();
+                // Centre and top edge: this sits at the foot of the panel, so
+                // the popover is centred on the button and grows upward.
+                setInvitesAnchor({ x: r.left + r.width / 2, y: r.top });
+                setInvitesOpen((v) => !v);
+              }}
+            >
+              Invites
+              <span className="sp-invites-count">
+                {receivedPending.length + sentPending.length}
+              </span>
+            </button>
+          )}
           {showCreate && (
             <CreateForm
               onSubmit={handleCreate}
@@ -3532,6 +3543,19 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           )}
         </div>
       </aside>
+
+      <InvitesPopover
+        open={invitesOpen}
+        anchorX={invitesAnchor.x}
+        anchorY={invitesAnchor.y}
+        received={receivedPending}
+        sent={sentPending}
+        signedIn={signedIn}
+        onClose={() => setInvitesOpen(false)}
+        onAccept={handleAcceptInvite}
+        onDecline={handleDeclineInvite}
+        onRevoke={handleRevokeInvite}
+      />
     </div>
   );
 };

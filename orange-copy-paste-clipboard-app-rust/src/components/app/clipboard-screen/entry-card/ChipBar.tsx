@@ -436,7 +436,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
         {syncState === "pending" && (
           <span
             className="card-sync-icon card-sync-icon--pending"
-            data-tooltip="Sync pending"
+            data-tooltip="Waiting to upload"
           >
             <CloudArrowUp size={15} />
           </span>

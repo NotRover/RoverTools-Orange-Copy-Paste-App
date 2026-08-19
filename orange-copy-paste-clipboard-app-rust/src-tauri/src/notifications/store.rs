@@ -1,6 +1,6 @@
 //! Notification records and their MessagePack store.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -105,6 +105,13 @@ impl Notification {
 #[derive(Debug, Default)]
 pub struct NotificationStore {
     items: Vec<Notification>,
+    /// Ids the user cleared by hand this session.
+    ///
+    /// Reconcile re-reads the server's invites on every panel open, so without
+    /// this a cleared invite is put straight back and the clear looks like it
+    /// did nothing. Not persisted: an invite still pending at the next launch
+    /// is a question the user has yet to answer, so it is right to ask again.
+    dismissed: HashSet<String>,
 }
 
 impl NotificationStore {
@@ -132,21 +139,30 @@ impl NotificationStore {
     /// Returns `true` when anything actually changed, so callers only persist
     /// and notify the UI on a real edit.
     pub fn upsert(&mut self, incoming: Notification) -> bool {
+        if self.dismissed.contains(&incoming.id) {
+            return false;
+        }
         let Some(existing) = self.items.iter_mut().find(|n| n.id == incoming.id) else {
             self.items.push(incoming);
             self.sort_recent();
             return true;
         };
+        // An outcome is final. Reconciling against the server re-ingests every
+        // invite it still calls pending, and a list read a moment before the
+        // answer landed says exactly that - so without this, accepting an
+        // invite put its Join and Decline buttons straight back, and the one
+        // that got pressed next reached an invite that was already answered.
+        let resolved = incoming.resolved.or_else(|| existing.resolved.clone());
         if existing.title == incoming.title
             && existing.body == incoming.body
-            && existing.resolved == incoming.resolved
+            && existing.resolved == resolved
             && existing.data == incoming.data
         {
             return false;
         }
         existing.title = incoming.title;
         existing.body = incoming.body;
-        existing.resolved = incoming.resolved;
+        existing.resolved = resolved;
         existing.data = incoming.data;
         true
     }
@@ -214,13 +230,22 @@ impl NotificationStore {
     pub fn dismiss(&mut self, id: &str) -> bool {
         let before = self.items.len();
         self.items.retain(|n| n.id != id);
-        before != self.items.len()
+        let removed = before != self.items.len();
+        if removed {
+            self.dismissed.insert(id.to_string());
+        }
+        removed
     }
 
     /// Drop everything the user has already read, leaving unread items alone.
     pub fn clear_read(&mut self) -> bool {
         let before = self.items.len();
-        self.items.retain(|n| !n.read);
+        let (read, keep): (Vec<Notification>, Vec<Notification>) =
+            std::mem::take(&mut self.items).into_iter().partition(|n| n.read);
+        self.items = keep;
+        for n in read {
+            self.dismissed.insert(n.id);
+        }
         before != self.items.len()
     }
 
@@ -229,6 +254,7 @@ impl NotificationStore {
     /// them.
     pub fn reset(&mut self) {
         self.items.clear();
+        self.dismissed.clear();
     }
 
     fn sort_recent(&mut self) {
@@ -259,6 +285,9 @@ impl NotificationStore {
         };
         let mut added = 0;
         for item in items {
+            if self.dismissed.contains(&item.id) {
+                continue;
+            }
             if !self.items.iter().any(|n| n.id == item.id) {
                 self.items.push(item);
                 added += 1;
@@ -299,6 +328,22 @@ impl NotificationStore {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_cleared_invite_is_not_put_back_by_the_next_reconcile() {
+        let mut store = NotificationStore::new();
+        assert!(store.upsert(invite("1")));
+        assert!(store.upsert(invite("2")));
+
+        assert!(store.dismiss("invite:1"));
+
+        // What a panel open does: re-read the server's still-pending invites.
+        assert!(!store.upsert(invite("1")));
+        assert!(!store.upsert(invite("2")));
+
+        let ids: Vec<&str> = store.all().iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["invite:2"]);
+    }
+
     fn invite(id: &str) -> Notification {
         Notification::new(
             format!("invite:{id}"),
@@ -324,6 +369,15 @@ mod tests {
         store.upsert(invite("a"));
         assert!(store.resolve("invite:a", "Joined"));
         assert!(!store.resolve("invite:a", "Joined"));
+    }
+
+    #[test]
+    fn an_answered_invite_stays_answered_when_the_server_still_calls_it_pending() {
+        let mut store = NotificationStore::new();
+        store.upsert(invite("a"));
+        assert!(store.resolve("invite:a", "Joined"));
+        // What a reconcile does with a list read just before the answer landed.
+        assert!(!store.upsert(invite("a")));
         assert_eq!(store.all()[0].resolved.as_deref(), Some("Joined"));
     }
 

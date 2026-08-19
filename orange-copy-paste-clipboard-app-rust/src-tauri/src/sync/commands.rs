@@ -398,7 +398,7 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
             .find(|e| e.id == skip.client_id)
             .cloned();
         if let Some(entry) = entry {
-            sync.on_update_clipboard_entry(entry);
+            sync.on_manual_push_clipboard_entry(entry);
             retried += 1;
             continue;
         }
@@ -410,7 +410,7 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
             .find(|n| n.id == skip.client_id)
             .cloned();
         if let Some(note) = note {
-            sync.on_update_note(note);
+            sync.on_manual_push_note(note);
             retried += 1;
         }
         // Neither: the entry was deleted after it was skipped. Nothing to do.
@@ -452,7 +452,7 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, Str
     let mut keys = Vec::with_capacity(entries.len() + notes.len());
     for entry in entries {
         keys.push(format!("clipboard:{}", entry.id));
-        sync.on_new_clipboard_entry(entry);
+        sync.on_manual_push_clipboard_entry(entry);
     }
     for note in notes {
         keys.push(format!("note:{}", note.id));
@@ -580,7 +580,7 @@ pub fn sync_push_entries(
                 .find(|e| e.id == id)
                 .cloned();
             if let Some(entry) = entry {
-                sync.on_new_clipboard_entry(entry);
+                sync.on_manual_push_clipboard_entry(entry);
                 pushed += 1;
             }
         }
@@ -664,6 +664,35 @@ pub async fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, 
 pub async fn sync_server_entry_count(state: State<'_, AppState>) -> Result<usize, String> {
     let sync = sync_client(&state)?;
     Ok(sync.server_entry_keys().await?.len())
+}
+
+/// The same account-wide sweep, split by what the entries are.
+#[derive(serde::Serialize)]
+pub struct ServerBreakdown {
+    pub clipboard: usize,
+    pub notes: usize,
+    pub total: usize,
+}
+
+/// What this account holds on the server, by kind.
+///
+/// Built on `server_entry_keys` rather than a second sweep: those keys already
+/// carry the kind (`"clipboard:{id}"` / `"note:{id}"`), so the split costs one
+/// pass over a list that had to be fetched anyway. The account screen shows
+/// clipboard and notes on their own rows, and a single total could not say
+/// which of the two an unexpected number came from.
+#[tauri::command]
+pub async fn sync_server_breakdown(
+    state: State<'_, AppState>,
+) -> Result<ServerBreakdown, String> {
+    let sync = sync_client(&state)?;
+    let keys = sync.server_entry_keys().await?;
+    let notes = keys.iter().filter(|k| k.starts_with("note:")).count();
+    Ok(ServerBreakdown {
+        clipboard: keys.len() - notes,
+        notes,
+        total: keys.len(),
+    })
 }
 
 /// Where a bulk upload or removal has got to.
@@ -1204,13 +1233,45 @@ pub async fn sync_send_invite(
     http.send_space_invite(&space_id, &email).await
 }
 
+/// One answer, told to every surface that is showing the invite.
+///
+/// The invite lists on the Spaces screen and the row in the notification centre
+/// used to find out separately, and only by asking the server again - so an
+/// invite accepted in one of them still offered Join and Decline in the other,
+/// and pressing Decline there is what produced "Invite already accepted".
+/// Answering it is now what settles it, wherever the answer came from.
+/// Swallow a 409 on an invite answer.
+///
+/// The server says 409 when the invite has already been answered - from
+/// another device, or from the app's other surface a moment earlier. The user
+/// asked for it to be gone and it is gone, so this is the outcome they wanted,
+/// not a failure to put in front of them. The caller still settles the row, so
+/// the stale buttons it was pressed on go away.
+fn already_answered<T>(result: Result<T, crate::sync::client::ApiError>) -> Result<(), String> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) if e.status == Some(409) => Ok(()),
+        Err(e) => Err(String::from(e)),
+    }
+}
+
+fn settle_invite(app: &tauri::AppHandle, invite_id: &str, status: &str, outcome: &str) {
+    crate::notifications::resolve(app, &format!("invite:{invite_id}"), outcome);
+    let _ = app.emit(
+        "sync:invite-answered",
+        serde_json::json!({ "invite_id": invite_id, "status": status }),
+    );
+}
+
 #[tauri::command]
 pub async fn sync_accept_invite(
     invite_id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
-    http.accept_invite(&invite_id).await?;
+    already_answered(http.accept_invite(&invite_id).await)?;
+    settle_invite(&app, &invite_id, "accepted", "Joined");
     // Catch up in the background: receive the keyring once the owner wraps it,
     // then pull the space's history (subject to its share_history policy).
     let sync2 = Arc::clone(&sync);
@@ -1224,19 +1285,25 @@ pub async fn sync_accept_invite(
 #[tauri::command]
 pub async fn sync_decline_invite(
     invite_id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
-    http.decline_invite(&invite_id).await
+    already_answered(http.decline_invite(&invite_id).await)?;
+    settle_invite(&app, &invite_id, "declined", "Declined");
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn sync_revoke_invite(
     invite_id: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (_sync, http) = sync_http(&state)?;
-    http.revoke_invite(&invite_id).await
+    already_answered(http.revoke_invite(&invite_id).await)?;
+    settle_invite(&app, &invite_id, "revoked", "Withdrawn");
+    Ok(())
 }
 
 // ── Settings sync commands ────────────────────────────────────────────

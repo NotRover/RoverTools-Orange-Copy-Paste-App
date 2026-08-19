@@ -12,87 +12,40 @@
   letter-spacing: 0.2px;
   flex-shrink: 0;
   user-select: none;
+  background: color-mix(in srgb, var(--type-color) 12%, transparent);
+  color: var(--type-color);
 }
 
 .type-pill-label {
   line-height: 1;
 }
 
-/* ── Kind colors (dark) ── */
+/* ── Kind colors ──
+   One hue per kind, published as `--type-color` so anything that has to speak
+   the same colour language - the pill, the composition bar on the account
+   screen - reads the token instead of repeating the literal. The pill derives
+   its own tint from it, so a kind is one line here, not two. */
 
-.type-pill--text {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
+.type-pill--text, .type-tint--text { --type-color: var(--accent); }
+.type-pill--image, .type-tint--image { --type-color: #3b82f6; }
+.type-pill--file, .type-tint--file { --type-color: #8b5cf6; }
+.type-pill--video, .type-tint--video { --type-color: #ef4444; }
+.type-pill--url, .type-tint--url { --type-color: #10b981; }
+.type-pill--document, .type-tint--document { --type-color: #f97316; }
+.type-pill--folder, .type-tint--folder { --type-color: #0ea5e9; }
+.type-pill--html, .type-tint--html { --type-color: #a855f7; }
 
-.type-pill--image {
-  background: rgba(59, 130, 246, 0.12);
-  color: #3b82f6;
-}
+/* Not a clipboard kind - notes only ever appear as a tint, on the account
+   screen's composition bar. */
+.type-tint--notes { --type-color: #eab308; }
 
-.type-pill--file {
-  background: rgba(139, 92, 246, 0.12);
-  color: #8b5cf6;
-}
-
-.type-pill--video {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-}
-
-.type-pill--url {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-}
-
-.type-pill--document {
-  background: rgba(249, 115, 22, 0.12);
-  color: #f97316;
-}
-
-.type-pill--folder {
-  background: rgba(14, 165, 233, 0.12);
-  color: #0ea5e9;
-}
-
-.type-pill--html {
-  background: rgba(168, 85, 247, 0.12);
-  color: #a855f7;
-}
-
-/* ── Kind colors (light) ── */
-
-[data-theme="light"] .type-pill--image {
-  background: rgba(59, 130, 246, 0.1);
-  color: #2563eb;
-}
-
-[data-theme="light"] .type-pill--file {
-  background: rgba(139, 92, 246, 0.1);
-  color: #7c3aed;
-}
-
-[data-theme="light"] .type-pill--video {
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
-}
-
-[data-theme="light"] .type-pill--url {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-}
-
-[data-theme="light"] .type-pill--document {
-  background: rgba(249, 115, 22, 0.1);
-  color: #ea6a0a;
-}
-
-[data-theme="light"] .type-pill--folder {
-  background: rgba(14, 165, 233, 0.1);
-  color: #0284c7;
-}
-
-[data-theme="light"] .type-pill--html {
-  background: rgba(168, 85, 247, 0.1);
-  color: #7c3aed;
-}
+/* Light theme darkens each hue to hold its contrast on a pale ground. Text
+   keeps the accent, which the theme already re-tunes for itself. */
+[data-theme="light"] .type-pill--image, [data-theme="light"] .type-tint--image { --type-color: #2563eb; }
+[data-theme="light"] .type-pill--file, [data-theme="light"] .type-tint--file { --type-color: #7c3aed; }
+[data-theme="light"] .type-pill--video, [data-theme="light"] .type-tint--video { --type-color: #dc2626; }
+[data-theme="light"] .type-pill--url, [data-theme="light"] .type-tint--url { --type-color: #059669; }
+[data-theme="light"] .type-pill--document, [data-theme="light"] .type-tint--document { --type-color: #ea6a0a; }
+[data-theme="light"] .type-pill--folder, [data-theme="light"] .type-tint--folder { --type-color: #0284c7; }
+[data-theme="light"] .type-pill--html, [data-theme="light"] .type-tint--html { --type-color: #7c3aed; }
+[data-theme="light"] .type-tint--notes { --type-color: #ca8a04; }
