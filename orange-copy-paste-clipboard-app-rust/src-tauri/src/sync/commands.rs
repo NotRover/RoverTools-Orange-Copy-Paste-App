@@ -666,6 +666,35 @@ pub async fn sync_server_entry_count(state: State<'_, AppState>) -> Result<usize
     Ok(sync.server_entry_keys().await?.len())
 }
 
+/// The same account-wide sweep, split by what the entries are.
+#[derive(serde::Serialize)]
+pub struct ServerBreakdown {
+    pub clipboard: usize,
+    pub notes: usize,
+    pub total: usize,
+}
+
+/// What this account holds on the server, by kind.
+///
+/// Built on `server_entry_keys` rather than a second sweep: those keys already
+/// carry the kind (`"clipboard:{id}"` / `"note:{id}"`), so the split costs one
+/// pass over a list that had to be fetched anyway. The account screen shows
+/// clipboard and notes on their own rows, and a single total could not say
+/// which of the two an unexpected number came from.
+#[tauri::command]
+pub async fn sync_server_breakdown(
+    state: State<'_, AppState>,
+) -> Result<ServerBreakdown, String> {
+    let sync = sync_client(&state)?;
+    let keys = sync.server_entry_keys().await?;
+    let notes = keys.iter().filter(|k| k.starts_with("note:")).count();
+    Ok(ServerBreakdown {
+        clipboard: keys.len() - notes,
+        notes,
+        total: keys.len(),
+    })
+}
+
 /// Where a bulk upload or removal has got to.
 #[derive(serde::Serialize)]
 pub struct BulkProgressOut {

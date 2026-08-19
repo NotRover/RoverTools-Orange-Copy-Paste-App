@@ -151,6 +151,14 @@ export interface SyncQuota {
   quota_bytes: number;
 }
 
+/** What the account holds on the server, split by kind. Account-wide, unlike
+ *  anything derived from `sync_get_entry_states`, which is this device only. */
+export interface SyncServerBreakdown {
+  clipboard: number;
+  notes: number;
+  total: number;
+}
+
 export interface SyncInviteList {
   sent: SyncInvite[];
   received: SyncInvite[];

@@ -1317,7 +1317,16 @@ const App: React.FC = () => {
         {screen === "settings" ? (
           <SettingsScreen />
         ) : screen === "account" ? (
-          <AccountScreen />
+          <AccountScreen
+            entries={entries}
+            notes={notes}
+            onNavigate={(s) => {
+              setScreen(s);
+              if (s === "clipboard" || s === "notes" || s === "spaces") {
+                localStorage.setItem("sc-last-screen", s);
+              }
+            }}
+          />
         ) : screen === "shortcuts" ? (
           <ShortcutsScreen />
         ) : screen === "spaces" ? (
