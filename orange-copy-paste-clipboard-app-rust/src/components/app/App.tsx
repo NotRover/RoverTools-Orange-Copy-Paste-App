@@ -226,6 +226,10 @@ const App: React.FC = () => {
   const [syncActivity, setSyncActivity] = useState(false);
   // Received shared-space invites still awaiting a response.
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  // Whether there is an account behind the app at all, as opposed to whether
+  // its socket happens to be up. Drives what the notification centre offers on
+  // an invite: buttons, or a line telling the user to sign in.
+  const [signedIn, setSignedIn] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifAnchor, setNotifAnchor] = useState({ x: 0, y: 0 });
 
@@ -546,25 +550,34 @@ const App: React.FC = () => {
     // Seed from the current status: the socket usually comes up during
     // startup, so waiting for the next event left every indicator reading
     // "inactive" on a device that was signed in and online the whole time.
-    invoke<{ user_id: string } | null>("sync_get_user")
-      .then((user) => {
-        if (!user) return;
-        return invoke<{ connected: boolean }>("sync_get_status").then((s) => {
-          if (!cancelled) setSyncConnected(s.connected);
-        });
-      })
-      .catch(() => {});
+    const readUser = () =>
+      invoke<{ user_id: string } | null>("sync_get_user")
+        .then((user) => {
+          if (!cancelled) setSignedIn(user !== null);
+          if (!user) return;
+          return invoke<{ connected: boolean }>("sync_get_status").then((s) => {
+            if (!cancelled) setSyncConnected(s.connected);
+          });
+        })
+        .catch(() => {});
+    readUser();
     track(
       listen<{ connected: boolean }>("sync:status-changed", (event) => {
         if (!cancelled) setSyncConnected(event.payload.connected);
+        // A socket only runs behind an account, so this is also how a sign-in
+        // that happened on another screen reaches the notification centre.
+        if (event.payload.connected && !cancelled) setSignedIn(true);
       }),
     );
+    track(listen("sync:session-restored", () => readUser()));
     // Back to null, not false: false means signed in with the socket down, and
     // showing either that or the last connected state is wrong once there is no
     // account behind it.
     track(
       listen("sync:signed-out", () => {
-        if (!cancelled) setSyncConnected(null);
+        if (cancelled) return;
+        setSyncConnected(null);
+        setSignedIn(false);
       }),
     );
     track(
@@ -1257,6 +1270,7 @@ const App: React.FC = () => {
           setScreen("spaces");
           localStorage.setItem("sc-last-screen", "spaces");
         }}
+        signedIn={signedIn}
       />
 
       <div className="main-frame">

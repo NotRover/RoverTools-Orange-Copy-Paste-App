@@ -25,6 +25,9 @@ interface NotificationsPopoutProps {
   onRefresh: () => void;
   /** Take the user to the space this notification is about. */
   onOpenSpaces: () => void;
+  /** Answering an invite needs an account. Signed out, say so instead of
+      offering buttons whose only outcome is an error. */
+  signedIn: boolean;
 }
 
 /** Chip label per category, in the order they are offered. */
@@ -98,6 +101,7 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
   onClose,
   onRefresh,
   onOpenSpaces,
+  signedIn,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const [chip, setChip] = useState<string>("all");
@@ -149,22 +153,25 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
     };
   }, [open, onClose]);
 
-  // The panel grows upward from the bell, so its top depends on a height only
-  // the browser knows. Measure, then place, writing straight to the node so it
-  // never paints at (0, 0) first. Re-runs when the content changes size, which
-  // filtering and answering an invite both do.
+  // The panel grows upward from the bell, so it is pinned by its *bottom* edge
+  // rather than positioned by a measured top. Its height can then change on its
+  // own - dismissing a row, switching a chip - with nothing having to reposition
+  // it: a JS reposition only lands after the round trip to Rust and back, which
+  // is long enough to watch the panel slide back into place.
+  //
+  // The height cap keeps it clear of the top of the window, which is the one
+  // thing a pinned bottom edge cannot do by itself.
   useLayoutEffect(() => {
     if (!open || !panelRef.current) return;
     const el = panelRef.current;
-    const { height, width } = el.getBoundingClientRect();
-    const top = Math.min(
-      Math.max(8, anchorY - height),
-      Math.max(8, window.innerHeight - height - 8),
+    const left = Math.min(
+      anchorX,
+      Math.max(8, window.innerWidth - el.offsetWidth - 8),
     );
-    const left = Math.min(anchorX, Math.max(8, window.innerWidth - width - 8));
-    el.style.top = `${top}px`;
     el.style.left = `${left}px`;
-  }, [open, anchorX, anchorY, items, chip, shown]);
+    el.style.bottom = `${Math.max(8, window.innerHeight - anchorY)}px`;
+    el.style.maxHeight = `${Math.max(160, Math.min(460, anchorY - 16))}px`;
+  }, [open, anchorX, anchorY]);
 
   // Reset the filter each time it opens: a chip left on "Sync" from last time
   // hides the invite the badge is counting.
@@ -177,23 +184,29 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
     [items],
   );
 
+  // Clearing the last row of the category being viewed takes that chip away
+  // with it. The selection has to follow, or the panel filters on a category
+  // that is no longer offered and reads as an empty feed - which is what the
+  // rest of the notifications look like they have gone.
+  const activeChip = chipsShown.some((c) => c.key === chip) ? chip : "all";
+
   // Rows whose clearing is waiting out its Undo toast are already gone from the
   // panel: the list is read from Rust, which still has them until the toast
   // runs out.
   const pendingGone = usePendingRemovals();
   const filtered = useMemo(() => {
     const here = items.filter((n) => !pendingGone.has(`notification:${n.id}`));
-    if (chip === "all") return here;
-    const match = CHIPS.find((c) => c.key === chip);
+    if (activeChip === "all") return here;
+    const match = CHIPS.find((c) => c.key === activeChip);
     return match ? here.filter((n) => match.kinds.includes(n.kind)) : here;
-  }, [items, chip, pendingGone]);
+  }, [items, activeChip, pendingGone]);
 
   // A page count is a property of the current filter, so switching chips starts
   // over. Without this, filtering after paging deep shows a "Show more" that
   // has nothing left to reveal.
   useEffect(() => {
     setShown(PAGE_SIZE);
-  }, [chip, open]);
+  }, [activeChip, open]);
 
   const visible = useMemo(() => filtered.slice(0, shown), [filtered, shown]);
   const remaining = filtered.length - visible.length;
@@ -289,7 +302,7 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
       {chipsShown.length > 1 && (
         <div className="ntf-chips">
           <button
-            className={`ntf-chip${chip === "all" ? " active" : ""}`}
+            className={`ntf-chip${activeChip === "all" ? " active" : ""}`}
             onClick={() => setChip("all")}
           >
             All
@@ -301,7 +314,7 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
             return (
               <button
                 key={c.key}
-                className={`ntf-chip${chip === c.key ? " active" : ""}`}
+                className={`ntf-chip${activeChip === c.key ? " active" : ""}`}
                 onClick={() => setChip(c.key)}
               >
                 {c.label}
@@ -363,24 +376,29 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
                         <span className="ntf-resolved">{n.resolved}</span>
                       )}
                     </p>
-                    {actionable && (
-                      <div className="ntf-actions">
-                        <button
-                          className="ntf-btn ntf-btn--primary"
-                          disabled={busy.includes(n.id)}
-                          onClick={() => answerInvite(n, true)}
-                        >
-                          Join
-                        </button>
-                        <button
-                          className="ntf-btn"
-                          disabled={busy.includes(n.id)}
-                          onClick={() => answerInvite(n, false)}
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    )}
+                    {actionable &&
+                      (signedIn ? (
+                        <div className="ntf-actions">
+                          <button
+                            className="ntf-btn ntf-btn--primary"
+                            disabled={busy.includes(n.id)}
+                            onClick={() => answerInvite(n, true)}
+                          >
+                            Join
+                          </button>
+                          <button
+                            className="ntf-btn"
+                            disabled={busy.includes(n.id)}
+                            onClick={() => answerInvite(n, false)}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="ntf-row-signin">
+                          Sign in on the Account screen to answer this.
+                        </p>
+                      ))}
                   </div>
                   <button
                     className="ntf-dismiss"
