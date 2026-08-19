@@ -398,7 +398,7 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
             .find(|e| e.id == skip.client_id)
             .cloned();
         if let Some(entry) = entry {
-            sync.on_update_clipboard_entry(entry);
+            sync.on_manual_push_clipboard_entry(entry);
             retried += 1;
             continue;
         }
@@ -410,7 +410,7 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
             .find(|n| n.id == skip.client_id)
             .cloned();
         if let Some(note) = note {
-            sync.on_update_note(note);
+            sync.on_manual_push_note(note);
             retried += 1;
         }
         // Neither: the entry was deleted after it was skipped. Nothing to do.
@@ -452,7 +452,7 @@ pub fn sync_push_unsynced(state: State<'_, AppState>) -> Result<Vec<String>, Str
     let mut keys = Vec::with_capacity(entries.len() + notes.len());
     for entry in entries {
         keys.push(format!("clipboard:{}", entry.id));
-        sync.on_new_clipboard_entry(entry);
+        sync.on_manual_push_clipboard_entry(entry);
     }
     for note in notes {
         keys.push(format!("note:{}", note.id));
@@ -580,7 +580,7 @@ pub fn sync_push_entries(
                 .find(|e| e.id == id)
                 .cloned();
             if let Some(entry) = entry {
-                sync.on_new_clipboard_entry(entry);
+                sync.on_manual_push_clipboard_entry(entry);
                 pushed += 1;
             }
         }

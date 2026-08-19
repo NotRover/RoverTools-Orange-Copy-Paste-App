@@ -82,6 +82,22 @@ pub(crate) const SYNC_MODE_KEY: &str = "sync_mode";
 type SpaceKeyring = Vec<[u8; 32]>;
 
 /// Shared handles cloned out of `SyncClient` for a spawned push/delete task.
+/// Why a push is happening, which is what decides whether manual mode may
+/// hold it.
+///
+/// The hold used to be read off `sync_mode` alone, inside the push itself, so
+/// it could not tell a capture from a click - and "Upload to cloud" on a picked
+/// item silently queued instead of uploading, which is indistinguishable from
+/// the feature being broken. Manual mode's promise is that nothing goes out
+/// *on its own*, not that the button stops working.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushOrigin {
+    /// The watcher, an edit, a note keystroke. Held in manual mode.
+    Automatic,
+    /// The user asked for this item to go up. Never held.
+    UserInitiated,
+}
+
 struct PushCtx {
     http: Option<Arc<SyncHttpClient>>,
     queue: Arc<Mutex<PendingQueue>>,
@@ -94,9 +110,6 @@ struct PushCtx {
     budget: BlobBudget,
     /// Pushes running right now, so the UI can show them as pending.
     in_flight: Arc<Mutex<HashSet<String>>>,
-    /// Manual mode: hold personal pushes in the queue instead of sending them.
-    /// Anything addressed to a space ignores this — see [`SyncMode::Manual`].
-    hold_personal: bool,
 }
 
 /// Bytes of blob storage left on the account, as last known.
@@ -1230,14 +1243,23 @@ impl SyncClient {
         let Some(umk) = self.umk.lock().clone() else {
             return; // Not logged in
         };
-        self.spawn_push_clipboard_entry(entry, umk, false);
+        self.spawn_push_clipboard_entry(entry, umk, false, PushOrigin::Automatic);
+    }
+
+    /// "Upload to cloud" on an item the user picked, as opposed to one that has
+    /// just been captured. Goes out even in manual mode - see [`PushOrigin`].
+    pub fn on_manual_push_clipboard_entry(&self, entry: ClipboardEntry) {
+        let Some(umk) = self.umk.lock().clone() else {
+            return;
+        };
+        self.spawn_push_clipboard_entry(entry, umk, true, PushOrigin::UserInitiated);
     }
 
     pub fn on_update_clipboard_entry(&self, entry: ClipboardEntry) {
         let Some(umk) = self.umk.lock().clone() else {
             return;
         };
-        self.spawn_push_clipboard_entry(entry, umk, true);
+        self.spawn_push_clipboard_entry(entry, umk, true, PushOrigin::Automatic);
     }
 
     pub fn on_delete_clipboard_entry(&self, client_id: String) {
@@ -1248,14 +1270,14 @@ impl SyncClient {
         let Some(umk) = self.umk.lock().clone() else {
             return;
         };
-        self.spawn_push_note(note, umk, false, None);
+        self.spawn_push_note(note, umk, false, None, PushOrigin::Automatic);
     }
 
     pub fn on_update_note(&self, note: Note) {
         let Some(umk) = self.umk.lock().clone() else {
             return;
         };
-        self.spawn_push_note(note, umk, true, None);
+        self.spawn_push_note(note, umk, true, None, PushOrigin::Automatic);
     }
 
     /// "Upload to cloud" on a note the user picked, as opposed to a note that
@@ -1276,7 +1298,7 @@ impl SyncClient {
             return;
         };
         let at = note.updated_at.max(now_ms());
-        self.spawn_push_note(note, umk, true, Some(at));
+        self.spawn_push_note(note, umk, true, Some(at), PushOrigin::UserInitiated);
     }
 
     pub fn on_delete_note(&self, note_id: String) {
@@ -1296,8 +1318,32 @@ impl SyncClient {
             gate: Arc::clone(&self.push_gate),
             budget: Arc::clone(&self.blob_budget),
             in_flight: Arc::clone(&self.in_flight),
-            hold_personal: *self.sync_mode.lock() == SyncMode::Manual,
         }
+    }
+
+    /// Whether manual mode drops this push on the floor.
+    ///
+    /// Manual mode makes no push of its own: an item reaches the cloud when the
+    /// user picks it, from the item menu or the bulk bar, and not before. It is
+    /// not queued in the meantime - a queue implies it is on its way, which is
+    /// what left every capture sitting on "waiting to upload" with only a
+    /// hidden bulk upload behind the Sync button to clear it.
+    ///
+    /// Two things are still not the app acting on its own, and go out anyway:
+    ///
+    /// - Anything addressed to a space. Someone is publishing it to other
+    ///   people, and holding it would leave them looking at a space that
+    ///   silently lost an item.
+    /// - An edit to an item already on the server. The choice to publish that
+    ///   one was made when it was uploaded; skipping the edit would leave the
+    ///   server holding an older pin, group set or note body while the card
+    ///   still reads "Synced" - a badge that says up to date about a copy that
+    ///   is not.
+    fn skips_automatic_push(&self, origin: PushOrigin, space_ids: &[String], key: &str) -> bool {
+        origin == PushOrigin::Automatic
+            && space_ids.is_empty()
+            && self.id_map.lock().get_server_id(key).is_none()
+            && *self.sync_mode.lock() == SyncMode::Manual
     }
 
     fn spawn_push_clipboard_entry(
@@ -1305,6 +1351,7 @@ impl SyncClient {
         entry: ClipboardEntry,
         umk: Zeroizing<[u8; 32]>,
         is_update: bool,
+        origin: PushOrigin,
     ) {
         // Not ours to publish - see the note push for why a second row is worse
         // than no push at all.
@@ -1329,6 +1376,14 @@ impl SyncClient {
                 return;
             }
         };
+
+        // Checked before the spawn, not inside the push: the push only reaches
+        // its own check after the image blob has been uploaded, so deciding it
+        // there put the bytes in the cloud that manual mode had promised to
+        // keep out of it.
+        if self.skips_automatic_push(origin, &space_ids, &format!("clipboard:{}", entry.id)) {
+            return;
+        }
 
         self.handle.spawn(async move {
             // Taken before anything touches the network, so a bulk upload of
@@ -1422,6 +1477,7 @@ impl SyncClient {
         umk: Zeroizing<[u8; 32]>,
         is_update: bool,
         wire_updated_at: Option<u64>,
+        origin: PushOrigin,
     ) {
         // Someone else wrote it, so it is not ours to publish. Rows are keyed by
         // owner, so this would not update theirs - it would insert a second row
@@ -1440,6 +1496,10 @@ impl SyncClient {
                 return;
             }
         };
+
+        if self.skips_automatic_push(origin, &space_ids, &format!("note:{}", note.id)) {
+            return;
+        }
 
         self.handle.spawn(async move {
             let permit = ctx.gate.clone().acquire_owned().await.ok();
@@ -1474,7 +1534,6 @@ impl SyncClient {
         let id_map = Arc::clone(&self.id_map);
         let status = Arc::clone(&self.status);
         let gate = Arc::clone(&self.push_gate);
-        let hold_personal = *self.sync_mode.lock() == SyncMode::Manual;
         let type_str = entry_type.as_str().to_string();
         let map_key = format!("{type_str}:{client_id}");
         // The tombstone must reach the same spaces the entry did, so members
@@ -1539,12 +1598,11 @@ impl SyncClient {
             // Always tombstone — even if offline (invariant #5).  A tombstone is
             // a push with deleted_at set, keyed by client_id (no server_id).
             //
-            // Manual mode queues it rather than sending, same rule as a push:
-            // held while it is only our own copy, sent when the deletion has to
-            // reach a space's other members.
-            let hold = hold_personal && space_ids.is_empty();
+            // Sent in every mode, manual included: a removal is something the
+            // user did, from the item menu or the bulk bar, so it is never the
+            // app acting on its own.
             if let (Some(http), Some(umk)) = (
-                http.as_ref().filter(|h| !hold && h.is_authenticated()),
+                http.as_ref().filter(|h| h.is_authenticated()),
                 umk.as_ref(),
             ) {
                 if let Some(req) = tombstone_req(umk, &client_id, &type_str, space_ids) {
@@ -1881,18 +1939,25 @@ impl SyncClient {
             return Err("not authenticated".into());
         }
 
-        // Flush pending queue in order
+        // Flush pending queue in order. Whatever does not get through goes
+        // back, in order: draining unconditionally meant one Sync now pressed
+        // on a flaky connection threw away every queued push, and the entries
+        // it dropped had no other record that they still needed to go up.
         let ops = self.pending_queue.lock().drain();
+        let mut unsent: Vec<PendingOp> = Vec::new();
         for op in ops {
             match op {
-                PendingOp::Push { entry_json, entry_type }
-                | PendingOp::Update { entry_json, entry_type } => {
+                ref sending @ (PendingOp::Push { ref entry_json, ref entry_type }
+                | PendingOp::Update { ref entry_json, ref entry_type }) => {
                     // Old-format queue entries (pre-CEK, no wrapped_keys) fail
                     // to parse and are dropped here — their ciphertext could
                     // not be decrypted under the new envelope anyway.
-                    if let Ok(req) = serde_json::from_str::<PushEntryRequest>(&entry_json) {
-                        let space_ids = req.space_ids.clone();
-                        if let Ok(result) = http.push_entries(vec![req]).await {
+                    let Ok(req) = serde_json::from_str::<PushEntryRequest>(entry_json) else {
+                        continue;
+                    };
+                    let space_ids = req.space_ids.clone();
+                    match http.push_entries(vec![req]).await {
+                        Ok(result) => {
                             for r in result.accepted {
                                 // Key by the op's own type. Hardcoding
                                 // "clipboard" filed every flushed note under a
@@ -1902,6 +1967,10 @@ impl SyncClient {
                                 id_map.set_entry(&key, &r.server_id);
                                 id_map.set_entry_shares(&key, &space_ids);
                             }
+                        }
+                        Err(e) => {
+                            eprintln!("[sync] queued push failed: {e}");
+                            unsent.push(sending.clone());
                         }
                     }
                 }
@@ -1916,12 +1985,20 @@ impl SyncClient {
                             .unwrap_or_default();
                         if let Some(req) = tombstone_req(&umk, &client_id, &entry_type, space_ids)
                         {
-                            let _ = http.push_entries(vec![req]).await;
-                            self.id_map.lock().remove_entry(&map_key);
+                            match http.push_entries(vec![req]).await {
+                                Ok(_) => self.id_map.lock().remove_entry(&map_key),
+                                Err(e) => {
+                                    eprintln!("[sync] queued delete failed: {e}");
+                                    unsent.push(PendingOp::Delete { client_id, entry_type });
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+        for op in unsent {
+            self.pending_queue.lock().push(op);
         }
 
         // Delta pull
@@ -3741,16 +3818,10 @@ async fn push_entry_task(
         wrapped_keys,
     };
 
-    // Manual mode sends nothing of its own accord, so this takes the queue path
-    // below and the entry waits for Sync now. An entry going to a space is not
-    // "of its own accord": someone is publishing it to other people, and holding
-    // it would leave them looking at a space that silently lost an item.
-    let hold = ctx.hold_personal && push_req.space_ids.is_empty();
-    if let Some(http) = ctx
-        .http
-        .as_ref()
-        .filter(|h| !hold && h.is_authenticated())
-    {
+    // Whether this push should happen at all was settled before any of this
+    // work started; everything that gets here is meant to go out now, and the
+    // queue below is only for a push that could not.
+    if let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) {
         match http.push_entries(vec![push_req.clone()]).await {
             Ok(result) => {
                 if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
@@ -3803,7 +3874,7 @@ async fn push_entry_task(
         }
     }
 
-    // Offline, unauthenticated, or held by manual mode — queue
+    // Offline or not signed in — queue it for the next flush
     let entry_json = match serde_json::to_string(&push_req) {
         Ok(j) => j,
         Err(e) => {
