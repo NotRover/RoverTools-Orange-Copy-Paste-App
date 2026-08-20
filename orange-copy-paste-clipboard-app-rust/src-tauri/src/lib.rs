@@ -363,6 +363,7 @@ fn setup_runtime(
         .store(keep_enabled, Ordering::Relaxed);
     for (key, flag, default) in [
         ("close_to_tray", &state_ref.close_to_tray, false),
+        ("os_notifications", &state_ref.os_notifications, true),
         ("start_minimized", &state_ref.start_minimized, false),
         ("autosave", &state_ref.autosave, false),
         ("show_splash", &state_ref.show_splash, true),
@@ -552,6 +553,7 @@ pub fn run() {
         keep_history: Arc::new(AtomicBool::new(false)),
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
+        os_notifications: Arc::new(AtomicBool::new(true)),
         start_minimized: Arc::new(AtomicBool::new(false)),
         notification_enabled: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
@@ -596,6 +598,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             crate::health::health_degraded_reason,
@@ -669,6 +672,7 @@ pub fn run() {
             crate::sync::commands::sync_reset_password,
             crate::sync::commands::sync_complete_password_reset,
             crate::sync::commands::sync_cancel_password_reset,
+            crate::runtime::commands::play_cue,
             crate::sync::commands::sync_change_password,
             crate::sync::commands::sync_create_recovery_code,
             crate::sync::commands::sync_has_recovery_code,

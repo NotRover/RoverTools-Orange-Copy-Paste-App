@@ -26,6 +26,7 @@ import ClipboardScreen from "./clipboard-screen/ClipboardScreen";
 import NotesScreen from "./notes-screen/NotesScreen";
 import NotificationsPopout from "./notifications/NotificationsPopout";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
+import { configureSounds, playCue, type Cue } from "../../sounds";
 import ToastNotification from "./toast/ToastNotification";
 import {
   APP_TOAST_DISMISS_EVENT,
@@ -353,6 +354,45 @@ const App: React.FC = () => {
       .catch(() => {});
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // ── Sounds ──────────────────────────────────────────────────────
+  // Rust decides what deserves a sound and emits one event for all of them;
+  // this window is the only one that listens, so a cue is heard once even
+  // though the popups are separate webviews. The main window outlives every
+  // popup (closing it either hides it or exits the app), so there is no case
+  // where a cue fires with nobody to play it.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    const load = () => {
+      invoke<boolean | null>("get_setting", { key: "sound" })
+        .then((v) => configureSounds({ enabled: v !== false }))
+        .catch(() => {});
+      invoke<boolean | null>("get_setting", { key: "sound_copy" })
+        .then((v) => configureSounds({ copy: v === true }))
+        .catch(() => {});
+      invoke<boolean | null>("get_setting", { key: "sound_paste" })
+        .then((v) => configureSounds({ paste: v === true }))
+        .catch(() => {});
+    };
+    // Read once. The Settings screen shares this module, so when the user
+    // changes one of these it calls configureSounds itself rather than writing
+    // to disk and hoping somebody re-reads it.
+    load();
+
+    listen<{ cue: Cue }>("ui:cue", (event) => {
+      if (!cancelled) playCue(event.payload.cue);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 

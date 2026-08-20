@@ -26,6 +26,10 @@ pub struct AppState {
     /// When `true`, closing the main window hides it to the system tray
     /// instead of quitting the app.
     pub close_to_tray: Arc<AtomicBool>,
+    /// Whether something worth a notification-centre row may also raise an OS
+    /// toast. Only ever consulted while the app is unfocused - see
+    /// `runtime::os_notify`.
+    pub os_notifications: Arc<AtomicBool>,
     /// When `true`, the app starts hidden (minimized to tray).
     pub start_minimized: Arc<AtomicBool>,
     /// When `true`, a small toast is shown at the bottom-right of the screen

@@ -3740,7 +3740,7 @@ impl SyncClient {
             1 => "You can read it now. The item you shared there has gone out.".to_string(),
             n => format!("You can read it now. {n} items you shared there have gone out."),
         };
-        crate::notifications::raise(
+        crate::notifications::raise_cued(
             &self.app,
             crate::notifications::Notification::new(
                 format!("space-key:{space_id}"),
@@ -3749,6 +3749,7 @@ impl SyncClient {
             )
             .with_body(body)
             .with_data("space_id", space_id.to_string()),
+            Some(crate::notifications::Cue::Unlocked),
         );
     }
 
@@ -3944,7 +3945,7 @@ impl SyncClient {
     /// Our own request was approved. The key came with it, so this is the point
     /// the space becomes readable rather than merely joined.
     pub(crate) fn note_join_approved(&self, space_id: &str, space_name: &str) {
-        crate::notifications::raise(
+        crate::notifications::raise_cued(
             &self.app,
             crate::notifications::Notification::new(
                 format!("space-joined:{space_id}"),
@@ -3953,6 +3954,7 @@ impl SyncClient {
             )
             .with_body("Your request was approved.")
             .with_data("space_id", space_id.to_string()),
+            Some(crate::notifications::Cue::Unlocked),
         );
     }
 

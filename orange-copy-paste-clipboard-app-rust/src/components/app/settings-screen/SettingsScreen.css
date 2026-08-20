@@ -14,8 +14,14 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 26px 22px 32px;
+  padding: 26px 8px 32px;
   overflow: hidden auto;
+  /* Same treatment as the clipboard and notes viewports: a matching gutter on
+     both edges so the scrollbar does not make the right side heavier, and the
+     whole scroll area inset from the window edge instead of touching it. The
+     padding drops to make room, so the content sits where it did. */
+  scrollbar-gutter: stable both-edges;
+  margin: 0 8px;
 }
 
 [data-theme="light"] .settings-screen {
@@ -24,7 +30,7 @@
 }
 
 .settings-screen::-webkit-scrollbar {
-  width: 10px;
+  width: 12px;
 }
 
 .settings-screen::-webkit-scrollbar-track {
@@ -34,13 +40,13 @@
 .settings-screen::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 999px;
-  border: 3px solid var(--bg);
+  border: 2px solid var(--bg);
   background-clip: padding-box;
 }
 
 .settings-screen::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
-  border: 3px solid var(--bg);
+  border: 2px solid var(--bg);
   background-clip: padding-box;
 }
 
@@ -111,6 +117,9 @@
 .set-section:nth-child(3) { animation-delay: 0.03s; }
 .set-section:nth-child(4) { animation-delay: 0.06s; }
 .set-section:nth-child(5) { animation-delay: 0.09s; }
+.set-section:nth-child(6) { animation-delay: 0.12s; }
+.set-section:nth-child(7) { animation-delay: 0.15s; }
+.set-section:nth-child(8) { animation-delay: 0.18s; }
 
 @keyframes setSectionIn {
   from {
@@ -194,7 +203,7 @@
 .set-row-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -440,7 +449,7 @@
   }
   to {
     opacity: 1;
-    max-height: 200px;
+    max-height: 280px;
     padding-top: 12px;
     padding-bottom: 12px;
   }
@@ -453,7 +462,7 @@
 @keyframes slideUp {
   from {
     opacity: 1;
-    max-height: 200px;
+    max-height: 280px;
     padding-top: 12px;
     padding-bottom: 12px;
   }
@@ -502,7 +511,7 @@
 .settings-checkbox-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
   flex: 1;
 }
@@ -540,3 +549,47 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ── Cue previews ─────────────────────────────────────────────────────
+   Small pills on the right of the test row, one per cue a user cannot
+   trigger from this screen. They wrap rather than squeeze on a narrow
+   window, so the row grows instead of the labels shrinking. */
+.set-cue-tests {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.set-cue-test {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  /* Squircle: a large radius reads as a pill at this height, so the corner
+     shape does the work. `corner-shape` is ignored where it is unsupported and
+     the plain radius stands in. */
+  border-radius: 11px;
+  corner-shape: squircle;
+  border: 1px solid var(--border-light);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.set-cue-test:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.set-cue-test:active {
+  transform: scale(0.96);
+}
+

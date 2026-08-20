@@ -212,6 +212,7 @@ pub fn set_setting(
     let flag = match key.as_str() {
         "keep_history" => Some(&state.keep_history),
         "close_to_tray" => Some(&state.close_to_tray),
+        "os_notifications" => Some(&state.os_notifications),
         "start_minimized" => Some(&state.start_minimized),
         "notification" => Some(&state.notification_enabled),
         "notif_copy" => Some(&state.notif_copy),
@@ -254,6 +255,7 @@ pub fn set_setting(
     const SYNCED_KEYS: &[&str] = &[
         "keep_history",
         "close_to_tray",
+        "os_notifications",
         "start_minimized",
         "notification",
         "notif_copy",
@@ -541,6 +543,7 @@ pub fn copy_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle)
     };
     let ok = copy_entry_suppressed(&app, &entry);
     if ok {
+        crate::notifications::cue(&app, crate::notifications::Cue::Copy);
         crate::runtime::notifications::notify_if_enabled(&app, &entry);
     }
     ok
@@ -568,6 +571,7 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
         match write_entry_to_clipboard(&entry) {
             Ok(()) => {
                 set_active_clipboard_id(&app_handle, &entry.id);
+                crate::notifications::cue(&app_handle, crate::notifications::Cue::Paste);
                 crate::runtime::notifications::notify_paste_if_enabled(&app_handle, &entry);
                 schedule_paste();
             }

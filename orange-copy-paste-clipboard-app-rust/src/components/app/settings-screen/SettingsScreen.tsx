@@ -11,12 +11,25 @@ import {
   ClockCounterClockwise,
   ArrowClockwise,
   DownloadSimple,
+  Bell,
+  SpeakerHigh,
+  Play,
 } from "@phosphor-icons/react";
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
+import { configureSounds, playCue } from "../../../sounds";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
+
+// The four cues a user cannot trigger on demand from this screen. Copying and
+// pasting are left out: their own checkboxes play them when ticked.
+const CUE_TESTS = [
+  { cue: "arrived" as const, label: "Arrived" },
+  { cue: "knock" as const, label: "Invite" },
+  { cue: "unlocked" as const, label: "Unlocked" },
+  { cue: "refused" as const, label: "Refused" },
+];
 
 // ── Shared sub-components ──────────────────────────────────────────────
 
@@ -103,6 +116,13 @@ const SettingsScreen: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
   const [notifClosing, setNotifClosing] = useState(false);
+
+  // ── Sound and OS notifications ─────────────────────────────────
+  const [sound, setSound] = useState(true);
+  const [soundCopy, setSoundCopy] = useState(false);
+  const [soundPaste, setSoundPaste] = useState(false);
+  const [soundClosing, setSoundClosing] = useState(false);
+  const [osNotifications, setOsNotifications] = useState(true);
   const autostartEnableBlocked = import.meta.env.DEV && !runOnStartup;
 
   // ── Updates ────────────────────────────────────────────────────
@@ -130,6 +150,10 @@ const SettingsScreen: React.FC = () => {
     loadBool("autosave", setAutosave, false);
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
+    loadBool("sound", setSound, true);
+    loadBool("sound_copy", setSoundCopy, false);
+    loadBool("sound_paste", setSoundPaste, false);
+    loadBool("os_notifications", setOsNotifications, true);
     loadBool("auto_check_updates", setAutoCheckUpdates, true);
     invoke<string | null>("get_setting", { key: "update_channel" })
       .then((v) => setBetaChannel(v === "beta"))
@@ -169,6 +193,31 @@ const SettingsScreen: React.FC = () => {
     } else {
       toggleBoolSetting(notificationEnabled, setNotificationEnabled, "notification");
     }
+  };
+
+  // Sounds live in the frontend, so the module that plays them is told directly
+  // as well as written to disk: the setting has to take effect on the next cue,
+  // not on the next launch.
+  const handleSoundToggle = () => {
+    const next = !sound;
+    if (!next) setSoundClosing(true);
+    const commit = () => {
+      toggleBoolSetting(sound, setSound, "sound");
+      configureSounds({ enabled: next });
+      setSoundClosing(false);
+      if (next) playCue("arrived", true);
+    };
+    if (next) commit();
+    else setTimeout(commit, 180);
+  };
+
+  const handleSoundCue = (key: "sound_copy" | "sound_paste") => {
+    const isCopy = key === "sound_copy";
+    const next = !(isCopy ? soundCopy : soundPaste);
+    (isCopy ? setSoundCopy : setSoundPaste)(next);
+    invoke("set_setting", { key, value: next });
+    configureSounds(isCopy ? { copy: next } : { paste: next });
+    if (next) playCue(isCopy ? "copy" : "paste", true);
   };
 
   const handleRunOnStartupToggle = async () => {
@@ -282,12 +331,28 @@ const SettingsScreen: React.FC = () => {
                 );
               }}
             />
+          </div>
+        </section>
+
+        {/* ── Notifications ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><Bell size={15} /></span>
+            <h3 className="set-section-title">Notifications</h3>
+          </div>
+          <div className="set-group">
+            <ToggleRow
+              label="Desktop notifications"
+              desc="Show Windows notifications while the app is in the background."
+              active={osNotifications}
+              onToggle={() => toggleBoolSetting(osNotifications, setOsNotifications, "os_notifications")}
+            />
             <div className="set-row set-row--stack">
               <div className="set-row-header">
                 <div className="set-row-info">
-                  <span className="set-row-label">Notifications</span>
+                  <span className="set-row-label">In-app popup</span>
                   <span className="set-row-desc">
-                    Show a popup at the bottom-right for clipboard operations.
+                    A small popup at the bottom-right.
                   </span>
                 </div>
                 <button
@@ -323,6 +388,88 @@ const SettingsScreen: React.FC = () => {
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Paste operations</span>
                       <span className="settings-checkbox-desc">Show notification on Ctrl+Shift+V</span>
+                    </div>
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Sounds ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><SpeakerHigh size={15} /></span>
+            <h3 className="set-section-title">Sounds</h3>
+          </div>
+          <div className="set-group">
+            <div className="set-row">
+              <div className="set-row-info">
+                <span className="set-row-label">Test sounds</span>
+                <span className="set-row-desc">Hear what each one means.</span>
+              </div>
+              <div className="set-cue-tests">
+                {CUE_TESTS.map(({ cue, label }) => (
+                  <button
+                    key={cue}
+                    type="button"
+                    className="set-cue-test"
+                    onClick={() => playCue(cue, true)}
+                  >
+                    <Play size={8} weight="fill" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* The expanding row goes last: the panel that slides out rounds off
+                the bottom of the group, so a row underneath would leave it
+                squared and running into the next one. */}
+            <div className="set-row set-row--stack">
+              <div className="set-row-header">
+                <div className="set-row-info">
+                  <span className="set-row-label">Sounds</span>
+                  <span className="set-row-desc">
+                    Shared items, invites, and spaces opening up.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={`settings-toggle${sound ? " active" : ""}`}
+                  onClick={handleSoundToggle}
+                  aria-pressed={sound}
+                >
+                  <span className="settings-toggle-knob" />
+                </button>
+              </div>
+              {(sound || soundClosing) && (
+                <div className={`set-child-checks${soundClosing ? " closing" : ""}`}>
+                  <label className="settings-checkbox-row">
+                    <span
+                      className={`settings-checkbox${soundCopy ? " checked" : ""}`}
+                      onClick={() => handleSoundCue("sound_copy")}
+                    >
+                      {soundCopy && <Check size={9} weight="bold" />}
+                    </span>
+                    <div className="settings-checkbox-info">
+                      <span className="settings-checkbox-label">Copying</span>
+                      <span className="settings-checkbox-desc">
+                        A click when you copy in the app.
+                      </span>
+                    </div>
+                  </label>
+                  <label className="settings-checkbox-row">
+                    <span
+                      className={`settings-checkbox${soundPaste ? " checked" : ""}`}
+                      onClick={() => handleSoundCue("sound_paste")}
+                    >
+                      {soundPaste && <Check size={9} weight="bold" />}
+                    </span>
+                    <div className="settings-checkbox-info">
+                      <span className="settings-checkbox-label">Pasting</span>
+                      <span className="settings-checkbox-desc">
+                        A click when you paste from the popup.
+                      </span>
                     </div>
                   </label>
                 </div>
