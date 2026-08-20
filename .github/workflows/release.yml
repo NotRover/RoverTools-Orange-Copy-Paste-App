@@ -120,6 +120,73 @@ jobs:
           [ "$fail" -eq 0 ] || exit 1
           echo "All prerequisites present."
 
+      - name: Collect release notes
+        # First thing after the prerequisite gate, and before anything is built or
+        # bumped: an empty changelog should fail the run in seconds, not after a
+        # matrix build. The notes are `changelog/next.md`, written by a human — or by
+        # `/update-changelog` — before the release. The workflow only reads and
+        # publishes them; nothing is derived from commit subjects. See docs/RELEASING.md
+        # and changelog/README.md.
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          src=changelog/next.md
+
+          # Only plain vX.Y.Z tags count as a prior release — the `v0.1.0-build.N`
+          # tags from build-linux.yml are throwaway CI builds. Used solely to tell the
+          # first release (which legitimately has no notes) from a later one that
+          # forgot them. `|| true`: no tag yet is exactly the first release.
+          last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+
+          if [ -f "$src" ]; then
+            # 1. Strip the HTML guidance comment (perl spans the multi-line block).
+            # 2. Drop the "### Internal" section whole — backend, MCP plumbing, CI,
+            #    docs and dependency bumps are kept in the file for the record but are
+            #    never shown to users. Skip from that heading to the next heading.
+            # 3. Drop any remaining "### Section" with no body — an untouched template
+            #    is empty headings, and those must never reach users. The awk withholds
+            #    a heading until a content line follows it; a heading followed only by
+            #    another heading (or EOF) is dropped. Lead lines pass straight through.
+            # 4. Fold typographic punctuation to ASCII — a stray em dash in the
+            #    changelog would otherwise carry into the app's "What's new" panel.
+            # 5. Trim blank lines from both ends (sed twice around tac).
+            perl -0777 -pe 's/<!--.*?-->//gs' "$src" \
+              | awk '
+                  /^#{1,6}[[:space:]]+[Ii]nternal[[:space:]]*$/ { skip=1; next }
+                  /^#{1,6}[[:space:]]/ { skip=0 }
+                  !skip { print }
+                ' \
+              | awk '
+                  /^#{1,6}[[:space:]]/ { pending=$0; next }
+                  /[^[:space:]]/ { if (pending!="") { print pending; pending="" } print; next }
+                  { if (pending=="") print "" }
+                ' \
+              | sed -e 's/—/-/g' -e 's/–/-/g' -e 's/“/"/g' -e 's/”/"/g' -e "s/’/'/g" -e "s/‘/'/g" -e 's/…/.../g' \
+              | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac \
+              > RELEASE_NOTES.md || true
+          fi
+
+          # No real notes staged. First release gets a one-liner (nobody updates *to* a
+          # first release). A dry run gets a placeholder so the rehearsal can proceed.
+          # A real, non-first release FAILS here — write the notes before shipping,
+          # which is the whole point of the enforcement.
+          if [ ! -f RELEASE_NOTES.md ] || ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
+            if [ -z "$last" ]; then
+              echo "No previous release and no staged notes — first release."
+              echo "First release." > RELEASE_NOTES.md
+            elif [ "$DRY_RUN" = "true" ]; then
+              echo "::warning::changelog/next.md is empty — using a placeholder for this rehearsal."
+              echo "- Maintenance and internal improvements." > RELEASE_NOTES.md
+            else
+              echo "::error::changelog/next.md has no release notes. Draft them (run /update-changelog) and commit changelog/next.md before releasing."
+              exit 1
+            fi
+          fi
+
+          echo "── release notes ──"
+          cat RELEASE_NOTES.md
+
       - name: Install cargo-edit
         # `cargo set-version` keeps Cargo.toml and Cargo.lock consistent, which
         # hand-editing the version does not.
@@ -167,68 +234,6 @@ jobs:
           mv package.json.tmp package.json
           git diff --stat
 
-      - name: Collect release notes
-        run: |
-          set -euo pipefail
-          # The commit subjects since the last release, cleaned up into something a
-          # user can read. These lines are the app's "What's new" panel, not a
-          # changelog for us: `chore(release): reset the version after a cancelled
-          # run` is bookkeeping, and `release: v0.1.2` inside the v0.1.2 notes is
-          # nonsense. Both were shipped to users before this filter existed.
-          #
-          # Merge commits are dropped — "Merge pull request #24 from …" says nothing
-          # a user can act on, and the branch's own commits are listed anyway.
-          # Matched with a regex, not a glob: `v[0-9]*.[0-9]*.[0-9]*` also matches
-          # the `v0.1.0-build.N` tags from build-linux.yml, which are throwaway CI
-          # builds. Treating one as the last release would silently truncate the
-          # notes to "everything since a random CI build".
-          #
-          # `|| true` is load-bearing: with no release tag yet, grep finds nothing
-          # and exits 1, which under `set -e` + pipefail aborts the step. That is
-          # exactly the first release — the one case this branch exists to handle.
-          last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-
-          if [ -n "$last" ]; then
-            echo "Notes cover $last..HEAD"
-            # Each stage, in order:
-            #   1. drop internal commit types — nothing a user of the app can see
-            #   2. drop the workflow's own `release: vX.Y.Z` bump commits
-            #   3. strip the `type(scope):` prefix — conventional-commit syntax is
-            #      ours, not theirs
-            #   4. capitalise the first letter (GNU sed; this job is ubuntu-latest)
-            #   5. fold typographic punctuation to ASCII — these lines are
-            #      user-facing copy, and a commit subject written with an em dash
-            #      would otherwise carry it into the app's "What's new" panel
-            #   6. de-duplicate — the same subject can land twice across branches
-            #   7. re-add the bullet, after the text has settled
-            # `|| true`: when every commit is internal, the greps output nothing and
-            # exit 1, which under `set -e` + pipefail would abort. An empty file is
-            # a valid outcome and is handled below.
-            git log --no-merges --pretty='format:%s' "$last..HEAD" \
-              | grep -vE '^(chore|ci|build|test|refactor|style|docs)(\([^)]*\))?!?:' \
-              | grep -vE '^release: v[0-9]' \
-              | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' \
-              | sed -E 's/^(.)/\U\1/' \
-              | sed -e 's/—/-/g' -e 's/–/-/g' -e 's/“/"/g' -e 's/”/"/g' -e "s/’/'/g" -e "s/‘/'/g" -e 's/…/.../g' \
-              | awk '!seen[$0]++' \
-              | sed 's/^/- /' > RELEASE_NOTES.md || true
-          else
-            # No previous release: listing the entire history would put hundreds of
-            # bullets in the update prompt, and nobody is updating *to* a first
-            # release anyway — they install it.
-            echo "No previous release tag — first release."
-            echo "First release." > RELEASE_NOTES.md
-          fi
-
-          # Empty means the release is real but every commit in it was internal —
-          # a blank body is not an option, and neither is listing them.
-          if [ ! -s RELEASE_NOTES.md ]; then
-            echo "- Maintenance and internal improvements." > RELEASE_NOTES.md
-          fi
-
-          echo "── release notes ──"
-          cat RELEASE_NOTES.md
-
       - name: Write the run summary
         # `run-name` is fixed when the run is created, before the version exists,
         # and a run cannot be renamed afterwards. This panel is the first place
@@ -272,6 +277,37 @@ jobs:
           path: RELEASE_NOTES.md
           if-no-files-found: error
 
+      - name: Stamp the changelog
+        # Only on a real publish: a dry run reads next.md for the notes but leaves the
+        # directory untouched, so nothing is committed for a rehearsal.
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUMP: ${{ inputs.bump }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          date=$(date -u +%Y-%m-%d)
+          if [ "$PRERELEASE" = "true" ]; then channel=beta; else channel=stable; fi
+
+          # Turn the staged notes into a permanent, self-describing release file, then
+          # open a fresh next.md from the template. The filename states the version,
+          # the bump and the channel — all known here, none of them guessed — so the
+          # directory reads like the run-name: 0.2.0-minor-stable.md, 0.1.14-patch-beta.md.
+          # The file body is exactly what shipped (RELEASE_NOTES.md), under a heading
+          # that repeats the same facts for anyone opening the file directly.
+          dest="changelog/${VERSION}-${BUMP}-${channel}.md"
+          {
+            echo "# ${VERSION} (${BUMP}, ${channel}) - ${date}"
+            echo
+            cat RELEASE_NOTES.md
+          } > "$dest"
+          cp changelog/TEMPLATE.md changelog/next.md
+
+          echo "── new release file: $dest ──"
+          cat "$dest"
+          echo "── changelog/next.md reset to the empty template ──"
+
       - name: Commit and tag
         if: ${{ !inputs.dry_run }}
         env:
@@ -281,7 +317,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$APP_DIR/package.json" "$APP_DIR/src-tauri/Cargo.toml" \
-                  "$APP_DIR/src-tauri/Cargo.lock"
+                  "$APP_DIR/src-tauri/Cargo.lock" changelog/
           git commit -m "release: $TAG"
           git tag -a "$TAG" -m "$TAG"
           git push origin HEAD:${{ github.ref_name }}

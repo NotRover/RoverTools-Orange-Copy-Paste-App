@@ -67,7 +67,8 @@ pub struct UpdateInfo {
     pub version: String,
     /// The version running right now, so the UI can say "0.1.0 → 0.2.0".
     pub current_version: String,
-    /// Release notes, generated from the commits that went into the release.
+    /// Release notes for this version, as published in the update feed
+    /// (`latest.json`) — this release's `changelog/` entry, passed through verbatim.
     pub notes: Option<String>,
     /// True once the bundle is on disk and its signature checked, i.e. the only
     /// thing left is the restart.

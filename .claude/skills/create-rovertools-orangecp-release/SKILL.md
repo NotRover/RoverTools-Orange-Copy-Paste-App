@@ -100,28 +100,27 @@ grep -m1 '^version = ' orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml
 Releases are cut from `main`, and the workflow builds from the pushed ref — so an unpushed
 commit will not be in the release. Say so if the branch is not `main` or the tree is dirty.
 
-The notes users will read are the commit subjects since the last release tag, minus the
-internal ones. This reproduces the workflow's own filter — internal types and its
-`release: vX.Y.Z` bumps dropped, the `type(scope):` prefix stripped, first letter
-capitalised, duplicates collapsed — so what it prints is what ships:
+The notes users will read are the user-facing sections of `changelog/next.md`. Print
+them the way the release will — comment stripped, the `### Internal` section dropped,
+blank edges trimmed:
 
 ```bash
-LAST=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1); if [ -n "$LAST" ]; then echo "since $LAST:"; git log --no-merges --pretty='format:%s' "$LAST..HEAD" | grep -vE '^(chore|ci|build|test|refactor|style|docs)(\([^)]*\))?!?:' | grep -vE '^release: v[0-9]' | sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' | sed -E 's/^(.)/\U\1/' | sed -e 's/—/-/g' -e 's/–/-/g' -e 's/“/"/g' -e 's/”/"/g' -e "s/’/'/g" -e "s/‘/'/g" -e 's/…/.../g' | cat -n | sort -u -k2 | sort -n | cut -f2- | sed 's/^/- /'; else echo "No release tag yet — the notes will be \"First release.\""; fi
+perl -0777 -pe 's/<!--.*?-->//gs' changelog/next.md | awk '/^#{1,6}[[:space:]]+[Ii]nternal[[:space:]]*$/{s=1;next} /^#{1,6}[[:space:]]/{s=0} !s' | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac
 ```
 
-> The de-duplication is that `cat -n | sort | cut` pipeline rather than the obvious
-> `awk '!seen[$0]++'` for one reason: a `$0` in this file is rewritten to the skill's
-> first argument before the command ever reaches a shell, so invoking
-> `/create-rovertools-orangecp-release patch preview` would silently turn it into
-> `awk '!seen[patch]++'` — a constant key, collapsing the whole list to one line. Keep
-> every command here free of `$0`, `$1`, `$2`. The workflow itself has no such
-> constraint and still uses `awk`.
+> The `### Internal` section is kept for the record but never shipped, so it is dropped
+> above. Keep every command in this file free of `$0`, `$1`, `$2` — a `$0` here is
+> rewritten to the skill's first argument before the shell sees it, which would corrupt
+> an `awk`/`sed` script. The awk above uses only the flag `s` and awk's implicit line
+> printing, no `$0`.
 
-Report the current version, the version being cut (patch bumps the third number, minor
-the second and zeroes the third), and the notes verbatim. No output means every commit
-in the range was internal, and the release will read "Maintenance and internal
-improvements." — say so. Flag any surviving line that reads as jargon: the fix is to
-reword the commit, not to hand-edit the notes.
+Report the current version and the version being cut (patch bumps the third number,
+minor the second and zeroes the third), then the notes verbatim. Any empty
+New/Improved/Fixed heading you see here would be dropped at publish. **If no user-facing
+section has an entry, a real release will fail at its first step** — stop and have the
+user run `/update-changelog` (or fill `changelog/next.md` by hand) before dispatching.
+Flag any line that reads as jargon or breaks the copy rules: the fix is to edit
+`changelog/next.md`, not to hand-edit anything at dispatch.
 
 Stop here if invoked with `preview`.
 
@@ -219,8 +218,13 @@ gh release list --repo Spectrewolf8/RoverTools-Releases --limit 5 --json tagName
   ```bash
   gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
   ```
-- `main` now carries the `release: vX.Y.Z` commit and tag, so the local clone needs a
-  `git pull`.
+
+  The release's changelog file keeps its `-beta` name — it records how the release was
+  first cut. If you want `changelog/` to reflect the current channel, rename it by hand
+  in the source repo: `git mv changelog/0.3.0-minor-beta.md changelog/0.3.0-minor-stable.md`.
+- `main` now carries the `release: vX.Y.Z` commit and tag (and the new
+  `changelog/<version>-<bump>-<channel>.md` plus a reset `changelog/next.md`), so the
+  local clone needs a `git pull`.
 - Anything that could not be checked, and why.
 
 ## Troubleshooting

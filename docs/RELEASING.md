@@ -3,7 +3,9 @@
 **Owns:** shipping. The release workflow, the two update channels, the signing key, the
 version-of-record, and the smoke test. Read before touching
 `.github/workflows/release.yml`.
-**Not here:** what the app does. This file is about getting builds to users.
+**Not here:** what the app does; and the *content* of the release notes, which lives in
+[`changelog/`](../changelog/) (staged in `changelog/next.md`). This file is about
+getting builds to users.
 
 Shipping a release is one workflow run. Everything else — version number, release
 notes, the update feed, the signed bundles — is derived from that.
@@ -36,7 +38,7 @@ release would contain without dispatching anything.
 you dispatch release.yml
    │
    ├─ bump the version in Cargo.toml   (patch or minor — your choice)
-   ├─ notes = user-facing commit subjects since the last release tag
+   ├─ notes = changelog/next.md  (renamed to changelog/<ver>-<bump>-<channel>.md on release)
    │
    ├─ build signed NSIS (Windows) + AppImage/deb (Linux)
    │
@@ -121,17 +123,43 @@ is cosmetic, kept in step by the workflow. Only plain `vX.Y.Z` tags count as rel
 the `v0.1.0-build.N` tags from [`build-linux.yml`](../.github/workflows/build-linux.yml)
 are throwaway CI builds and are ignored.
 
-Release notes come from the commit subjects since the last release tag, cleaned up for
-the people reading them: merge commits and the workflow's own `release: vX.Y.Z` bumps
-are dropped, so are `chore`/`ci`/`build`/`test`/`refactor`/`style`/`docs` subjects, the
-`type(scope):` prefix is stripped, the first letter is capitalised and duplicates are
-collapsed. A release whose commits are *all* internal gets one line — "Maintenance and
-internal improvements."
+## Release notes
 
-So `feat(sync): retry a failed push` reaches users as "Retry a failed push", and
-`chore(release): reset the version` reaches nobody. Everything you want users to see
-must be a user-facing type — `feat`, `fix`, `perf`, `revert` — and read as a sentence
-about the app, not about the repo.
+Notes live in [`changelog/`](../changelog/): one file per shipped release, plus
+`changelog/next.md`, the notes staged for the release you have not cut yet. You write
+`next.md` *before* dispatching. The workflow reads it as the very first step —
+publishes it as the notes, then renames it to `changelog/<version>-<bump>-<channel>.md`
+(e.g. `0.2.0-minor-stable.md`, `0.1.14-patch-beta.md`) and opens a fresh `next.md`. The
+filename states the version, bump and channel — all resolved at dispatch, none guessed
+— so the directory reads at a glance like the run-name does. The convention lives in
+[`changelog/README.md`](../changelog/README.md).
+
+Author `next.md` with `/update-changelog`: it reads the commits since the last release,
+keeps the user-facing ones (`feat` → New, `perf` and refinements → Improved,
+`fix`/`revert` → Fixed; internal types get nothing) and writes them as a lead sentence
+plus sections in the app's voice. Or edit it by hand — the empty skeleton is
+[`changelog/TEMPLATE.md`](../changelog/TEMPLATE.md).
+
+These lines are **user-facing copy**: the app's "What's new" panel renders the lead
+sentence and the New/Improved/Fixed sections, the GitHub release body renders the same
+text as markdown, and the No-AI-Slop rules in `CLAUDE.md` apply.
+
+Internal work — backend and MCP plumbing, refactors, CI, docs, dependency bumps — goes
+under a **`### Internal`** section instead. It is kept in the release file for the
+record, but the workflow **drops it before publishing**, so it never reaches users.
+That way nothing is lost and the "What's new" panel stays about the app. `### Internal`
+does not count toward the emptiness check below.
+
+**An empty `next.md` fails a real release**, in the first few seconds, before anything
+is built — the enforcement is deliberate, so you cannot ship a version with no notes.
+The two exceptions: the very first release (no prior tag) publishes "First release.",
+and a dry run substitutes a placeholder so the rehearsal can still exercise the build.
+A change you want users to see has to reach `changelog/next.md`; one that stays out of
+it reaches nobody.
+
+A promoted beta keeps its `-beta` filename — the name records how it was first cut.
+Rename it (`git mv changelog/<v>-<bump>-beta.md …-stable.md`) if you want the directory
+to track the current channel.
 
 ---
 
