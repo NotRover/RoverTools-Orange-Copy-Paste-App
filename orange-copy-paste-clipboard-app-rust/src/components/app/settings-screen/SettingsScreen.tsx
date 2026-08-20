@@ -18,6 +18,7 @@ import {
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
 import { configureSounds, playCue } from "../../../sounds";
+import { parseNotes, hasParsedNotes } from "../update-banner/parseNotes";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -596,9 +597,33 @@ const SettingsScreen: React.FC = () => {
                   </button>
                 )}
               </div>
-              {updater.info?.notes && updater.stage !== "idle" && (
-                <pre className="set-update-notes">{updater.info.notes}</pre>
-              )}
+              {updater.info?.notes &&
+                updater.stage !== "idle" &&
+                (() => {
+                  const notes = parseNotes(updater.info.notes);
+                  if (!hasParsedNotes(notes)) return null;
+                  return (
+                    <div className="set-update-notes">
+                      {notes.lead && (
+                        <p className="set-update-lead">{notes.lead}</p>
+                      )}
+                      {notes.sections.map((section, i) => (
+                        <div className="set-update-group" key={i}>
+                          {section.title && (
+                            <span className="set-update-section">
+                              {section.title}
+                            </span>
+                          )}
+                          <ul className="set-update-list">
+                            {section.items.map((item, j) => (
+                              <li key={j}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
             </div>
             <ToggleRow
               label="Check for updates automatically"
