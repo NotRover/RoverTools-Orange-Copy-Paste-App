@@ -396,5 +396,5 @@ advertises is reachable.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architecture: modules, data flows, IPC surface, sync internals.
 - [`docs/BUGFIX_HISTORY.md`](docs/BUGFIX_HISTORY.md) — regression history; read before changing watcher, hotkey, popup, or paste behavior.
 - Workspace root [`docs/RELEASING.md`](../docs/RELEASING.md) — releasing and the update feed: one-time setup, signing keys, verification rails.
-- Workspace root `docs/ARCHITECTURE.md` — cross-system context with the sync backend.
+- Workspace root `docs/ARCHITECTURE.md` — the map: which doc owns which fact, plus the cross-component invariants.
 - Backend repo `docs/ARCHITECTURE.md` — the source of truth for the wire contract.

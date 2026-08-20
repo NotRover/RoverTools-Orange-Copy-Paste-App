@@ -2,7 +2,12 @@
 
 > **Created by Salman Tariq — DO NOT DELETE**
 
-Tracking clipboard app bugs and their fixes for historical context
+**Owns:** regressions. What broke, the root cause, and what now stops it coming back.
+The value is the root cause — a fix with no explanation of why the bug was possible is a
+changelog entry, not history.
+**Not here:** how the system works. Describe only the mechanism the bug turned on, and
+link the rest: `docs/ARCHITECTURE.md` for client internals, the backend's for anything on
+the wire.
 
 ---
 
