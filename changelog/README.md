@@ -15,30 +15,37 @@ and how releases are cut ([`../docs/RELEASING.md`](../docs/RELEASING.md)).
   `0.2.0-minor-stable.md`, `0.1.14-patch-beta.md`, `1.0.0-major-stable.md`. The
   workflow creates it by renaming `next.md` on release, so the name always states the
   real version, the bump, and the channel it went out on. You never name these by hand.
-- Releases before `0.1.13` are on the
-  [releases repo](https://github.com/Spectrewolf8/RoverTools-Releases/releases).
+- Every shipped release from `0.1.0` on has a file here; the published assets also live
+  on the [releases repo](https://github.com/Spectrewolf8/RoverTools-Releases/releases).
 
 ## What goes in one
 
-A lead sentence, then only the sections that apply:
+A lead, then only the sections that apply:
 
 ```
-One sentence naming the headline change for the user.
+One or two sentences framing what this release is about.
 
 ### New
-- A capability the user did not have before.
+- A capability the user did not have before, in one to three sentences: what it does
+  and why it helps.
 
 ### Fixed
-- A wrong behaviour made right.
+- A wrong behaviour made right, and what that means for the user.
 
 ### Internal
 - Backend, MCP, refactor or dependency work. Kept for the record, never shown to users.
 ```
 
-The lead sentence and the **New / Improved / Fixed** sections are user-facing copy: the
-app's "What's new" panel renders them, the GitHub release body renders the same text as
+The lead and the **New / Improved / Fixed** sections are user-facing copy: the app's
+"What's new" panel renders them, the GitHub release body renders the same text as
 markdown, and the No-AI-Slop rules in `../CLAUDE.md` apply. `feat` goes to New, `perf`
 and refinements to Improved, `fix`/`revert` to Fixed.
+
+**Substance is the point.** Each entry is one to three full sentences that say what
+changed and why it helps — not a one-line paraphrase of the commit subject. Give every
+distinct user-facing change its own entry rather than collapsing a release into four
+lines; a release with a dozen visible changes reads like one. `### Internal` is the
+exception: keep it a terse footnote, one line for a run of bumps.
 
 **`### Internal`** is different: backend changes, MCP plumbing, refactors, CI, docs and
 dependency bumps go here so the history is complete, but the release workflow **drops
