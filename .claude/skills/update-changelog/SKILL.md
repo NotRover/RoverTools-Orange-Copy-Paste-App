@@ -61,26 +61,46 @@ belongs in **Fixed**. If a range is **all** internal, fill only `### Internal` a
 the user-facing sections empty — a release cut from that fails on purpose, which is the
 signal to write real notes.
 
-## Step 3 — Write it in the app's voice
+## Step 3 — Write it in the app's voice, with substance
 
-In `changelog/next.md`: a lead sentence, then only the sections that have entries.
+These lines are the whole reason the file exists — users read them in the app's
+"What's new" panel and on the GitHub release. **Substance is the point:** each entry
+explains what changed and why it helps, not a one-line restatement of the commit
+subject. A previous pass that reduced everything to bare one-liners is exactly the
+failure this rewrite exists to prevent.
 
-- **Lead:** one plain sentence naming the headline change of the release. No bullet.
-- **Bullets:** one sentence each, present tense, user perspective, ending with a
-  period. Describe the visible effect, never the mechanism — no file names, type
-  names, or internal detail. Collapse several commits that add up to one user-visible
-  change into a single bullet.
+In `changelog/next.md`: a lead, then only the sections that have entries.
+
+- **Lead:** one or two plain sentences framing what the release is about. No bullet.
+- **Entries:** one to three full sentences each, present tense, from the user's
+  perspective, ending with a period. Say the situation before, what is different now,
+  and the benefit. Describe the visible effect, never the mechanism — no file names,
+  type names, or internal detail.
+- **Coverage — do not over-collapse.** Every distinct user-facing change gets its own
+  entry; only merge commits that are genuinely the same change split apart. A release
+  with a dozen user-facing commits has close to a dozen entries, not four. Bigger
+  releases get fuller notes; order entries most to least significant.
+- **Accuracy.** Expand only what the commit subject and obvious context support. Add
+  the plain user-benefit framing that clearly follows; never invent numbers, UI names,
+  or features that are not there. If a subject is thin and you cannot say more
+  truthfully, write one solid sentence rather than padding.
 - **Copy rules (New/Improved/Fixed ship):** ASCII punctuation only — no em dashes, en
-  dashes, curly quotes, ellipsis character, or the section sign. Obey the No-AI-Slop
-  rules in `CLAUDE.md`: no "seamless / robust / effortless / unlock / transform …", no
-  "it's not just X, it's Y", no three-adjective piles. Short, specific, concrete.
-- **`### Internal`:** terse lines for the record, no lead and no user voice needed —
-  still ASCII, still no section sign. Collapse a run of submodule bumps or refactors
-  into one line; it is history, not a report.
+  dashes, curly quotes, ellipsis character, or the section sign. Write two sentences
+  rather than joining with a dash. Obey the No-AI-Slop rules in `CLAUDE.md`: no
+  "seamless / robust / effortless / unlock / transform …", no "it's not just X, it's
+  Y", no three-adjective piles. Concrete and specific — substance means real
+  information, not more adjectives.
+- **`### Internal`:** the one place you still collapse hard. Terse lines for the
+  record, no user voice — still ASCII, still no section sign. Fold a run of submodule
+  bumps, CI, and refactors into a single line; it is a footnote, not a report.
 
-Turn `feat(spaces): ask to join, and get let in with the key` into
-`Request access to a space with a code or link, and get in once a member approves.` —
-a sentence about the app, not the commit.
+Thin (do not do this):
+`Removing items from the cloud no longer deletes your local copies.`
+
+Substantial (do this):
+`Removing an item from the cloud used to also delete the copy on your own device. Now
+it only clears the cloud copy, so your local history stays intact when you free up
+cloud space.`
 
 ## Step 4 — Edit, show, stop
 
