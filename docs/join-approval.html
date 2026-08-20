@@ -514,10 +514,10 @@
     </div>
 
     <ul class="meta">
-      <li><span class="k">Status</span><span class="v">proposed, nothing built</span></li>
+      <li><span class="k">Status</span><span class="v">built, not deployed</span></li>
       <li><span class="k">New controls</span><span class="v">one, on the space</span></li>
       <li><span class="k">Addressed invites</span><span class="v">unaffected</span></li>
-      <li><span class="k">Spec</span><span class="v">docs/SPACE-JOIN-APPROVAL.md</span></li>
+      <li><span class="k">Migration</span><span class="v">0018, applies on deploy</span></li>
     </ul>
   </header>
 
@@ -597,6 +597,47 @@
         join nobody approved.
       </p>
     </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">One gate, not two</span>
+      <h2>A join link is the code, wearing a coat</h2>
+      <p>
+        Worth being explicit, because "code or link" reads like two features. It
+        is one. <span class="str">/join/{code}</span> is a web page whose entire
+        job is to hand the code to the app as
+        <span class="str">orange://join?code=&hellip;</span>; the app strips the
+        wrapper and calls the same <span class="str">POST /spaces/join</span> a
+        typed code calls. There is no link-shaped route, no link-shaped token,
+        and nothing that could make a link behave differently from the eight
+        characters inside it.
+      </p>
+      <p>
+        So the gate is in one place and covers both by construction. A pasted
+        link, a typed code, a code with dashes, a code in the wrong case: same
+        request, same approval, same wait.
+      </p>
+    </div>
+
+    <figure>
+      <div class="plate">
+        <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+flowchart LR
+    L["Join link<br/>/join/K7M2QP49"] --> D["orange://join?code=K7M2QP49"]
+    T["Typed code<br/>k7m2-qp49"] --> E
+    D --> E["extract_invite_code()"]
+    E --> J["POST /spaces/join"]
+    J --> R["join request<br/>pending"]
+        </pre>
+      </div>
+      <figcaption>
+        <b>Both arrows meet before the gate.</b> The link's only privilege is
+        skipping the typing. Everything that decides access happens after the
+        merge, which is why there is nothing separate to secure.
+      </figcaption>
+    </figure>
   </section>
 
   <section>
@@ -738,7 +779,7 @@ sequenceDiagram
           Two lists, received and sent invites. Count on the trigger sums both.
         </div>
         <div class="cell cell--now"><span class="tag">Now</span>
-          A third list above them: <span class="str">"Sam wants to join Design"</span>, with Approve and Decline. The count sums all three. Only shown to people who may approve.
+          A third tab, <span class="str">Requests</span>, which the popover opens on when anything is in it: <span class="str">"Sam used a code or a join link"</span>, with Approve and Decline. The trigger count sums all three tabs.
         </div>
       </div>
 
@@ -795,10 +836,20 @@ sequenceDiagram
       <div class="row">
         <div class="surface">The <span class="str">/join/{code}</span> page</div>
         <div class="cell cell--was"><span class="tag">Was</span>
-          Hands the code to the app via the deep link.
+          Hands the code to the app via the deep link. Not a separate way in - the same code, in a page.
         </div>
         <div class="cell cell--now"><span class="tag">Now</span>
-          Unchanged. It still hands over a code; only what redeeming one <em>does</em> changed.
+          Not one line changed. It still hands over a code; the code is what now asks instead of entering, so the link inherits the gate for free.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Your own pending ask</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          You were a member of a space with nothing in it, and nothing said why.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          A dashed, dimmed row under <span class="str">Waiting</span> in the spaces list: <span class="str">"Waiting for someone in this space to let you in"</span>. It survives a restart, because the server is asked for it.
         </div>
       </div>
     </div>
@@ -837,6 +888,14 @@ sequenceDiagram
         </p>
       </div>
       <div class="note">
+        <h3>Eight new tests, none of them run here</h3>
+        <p>
+          The approval suite is written and lints clean, but this machine has no
+          Postgres the test fixtures can reach and no Docker to start one, so it
+          has only ever been read. CI is the first thing that will execute it.
+        </p>
+      </div>
+      <div class="note">
         <h3>Nothing is revoked retroactively</h3>
         <p>
           Anyone who joined by code before this ships is a member and stays one.
@@ -851,17 +910,18 @@ sequenceDiagram
       <span class="eyebrow">Where it stands</span>
       <h2>Verified, and not</h2>
       <p>
-        Nothing has been written. The rows below are the plan's checkpoints, not
-        results, and the migration will be the fifth in a row that applies on a
-        deploy rather than from anyone's machine.
+        Written and checked, not yet exercised against a live pair of accounts.
+        Migration 0018 applies on the next deploy, the way every migration here
+        does; it has not touched a database.
       </p>
     </div>
 
     <ul class="checks">
-      <li class="chk chk--open">design &middot; awaiting sign-off</li>
-      <li class="chk chk--open">migration 0018</li>
-      <li class="chk chk--open">backend routes + tests</li>
-      <li class="chk chk--open">client commands + UI</li>
+      <li class="chk chk--pass">ruff + ty</li>
+      <li class="chk chk--pass">cargo check</li>
+      <li class="chk chk--pass">cargo test &middot; 58</li>
+      <li class="chk chk--pass">bun run build</li>
+      <li class="chk chk--open">pytest &middot; needs Postgres, CI only</li>
       <li class="chk chk--open">live join flow &middot; needs a deploy and two accounts</li>
     </ul>
   </section>

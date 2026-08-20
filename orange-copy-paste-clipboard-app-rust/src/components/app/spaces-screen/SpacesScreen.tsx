@@ -13,7 +13,9 @@ import type {
   Note,
   DeletedMarker,
   SendFilter,
+  PendingJoin,
   Space,
+  SpaceJoinRequest,
   SpaceMember,
   SyncInvite,
   SyncInviteList,
@@ -1210,6 +1212,7 @@ const SpaceSettings: React.FC<{
   showRemoved: boolean;
   onShowRemoved: (enabled: boolean) => void;
   onShareHistory: (enabled: boolean) => void;
+  onMembersCanApprove: (allowed: boolean) => void;
   filter: SendFilter;
   onFilter: (next: SendFilter) => void;
   availableGroups: string[];
@@ -1226,6 +1229,7 @@ const SpaceSettings: React.FC<{
   showRemoved,
   onShowRemoved,
   onShareHistory,
+  onMembersCanApprove,
   filter,
   onFilter,
   availableGroups,
@@ -1547,6 +1551,27 @@ const SpaceSettings: React.FC<{
                 className="sp-switch"
                 checked={space.share_history}
                 onChange={(e) => onShareHistory(e.target.checked)}
+              />
+            </label>
+          )}
+
+          {space.is_owner && (
+            <label className="sp-toggle-row">
+              <span className="sp-toggle-text">
+                <span className="sp-toggle-title">
+                  Members can approve requests
+                </span>
+                <span className="sp-toggle-desc">
+                  {space.members_can_approve
+                    ? "Anyone here can let in someone who used the code or a join link."
+                    : "Only you can let in someone who used the code or a join link. Turn this on so you are not the only way in."}
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                className="sp-switch"
+                checked={space.members_can_approve}
+                onChange={(e) => onMembersCanApprove(e.target.checked)}
               />
             </label>
           )}
@@ -1901,6 +1926,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     localStorage.getItem(SELECTED_KEY),
   );
   const [invites, setInvites] = useState<SyncInviteList>(cache.invites);
+  // People waiting to be let in, across every space this account may approve
+  // for. Not cached: a request answered on another device should not reappear
+  // here on the strength of a stale list.
+  const [joinRequests, setJoinRequests] = useState<SpaceJoinRequest[]>([]);
+  // Our own outstanding knocks. These spaces are not memberships, so they are
+  // absent from `spaces_list` and would otherwise be nothing on screen at all.
+  const [pendingJoins, setPendingJoins] = useState<PendingJoin[]>([]);
   const [invitesOpen, setInvitesOpen] = useState(false);
   const [invitesAnchor, setInvitesAnchor] = useState({ x: 0, y: 0 });
   // Answering the last one takes the button away with it, so the popover has
@@ -2241,6 +2273,33 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .catch(() => {});
   }, []);
 
+  // Requests are per space, and only for spaces the server says we may approve
+  // for - `i_can_approve` is its answer, not a rule re-derived here. Takes the
+  // space list as an argument rather than reading state, so the reload that
+  // fetched it can hand it straight over instead of waiting a render.
+  const refreshJoinRequests = useCallback((list: Space[]) => {
+    const mine = list.filter((sp) => sp.i_can_approve);
+    if (mine.length === 0) {
+      setJoinRequests([]);
+      return;
+    }
+    Promise.all(
+      mine.map((sp) =>
+        invoke<SpaceJoinRequest[]>("space_join_requests", {
+          spaceId: sp.id,
+        }).catch(() => [] as SpaceJoinRequest[]),
+      ),
+    )
+      .then((lists) => setJoinRequests(lists.flat()))
+      .catch(() => {});
+  }, []);
+
+  const refreshPendingJoins = useCallback(() => {
+    invoke<PendingJoin[]>("space_my_join_requests")
+      .then(setPendingJoins)
+      .catch(() => {});
+  }, []);
+
   // Reads the server and recovers keyrings on the way, so it is the mount
   // path and the answer to a real membership change - not to presence ticks.
   const reloadSpaces = useCallback(() => {
@@ -2248,9 +2307,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       .then((list) => {
         setSpaces(list);
         setLoaded(true);
+        refreshJoinRequests(list);
+        refreshPendingJoins();
       })
       .catch(() => setLoaded(true));
-  }, []);
+  }, [refreshJoinRequests, refreshPendingJoins]);
 
   // Everything this screen shows that comes from the server. Spaces, members
   // and invites arrive over REST, not the socket, so nothing on screen updates
@@ -2402,6 +2463,28 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         refreshInvites();
         reloadSpaces();
       }),
+    );
+    // Somebody used a code or a join link. Only people who may approve are sent
+    // this, so anything arriving is ours to answer.
+    track(
+      listen("sync:join-requested", () => {
+        reloadSpaces();
+      }),
+    );
+    // Our own request was answered. An approval carries the Space Key with it,
+    // so the space is readable by the time the reload lands - no separate wait.
+    track(
+      listen<{ space_id: string; status: string }>(
+        "sync:join-decided",
+        (event) => {
+          reloadSpaces();
+          refreshPendingJoins();
+          if (event.payload.status === "approved") return;
+          showToast("Your request to join was turned down.", "error", {
+            key: `join-declined:${event.payload.space_id}`,
+          });
+        },
+      ),
     );
     // Answered here or from the notification centre, it is the same invite.
     // Dropped from the list on the spot rather than waiting for the refresh:
@@ -2710,16 +2793,32 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       setFormLoading(true);
       setListError(null);
       try {
-        await invoke("space_join", { inviteCode });
+        // A code and a join link both land here, and neither one grants
+        // membership: they ask. The space arrives on `sync:join-decided`.
+        const out = await invoke<{ status: string; space_name: string }>(
+          "space_join",
+          { inviteCode },
+        );
         setShowJoin(false);
+        if (out.status === "declined") {
+          setListError(
+            `Your request to join ${out.space_name} was turned down.`,
+          );
+        } else {
+          showToast(
+            `Asked to join ${out.space_name}. Somebody in it has to let you in.`,
+            "success",
+          );
+        }
+        refreshPendingJoins();
         reloadSpaces();
       } catch (e) {
-        setListError(errMsg(e, "Could not join with that code."));
+        setListError(errMsg(e, "Could not use that code."));
       } finally {
         setFormLoading(false);
       }
     },
-    [reloadSpaces],
+    [reloadSpaces, refreshPendingJoins, showToast],
   );
 
   // Leaving, deleting and removing a member all reach the server and none of
@@ -2959,6 +3058,66 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       );
     },
     [refreshInvites],
+  );
+
+  // Approving hands over the Space Key: Rust wraps our ring for the requester's
+  // identity key inside the same call, which is why the row carries that key and
+  // why the new member can read the space the moment this returns.
+  const handleApproveJoin = useCallback(
+    async (req: SpaceJoinRequest) => {
+      setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
+      try {
+        await invoke("space_approve_join", {
+          spaceId: req.space_id,
+          requestId: req.id,
+          identityPubkey: req.identity_pubkey ?? null,
+        });
+        showToast(
+          `${req.display_name || "They"} can read ${req.space_name} now.`,
+          "success",
+        );
+      } catch (e) {
+        setListError(errMsg(e, "Could not approve that request."));
+      }
+      reloadSpaces();
+    },
+    [reloadSpaces, showToast],
+  );
+
+  const handleTurnDownJoin = useCallback(
+    async (req: SpaceJoinRequest) => {
+      setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
+      try {
+        await invoke("space_decline_join", {
+          spaceId: req.space_id,
+          requestId: req.id,
+        });
+      } catch (e) {
+        setListError(errMsg(e, "Could not turn down that request."));
+      }
+      reloadSpaces();
+    },
+    [reloadSpaces],
+  );
+
+  const handleMembersCanApprove = useCallback(
+    async (spaceId: string, allowed: boolean) => {
+      setSpaceError(null);
+      // Optimistic: this is a switch, and waiting on the round trip makes it
+      // feel like the click missed.
+      setSpaces((prev) =>
+        prev.map((sp) =>
+          sp.id === spaceId ? { ...sp, members_can_approve: allowed } : sp,
+        ),
+      );
+      try {
+        await invoke("space_set_members_can_approve", { spaceId, allowed });
+      } catch (e) {
+        setSpaceError(errMsg(e, "Could not change who can approve."));
+        reloadSpaces();
+      }
+    },
+    [reloadSpaces],
   );
 
   // An invite link the user opened. Joining straight away rather than
@@ -3408,6 +3567,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             onShareHistory={(enabled) =>
               handleSetShareHistory(selected.id, enabled)
             }
+            onMembersCanApprove={(allowed) =>
+              handleMembersCanApprove(selected.id, allowed)
+            }
             filter={selectedFilter}
             onFilter={(next) => handleSetFilter(selected.id, next)}
             availableGroups={availableGroups}
@@ -3488,7 +3650,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                   ? "Sign in on the Account screen to share."
                   : syncConnected === false
                     ? "Reconnecting..."
-                    : "Create a space, or join one with an invite code."}
+                    : pendingJoins.length > 0
+                      ? "Waiting to be let into the space you asked to join."
+                      : "Create a space, or join one with an invite code."}
               </span>
             </div>
           ) : (
@@ -3566,12 +3730,47 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 </React.Fragment>
               ))}
 
+              {pendingJoins.length > 0 && (
+                <>
+                  <div className="sp-space-group">
+                    Waiting
+                    <span className="sp-space-group-n">
+                      {pendingJoins.length}
+                    </span>
+                    <span className="sp-space-group-rule" />
+                  </div>
+                  {pendingJoins.map((p) => (
+                    <div
+                      key={p.space_id}
+                      className="sp-space-card sp-space-card--waiting"
+                    >
+                      <span
+                        className="sp-space-avatar"
+                        style={{ background: spaceAvatarColor(p.space_id) }}
+                      >
+                        {p.space_name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="sp-space-card-body">
+                        <span className="sp-space-card-name">
+                          {p.space_name}
+                        </span>
+                        <span className="sp-space-card-meta">
+                          Waiting for someone in this space to let you in
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
+
             </div>
           )}
         </div>
 
         <div className="sp-panel-actions">
-          {(receivedPending.length > 0 || sentPending.length > 0) && (
+          {(receivedPending.length > 0 ||
+            sentPending.length > 0 ||
+            joinRequests.length > 0) && (
             <button
               type="button"
               data-invites-trigger
@@ -3588,7 +3787,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
             >
               Invites
               <span className="sp-invites-count">
-                {receivedPending.length + sentPending.length}
+                {receivedPending.length +
+                  sentPending.length +
+                  joinRequests.length}
               </span>
             </button>
           )}
@@ -3655,11 +3856,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         anchorY={invitesAnchor.y}
         received={receivedPending}
         sent={sentPending}
+        requests={joinRequests}
         signedIn={signedIn}
         onClose={() => setInvitesOpen(false)}
         onAccept={handleAcceptInvite}
         onDecline={handleDeclineInvite}
         onRevoke={handleRevokeInvite}
+        onApprove={handleApproveJoin}
+        onTurnDown={handleTurnDownJoin}
       />
     </div>
   );

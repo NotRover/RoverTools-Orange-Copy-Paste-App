@@ -78,6 +78,45 @@ export interface Space {
   members: SpaceMember[];
   invite_code?: string;
   invite_expires_at?: number;
+  /** The owner's approval policy: may any member let somebody in, or only the
+   *  owner? The one control the space has, and the owner's to set. */
+  members_can_approve: boolean;
+  /** Whether this account may approve, decided by the server from the policy
+   *  and our role. Render the requests list on this and nothing else - the rule
+   *  has one definition and it is not in the client. */
+  i_can_approve: boolean;
+  /** People waiting to be let in. Zero unless we may act on them, so it can go
+   *  straight into a badge count. */
+  pending_join_requests: number;
+}
+
+/** A space this account has asked to join and is still waiting on. Not a
+ *  membership, so it is absent from `spaces_list` - which is exactly why it has
+ *  to be fetched and shown separately, or the wait looks like nothing
+ *  happening. Mirrors `PendingJoin` in `src-tauri/src/sync/types.rs`. */
+export interface PendingJoin {
+  space_id: string;
+  space_name: string;
+  created_at: number;
+}
+
+/** Somebody who pasted this space's code and is waiting to be let in. Mirrors
+ *  `SpaceJoinRequest` in `src-tauri/src/sync/types.rs`.
+ *
+ *  A code and a join link are the same thing here: the link's only job is to
+ *  hand the code to the app, so both produce one of these. */
+export interface SpaceJoinRequest {
+  id: string;
+  space_id: string;
+  space_name: string;
+  user_id: string;
+  display_name: string;
+  avatar_url?: string | null;
+  created_at: number;
+  /** The requester's identity key. Passed back on approve so Rust can wrap the
+   *  Space Key for them in the same action - which is what makes an approval
+   *  hand over access instead of merely granting it. */
+  identity_pubkey?: string | null;
 }
 
 /** One comment on an entry shared into a space. Mirrors `SpaceComment` in

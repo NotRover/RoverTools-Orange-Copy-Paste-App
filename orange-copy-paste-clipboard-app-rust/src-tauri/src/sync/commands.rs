@@ -1024,24 +1024,140 @@ pub async fn space_create(
         members: Vec::new(),
         invite_code: Some(created.invite_code),
         invite_expires_at: None,
+        // A new space is owner-only until its owner says otherwise, and its
+        // creator is the one person who can approve for it.
+        members_can_approve: false,
+        i_can_approve: true,
+        pending_join_requests: 0,
     })
 }
 
+/// Ask to join a space by code or pasted link.
+///
+/// A code introduces a space; it does not open one. This raises a request that
+/// somebody inside approves, and their approval is what hands over the Space
+/// Key - so there is no reconcile to do here. `space:join_decided` is where the
+/// space actually arrives.
+///
+/// Returns what happened, because the two outcomes need different words on
+/// screen: `"pending"` for a knock now waiting, `"declined"` for a code this
+/// account was already turned down on.
 #[tauri::command]
-pub async fn space_join(invite_code: String, state: State<'_, AppState>) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    http.join_space(JoinSpaceRequest {
-        // Tolerate pasted links and sloppy casing: the server normalizes
-        // short codes, but strip an obvious `?code=`/path prefix here.
-        invite_code: extract_invite_code(&invite_code),
+pub async fn space_join(
+    invite_code: String,
+    state: State<'_, AppState>,
+) -> Result<JoinOutcome, String> {
+    let (_sync, http) = sync_http(&state)?;
+    let resp = http
+        .join_space(JoinSpaceRequest {
+            // Tolerate pasted links and sloppy casing: the server normalizes
+            // short codes, but strip an obvious `?code=`/path prefix here.
+            invite_code: extract_invite_code(&invite_code),
+        })
+        .await?;
+    Ok(JoinOutcome {
+        status: resp.status,
+        space_name: resp.space_name,
     })
-    .await?;
-    // Catch up on the space's shared history in the background (the keyring
-    // arrives once the owner's reconcile wraps it for us).
+}
+
+/// What a code redemption produced. No space id: a pending request is not a
+/// membership, and there is nothing for the UI to open yet.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct JoinOutcome {
+    /// `"pending"` or `"declined"`.
+    pub status: String,
+    pub space_name: String,
+}
+
+/// Spaces we have asked to join and are still waiting on.
+#[tauri::command]
+pub async fn space_my_join_requests(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::sync::types::PendingJoin>, String> {
+    let (_sync, http) = sync_http(&state)?;
+    let rows = http.my_join_requests().await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| crate::sync::types::PendingJoin {
+            space_id: r.space_id,
+            space_name: r.space_name,
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
+/// People waiting to be let into a space, for anyone who may approve.
+#[tauri::command]
+pub async fn space_join_requests(
+    space_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::sync::types::SpaceJoinRequest>, String> {
+    let (_sync, http) = sync_http(&state)?;
+    let rows = http.list_join_requests(&space_id).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| crate::sync::types::SpaceJoinRequest {
+            id: r.id,
+            space_id: r.space_id,
+            space_name: r.space_name,
+            user_id: r.user_id,
+            display_name: r.display_name,
+            avatar_url: r.avatar_url,
+            created_at: r.created_at,
+            identity_pubkey: r.identity_pubkey,
+        })
+        .collect())
+}
+
+/// Let somebody in. The Space Key goes with the approval, so they can read the
+/// space as soon as this returns rather than waiting on the next reconcile.
+#[tauri::command]
+pub async fn space_approve_join(
+    space_id: String,
+    request_id: String,
+    identity_pubkey: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (sync, _http) = sync_http(&state)?;
+    sync.approve_join_request(&space_id, &request_id, identity_pubkey.as_deref())
+        .await?;
     let sync2 = Arc::clone(&sync);
     tauri::async_runtime::spawn(async move {
         sync2.reconcile_spaces().await;
-        let _ = sync2.flush_and_pull().await;
+    });
+    Ok(())
+}
+
+/// Turn a request down. The server keeps the row, which is what stops the same
+/// code producing another knock.
+#[tauri::command]
+pub async fn space_decline_join(
+    space_id: String,
+    request_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (sync, http) = sync_http(&state)?;
+    http.decline_join_request(&space_id, &request_id).await?;
+    let sync2 = Arc::clone(&sync);
+    tauri::async_runtime::spawn(async move {
+        sync2.reconcile_spaces().await;
+    });
+    Ok(())
+}
+
+/// Choose who may approve join requests for a space (owner only).
+#[tauri::command]
+pub async fn space_set_members_can_approve(
+    space_id: String,
+    allowed: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (sync, http) = sync_http(&state)?;
+    http.set_members_can_approve(&space_id, allowed).await?;
+    let sync2 = Arc::clone(&sync);
+    tauri::async_runtime::spawn(async move {
+        sync2.reconcile_spaces().await;
     });
     Ok(())
 }

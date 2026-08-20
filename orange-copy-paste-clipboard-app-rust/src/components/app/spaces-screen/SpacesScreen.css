@@ -1010,6 +1010,20 @@
   margin-top: 1px;
 }
 
+/* A space we have asked to join and are still waiting on. Not a membership, so
+   there is nothing to open: no hover, no cursor, no click. Dimmed rather than
+   hidden, because the wait is the information. */
+.sp-space-card--waiting {
+  cursor: default;
+  opacity: 0.62;
+  border-style: dashed;
+}
+
+.sp-space-card--waiting:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
 /* ── Bottom actions ── */
 
 .sp-panel-actions {

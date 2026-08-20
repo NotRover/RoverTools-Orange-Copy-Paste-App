@@ -112,6 +112,46 @@ pub struct Space {
     pub invite_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invite_expires_at: Option<u64>,
+    /// The owner's approval policy: may any member let somebody in, or only the
+    /// owner? The one control the space has, shown to the owner alone.
+    #[serde(default)]
+    pub members_can_approve: bool,
+    /// Whether *we* may approve, decided by the server from the policy and our
+    /// role. The UI shows the requests list on this and nothing else, so there
+    /// is one definition of the rule and it is not here.
+    #[serde(default)]
+    pub i_can_approve: bool,
+    /// People waiting to be let in. Zero unless we may act on them, so it is
+    /// safe to add straight into a badge count.
+    #[serde(default)]
+    pub pending_join_requests: u32,
+}
+
+/// A space we have asked to join and are still waiting on. Not a member yet, so
+/// the name is all there is to show - and showing it is the difference between
+/// an honest wait and an empty screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingJoin {
+    pub space_id: String,
+    pub space_name: String,
+    pub created_at: u64,
+}
+
+/// A pending request to join a space, as the UI sees it. The identity key rides
+/// along because approving wraps the Space Key in the same action, and that is
+/// what makes the approval hand over access rather than merely grant it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpaceJoinRequest {
+    pub id: String,
+    pub space_id: String,
+    pub space_name: String,
+    pub user_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    pub created_at: u64,
+    #[serde(default)]
+    pub identity_pubkey: Option<String>,
 }
 
 /// Per-space send filter: which of the user's entries auto-flow into the

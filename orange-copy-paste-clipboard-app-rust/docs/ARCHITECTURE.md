@@ -481,6 +481,8 @@ addressed to a person.
 | An invite addressed to this user | `space_invite` | `notifications_refresh`, reconciled against `GET /api/v1/invites` |
 | Someone joined or left a space, or a space was deleted | `space_activity` | `SyncClient::handle_membership_changed`, off the `space:membership_changed` socket event |
 | An invite this user sent was accepted or declined | `space_activity` | `SyncClient::note_invite_answered`, off `invite:updated` |
+| Somebody used a code or a join link on a space this user may approve | `space_invite` | `SyncClient::note_join_requested`, off `space:join_requested`. Raised only when `i_can_approve`, keyed on the request id so a replayed event cannot double-report. |
+| A join request this user made was approved | `space_activity` | `SyncClient::note_join_approved`, off `space:join_decided`. A decline raises nothing loud - the row stops showing as pending. |
 | A space owner removed something this user shared there | `space_activity` | `SyncClient::note_entry_taken_down`, in `drop_space_entry` |
 | Sync refused to send an item | `sync_warning` | `record_skip` |
 | Items sitting in the manual-mode queue | `reminder` | `remind_manual_queue_waiting`, on the reminder sweep |
@@ -947,6 +949,7 @@ user is elsewhere.
 |---|---|---|
 | `note_space_readable` | `SpaceActivity` | A space became readable, and how many held shares went out with the key. One row per space (`space-key:{id}`), so a later rekey cannot raise a second - a rekey is not the user gaining access. |
 | `note_comment` | `SpaceActivity` | Somebody commented on an entry *we wrote*, or named us. Keyed on the comment id so a reconnect replaying `space:comment` cannot report the same reply twice. |
+| `note_join_requested` / `note_join_approved` | `SpaceInvite` / `SpaceActivity` | Somebody asked to join a space this user may approve, and the answer to this user's own ask. Both are the same problem as the rows above: they land while the window is hidden, and the approver is the only thing standing between the joiner and a space. |
 | `note_space_key_rejected` | `SyncWarning` | A keyring failed the fingerprint check. A warning because the space stays unreadable and nothing the user does in the app changes that. |
 
 `note_comment` is deliberately narrow and deliberately textless. Two other members talking

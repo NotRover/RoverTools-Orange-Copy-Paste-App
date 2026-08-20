@@ -384,6 +384,18 @@ pub struct SpaceOut {
     pub rekey_requested_at: Option<u64>,
     #[serde(default = "default_true")]
     pub share_history: bool,
+    /// The owner's approval policy: may any member let somebody in, or only the
+    /// owner? Shown to the owner as the one control on the space.
+    #[serde(default)]
+    pub members_can_approve: bool,
+    /// Whether *we* may approve, resolved by the server from the policy above and
+    /// our role. Derived server-side on purpose, so no client re-implements the
+    /// rule and none of them can disagree with it.
+    #[serde(default)]
+    pub i_can_approve: bool,
+    /// Pending join requests on this space. Zero unless we may act on them.
+    #[serde(default)]
+    pub pending_join_requests: u32,
 }
 
 /// A comment as it goes to the server: ciphertext plus the wrapped key that
@@ -428,10 +440,54 @@ pub struct JoinSpaceRequest {
     pub invite_code: String,
 }
 
+/// The answer to redeeming an invite code. There is no space in it, because a
+/// code no longer grants one: `status` is `"pending"` while somebody inside
+/// decides, or `"declined"` when a previous knock was already turned down.
 #[derive(Debug, Deserialize)]
 pub struct JoinSpaceResponse {
+    pub status: String,
+    pub space_name: String,
+}
+
+// ── Join requests ───────────────────────────────────────────────────────
+
+/// Somebody who pasted this space's code and is waiting to be let in.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JoinRequestOut {
+    pub id: String,
     pub space_id: String,
-    pub name: String,
+    pub space_name: String,
+    pub user_id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    pub status: String,
+    pub created_at: u64,
+    /// The requester's X25519 identity key, so we can wrap the Space Key for them
+    /// in the same action as the approval. `None` means they have not registered
+    /// keys yet; approving still works and they pick one up on the next
+    /// distribution, like any other keyless member.
+    #[serde(default)]
+    pub identity_pubkey: Option<String>,
+}
+
+/// One of our own outstanding knocks. A pending request is not a membership, so
+/// none of these spaces come back from `GET /spaces` - this is the only thing
+/// that stops the wait being a blank screen.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MyJoinRequestOut {
+    pub space_id: String,
+    pub space_name: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApproveJoinRequest {
+    /// Our keyring wrapped for the requester. `None` when we cannot wrap yet -
+    /// the approval still stands and they wait for a key the way a member does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wrapped_space_keys: Option<String>,
 }
 
 // ── Space key distribution ──────────────────────────────────────────────
@@ -1172,6 +1228,75 @@ impl SyncHttpClient {
     pub async fn join_space(&self, req: JoinSpaceRequest) -> Result<JoinSpaceResponse, String> {
         self.get_json("join space", || {
             Ok(self.authed(Method::POST, "/api/v1/spaces/join")?.json(&req))
+        })
+        .await
+    }
+
+    /// Pending join requests on a space we may approve for.
+    pub async fn list_join_requests(&self, space_id: &str) -> Result<Vec<JoinRequestOut>, String> {
+        self.get_json("list join requests", || {
+            Ok(self.authed(
+                Method::GET,
+                &format!("/api/v1/spaces/{space_id}/join-requests"),
+            )?)
+        })
+        .await
+    }
+
+    /// Spaces we have asked to join and are still waiting on.
+    pub async fn my_join_requests(&self) -> Result<Vec<MyJoinRequestOut>, String> {
+        self.get_json("my join requests", || {
+            Ok(self.authed(Method::GET, "/api/v1/spaces/my-join-requests")?)
+        })
+        .await
+    }
+
+    /// Let a requester in, handing over the Space Key in the same call.
+    pub async fn approve_join_request(
+        &self,
+        space_id: &str,
+        request_id: &str,
+        wrapped_space_keys: Option<String>,
+    ) -> Result<(), String> {
+        self.get_ok("approve join request", false, || {
+            Ok(self
+                .authed(
+                    Method::POST,
+                    &format!("/api/v1/spaces/{space_id}/join-requests/{request_id}/approve"),
+                )?
+                .json(&ApproveJoinRequest {
+                    wrapped_space_keys: wrapped_space_keys.clone(),
+                }))
+        })
+        .await
+    }
+
+    /// Turn a request down. The server keeps the row, which is what stops the
+    /// same code producing another knock.
+    pub async fn decline_join_request(
+        &self,
+        space_id: &str,
+        request_id: &str,
+    ) -> Result<(), String> {
+        self.get_ok("decline join request", false, || {
+            Ok(self.authed(
+                Method::POST,
+                &format!("/api/v1/spaces/{space_id}/join-requests/{request_id}/decline"),
+            )?)
+        })
+        .await
+    }
+
+    /// Choose who may approve join requests (owner only).
+    pub async fn set_members_can_approve(
+        &self,
+        space_id: &str,
+        members_can_approve: bool,
+    ) -> Result<SpaceOut, String> {
+        self.get_json("update space", || {
+            Ok(self
+                .authed(Method::PATCH, &format!("/api/v1/spaces/{space_id}"))?
+                .json(&serde_json::json!({ "members_can_approve": members_can_approve })))
         })
         .await
     }

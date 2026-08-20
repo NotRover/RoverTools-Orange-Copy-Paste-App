@@ -358,6 +358,68 @@ impl WsListener {
                     });
                 }
             }
+            // Somebody redeemed this space's code and is waiting to be let in.
+            // Published only to people who may approve, so anything arriving
+            // here is ours to act on.
+            "space:join_requested" => {
+                let _ = self.app.emit("sync:join-requested", &msg.payload);
+                if let Some(sync) = self.sync_client() {
+                    let p = &msg.payload;
+                    if let (Some(space_id), Some(request_id)) = (
+                        p.get("space_id").and_then(|v| v.as_str()),
+                        p.get("request_id").and_then(|v| v.as_str()),
+                    ) {
+                        let space_id = space_id.to_string();
+                        let request_id = request_id.to_string();
+                        let user_id = p
+                            .get("user_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        tokio::runtime::Handle::current().spawn(async move {
+                            // Refresh first: the request carries a user id, and
+                            // only the space list can turn that into a name.
+                            let spaces = sync.reconcile_spaces().await;
+                            let who = spaces
+                                .iter()
+                                .find(|sp| sp.id == space_id)
+                                .and_then(|sp| {
+                                    sp.members.iter().find(|m| m.user_id == user_id)
+                                })
+                                .map(|m| m.display_name.clone())
+                                .unwrap_or_default();
+                            sync.note_join_requested(&space_id, &request_id, &who);
+                        });
+                    }
+                }
+            }
+            // Our own request was answered. An approval carries the Space Key
+            // with it, so the reconcile that follows is what makes the space
+            // readable - not a later one that happens to find a wrap.
+            "space:join_decided" => {
+                let _ = self.app.emit("sync:join-decided", &msg.payload);
+                if let Some(sync) = self.sync_client() {
+                    let p = &msg.payload;
+                    if let (Some(space_id), Some(status)) = (
+                        p.get("space_id").and_then(|v| v.as_str()),
+                        p.get("status").and_then(|v| v.as_str()),
+                    ) {
+                        if status == "approved" {
+                            let space_id = space_id.to_string();
+                            tokio::runtime::Handle::current().spawn(async move {
+                                let spaces = sync.reconcile_spaces().await;
+                                let name = spaces
+                                    .iter()
+                                    .find(|sp| sp.id == space_id)
+                                    .map(|sp| sp.name.clone())
+                                    .unwrap_or_else(|| "a space".to_string());
+                                sync.note_join_approved(&space_id, &name);
+                                let _ = sync.flush_and_pull().await;
+                            });
+                        }
+                    }
+                }
+            }
             // Addressed invites: surface to the UI (badge + pending list).
             "invite:received" => {
                 let _ = self.app.emit("sync:invite-received", &msg.payload);
