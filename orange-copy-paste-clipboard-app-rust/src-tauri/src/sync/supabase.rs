@@ -45,6 +45,53 @@ impl AuthError {
             Some(status) => status == 408 || status == 429 || status >= 500,
         }
     }
+
+    /// The same failure, said to the person who is looking at the screen.
+    ///
+    /// `message` is a diagnostic - it carries the call tag and the status because
+    /// that is what a log needs. Putting it on screen produced
+    /// `supabase login (400): Invalid login credentials`, which names our vendor,
+    /// our internal tag and an HTTP status to somebody who mistyped a password.
+    ///
+    /// Status alone is not enough here: GoTrue answers 400 for a wrong password,
+    /// an unconfirmed address and a dead refresh token alike, so the reply text is
+    /// what separates them. Matched loosely and in lowercase, with a plain
+    /// fallback per status, so a rewording upstream degrades to a vaguer sentence
+    /// rather than leaking the raw one.
+    pub fn user_message(&self) -> String {
+        let detail = self.message.to_lowercase();
+        let has = |needle: &str| detail.contains(needle);
+
+        if has("invalid login credentials") {
+            return "That email and password do not match an account.".into();
+        }
+        if has("email not confirmed") {
+            return "Confirm your email first. The link is in your inbox.".into();
+        }
+        if has("already registered") || has("already been registered") {
+            return "An account already uses that email. Sign in instead.".into();
+        }
+        if has("password should be") || has("password is too short") {
+            return "Use a longer password - at least 8 characters.".into();
+        }
+        if has("refresh token") || (has("session") && has("expired")) {
+            return "Your session expired. Sign in again.".into();
+        }
+        if has("email address") && has("invalid") {
+            return "That does not look like an email address.".into();
+        }
+
+        match self.status {
+            // No response at all: nothing was judged, so do not imply a verdict
+            // on what the user typed.
+            None => "Cannot reach the sign-in service. Check your connection and try again.".into(),
+            Some(422) | Some(400) => "That did not work. Check the email and password and try again.".into(),
+            Some(401) | Some(403) => "Your session expired. Sign in again.".into(),
+            Some(429) => "Too many attempts just now. Wait a minute and try again.".into(),
+            Some(s) if s >= 500 => "The sign-in service is having trouble. Try again shortly.".into(),
+            Some(_) => "Could not sign in. Try again.".into(),
+        }
+    }
 }
 
 impl std::fmt::Display for AuthError {
@@ -54,8 +101,12 @@ impl std::fmt::Display for AuthError {
 }
 
 impl From<AuthError> for String {
+    /// The user-facing sentence, with the diagnostic kept for the log. Commands
+    /// return `Result<T, String>` and that string is rendered verbatim, so this
+    /// conversion is the last place the two audiences can still be told apart.
     fn from(e: AuthError) -> Self {
-        e.message
+        eprintln!("[auth] {}", e.message);
+        e.user_message()
     }
 }
 
@@ -297,7 +348,11 @@ impl SupabaseAuth {
             }))
             .send()
             .await
-            .map_err(|e| format!("supabase recover: {e}"))?;
+            .map_err(|e| {
+                eprintln!("[auth] supabase recover: {e}");
+                "Cannot reach the sign-in service. Check your connection and try again."
+                    .to_string()
+            })?;
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -311,7 +366,12 @@ impl SupabaseAuth {
                         .map(str::to_string)
                 })
                 .unwrap_or(body);
-            return Err(format!("supabase recover ({}): {msg}", status.as_u16()));
+            eprintln!("[auth] supabase recover ({}): {msg}", status.as_u16());
+            return Err(AuthError {
+                status: Some(status.as_u16()),
+                message: format!("supabase recover ({}): {msg}", status.as_u16()),
+            }
+            .user_message());
         }
         Ok(())
     }
@@ -333,7 +393,11 @@ impl SupabaseAuth {
         // response carries only the user object.
         if value.get("access_token").and_then(|v| v.as_str()).is_some() {
             let session = serde_json::from_value::<SupabaseSession>(value)
-                .map_err(|e| format!("supabase signup parse: {e}"))?;
+                .map_err(|e| {
+                    eprintln!("[auth] supabase signup parse: {e}");
+                    "The account was created but the reply was unreadable. Sign in to continue."
+                        .to_string()
+                })?;
             Ok(SignUpOutcome::Session(Box::new(session)))
         } else {
             Ok(SignUpOutcome::ConfirmationRequired)
