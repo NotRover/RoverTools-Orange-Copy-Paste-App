@@ -230,6 +230,7 @@ interface EntryCardProps {
   itemSpaceIds?: string[];
   /** Names of those spaces, for the shared indicator's tooltip. */
   sharedSpaceNames?: string[];
+  waitingSpaceNames?: string[];
   /** Set only when the entry arrived from another member of a space. */
   owner?: EntryOwner;
   /** Share this entry into a space, or stop sharing it there. */
@@ -258,6 +259,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   signedIn,
   itemSpaceIds,
   sharedSpaceNames,
+  waitingSpaceNames,
   owner,
   onToggleSpace,
   inCloud,
@@ -671,6 +673,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
           copied={copied}
           relTime={relTime}
           sharedSpaceNames={sharedSpaceNames}
+          waitingSpaceNames={waitingSpaceNames}
           owner={owner}
         />
       </div>

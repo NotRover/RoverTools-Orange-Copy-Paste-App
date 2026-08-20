@@ -354,6 +354,15 @@
   color: #fff;
 }
 
+.card-menu-space-wait {
+  flex-shrink: 0;
+  font-size: 8.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  opacity: 0.8;
+}
+
 .card-menu-space-name {
   flex: 1;
   min-width: 0;

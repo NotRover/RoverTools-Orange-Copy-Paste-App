@@ -1247,19 +1247,22 @@ const SpaceSettings: React.FC<{
   const shownMembers = space.members.filter(
     (m) => !pendingGone.has(`member:${space.id}:${m.user_id}`),
   );
-  // Only the owner's app can hand out a Space Key, so a member waiting on one
-  // is waiting on a specific person, not on the service. Name them - "the
-  // owner" reads as a system component and gives nobody to go and nudge - and
-  // say whether their app is up, because that is the difference between "a few
-  // seconds" and "whenever they next open it". Presence is live here: a
-  // `space:presence-changed` event reloads this list, so the wording flips on
-  // its own. A missing display name (a profile that never set one) falls back.
+  // Waiting on a key is waiting on a person, not on the service, so say which
+  // person: "a member" gives nobody to go and nudge. Any member who already has
+  // the key can hand it over, so name whoever is online rather than the owner -
+  // and when nobody is, name the owner, since minting a first key is only ever
+  // theirs to do. Presence is live: a `space:presence-changed` event reloads
+  // this list, so the wording flips on its own. A profile that never set a
+  // display name falls back.
   const owner = space.members.find((m) => m.user_id === space.owner_id);
-  const ownerName = owner?.display_name?.trim() || "";
-  const ownerLabel = ownerName ? `${ownerName}'s app` : "The owner's app";
-  const waitingReason = owner?.online
-    ? `${ownerLabel} is online, so the key should land in a moment.`
-    : `${ownerLabel} is not running. The key arrives on its own once they open it, even if it only sits in the tray.`;
+  const holderOnline = space.members.find(
+    (m) => m.online && m.has_space_key && m.user_id !== selfUserId,
+  );
+  const nameOf = (m: SpaceMember | undefined, fallback: string) =>
+    m?.display_name?.trim() ? `${m.display_name.trim()}'s app` : fallback;
+  const waitingReason = holderOnline
+    ? `${nameOf(holderOnline, "Another member's app")} is online, so the key should land in a moment.`
+    : `${nameOf(owner, "The owner's app")} is not running, and nobody else here has the key yet. It arrives on its own once someone opens the app, even if it only sits in the tray.`;
 
   useEffect(
     () => () => {
@@ -1382,17 +1385,17 @@ const SpaceSettings: React.FC<{
       <div className="sp-rules-body">
         {error && <span className="sp-settings-error">{error}</span>}
 
-        {/* A joined space is not usable until its key arrives: everything in it
-            is encrypted under that key, so until then there is nothing to read
-            and nothing that can be written. Said once, here, with the controls
-            it affects switched off - the alternative is a share that reports
-            success and never lands. */}
+        {/* Everything in a space is encrypted under its key, so until the key
+            arrives there is nothing here to read. Sharing is not blocked: the
+            choice is held and sent when the key lands. Said once, here, so no
+            control has to explain it. */}
         {!space.has_key && (
           <div className="sp-waiting">
             <span className="sp-waiting-title">Waiting for this space's key</span>
             <span className="sp-waiting-desc">
-              {waitingReason} Until then you cannot read this space or share
-              anything into it, and you do not need to rejoin.
+              {waitingReason} The feed stays empty until then. You can still
+              choose to share items here and they go out as soon as the key
+              arrives. You do not need to rejoin.
             </span>
           </div>
         )}
@@ -1423,18 +1426,17 @@ const SpaceSettings: React.FC<{
             <span className="sp-toggle-text">
               <span className="sp-toggle-title">Share new items out</span>
               <span className="sp-toggle-desc">
-                {!space.has_key
-                  ? "Available once this space's key arrives."
-                  : filter.enabled
+                {filter.enabled
+                  ? space.has_key
                     ? "New items that match the rules below are shared here. Older items are untouched."
-                    : "Off. Only items you share by hand go into this space."}
+                    : "New items that match the rules below are held until this space's key arrives, then sent."
+                  : "Off. Only items you share by hand go into this space."}
               </span>
             </span>
             <input
               type="checkbox"
               className="sp-switch"
               checked={filter.enabled}
-              disabled={!space.has_key}
               onChange={(e) =>
                 onFilter({ ...filter, enabled: e.target.checked })
               }
@@ -1859,6 +1861,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   onJoinCodeConsumed,
 }) => {
   const [spaces, setSpaces] = useState<Space[]>(cache.spaces);
+  // The event listeners below are registered once, so they cannot read `spaces`
+  // from their own closure without going stale. They name a space by id.
+  const spacesRef = useRef<Space[]>(spaces);
+  spacesRef.current = spaces;
   const [loaded, setLoaded] = useState(cache.loaded);
   const screenRef = useRef<HTMLDivElement>(null);
   const [listWidth, setListWidth] = useState(() => readWidth(LIST_PANE));
@@ -2348,7 +2354,38 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       }),
     );
     track(listen("space:membership-changed", reloadSpaces));
-    track(listen("space:key-received", reloadSpaces));
+    // The key landing is the moment a space becomes readable and anything held
+    // for it goes out, so it is worth saying rather than leaving the user to
+    // notice the notice disappear.
+    track(
+      listen<{ space_id: string }>("space:key-received", (event) => {
+        reloadSpaces();
+        const name = spacesRef.current.find(
+          (sp) => sp.id === event.payload.space_id,
+        )?.name;
+        showToast(
+          name ? `${name} is ready` : "Space key arrived",
+          "success",
+          { key: `space-key:${event.payload.space_id}` },
+        );
+      }),
+    );
+    // A keyring that does not match what the owner published is refused, not
+    // retried: a wrong key unwraps fine and then decrypts nothing, and no amount
+    // of waiting turns it into the right one. The owner removing whoever sent it
+    // rekeys the space, which is the way out.
+    track(
+      listen<{ space_id: string }>("space:key-rejected", (event) => {
+        const name = spacesRef.current.find(
+          (sp) => sp.id === event.payload.space_id,
+        )?.name;
+        showToast(
+          `The key sent for ${name ?? "a space"} does not match the one its owner published, so it was not used.`,
+          "error",
+          { key: `space-key-bad:${event.payload.space_id}` },
+        );
+      }),
+    );
     track(
       listen<SyncInvite>("sync:invite-received", (event) => {
         setInvites((prev) => ({

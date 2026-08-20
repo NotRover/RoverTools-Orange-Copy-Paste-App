@@ -313,6 +313,10 @@ impl WsListener {
                         // outcome as never having been sent it.
                         if let Some(comment) = sync.decrypt_comment(&row) {
                             let _ = self.app.emit("space:comment-added", &comment);
+                            // The event only fills a thread that is already
+                            // open, so this is the only thing that reaches
+                            // someone who is not looking at the space.
+                            sync.note_comment(&comment);
                         }
                     }
                 }

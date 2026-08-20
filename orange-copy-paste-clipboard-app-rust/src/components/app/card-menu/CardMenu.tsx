@@ -270,16 +270,18 @@ const CardMenu: React.FC<CardMenuProps> = ({
               <div className="card-menu-groups-flyout-body">
                 {spaces.map((space) => {
                   const active = itemSpaceIds.includes(space.id);
-                  // Nothing can be encrypted for a space whose key has not
-                  // arrived, so the row says why instead of failing on click.
+                  // A space whose key has not arrived can still be picked: the
+                  // choice is held and sent when the key lands. The row says so
+                  // rather than blocking on a wait nobody can shorten.
                   const waiting = !space.has_key;
                   return (
                     <button
                       key={space.id}
-                      className={`card-menu-space-row${active ? " card-menu-space-row--active" : ""}`}
-                      disabled={waiting}
+                      className={`card-menu-space-row${active ? " card-menu-space-row--active" : ""}${waiting ? " card-menu-space-row--waiting" : ""}`}
                       data-tooltip={
-                        waiting ? "Waiting for this space's key" : undefined
+                        waiting
+                          ? "Waiting for this space's key. Your choice is kept and sent when it arrives."
+                          : undefined
                       }
                       data-tooltip-pos={waiting ? "left" : undefined}
                       onClick={() => onToggleSpace?.(space.id)}
@@ -288,6 +290,9 @@ const CardMenu: React.FC<CardMenuProps> = ({
                         {active && <Check size={10} weight="bold" />}
                       </span>
                       <span className="card-menu-space-name">{space.name}</span>
+                      {waiting && (
+                        <span className="card-menu-space-wait">waiting</span>
+                      )}
                     </button>
                   );
                 })}

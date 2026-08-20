@@ -268,15 +268,17 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
               <div className="bulk-popup-flyout-spaces">
                 {spaces.map((space) => {
                   const active = commonSpaceIds.includes(space.id);
-                  // Same rule as the card menu: no key, nothing to share into.
+                  // Same rule as the card menu: no key yet means queued, not
+                  // blocked.
                   const waiting = !space.has_key;
                   return (
                     <button
                       key={space.id}
-                      className={`bulk-popup-space-row${active ? " bulk-popup-space-row--active" : ""}`}
-                      disabled={waiting}
+                      className={`bulk-popup-space-row${active ? " bulk-popup-space-row--active" : ""}${waiting ? " bulk-popup-space-row--waiting" : ""}`}
                       data-tooltip={
-                        waiting ? "Waiting for this space's key" : undefined
+                        waiting
+                          ? "Waiting for this space's key. Your choice is kept and sent when it arrives."
+                          : undefined
                       }
                       data-tooltip-pos={waiting ? "left" : undefined}
                       onClick={() => onBulkToggleSpace?.(space.id, !active)}
@@ -285,6 +287,9 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                         {active && <Check size={9} weight="bold" />}
                       </span>
                       <span className="bulk-popup-row-label">{space.name}</span>
+                      {waiting && (
+                        <span className="bulk-popup-space-wait">waiting</span>
+                      )}
                     </button>
                   );
                 })}

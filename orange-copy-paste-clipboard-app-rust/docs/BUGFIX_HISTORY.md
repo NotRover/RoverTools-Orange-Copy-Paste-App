@@ -359,3 +359,57 @@ The rest of the restore path was already careful about this distinction - transp
 - The header is a marker, not prose. Sniffing the detail string would have worked today and broken the next time the wording moved, which is the failure this repo already had once in the invite path.
 
 **Invariant to keep**: ending a session is a terminal act and needs a positive answer from the server. Absence of a successful reply is never one - if the credentials in the keychain could still work, the restore retries instead of asking for a password.
+
+---
+
+## #13 - One member leaving could make a space unreadable for everyone, forever
+
+**Symptom.** A space that had been working went permanently blank for every
+member, owner included. Nothing in the app said why, and rejoining did nothing:
+the entries were still on the server, and no key existed that could open them.
+
+**Cause.** A departure was the rekey signal, and the signal was "the server
+cleared every wrapped keyring" - the owner's included. A Space Key lives only in
+client memory and in those wraps. So between the departure and the owner's next
+distribution, the ring existed in exactly one place: the owner's running process.
+If that process restarted in the window - a quit, a crash, a reboot, an update -
+the previous keys were gone. Reconcile then found an empty ring, minted a *first*
+key rather than prepending, and every entry ever shared in the space stayed
+encrypted under keys that no longer existed anywhere.
+
+Any member could trigger it, by leaving. Nothing about it needed bad intent, and
+nothing about it was recoverable.
+
+**Fix.** The signal moved out of band. `remove_member` clears the *non-owner*
+wraps and stamps `spaces.rekey_requested_at`; the owner's wrap stays, so its ring
+survives a restart and reconcile prepends to it instead of starting over. The
+client reads `rekey_requested_at` rather than inferring a rekey from an empty
+wrap, and distribution clears the flag once every member holds a copy.
+
+**Why it is written down.** The old shape looks harmless in the diff - clearing
+every wrap is the obvious way to say "everybody needs a new key". What it also
+did was delete the only durable copy of the keys that still had to work. A wrap
+is not a cache here; for the owner it is the backup.
+
+---
+
+## #14 - A valid token was enough to take over an account's future shared content
+
+**Symptom.** None, which is the point. Nothing broke, and nothing looked wrong.
+
+**Cause.** `POST /auth/keys/register` assigned `profiles.identity_pubkey`
+unconditionally. Space Keys are wrapped to whatever sits in that column, so
+anyone holding a valid access token - no password, no UMK - could replace it with
+a key they owned and be handed every subsequent key distribution for every space
+the account was in. The real device would go on failing to unwrap and quietly
+retry.
+
+**Fix.** The column is write-once. The identity keypair is derived from the UMK,
+so every honest device of an account sends the same value forever; a *different*
+value means the caller does not hold the UMK. A change is refused with 409 and
+logged. Device keys stay writable - each only ever opens that device's own copy
+of the UMK.
+
+**Why it is written down.** It became load-bearing the moment invites started
+carrying a pre-wrapped key: that wraps for whatever is in the column, on the
+strength of the server's word about who owns it.

@@ -46,6 +46,7 @@ interface ChipBarProps {
   relTime: string;
   /** Spaces this entry is shared into, by name. Empty means personal only. */
   sharedSpaceNames?: string[];
+  waitingSpaceNames?: string[];
   /** Set only when the entry arrived from another member. */
   owner?: EntryOwner;
 }
@@ -69,6 +70,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
   copied,
   relTime,
   sharedSpaceNames = [],
+  waitingSpaceNames = [],
   owner,
 }) => {
   const [showHiddenChips, setShowHiddenChips] = useState(false);
@@ -414,8 +416,14 @@ const ChipBar: React.FC<ChipBarProps> = ({
         </div>
         {sharedSpaceNames.length > 0 && (
           <span
-            className="card-share-icon"
-            data-tooltip={`Shared to ${sharedSpaceNames.join(", ")}`}
+            className={`card-share-icon${waitingSpaceNames.length > 0 ? " card-share-icon--waiting" : ""}`}
+            data-tooltip={
+              waitingSpaceNames.length === sharedSpaceNames.length
+                ? `Waiting for the key to ${waitingSpaceNames.join(", ")}`
+                : waitingSpaceNames.length > 0
+                  ? `Shared to ${sharedSpaceNames.join(", ")}. Still waiting for the key to ${waitingSpaceNames.join(", ")}.`
+                  : `Shared to ${sharedSpaceNames.join(", ")}`
+            }
           >
             <ShareNetwork size={15} />
             {sharedSpaceNames.length > 1 && (

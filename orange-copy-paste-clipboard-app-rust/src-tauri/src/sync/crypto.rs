@@ -239,6 +239,29 @@ pub fn sha256_hex(data: &[u8]) -> String {
     s
 }
 
+/// Fingerprint of a Space Key: the first 16 bytes of `SHA-256("space-key-v1" || key)`,
+/// lowercase hex.
+///
+/// The owner publishes this when it mints a key, and a member checks a keyring it
+/// was handed against it before adopting it. Without the check, another member
+/// could hand a newcomer a key that is not this space's: an unwrap with the wrong
+/// wrapping key fails, but a *correctly wrapped wrong key* unwraps fine, and the
+/// victim would then silently decrypt nothing. A hash of 32 random bytes tells the
+/// server that stores it nothing about the key, and the domain prefix keeps it from
+/// ever colliding with another hash this app publishes.
+pub fn space_key_fingerprint(key: &[u8; 32]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"space-key-v1");
+    hasher.update(key);
+    let digest = hasher.finalize();
+    let mut s = String::with_capacity(32);
+    for b in &digest[..16] {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
 /// Generate a PKCE `(code_verifier, code_challenge)` pair for the OAuth 2.0
 /// authorization-code flow (RFC 7636, S256 method).
 ///

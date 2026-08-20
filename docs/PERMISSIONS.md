@@ -81,6 +81,8 @@ so the damage was one-sided and invisible from the other end.
 |---|---|---|
 | Rename, delete the space | yes | no |
 | Invite by email, rotate the invite code | yes | no |
+| Mint the space's key | yes | no |
+| Hand the key to a member who lacks one | yes | yes (any keyholder) |
 | Change the share-history policy | yes | no |
 | Remove a member | yes | no |
 | Leave | n/a | yes |
@@ -92,23 +94,39 @@ so the damage was one-sided and invisible from the other end.
 | Set per-space send filters | yes | yes (own client, own choice) |
 | Share an entry into the space | yes | yes |
 
-**Every write in that table needs the Space Key first.** A member who has just joined
-does not hold it until the owner's app wraps a copy for them, and content in a space is
-encrypted under it - so until it arrives there is nothing readable and nothing that can
-be written. This is a capability, not a role: it applies to an owner too, in the window
-between creating a space and minting its key.
+**Reading a space needs its Space Key.** Content is encrypted under it, so until a copy
+arrives there is nothing to decrypt. This is a capability rather than a role: it applies to
+an owner too, in the window between creating a space and minting its key.
 
-The client refuses those writes rather than half-doing them, because the push path drops
-a space it holds no key for: going ahead would record a share locally, report success,
-and never reach the space. `Space.has_key` carries the state to the UI, stamped from the
-live keyring on every read since the key can land at any moment.
+Two things keep that window short. **Any member holding the key hands it over**, not only
+the owner, so somebody is nearly always running; and an invite carries the key wrapped for
+the invitee, so an invited member holds it the moment they accept. `Space.has_key` carries
+the state to the UI, stamped from the live keyring on every read since the key can land at
+any moment.
+
+**Sharing into a space is never blocked on the key.** The choice is recorded, the push path
+drops a space it holds no key for so nothing unreadable is ever pushed, and the entry is
+pushed again when the key lands. The record in `id_map.json` is the queue, so it survives a
+restart.
 
 | Attempted while waiting for the key | What happens |
 |---|---|
-| Share an entry in (card menu, bulk bar) | row disabled, reason on hover; the command also refuses |
-| Turn on "Share new items out" | toggle disabled, and the space's panel says why |
+| Share an entry in (card menu, bulk bar) | allowed; the row says "waiting" and the entry's chip is dimmed until it goes out |
+| Turn on "Share new items out" | allowed; matching items are held and sent when the key arrives |
 | Comment on an entry | command refuses; nothing is readable to comment on anyway |
 | Read the feed | empty - the entries cannot be decrypted yet |
+
+**Who gets told.** Three notification rows come out of this, and all three are scoped by
+the same ownership rule as the actions above: a space becoming readable (yours to know, you
+are in it), a comment on an entry **you wrote** or one that **names you**, and a refused
+keyring. A comment between two other members on a third member's item raises nothing - the
+notification follows authorship, not membership.
+
+**A key that does not match is refused, not retried.** Since any member may distribute, a
+recipient checks the ring against `spaces.key_fingerprint` - written by the owner alone when
+it mints - before adopting it. A correctly wrapped *wrong* key unwraps fine and then decrypts
+nothing, which is the failure this catches. Nothing about waiting fixes it, so the client
+reports it (`space:key-rejected`); the owner removing whoever sent it rekeys the space.
 
 ## Who pays for what
 
@@ -155,13 +173,20 @@ Client, Rust — the enforcement that matters, since only Rust can push:
   of the tombstone branch in `merge_pulled`. This is what makes "keep the local
   copy" true when the device's own tombstone comes back.
 - `notes/commands.rs` — `update_note` refuses outright.
-- `sync/mod.rs` — `has_space_key`, and `sync/commands.rs` — the check at the
-  top of `space_set_entry_shares`. A space whose key has not arrived cannot be
-  written to at all, by anyone, so this one is a capability rather than a role.
-  `space_comment_add` refuses on the same condition.
+- `sync/mod.rs` — `has_space_key`, and the `space_comment_add` refusal built on
+  it. Commenting needs something readable to comment on, so it is gated on the
+  key. Sharing is not: `space_set_entry_shares` records the intent either way,
+  `share_targets` drops a keyless space on the way out, and
+  `flush_pending_shares` sends it when the key lands.
 - `sync/mod.rs` — `stamp_keys`, which sets `Space::has_key` from the live
   keyring on every read. It is what the UI below draws from, and it is stamped
   rather than stored because the key can arrive at any moment.
+- `sync/mod.rs` — `reconcile_spaces`, which decides who may hand a key over (any
+  keyholder), who may mint one (the owner), and refuses a ring whose newest key
+  does not match the space's published fingerprint.
+- `sync/mod.rs` — `note_comment`, the one place that decides a comment is worth
+  interrupting for: not ours, and either on an entry we wrote or naming us.
+  `note_space_readable` and `note_space_key_rejected` are the other two rows.
 
 Client, React — hides what is not allowed, so nothing dead is on screen:
 
@@ -176,9 +201,10 @@ Client, React — hides what is not allowed, so nothing dead is on screen:
   `is_mine || isOwner`. Commenting itself is ungated in the UI: everyone in the
   space may, so there is nothing to hide.
 - `SpacesScreen.tsx`, `card-menu/CardMenu.tsx`,
-  `clipboard-screen/bulk-actions/BulkActionsBar.tsx` — `space.has_key` disables
-  every share control for a space still waiting on its key, and the space panel
-  says so in words rather than leaving a dead toggle.
+  `clipboard-screen/bulk-actions/BulkActionsBar.tsx` — `space.has_key` marks a
+  space still waiting on its key rather than disabling it: the share rows stay
+  clickable and say "waiting", the space panel explains the wait once, and
+  `useSpaceShares.waitingNamesFor` dims the entry's share chip until it goes out.
 
 Backend — the only place a rule survives a modified client:
 

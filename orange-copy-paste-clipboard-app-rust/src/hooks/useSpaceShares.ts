@@ -15,6 +15,9 @@ export interface SpaceShares {
   shares: Record<string, string[]>;
   /** Space names for one item, for the card indicator's tooltip. */
   namesFor: (kind: ShareKind, id: string) => string[];
+  /** Of those, the ones still waiting for their space's key: the item is
+   *  recorded as shared there and goes out when the key arrives. */
+  waitingNamesFor: (kind: ShareKind, id: string) => string[];
   /** Add or remove one space for one item. */
   toggle: (kind: ShareKind, id: string, spaceId: string) => void;
   /** Add or remove one space across several items, leaving their other
@@ -35,6 +38,9 @@ const REFRESH_ON = [
   "sync:notes-merged",
   "space:membership-changed",
   "sync:status-changed",
+  // A key arriving flips has_key, which is what tells a waiting share from a
+  // delivered one.
+  "space:key-received",
 ];
 
 /**
@@ -174,15 +180,21 @@ export function useSpaceShares(): SpaceShares {
         id,
         sharing ? [...current, spaceId] : current.filter((s) => s !== spaceId),
       );
+      // A space we hold no key for takes the choice and holds it: nothing is
+      // refused, and nothing unreadable is pushed. Say which of the two happened
+      // rather than reporting a share that has not gone anywhere yet.
+      const keyed = spaces.find((s) => s.id === spaceId)?.has_key ?? true;
       showToast(
         sharing
-          ? `Shared in ${spaceName(spaceId)}`
+          ? keyed
+            ? `Shared in ${spaceName(spaceId)}`
+            : `Will go to ${spaceName(spaceId)} when its key arrives`
           : `Removed from ${spaceName(spaceId)}`,
         "info",
         { key: "space-share" },
       );
     },
-    [shares, apply, spaceName],
+    [shares, apply, spaceName, spaces],
   );
 
   const bulkToggle = useCallback(
@@ -232,5 +244,24 @@ export function useSpaceShares(): SpaceShares {
     [shares, spaces],
   );
 
-  return { spaces, signedIn, shares, namesFor, toggle, bulkToggle };
+  const waitingNamesFor = useCallback(
+    (kind: ShareKind, id: string) => {
+      const ids = shares[`${kind}:${id}`] ?? [];
+      return ids
+        .map((sid) => spaces.find((s) => s.id === sid))
+        .filter((s) => s && !s.has_key)
+        .map((s) => s!.name);
+    },
+    [shares, spaces],
+  );
+
+  return {
+    spaces,
+    signedIn,
+    shares,
+    namesFor,
+    waitingNamesFor,
+    toggle,
+    bulkToggle,
+  };
 }
