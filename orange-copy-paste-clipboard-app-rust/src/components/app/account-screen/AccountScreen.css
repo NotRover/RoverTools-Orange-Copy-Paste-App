@@ -647,7 +647,8 @@
 .acct-id-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* Same label-over-description gap as the Settings rows. */
+  gap: 4px;
   min-width: 0;
   flex: 1 1 260px;
 }
