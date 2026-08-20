@@ -7,51 +7,8 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { Updater } from "../../../hooks/useUpdater";
+import { parseNotes, type ParsedNotes } from "./parseNotes";
 import "./UpdateBanner.css";
-
-type NoteSection = { title: string | null; items: string[] };
-type ParsedNotes = { lead: string | null; sections: NoteSection[] };
-
-/** Notes arrive as the CHANGELOG's `[Unreleased]` body: an optional lead sentence,
-    then `### New` / `### Improved` / `### Fixed` sections of `-` bullets. Parse that
-    shape into a lead line plus titled sections.
-
-    Older releases shipped a flat bulleted list with no headings — those parse to a
-    single title-less section and render exactly as before, so an old install
-    updating past this change still reads cleanly. */
-const parseNotes = (raw: string): ParsedNotes => {
-  const lead: string[] = [];
-  const sections: NoteSection[] = [];
-  let current: NoteSection | null = null;
-
-  for (const line of raw.split("\n").map((l) => l.trim())) {
-    if (!line) continue;
-    const heading = line.match(/^#{1,6}\s+(.*)$/);
-    if (heading) {
-      current = { title: heading[1].trim(), items: [] };
-      sections.push(current);
-      continue;
-    }
-    const bullet = line.match(/^[-*]\s+(.*)$/);
-    if (bullet) {
-      if (!current) {
-        current = { title: null, items: [] };
-        sections.push(current);
-      }
-      current.items.push(bullet[1].trim());
-      continue;
-    }
-    // Plain text: a lead sentence before any section, otherwise a stray line folded
-    // into the section it sits under.
-    if (current) current.items.push(line);
-    else lead.push(line);
-  }
-
-  return {
-    lead: lead.length ? lead.join(" ") : null,
-    sections: sections.filter((s) => s.items.length > 0),
-  };
-};
 
 /**
  * The one place an update interrupts the user, and it interrupts gently: a strip
