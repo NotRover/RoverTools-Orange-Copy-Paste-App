@@ -466,3 +466,33 @@ failure is a multi-attempt flow whether or not it was designed as one - so
 anything single-use it consumes on the first pass has to be preserved for the
 second. This one made accounts unrecoverable, which is the worst outcome the
 sync feature has.
+
+---
+
+## #16 - Every launch announced that your spaces were "ready", once per space
+
+**Symptom.** Opening the app produced a row per space in the notification centre
+- `"<space>" is ready`, `You can read it now.` - every single time, on an account
+that had had those spaces for days. Three spaces meant three rows, three unread
+badges, and a sound, at every launch.
+
+**Root cause.** The space keyring is memory-only by design: it never touches
+disk, so it is unwrapped from the server's key rows on every start.
+`reconcile_spaces` treated "the in-memory map did not have this key and now does"
+as "the user has just gained access", which is true exactly once per install and
+false on every launch after it. Keying the row on `space-key:<id>` did not help;
+`upsert` collapses repeats within one feed, but the announcement is genuinely
+re-raised on a feed the user has since cleared.
+
+**Fix.** `SyncState::spaces_announced` records the spaces the user has already
+been told about, and `mark_space_announced` gates the row. Ids only, so nothing
+about the key material moves to disk. The `space:key-received` event still fires
+every time - the UI does need to know the feed is decryptable now.
+
+**Why it is written down.** A durable claim cannot be answered from ephemeral
+state. "Is this new?" asked of a map that is empty at every startup always
+answers yes, and the answer looks correct in a dev session where you sign in once
+and watch it happen for real. The general form: when a notification says
+*something changed*, the thing it compares against has to outlive the process, or
+the notification is really reporting that the process started.
+
