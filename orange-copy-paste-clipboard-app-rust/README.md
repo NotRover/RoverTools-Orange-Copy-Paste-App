@@ -265,7 +265,7 @@ about to ship, dispatches only after an explicit yes, then verifies both channel
 you dispatch release.yml (patch, minor or major)
    │
    ├─ bump src-tauri/Cargo.toml
-   ├─ notes = user-facing commit subjects since the last release tag
+   ├─ notes = changelog/next.md  (renamed to changelog/<ver>-<bump>-<channel>.md)
    │
    └─ matrix build ─► signed NSIS (Windows) + AppImage/deb (Linux)
                           │
@@ -346,7 +346,7 @@ expensive option is no longer a shortcut.
 | Trap | Why it matters |
 | --- | --- |
 | **The signing key is load-bearing** | Every installed copy only trusts bundles signed by it. Lose it and the update channel is dead — users would have to reinstall by hand to get a build carrying a new public key. Back it up outside CI before the first release. |
-| **Commit messages *are* the release notes** | Every commit subject since the last release ships verbatim into the update prompt — nothing is filtered by prefix. Write them for users, not for yourself. |
+| **`changelog/next.md` *is* the release notes** | The workflow ships it verbatim into the update prompt, then renames it to `changelog/<version>-<bump>-<channel>.md`. Author it with `/update-changelog` before releasing — an empty one **fails the release** on purpose. Internal changes go under `### Internal` and are kept but never shown to users. |
 | **`bun run tauri build` output cannot be served as an update** | Local builds are unsigned. Only `release.yml` produces the `.sig` files the feed needs. Use local bundles for testing, never for publishing. |
 | **Only NSIS and AppImage self-update** | `.deb`/`.rpm` are owned by the package manager. They are still built and attached for manual install, but never appear in `latest.json` — offering an update the client can't apply is worse than offering none. |
 | **The version lives in exactly one place** | `src-tauri/Cargo.toml`. `tauri.conf.json` has no `version` field on purpose (Tauri falls back to Cargo.toml), and `package.json`'s copy is cosmetic. Don't reintroduce it. |

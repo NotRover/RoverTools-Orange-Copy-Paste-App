@@ -223,10 +223,16 @@ the in-app updater reads. The backend has no release pipeline. Reference:
 - `src-tauri/Cargo.toml` is the single source of version truth (`tauri.conf.json` has no
   `version` field on purpose; `package.json`'s copy is cosmetic). Only plain `vX.Y.Z` tags
   are releases — `v0.1.0-build.N` are throwaway CI builds.
-- **Commit subjects become the release notes**, so they are user-facing copy and the
-  No-AI-Slop rules apply. Only `feat`/`fix`/`perf`/`revert` reach users; internal types and
-  the workflow's own `release: vX.Y.Z` are filtered out. Write a sentence about the app,
-  not about the repo, and pick the type deliberately — `chore:` means users are not told.
+- **Release notes live in `changelog/`** — one file per release, staged in
+  `changelog/next.md`, authored before a release with `/update-changelog` (or by hand)
+  and published verbatim, so they are user-facing copy and the No-AI-Slop rules apply.
+  `feat` → New, `perf`/refinements → Improved, `fix`/`revert` → Fixed; internal work
+  (backend, MCP, refactors, CI, docs) → `### Internal`, which is kept for the record but
+  dropped before publishing. Write sentences about the app, not the repo; the app's
+  "What's new" panel renders the lead line and the sections, so keep that format. The
+  workflow reads `next.md`, publishes it, then renames it to
+  `changelog/<version>-<bump>-<channel>.md` and opens a fresh `next.md` — never rename or
+  hand-edit a shipped file. **An empty `next.md` fails a real release on purpose.**
 - The minisign signing key is the one irreplaceable secret: never read, print or commit it,
   and let the user run anything that touches it. Losing it kills updates for every install.
 - Updates are off in debug builds by design, so the flow can only be verified from two
@@ -249,6 +255,7 @@ by intention, and the copy that drifts is the one nobody was reading when it bro
 | Who may do what, and where it is enforced | `docs/PERMISSIONS.md` |
 | Regressions and their root causes | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
 | The release pipeline | `docs/RELEASING.md` |
+| User-facing release history, and the next release's notes | `changelog/` — one file per release, staged in `changelog/next.md` (skeleton `changelog/TEMPLATE.md`, convention `changelog/README.md`) |
 | How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |
 | Where everything lives, and cross-component invariants with no other home | `docs/ARCHITECTURE.md` — a map, not a description |
 

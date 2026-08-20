@@ -126,7 +126,7 @@ Full end-to-end sync needs a live backend, a Supabase project, and two accounts.
 
 A release is one manual workflow run: `gh workflow run release.yml` for a patch, `-f bump=minor` for a feature release, `-f bump=major` for a breaking one.
 
-`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, bumps the version in `src-tauri/Cargo.toml`, takes the user-facing commit subjects since the last release tag as the notes (internal `chore`/`ci`/`docs`-style subjects and its own bump commits are filtered out, and the `type(scope):` prefix is stripped), builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
+`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, publishes [`changelog/next.md`](changelog/) as the notes (erroring right away if it is empty), bumps the version in `src-tauri/Cargo.toml`, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. On release it renames `next.md` to `changelog/<version>-<bump>-<channel>.md`. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
 
 ### Dispatch flags
 
@@ -160,7 +160,8 @@ Releases never touch the sync backend; it deploys on its own.
 
 ## Conventions
 
-- **Commit messages:** lowercase `type(scope): subject`, then a few single-line bullets on what changed and why. Subjects ship verbatim as release notes, so write them for users.
+- **Commit messages:** lowercase `type(scope): subject`, then a few single-line bullets on what changed and why.
+- **Release notes** live in [`changelog/`](changelog/): draft `changelog/next.md` with `/update-changelog` (or by hand) before releasing — an empty one fails the release. Internal changes go under `### Internal` and are kept but never shown to users.
 - **Pull requests** open as drafts against each repo's own `main`.
 - **Migrations are written, never auto-applied.** Authoring an Alembic revision is normal work; applying it to a real database is a separate, explicitly approved step.
 - **Backend work goes on its own branches** in the backend repo, not alongside client changes.

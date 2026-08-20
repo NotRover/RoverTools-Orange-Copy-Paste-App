@@ -104,31 +104,56 @@
   transform: rotate(180deg);
 }
 
-/* No box, no scroll well. A boxed list of fifteen one-line sentences reads as a
-   cramped scroll pit; a hairline and two columns let the whole list sit on the
-   strip and be read at a glance. Columns fit themselves to the window, so a
-   narrow window falls back to one. */
+/* No box, no scroll well — just a hairline and the curated notes below it. The
+   notes are a short lead sentence and a few grouped bullets, so they sit on the
+   strip and read at a glance without a scroll pit. */
 .app-update-notes {
   margin: 9px 0 2px;
   padding: 9px 0 0;
   border-top: 1px solid var(--border);
-  columns: 300px 2;
-  column-gap: 32px;
-  list-style: none;
   animation: app-update-notes-in 0.16s ease;
 }
 
-.app-update-notes li {
+/* One-sentence summary of the release, above the sections. */
+.app-update-lead {
+  margin: 0 0 9px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.app-update-group + .app-update-group {
+  margin-top: 9px;
+}
+
+/* Section label — New / Improved / Fixed. Quiet, so the entries carry the weight. */
+.app-update-section {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app-update-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-update-list li {
   position: relative;
   padding-left: 13px;
-  break-inside: avoid;
   font-size: 11.5px;
   line-height: 1.75;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
-.app-update-notes li::before {
+.app-update-list li::before {
   content: "";
   position: absolute;
   left: 1px;
