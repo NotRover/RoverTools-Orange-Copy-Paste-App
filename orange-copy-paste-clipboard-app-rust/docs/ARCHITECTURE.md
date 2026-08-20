@@ -489,6 +489,7 @@ addressed to a person.
 | Someone joined or left a space, or a space was deleted | `space_activity` | `SyncClient::handle_membership_changed`, off the `space:membership_changed` socket event |
 | An invite this user sent was accepted or declined | `space_activity` | `SyncClient::note_invite_answered`, off `invite:updated` |
 | Somebody used a code or a join link on a space this user may approve | `space_invite` | `SyncClient::note_join_requested`, off `space:join_requested`. Raised only when `i_can_approve`, keyed on the request id so a replayed event cannot double-report. |
+| A space became readable (its key arrived) | `space_activity` | `SyncClient::note_space_readable`, in `reconcile_spaces`. Gated on `SyncState::spaces_announced` - the keyring is memory-only, so the in-memory map cannot tell "just gained access" from "just launched". See bug #16. |
 | A join request this user made was approved | `space_activity` | `SyncClient::note_join_approved`, off `space:join_decided`. A decline raises nothing loud - the row stops showing as pending. |
 | A space owner removed something this user shared there | `space_activity` | `SyncClient::note_entry_taken_down`, in `drop_space_entry` |
 | Sync refused to send an item | `sync_warning` | `record_skip` |
@@ -557,6 +558,47 @@ that was left or deleted is gone afterwards. The fresher answer wins.
   effect of trying to read the row. It lands on Spaces generally, not on the
   space itself; per-space deep linking would need a selection prop on
   `SpacesScreen`.
+
+**Sound and the OS toast** are the same feed heard rather than read, so they hang
+off `raise` instead of off each caller. `raise_cued` captures title, body and cue
+*before* the store takes ownership of the row, then acts only if `upsert`
+reported a real change — `notifications_refresh` re-reads the server's invites on
+every panel open, and a sound per re-read would be unbearable.
+
+- **A `Cue` is a family, not an event.** Six of them (`copy`, `paste`, `arrived`,
+  `knock`, `unlocked`, `refused`) cover every source above, because the point is
+  a set the user can learn: rising means something came, falling means something
+  was refused, lower and slower means a person rather than a thing.
+  `Cue::for_kind` maps a `NotificationKind` to one, and `raise_cued` lets a
+  caller override where the kind is too broad — a space becoming readable and a
+  join being approved are both `space_activity` and both want `unlocked`.
+- **Rust decides when, the webview decides what it sounds like.** `notifications::cue`
+  emits `ui:cue` with the name; `src/sounds.ts` synthesizes the tone in WebAudio
+  and caches a buffer per cue. Nothing ships as an audio file and no audio
+  backend is linked into the binary. The main window is the only listener, so a
+  cue is heard once even though the popups are separate webviews — and it
+  outlives every popup, since closing it either hides it or exits the app.
+- **Copy and paste are cued at the two command call sites**
+  (`clipboard::commands`), never inside `runtime::notifications::notify_if_enabled` —
+  the clipboard watcher calls that same helper on every capture, so a cue there
+  would fire on every copy anywhere in the OS. They are also the two cues that
+  default to *off* (`sound_copy`, `sound_paste`), for the same reason.
+- **The OS toast only fires while the app is not focused**
+  (`runtime::os_notify`). A toast for something the user is looking at is the
+  same sentence twice. A hidden window reports no focus, which is the answer we
+  want, so the visible-and-focused test collapses into one check; an error from
+  either question reads as "not focused", because a toast nobody needed costs
+  less than dropping the only sign that something happened.
+
+Settings, all device-local: `sound` (master), `sound_copy`, `sound_paste`,
+`os_notifications`. There is deliberately no volume control - one level, chosen
+to sit under whatever else is playing, beats a slider nobody moves twice. The
+Settings screen previews the four cues the user cannot fire on demand
+(`arrived`, `knock`, `unlocked`, `refused`) through `runtime::commands::play_cue`'s
+frontend twin, `playCue(cue, true)`, which ignores the per-cue settings - you
+have to be able to hear one to decide whether to turn it on. The frontend module holds them in memory and
+the Settings screen calls `configureSounds` directly as well as writing them, so
+a change takes effect on the next cue rather than the next launch.
 
 ---
 

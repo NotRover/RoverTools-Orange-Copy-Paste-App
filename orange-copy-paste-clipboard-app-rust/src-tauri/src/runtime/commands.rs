@@ -105,3 +105,20 @@ pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> bool {
         mgr.disable().is_ok()
     }
 }
+
+/// Play one sound, for the Settings screen to demonstrate with.
+///
+/// Goes through the same event every real cue does, so what the user hears while
+/// setting the volume is exactly what they will hear later.
+#[tauri::command]
+pub fn play_cue(app: tauri::AppHandle, cue: String) {
+    let cue = match cue.as_str() {
+        "copy" => crate::notifications::Cue::Copy,
+        "paste" => crate::notifications::Cue::Paste,
+        "knock" => crate::notifications::Cue::Knock,
+        "unlocked" => crate::notifications::Cue::Unlocked,
+        "refused" => crate::notifications::Cue::Refused,
+        _ => crate::notifications::Cue::Arrived,
+    };
+    crate::notifications::cue(&app, cue);
+}
