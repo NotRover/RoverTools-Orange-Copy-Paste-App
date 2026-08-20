@@ -1,5 +1,10 @@
 # Releasing the Smart Clipboard app
 
+**Owns:** shipping. The release workflow, the two update channels, the signing key, the
+version-of-record, and the smoke test. Read before touching
+`.github/workflows/release.yml`.
+**Not here:** what the app does. This file is about getting builds to users.
+
 Shipping a release is one workflow run. Everything else — version number, release
 notes, the update feed, the signed bundles — is derived from that.
 

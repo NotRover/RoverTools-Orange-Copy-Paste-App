@@ -6,6 +6,14 @@ rule underneath all of it:
 > **An entry belongs to whoever wrote it.** Everyone else has a copy. You can do
 > anything to your copy and nothing to theirs.
 
+**Owns:** permission. Who may act on an entry or inside a space, what happens when they
+try anyway, and the `path:line` where each rule is enforced. Any new action on a card menu,
+a bulk bar, or a space route gets a row here.
+**Not here:** how the action works. Payloads and routes are the backend's
+(`orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`), client mechanics are the
+app's (`orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md`). This file answers
+*may they*, not *how*.
+
 Server rows are keyed `(user_id, client_id)`, so this is not only policy — a
 write against someone else's entry *cannot* reach their row. It would insert a
 second row under the same `client_id` and hand every member a rival copy. That

@@ -49,7 +49,7 @@ Each has its own README with setup, structure, and development instructions.
 
 **Sharing** comes in two shapes, both built on a random per-group key wrapped individually for each member with X25519: persistent **pool groups**, and ephemeral **Live Share** sessions scoped to clipboard, notes, or both.
 
-The full contract — payload shapes, event envelopes, key lifecycle — is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The full contract — payload shapes, event envelopes, key lifecycle — is in the [backend architecture doc](orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md), which owns it.
 
 ---
 
@@ -169,7 +169,7 @@ Releases never touch the sync backend; it deploys on its own.
 
 ## Further reading
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system overview, data ownership, integration contract, encryption boundary, sharing model, deployment topology.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the map: which doc owns which fact, and the invariants that bind the two components. Start here to find the right doc.
 - [`docs/RELEASING.md`](docs/RELEASING.md) — the release pipeline end to end.
 - [Client README](orange-copy-paste-clipboard-app-rust/README.md) · [client architecture](orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md) · [bugfix history](orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md).
 - [Backend README](orange-copy-paste-clipboard-backend/README.md) · [backend architecture](orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md) · [deployment guide](orange-copy-paste-clipboard-backend/docs/DEPLOY.md).

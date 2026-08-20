@@ -4,7 +4,14 @@
 
 A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
 
-> **Cross-system context:** For how this app integrates with the FastAPI backend, see `docs/ARCHITECTURE.md` (workspace root). For backend internals, see `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
+**Owns:** how this app works inside. Windows and runtime, app state, Tauri commands and
+events, local persistence, the capture pipeline, and the client half of the sync engine —
+what it does with what it receives.
+**Not here:** the wire contract itself. Routes, payloads, DDL, socket-event shapes and the
+crypto envelope live in `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`;
+who-may-do-what in the root `docs/PERMISSIONS.md`; cross-component invariants in the root
+`docs/ARCHITECTURE.md`. Restating a payload here creates a second contract that nothing
+keeps true.
 
 ---
 
@@ -1551,7 +1558,9 @@ Applied to all three windows:
 
 ## Cross-System Invariants
 
-The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee. The canonical list lives in `docs/ARCHITECTURE.md` (workspace root, section 13); this is the app-side view.
+The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee.
+
+The **promises** are the workspace root `docs/ARCHITECTURE.md` (Cross-Component Invariants) - that is where they are stated and where a new one is added. What only this file can say is the second column: which function, which file, and what has to be called to keep each one. Rows without a root counterpart (7, 8, 17, 18) are this app's alone.
 
 | #   | Invariant                                      | App-side implication                                                                                                                                                  |
 | --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
