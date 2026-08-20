@@ -231,14 +231,47 @@ the in-app updater reads. The backend has no release pipeline. Reference:
 
 ## Docs & Source Priority
 
-Use live code first; docs are context and may be stale — confirm behavior in code, and report mismatches rather than trusting docs.
+Live code first. Docs are context and go stale — confirm behavior in code, and report a
+mismatch rather than trusting the doc.
 
-- Client: `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md`, `docs/BUGFIX_HISTORY.md` (high-value regression history), `README.md`.
-- Backend: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` (the definitive sync/crypto/contract reference), `TODO.md`.
-- Root `docs/ARCHITECTURE.md` — shared/workspace-level context. Read selectively; if it conflicts with code, trust the code.
-- Root `docs/RELEASING.md` — the release pipeline: setup, channels, safety rails, smoke test. Read before touching `.github/workflows/release.yml`.
-- Root `docs/PERMISSIONS.md` — who can do what to an entry (yours vs another member's) and inside a space, with where each rule is enforced. Read before adding any action to a card menu, bulk bar, or space route; add the new action to its table.
-- Root `docs/_doc-template.html` — the house style for a rendered walkthrough. See Visual Docs below.
+**One fact, one home.** A fact lives where it is enforced, and nowhere else. Every other
+doc that needs it links to that home instead of restating it. This is the only rule that
+keeps a doc set this size true: three copies of the wire contract cannot be kept in step
+by intention, and the copy that drifts is the one nobody was reading when it broke.
+
+| Fact | Home |
+|------|------|
+| Wire contract — routes, payloads, DDL, socket events, crypto envelope | `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` |
+| Client internals — state, commands, events, persistence, runtime behavior | `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md` |
+| Who may do what, and where it is enforced | `docs/PERMISSIONS.md` |
+| Regressions and their root causes | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
+| The release pipeline | `docs/RELEASING.md` |
+| How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |
+| Where everything lives, and cross-component invariants with no other home | `docs/ARCHITECTURE.md` — a map, not a description |
+
+Every reference doc opens with a two-line **Owns / Not here** header naming what only it
+may say and where the neighbouring facts live. Read it before adding to that file: if what
+you are about to write belongs to another home, edit that home instead. Deleting a
+duplicate you happen to be standing next to is always in scope.
+
+Two consequences worth stating outright, because both are easy to get wrong:
+
+- **A contract change is one edit, not four.** Change the backend doc. Add a
+  `docs/PERMISSIONS.md` row only if the change is about *who may*, and a client-doc row
+  only if it is about client internals. Do not restate the payload anywhere.
+- **A README is a front door, not a reference.** It may say what the thing is and how to
+  run it. Anything a reader could act on wrongly — a payload, a key derivation, a
+  precedence rule — is a link.
+
+**Design memos have a lifecycle.** `docs/SPACE-*.md` are memos: they argue for a change
+before it exists, so while a design is unbuilt the memo is its home and may hold the whole
+spec. **On ship, the memo shrinks to a decision record** — the rejected alternatives and
+why, which is the one thing the reference docs deliberately do not carry — and everything
+the code now enforces is deleted, having moved to the homes above. A memo left whole after
+shipping is a second wire contract with no owner.
+
+- Root `docs/_doc-template.html` — the house style for a rendered walkthrough. See Visual
+  Docs below.
 
 ## Visual Docs
 
@@ -246,6 +279,12 @@ Some things do not land as markdown: a before/after UX change, a flow whose poin
 *order* of events, a mechanism where the interesting part is what a person sees at each
 step. Those get a rendered HTML page with real diagrams. Prose docs stay markdown — this is
 for explaining a change to a human, not for the durable spec.
+
+**A walkthrough is dated and then left alone.** It explains one change at one moment, so it
+is exempt from One fact, one home for the same reason it is cheap: nobody has to keep it
+true. Say so in its header, date it, and never update it when the contract moves — the
+reference doc is what moves. A walkthrough that gets maintained has quietly become a
+fourth copy of the spec.
 
 **Start from the template, never from scratch.** `docs/_doc-template.html` carries the
 stylesheet, the font links, the mermaid init line, and a commented skeleton of every block.
