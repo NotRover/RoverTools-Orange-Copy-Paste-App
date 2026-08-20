@@ -4089,7 +4089,14 @@ impl SyncClient {
                                 serde_json::json!({ "space_id": s.id }),
                             );
                             let flushed = self.flush_pending_shares(&s.id);
-                            self.note_space_readable(&s.id, flushed);
+                            // `had` is only ever about this process: the keyring
+                            // is memory-only, so every launch re-unwraps it and
+                            // every launch reaches here. Whether it is *news*
+                            // is a durable question, and this is where it is
+                            // asked. See bug #16.
+                            if self.sync_state.lock().mark_space_announced(&s.id) {
+                                self.note_space_readable(&s.id, flushed);
+                            }
                         }
                     }
                 }

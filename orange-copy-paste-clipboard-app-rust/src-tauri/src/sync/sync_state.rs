@@ -29,6 +29,14 @@ pub struct SyncState {
     /// of being undone by the next refresh.
     #[serde(default)]
     pub announcements_cursor: u64,
+    /// Spaces this device has already said "you can read this now" about.
+    ///
+    /// The keyring itself lives only in memory, so every launch unwraps it from
+    /// scratch and every launch looks like the moment access arrived. This is
+    /// the durable half of that question: gaining access is news once, and a
+    /// restart is not it. Ids only - nothing here is key material.
+    #[serde(default)]
+    pub spaces_announced: Vec<String>,
     /// Whether this install has rebuilt its record of who wrote what.
     ///
     /// False on every install that predates the fix for bug #8. Those records
@@ -75,6 +83,18 @@ impl SyncStateStore {
         }
         self.data.announcements_cursor = ts;
         self.save();
+    }
+
+    /// Record that the user has been told they can read a space. Returns false
+    /// when they were already told, which is what suppresses the row on the next
+    /// launch.
+    pub fn mark_space_announced(&mut self, space_id: &str) -> bool {
+        if self.data.spaces_announced.iter().any(|s| s == space_id) {
+            return false;
+        }
+        self.data.spaces_announced.push(space_id.to_string());
+        self.save();
+        true
     }
 
     /// Record that this device has pulled a space's earlier items, so it does
