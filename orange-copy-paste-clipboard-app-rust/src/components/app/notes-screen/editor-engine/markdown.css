@@ -35,13 +35,14 @@
   position: relative;
 }
 
-/* Slim scrollbars (match clipboard screen, no arrow buttons). Applied to all
-   scrollable editor surfaces. */
+/* Same scrollbar as the clipboard and notes viewports: the thumb carries a
+   border in the surface colour so it reads as inset rather than pinned to the
+   edge of the window, which is where this pane sits while editing. */
 .ee-rich-shell::-webkit-scrollbar,
 .ee-textarea::-webkit-scrollbar,
 .ee-preview::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 12px;
+  height: 12px;
 }
 .ee-rich-shell::-webkit-scrollbar-track,
 .ee-textarea::-webkit-scrollbar-track,
@@ -53,11 +54,15 @@
 .ee-preview::-webkit-scrollbar-thumb {
   background: var(--border-light);
   border-radius: 999px;
+  border: 3px solid var(--surface);
+  background-clip: padding-box;
 }
 .ee-rich-shell::-webkit-scrollbar-thumb:hover,
 .ee-textarea::-webkit-scrollbar-thumb:hover,
 .ee-preview::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
+  border: 3px solid var(--surface);
+  background-clip: padding-box;
 }
 .ee-rich-shell::-webkit-scrollbar-button,
 .ee-textarea::-webkit-scrollbar-button,
