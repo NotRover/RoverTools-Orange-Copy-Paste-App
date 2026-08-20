@@ -648,6 +648,10 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                               "clipboard",
                               entry.id,
                             )}
+                            waitingSpaceNames={spaceShares.waitingNamesFor(
+                              "clipboard",
+                              entry.id,
+                            )}
                             owner={entryOwners[`clipboard:${entry.id}`]}
                             onToggleSpace={
                               remoteKeys.has(`clipboard:${entry.id}`)

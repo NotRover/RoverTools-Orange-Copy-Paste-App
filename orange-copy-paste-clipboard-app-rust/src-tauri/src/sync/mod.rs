@@ -39,8 +39,8 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use crate::clipboard::history::{ClipboardEntry, EntryKind};
 use crate::notes::Note;
 use crate::sync::client::{
-    BlobUploadRequest, CommentOut, CreateCommentRequest, DistributeKeysRequest, PushEntryRequest,
-    RegisterDeviceRequest, SyncHttpClient, WrappedKeyringEntry,
+    BlobUploadRequest, CommentOut, CreateCommentRequest, DistributeKeysRequest, InviteOut,
+    PushEntryRequest, RegisterDeviceRequest, SyncHttpClient, WrappedKeyringEntry,
 };
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
@@ -3625,20 +3625,249 @@ impl SyncClient {
         http.delete_space_comment(space_id, comment_id).await
     }
 
+    /// Push again everything that was shared into a space before its key
+    /// arrived.
+    ///
+    /// The share record is the queue, and it already exists: `set_entry_shares`
+    /// writes the intent whether or not the space can be encrypted for yet, and
+    /// `share_targets` drops the spaces we hold no key for on the way out. So an
+    /// entry shared while waiting is on disk and pushed, just not in that space.
+    /// Re-pushing it now the key is here is the whole flush - no second queue,
+    /// and it survives a restart because `id_map.json` does.
+    ///
+    /// Only entries we wrote: `spawn_push_*` refuses someone else's, and a share
+    /// control is never offered for one.
+    ///
+    /// Returns how many entries were sent, so the arrival notification can say
+    /// what actually moved rather than only that a key turned up.
+    pub(crate) fn flush_pending_shares(self: &Arc<Self>, space_id: &str) -> usize {
+        let keys: Vec<String> = {
+            let id_map = self.id_map.lock();
+            id_map
+                .entry_shares()
+                .into_iter()
+                .filter(|(_, ids)| ids.iter().any(|s| s == space_id))
+                .map(|(key, _)| key)
+                .collect()
+        };
+        if keys.is_empty() {
+            return 0;
+        }
+        let state = self.app.state::<crate::state::AppState>();
+        let mut sent = 0usize;
+        for key in keys {
+            let Some((entry_type, client_id)) = key.split_once(':') else {
+                continue;
+            };
+            if entry_type == "note" {
+                let note = state.notes.lock().all().iter().find(|n| n.id == client_id).cloned();
+                if let Some(note) = note {
+                    self.on_update_note(note);
+                    sent += 1;
+                }
+            } else {
+                let entry =
+                    state.history.lock().all().iter().find(|e| e.id == client_id).cloned();
+                if let Some(entry) = entry {
+                    self.on_update_clipboard_entry(entry);
+                    sent += 1;
+                }
+            }
+        }
+        sent
+    }
+
+    /// A space became readable. Worth a notification and not only the toast,
+    /// because the wait is exactly the situation where the user is somewhere
+    /// else: a toast fired while the window is hidden is a toast nobody saw, and
+    /// the only other sign is a notice quietly disappearing.
+    ///
+    /// One row per space (`space-key:{id}`), so a later rekey - which is not the
+    /// user becoming able to read anything - cannot raise a second one.
+    fn note_space_readable(&self, space_id: &str, flushed: usize) {
+        let space_name = self
+            .spaces()
+            .into_iter()
+            .find(|s| s.id == space_id)
+            .map(|s| s.name)
+            .unwrap_or_else(|| "a space".to_string());
+        let body = match flushed {
+            0 => "You can read it now, and share into it.".to_string(),
+            1 => "You can read it now. The item you shared there has gone out.".to_string(),
+            n => format!("You can read it now. {n} items you shared there have gone out."),
+        };
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                format!("space-key:{space_id}"),
+                crate::notifications::NotificationKind::SpaceActivity,
+                format!("\"{space_name}\" is ready"),
+            )
+            .with_body(body)
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// A keyring we were handed did not match the fingerprint the owner
+    /// published, so it was refused.
+    ///
+    /// A warning rather than activity, and durable rather than a toast: the
+    /// space stays unreadable until somebody acts, and nothing the user does in
+    /// the app will change it. Keyed on the space so repeated reconciles report
+    /// it once.
+    fn note_space_key_rejected(&self, space_id: &str, wrapped_by: &str) {
+        let spaces = self.spaces();
+        let space = spaces.iter().find(|s| s.id == space_id);
+        let space_name = space.map(|s| s.name.clone()).unwrap_or_else(|| "a space".to_string());
+        let sender = space
+            .and_then(|s| s.members.iter().find(|m| m.user_id == wrapped_by))
+            .map(|m| m.display_name.clone())
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "another member".to_string());
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                format!("space-key-rejected:{space_id}"),
+                crate::notifications::NotificationKind::SyncWarning,
+                format!("Refused the key sent for \"{space_name}\""),
+            )
+            .with_body(format!(
+                "It does not match the key the owner published, so it was not used. \
+                 It came from {sender}. The space stays unreadable until the owner sends a new key."
+            ))
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// Somebody commented in a space, on something of ours or naming us.
+    ///
+    /// Comments used to be silent unless the thread happened to be open, which
+    /// meant a reply to your own item reached you only if you went looking. Two
+    /// cases are worth interrupting for and no others: a comment on an entry
+    /// *we wrote*, and one that names us. A comment between two other people on
+    /// a third person's item is conversation we are not in.
+    ///
+    /// The text is deliberately left out. The notification says who and where,
+    /// which is enough to make someone open the thread, and keeps decrypted
+    /// space content out of a store that outlives the entry it belongs to.
+    pub(crate) fn note_comment(&self, c: &SpaceComment) {
+        if c.is_mine {
+            return;
+        }
+        let me = self.current_user().map(|u| u.user_id);
+        let mentions_me = me
+            .as_deref()
+            .is_some_and(|id| c.mentions.iter().any(|m| m == id));
+        let ours = !self.is_remote_entry(&c.entry_type, &c.client_id);
+        if !mentions_me && !ours {
+            return;
+        }
+        let spaces = self.spaces();
+        let space = spaces.iter().find(|s| s.id == c.space_id);
+        let space_name = space.map(|s| s.name.clone()).unwrap_or_else(|| "a space".to_string());
+        let author = space
+            .and_then(|s| s.members.iter().find(|m| m.user_id == c.author_id))
+            .map(|m| m.display_name.clone())
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "Someone".to_string());
+        let what = if c.entry_type == "note" { "note" } else { "item" };
+        let title = if mentions_me && !ours {
+            format!("{author} mentioned you in \"{space_name}\"")
+        } else {
+            format!("{author} commented on your {what} in \"{space_name}\"")
+        };
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                // Keyed on the comment, so a reconnect replaying the event
+                // cannot report the same reply twice.
+                format!("space-comment:{}", c.id),
+                crate::notifications::NotificationKind::SpaceActivity,
+                title,
+            )
+            .with_body("Open the space to read it.")
+            .with_data("space_id", c.space_id.clone()),
+        );
+    }
+
+    /// Wrap our copy of a space's keyring onto a pending invite we just sent.
+    ///
+    /// This is what makes a new member able to read the space the *instant* they
+    /// accept, with nobody else online: the server moves the wrap onto their
+    /// membership row as part of the accept. An invitee always has an account
+    /// already - the invite route refuses an unknown address - so their identity
+    /// key is normally registered by now.
+    ///
+    /// Best-effort on purpose. The invite is sent and valid without it, and the
+    /// ordinary distribution path still covers the member once they join, so
+    /// nothing here is worth failing the invite over.
+    pub(crate) async fn attach_invite_key(self: &Arc<Self>, invite: &InviteOut) {
+        let Some(http) = self.http.lock().clone() else {
+            return;
+        };
+        let Some((id_priv, _id_pub)) = self.identity_keypair() else {
+            return;
+        };
+        let Some(invitee_pub) = invite
+            .invitee_identity_pubkey
+            .as_deref()
+            .and_then(decode_pubkey)
+        else {
+            return; // no keys registered yet — they get one after joining
+        };
+        let ring = self
+            .space_keys
+            .lock()
+            .get(&invite.space_id)
+            .cloned()
+            .unwrap_or_default();
+        if ring.is_empty() {
+            return; // we cannot read the space ourselves yet
+        }
+        let shared = crypto::x25519_shared_secret(&id_priv, &invitee_pub);
+        let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
+        for key in &ring {
+            match crypto::wrap_key(&shared, key) {
+                Ok(w) => wrapped.push(w),
+                Err(e) => {
+                    eprintln!("[sync] wrap invite key for {}: {e}", invite.id);
+                    return;
+                }
+            }
+        }
+        match serde_json::to_string(&wrapped) {
+            Ok(json) => {
+                if let Err(e) = http.attach_invite_key(&invite.id, json).await {
+                    eprintln!("[sync] attach invite key {}: {e}", invite.id);
+                }
+            }
+            Err(e) => eprintln!("[sync] invite keyring json {}: {e}", invite.id),
+        }
+    }
+
     /// Reconcile space keyrings with the server; refreshes the cached space
     /// list and returns it.
     ///
     /// For every space we belong to: recover our keyring by unwrapping the
-    /// server-side `my_wrapped_space_keys` against the owner's identity key.
-    /// If we *are* the owner: mint a key when the space has none yet, mint a
-    /// **new** key on top of the ring when the server cleared the wrapped
-    /// keyrings (that is the rekey signal after a member was removed), and
-    /// (re)wrap the full keyring for every member who needs it.  Members
-    /// without a registered identity key are skipped and picked up next run.
+    /// server-side `my_wrapped_space_keys` against the public key
+    /// `my_wrapped_by` names, and check the newest key against the space's
+    /// `key_fingerprint` before adopting it.
     ///
-    /// Idempotent, and safe to call on login, on `space:rekey`, and whenever
-    /// membership changes: distribution only happens while someone lacks keys,
-    /// so the rekey events it echoes back cannot loop.
+    /// Then, if we hold the ring, wrap it for every member who does not - owner
+    /// or not. Handing a key over used to be the owner's job alone, which meant
+    /// a member who joined while the owner's app was closed could neither read
+    /// the space nor write to it until it opened. Every member already holds the
+    /// key in memory, so the restriction never stopped anyone determined to leak
+    /// it; widening it means somebody is nearly always online to help.
+    ///
+    /// **Minting stays the owner's**: a first key for a new space, or a new key
+    /// prepended to the ring when `rekey_requested_at` says a member left. Older
+    /// keys stay so history written under them remains readable.
+    ///
+    /// Members without a registered identity key are skipped and picked up next
+    /// run. Idempotent, and safe to call on login, on `space:rekey`, and whenever
+    /// membership changes: distribution only happens while someone lacks keys, so
+    /// the rekey events it echoes back cannot loop.
     pub(crate) async fn reconcile_spaces(self: &Arc<Self>) -> Vec<Space> {
         let Some(http) = self.http.lock().clone() else {
             return self.spaces();
@@ -3677,25 +3906,30 @@ impl SyncClient {
 
         let mut out = Vec::new();
         for s in server_spaces {
-            let owner_pub = s
-                .members
-                .iter()
-                .find(|m| m.user_id == s.owner_id)
-                .and_then(|m| m.identity_pubkey.as_deref())
-                .and_then(decode_pubkey);
+            let is_owner = s.owner_id == me;
+            let pubkey_of = |uid: &str| {
+                s.members
+                    .iter()
+                    .find(|m| m.user_id == uid)
+                    .and_then(|m| m.identity_pubkey.as_deref())
+                    .and_then(decode_pubkey)
+            };
 
             // ── Recover our keyring from the server-side wrapped copy ────
-            // An empty wrap does NOT clear in-memory keys: the server clears
-            // keyrings to signal a pending rekey, and the owner needs the old
-            // ring to keep history readable under the new distribution.
+            // An empty wrap does NOT clear in-memory keys: a rekey clears the
+            // non-owner wraps, and a member needs the old ring to keep reading
+            // history written under it.
             let server_keyring: Vec<String> = s
                 .my_wrapped_space_keys
                 .as_deref()
                 .and_then(|j| serde_json::from_str(j).ok())
                 .unwrap_or_default();
+            // Who wrapped it, and so whose public key opens it. Absent means the
+            // owner, which was the only writer before handover was widened.
+            let wrapper_id = s.my_wrapped_by.clone().unwrap_or_else(|| s.owner_id.clone());
             if !server_keyring.is_empty() {
-                if let Some(owner_pub) = owner_pub {
-                    let shared = crypto::x25519_shared_secret(&id_priv, &owner_pub);
+                if let Some(wrapper_pub) = pubkey_of(&wrapper_id) {
+                    let shared = crypto::x25519_shared_secret(&id_priv, &wrapper_pub);
                     let mut ring: SpaceKeyring = Vec::with_capacity(server_keyring.len());
                     for wrapped in &server_keyring {
                         match crypto::unwrap_key(&shared, wrapped) {
@@ -3703,7 +3937,31 @@ impl SyncClient {
                             Err(e) => eprintln!("[sync] unwrap space key {}: {e}", s.id),
                         }
                     }
-                    if !ring.is_empty() {
+                    // Anyone may have written this ring, and the server cannot
+                    // check what it stored - so we check it here. A wrong key
+                    // unwraps perfectly and then decrypts nothing, which is the
+                    // failure this catches. Our own writes need no check, and a
+                    // space whose owner has not published a fingerprint yet
+                    // cannot be checked at all.
+                    let self_written = wrapper_id == me;
+                    let mismatch = match (&s.key_fingerprint, ring.first()) {
+                        (Some(expected), Some(newest)) if !self_written => {
+                            crypto::space_key_fingerprint(newest) != *expected
+                        }
+                        _ => false,
+                    };
+                    if mismatch {
+                        use zeroize::Zeroize;
+                        for key in ring.iter_mut() {
+                            key.zeroize();
+                        }
+                        eprintln!("[sync] space {} key fingerprint mismatch, refused", s.id);
+                        let _ = self.app.emit(
+                            "space:key-rejected",
+                            serde_json::json!({ "space_id": s.id, "wrapped_by": wrapper_id }),
+                        );
+                        self.note_space_key_rejected(&s.id, &wrapper_id);
+                    } else if !ring.is_empty() {
                         let mut guard = self.space_keys.lock();
                         let had = guard.get(&s.id).is_some_and(|r| !r.is_empty());
                         let changed = guard.get(&s.id) != Some(&ring);
@@ -3713,45 +3971,53 @@ impl SyncClient {
                         drop(guard);
                         if changed && !had {
                             // Newly able to read this space — tell the UI so
-                            // the feed refreshes without a manual reload.
+                            // the feed refreshes without a manual reload, and
+                            // send whatever was shared into it while we waited.
                             let _ = self.app.emit(
                                 "space:key-received",
                                 serde_json::json!({ "space_id": s.id }),
                             );
+                            let flushed = self.flush_pending_shares(&s.id);
+                            self.note_space_readable(&s.id, flushed);
                         }
                     }
                 }
             }
 
-            // ── Owner: mint / rekey, then wrap for whoever needs it ──────
-            if s.owner_id == me {
-                // The server clearing every wrapped keyring (ours included) is
-                // the rekey signal left behind by a member removal.
-                let needs_rekey = server_keyring.is_empty();
-                let mut ring = self
-                    .space_keys
-                    .lock()
-                    .get(&s.id)
-                    .cloned()
-                    .unwrap_or_default();
-                let mut redistribute_all = false;
+            // ── Mint if we own it, then wrap for whoever needs it ────────
+            let needs_rekey = s.rekey_requested_at.is_some();
+            let mut ring = self
+                .space_keys
+                .lock()
+                .get(&s.id)
+                .cloned()
+                .unwrap_or_default();
+            let mut minted = false;
+            if is_owner {
                 if ring.is_empty() {
-                    // Brand-new space — or a rekey after a restart, where the
-                    // previous keys are unrecoverable (they lived only in
-                    // memory once the server cleared the wraps).
+                    // Brand-new space, or one whose keys are unrecoverable
+                    // because they only ever lived in memory.
                     ring.push(*crypto::random_key());
-                    redistribute_all = true;
+                    minted = true;
                 } else if needs_rekey {
                     // New key on top; older keys stay so history remains
-                    // readable. The removed member never sees the new one.
+                    // readable. The departed member never sees the new one.
                     ring.insert(0, *crypto::random_key());
-                    redistribute_all = true;
+                    minted = true;
                 }
-                self.space_keys.lock().insert(s.id.clone(), ring.clone());
+                if minted {
+                    self.space_keys.lock().insert(s.id.clone(), ring.clone());
+                }
+            }
 
+            // A non-owner sits out a pending rekey: handing over the ring the
+            // owner is about to replace would publish a key that no longer
+            // matches the fingerprint about to be written.
+            let may_distribute = !ring.is_empty() && (is_owner || !needs_rekey);
+            if may_distribute {
                 let mut wrapped_keyrings = Vec::new();
                 for m in &s.members {
-                    if m.has_space_key && !redistribute_all {
+                    if m.has_space_key && !minted {
                         continue; // already holds the current ring
                     }
                     let Some(member_pub) = m.identity_pubkey.as_deref().and_then(decode_pubkey)
@@ -3759,8 +4025,8 @@ impl SyncClient {
                         continue; // hasn't registered keys yet — retried next run
                     };
                     // Wrapping for ourselves works too: X25519(priv, own_pub)
-                    // is a valid shared secret, which is how the owner recovers
-                    // after a restart.
+                    // is a valid shared secret, which is how a keyholder
+                    // recovers its ring after a restart.
                     let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
                     let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
                     let mut failed = false;
@@ -3787,10 +4053,15 @@ impl SyncClient {
                 }
 
                 if !wrapped_keyrings.is_empty() {
-                    if let Err(e) = http
-                        .distribute_space_keys(&s.id, DistributeKeysRequest { wrapped_keyrings })
-                        .await
-                    {
+                    // Only the owner may name the fingerprint, and it always
+                    // sends one: that also backfills a space minted before the
+                    // check existed. Publishing it clears the rekey request.
+                    let key_fingerprint = ring
+                        .first()
+                        .filter(|_| is_owner)
+                        .map(|k| crypto::space_key_fingerprint(k));
+                    let req = DistributeKeysRequest { wrapped_keyrings, key_fingerprint };
+                    if let Err(e) = http.distribute_space_keys(&s.id, req).await {
                         eprintln!("[sync] distribute space keys for {}: {e}", s.id);
                     }
                 }
@@ -3854,16 +4125,16 @@ impl SyncClient {
     }
 
     /// Whether anyone is still waiting on a Space Key we could hand out or
-    /// receive: a member of a space we own without their wrapped copy, or a
-    /// space of someone else's that we cannot read yet.
+    /// receive: a space we cannot read yet, or one where we hold the ring and
+    /// some member does not.
+    ///
+    /// The second half is not owner-only, because handing a key over is not
+    /// either. Whoever is running when a newcomer arrives is the one who helps.
     fn keys_pending(&self, spaces: &[Space]) -> bool {
         let rings = self.space_keys.lock();
         spaces.iter().any(|s| {
-            if s.is_owner {
-                s.members.iter().any(|m| !m.has_space_key)
-            } else {
-                !matches!(rings.get(&s.id), Some(ring) if !ring.is_empty())
-            }
+            let holding = matches!(rings.get(&s.id), Some(ring) if !ring.is_empty());
+            !holding || s.members.iter().any(|m| !m.has_space_key)
         })
     }
 

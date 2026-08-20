@@ -766,7 +766,7 @@ On each received message, dispatches to:
 | `sync:entry`                       | Unwrap the CEK (`personal` under UMK, else a carried space id through that space's keyring) → decrypt → insert or update in history/notes → emit `clipboard:new-entry` or `notes:updated`. Personal entries are skipped in passive mode; space entries always apply, and may auto-copy. Deletes arrive as tombstones on this event. |
 | `device:online` / `device:offline` | Update sync status indicator via Tauri event                                                                                                                  |
 | `space:membership_changed`         | Refresh spaces, emit `space:membership-changed`; an owner whose members lost their keys mints a new space key and redistributes                                |
-| `space:rekey`                      | Prepend the new space key to that space's keyring → future entries decrypt under it, older ones still decrypt under the older keys                             |
+| `space:rekey`                      | Reconcile: adopt the ring the server holds for us (checked against `key_fingerprint`), prepend a newly minted key if we own the space and one is owed, and wrap for any member who lacks one |
 | `ping`                             | Respond with `pong`; this refreshes the device's presence TTL server-side                                                                                     |
 
 Connection drop → automatic reconnect after 5s backoff, then exponential up to 60s.
@@ -797,6 +797,7 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
 | `generate_x25519_keypair() → (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |
 | `x25519_shared_secret(privkey, peer_pubkey) → [u8; 32]` | ECDH for device key handshake and space key wrapping     |
+| `space_key_fingerprint(key) → String`                   | Truncated hash the owner publishes so a member can tell a genuine keyring from one another member made up |
 | `random_key() → [u8; 32]`                               | Random key: the UMK, a space key, or a per-entry CEK     |
 | `wrap_key(wrapping_key, key) → String` / `unwrap_key(…)` | Wrap/unwrap a CEK or space key; failure means wrong key  |
 | `pkce_pair() → (verifier, challenge)`                   | S256 pair for an OAuth or password-reset hop             |
@@ -898,13 +899,59 @@ No matches means personal-only: one wrap, no `space_ids`. Local group tags no lo
 sharing — they are only filter inputs.
 
 **Space keys.** Each space has a keyring (`Vec<[u8; 32]>`, newest first) recovered from the
-server-side wrapped keyring, which is X25519-wrapped to each member's identity public key.
-New entries encrypt under `keyring[0]`. Removing a member (or a member leaving) makes the
-server clear every remaining member's wrapped keys; the owner's next reconcile sees members
-without keys, mints a new key, prepends it, and redistributes through
-`POST /spaces/{id}/keys`. Old entries stay readable because the older keys stay in the
-keyring. Revocation is best-effort: the removed member keeps whatever it already pulled and
-simply never receives the new key.
+server-side wrapped keyring, which is X25519-wrapped to a member's identity public key. New
+entries encrypt under `keyring[0]`.
+
+**Who hands a key over: any member holding it.** `reconcile_spaces` wraps the ring for every
+member who lacks one, whoever is running. It used to be the owner's job alone, and the cost
+was a blockage nobody could shorten: a member who joined while the owner's app was closed
+could neither read the space nor write to it until it opened. Nothing is given up, because
+every member already holds the key in memory and could pass it on by other means. Three
+pieces make it safe:
+
+- `SpaceOut.my_wrapped_by` says whose public key opens our wrap. Null means the owner, so
+  rows written before this keep working.
+- `spaces.key_fingerprint` is written by the owner alone, when it mints. A recipient checks
+  the newest key of a received ring against it (`crypto::space_key_fingerprint`) and refuses
+  on mismatch, because a *correctly wrapped wrong key* unwraps fine and then decrypts
+  nothing. A refusal emits `space:key-rejected` and is not retried - waiting cannot turn a
+  wrong key into the right one; the owner removing whoever sent it rekeys the space.
+- **Minting stays the owner's**, so exactly one account decides what the current key is. A
+  non-owner also sits out a pending rekey rather than handing over a ring about to be
+  replaced.
+
+**A new member usually has the key before they ask.** `attach_invite_key` wraps the ring for
+the invitee's identity key when the invite is sent and `PUT /invites/{id}/key` parks it on
+the invite; accepting moves it onto the membership. The invite route refuses an address with
+no account, so the invitee's key is registered by then. Best-effort: the invite is valid
+without it and the ordinary path still covers them.
+
+**Rekey.** A member being removed (or leaving) clears the other members' wraps and sets
+`spaces.rekey_requested_at`; the owner's next reconcile prepends a fresh key and
+redistributes. Older keys stay in the ring, so old entries stay readable. The *owner's* wrap
+is deliberately left alone - see bug #13. Revocation is best-effort: the removed member
+keeps whatever it already pulled and simply never receives the new key.
+
+**Sharing into a space with no key is queued, not refused.** `space_set_entry_shares`
+records the intent whichever way, `share_targets` drops a keyless space on the way out so
+nothing unreadable is pushed, and `flush_pending_shares` re-pushes those entries when
+`space:key-received` fires. The record in `id_map.json` *is* the queue, so it survives a
+restart and there is no second store to keep consistent. The UI shows it as a dimmed share
+chip and a "waiting" row in the share menus.
+
+**Three things reach the notification centre, not just a toast.** A toast fired while the
+window is hidden is a toast nobody saw, and all three of these happen precisely when the
+user is elsewhere.
+
+| Raised by | Kind | Row |
+|---|---|---|
+| `note_space_readable` | `SpaceActivity` | A space became readable, and how many held shares went out with the key. One row per space (`space-key:{id}`), so a later rekey cannot raise a second - a rekey is not the user gaining access. |
+| `note_comment` | `SpaceActivity` | Somebody commented on an entry *we wrote*, or named us. Keyed on the comment id so a reconnect replaying `space:comment` cannot report the same reply twice. |
+| `note_space_key_rejected` | `SyncWarning` | A keyring failed the fingerprint check. A warning because the space stays unreadable and nothing the user does in the app changes that. |
+
+`note_comment` is deliberately narrow and deliberately textless. Two other members talking
+on a third person's item is conversation we are not in, so it is skipped; and the decrypted
+body is left out because the notification store outlives the entry it points at.
 
 **Auto-copy.** Per space and per device (`space_autocopy:{space_id}` in `settings.json`,
 deliberately not synced). Only WebSocket-delivered space entries can trigger it — never

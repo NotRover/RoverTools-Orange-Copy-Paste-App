@@ -367,6 +367,21 @@ pub struct SpaceOut {
     /// so this is how a client recovers them after restart.
     #[serde(default)]
     pub my_wrapped_space_keys: Option<String>,
+    /// Which account wrapped `my_wrapped_space_keys`, and therefore whose public
+    /// key opens it. `None` means the owner did - the only possibility before any
+    /// member could hand a key over, so old rows keep working.
+    #[serde(default)]
+    pub my_wrapped_by: Option<String>,
+    /// Fingerprint of the space's newest key, written by the owner alone. What a
+    /// received keyring is checked against; `None` when the owner has not
+    /// published one yet, and then nothing can be verified.
+    #[serde(default)]
+    pub key_fingerprint: Option<String>,
+    /// Set when a departure means the owner owes the space a new key. This is the
+    /// rekey signal; it used to be "the server cleared every wrap", which also
+    /// destroyed the owner's own recovery copy.
+    #[serde(default)]
+    pub rekey_requested_at: Option<u64>,
     #[serde(default = "default_true")]
     pub share_history: bool,
 }
@@ -431,6 +446,10 @@ pub struct WrappedKeyringEntry {
 #[derive(Debug, Serialize)]
 pub struct DistributeKeysRequest {
     pub wrapped_keyrings: Vec<WrappedKeyringEntry>,
+    /// Fingerprint of the newest key in the rings being sent. The server accepts
+    /// it from the space owner only, since only the owner mints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_fingerprint: Option<String>,
 }
 
 // ── Addressed invites ───────────────────────────────────────────────────
@@ -446,6 +465,21 @@ pub struct InviteOut {
     pub status: String,
     pub created_at: u64,
     pub expires_at: u64,
+    /// The invitee's identity key, returned to the inviter only so it can wrap
+    /// the keyring for them up front. Not passed on to the frontend: nothing on
+    /// screen needs it, and key material stays in Rust.
+    #[serde(default, skip_serializing)]
+    pub invitee_identity_pubkey: Option<String>,
+    /// Whether a wrapped keyring is already attached to this invite.
+    #[serde(default, skip_serializing)]
+    pub has_space_key: bool,
+}
+
+/// The keyring wrapped for an invitee, attached to their pending invite so the
+/// key is there the moment they accept - with nobody else online.
+#[derive(Debug, Serialize)]
+pub struct AttachInviteKeyRequest {
+    pub wrapped_space_keys: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1142,7 +1176,28 @@ impl SyncHttpClient {
         .await
     }
 
-    /// Distribute per-member wrapped Space keyrings (owner action).
+    /// Attach a wrapped keyring to a pending invite we sent.
+    ///
+    /// Accepting the invite moves it onto the new membership, so a member can read
+    /// the space from the instant they join instead of waiting for a keyholder to
+    /// come online.
+    pub async fn attach_invite_key(
+        &self,
+        invite_id: &str,
+        wrapped_space_keys: String,
+    ) -> Result<(), String> {
+        self.get_ok("attach invite key", false, || {
+            Ok(self
+                .authed(Method::PUT, &format!("/api/v1/invites/{invite_id}/key"))?
+                .json(&AttachInviteKeyRequest {
+                    wrapped_space_keys: wrapped_space_keys.clone(),
+                }))
+        })
+        .await
+    }
+
+    /// Distribute wrapped Space keyrings to members who lack one. Any member
+    /// holding the ring may call this; only the owner may name a fingerprint.
     pub async fn distribute_space_keys(
         &self,
         space_id: &str,

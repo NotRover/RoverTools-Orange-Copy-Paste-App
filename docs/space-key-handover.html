@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Standalone copy of the "Space Key Handover" artifact, kept in the repo so the
+  page survives without the artifact host. Same body; this file adds only the
+  document wrapper, the CSS reset the host would have supplied, and the mermaid
+  loader. Published copy: claude.ai/code/artifact/5a1b4e25-fe9b-44c8-a886-1f81ac8bf96c
+-->
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  img, svg, video { display: block; max-width: 100%; }
+</style>
+</head>
+<body>
+<title>Space Key Handover</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    /* Cool graphite neutrals, biased a few degrees toward the accent's
+       complement so the orange reads as a decision rather than a default. */
+    --paper:      #F4F5F7;
+    --paper-2:    #FFFFFF;
+    --paper-3:    #E9EBEF;
+    --ink:        #141922;
+    --ink-2:      #3E4855;
+    --ink-3:      #6B7787;
+    --rule:       #D3D7DE;
+    --rule-hard:  #B6BCC7;
+
+    /* The app's own orange, deepened for contrast on paper. Reserved for the
+       "after" state and nothing else. */
+    --accent:     #C9591A;
+    --accent-dim: #F3E3D6;
+    --slate:      #556475;   /* waiting */
+    --slate-dim:  #E2E6EB;
+    --rust:       #9C3D2A;   /* refused / dead end */
+    --rust-dim:   #F2DED9;
+
+    /* Diagram plates commit to one dark ground in both themes: mermaid is
+       configured once per figure and cannot follow a theme swap. */
+    --plate:      #171C23;
+    --plate-2:    #1F262F;
+    --plate-rule: #333E4B;
+    --plate-ink:  #DEE3E9;
+    --plate-ink-2:#94A1AF;
+
+    --measure: 66ch;
+
+    --step--1: 0.813rem;
+    --step-0:  1rem;
+    --step-1:  1.2rem;
+    --step-2:  1.5rem;
+    --step-3:  2rem;
+    --step-4:  2.9rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #10141A;
+      --paper-2:    #171C23;
+      --paper-3:    #1E252E;
+      --ink:        #E7EBF0;
+      --ink-2:      #B3BDC9;
+      --ink-3:      #7D8896;
+      --rule:       #2A323C;
+      --rule-hard:  #3C4652;
+
+      --accent:     #F0873F;
+      --accent-dim: #33241A;
+      --slate:      #93A2B2;
+      --slate-dim:  #202832;
+      --rust:       #E07A62;
+      --rust-dim:   #2E1F1B;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #10141A;
+    --paper-2:    #171C23;
+    --paper-3:    #1E252E;
+    --ink:        #E7EBF0;
+    --ink-2:      #B3BDC9;
+    --ink-3:      #7D8896;
+    --rule:       #2A323C;
+    --rule-hard:  #3C4652;
+
+    --accent:     #F0873F;
+    --accent-dim: #33241A;
+    --slate:      #93A2B2;
+    --slate-dim:  #202832;
+    --rust:       #E07A62;
+    --rust-dim:   #2E1F1B;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(1.75rem, 4vw, 4rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.75rem, 5vw, 4.5rem);
+  }
+
+  /* ── type roles ─────────────────────────────────────────────── */
+
+  h1, h2, h3, .eyebrow, .lede, .rail-cap, th {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: var(--step-4);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.028em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: var(--step-2);
+    font-weight: 700;
+    letter-spacing: -0.018em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: var(--step-0);
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+
+  .eyebrow {
+    font-size: 0.688rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 30ch;
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: var(--step-1);
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+
+  /* Mono is not decoration here: it means "this string is literally what the
+     product shows", so quoted copy and identifiers share one face. */
+  code, .mono, .str {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+  }
+
+  code {
+    background: var(--paper-3);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.08em 0.34em;
+  }
+
+  .str { color: var(--ink-2); }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ── header ─────────────────────────────────────────────────── */
+
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .titleblock {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(1.25rem, 4vw, 3.5rem);
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2.25rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .meta li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem 0;
+  }
+
+  .meta dt, .meta .k {
+    font-family: Archivo, sans-serif;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .meta .v {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  /* ── section shell ──────────────────────────────────────────── */
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .sechead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: var(--measure);
+  }
+
+  /* ── hero rail ──────────────────────────────────────────────── */
+
+  .rails {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .rail {
+    background: var(--paper-2);
+    padding: 1.4rem clamp(1rem, 2.5vw, 1.6rem) 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .rail-cap {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.688rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .rail-cap .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    flex: none;
+  }
+  .rail--was .dot { background: var(--rust); }
+  .rail--now .dot { background: var(--accent); }
+  .rail--was .rail-cap { color: var(--rust); }
+  .rail--now .rail-cap { color: var(--accent); }
+
+  .rail svg { display: block; width: 100%; height: auto; }
+
+  .rail p {
+    margin: 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: none;
+  }
+
+  /* ── ledger ─────────────────────────────────────────────────── */
+
+  .ledger {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--rule-hard);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.7fr);
+    gap: 0 clamp(0.9rem, 2.5vw, 2rem);
+    padding: 1.05rem 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: start;
+  }
+
+  .row > .surface {
+    font-family: Archivo, sans-serif;
+    font-weight: 600;
+    font-size: var(--step--1);
+    letter-spacing: -0.005em;
+    line-height: 1.4;
+    color: var(--ink);
+    padding-top: 0.1rem;
+  }
+
+  .cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: var(--step--1);
+    line-height: 1.5;
+  }
+
+  .cell .tag {
+    font-family: Archivo, sans-serif;
+    font-size: 0.594rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .cell--was { color: var(--ink-3); }
+  .cell--was .tag { color: var(--rust); }
+  .cell--now { color: var(--ink); }
+  .cell--now .tag { color: var(--accent); }
+
+  .rowhead {
+    display: none;
+  }
+
+  @media (min-width: 720px) {
+    .rowhead {
+      display: grid;
+      grid-template-columns: minmax(140px, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.7fr);
+      gap: 0 clamp(0.9rem, 2.5vw, 2rem);
+      padding-bottom: 0.5rem;
+    }
+    .rowhead span {
+      font-family: Archivo, sans-serif;
+      font-size: 0.594rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .cell .tag { display: none; }
+  }
+
+  @media (max-width: 719px) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 0.7rem;
+      padding: 1.15rem 0;
+    }
+  }
+
+  /* ── figures / plates ───────────────────────────────────────── */
+
+  figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .plate {
+    background: var(--plate);
+    border: 1px solid var(--plate-rule);
+    padding: clamp(0.9rem, 2.5vw, 1.6rem);
+    overflow-x: auto;
+  }
+
+  .plate .mermaid {
+    margin: 0;
+    min-width: 520px;
+  }
+
+  .plate--svg { color: var(--plate-ink); }
+  .plate--svg svg { display: block; width: 100%; height: auto; min-width: 560px; }
+
+  figcaption {
+    padding: 0.7rem 0 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: var(--measure);
+  }
+
+  figcaption b {
+    font-family: Archivo, sans-serif;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .figpair {
+    display: flex;
+    flex-direction: column;
+    gap: 2.25rem;
+  }
+
+  /* ── notes ──────────────────────────────────────────────────── */
+
+  .notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .note {
+    background: var(--paper-2);
+    padding: 1.15rem 1.3rem 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .note p {
+    margin: 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: none;
+  }
+
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .chk {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    padding: 0.28rem 0.6rem;
+    border: 1px solid var(--rule-hard);
+    background: var(--paper-2);
+  }
+
+  .chk::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    transform: translateY(-1px);
+    flex: none;
+  }
+  .chk--pass::before { background: var(--accent); }
+  .chk--open::before { background: transparent; border: 1px solid var(--slate); }
+  .chk--open { color: var(--ink-3); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.4rem;
+    font-size: var(--step--1);
+    color: var(--ink-3);
+    max-width: var(--measure);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="titleblock">
+      <div style="display:flex;flex-direction:column;gap:0.9rem;">
+        <span class="eyebrow">Orange Copy Paste &middot; Spaces</span>
+        <h1>Space Key<br>Handover</h1>
+      </div>
+      <p class="lede">
+        A member used to sit blocked until one specific person opened their app.
+        Now the key usually beats them to the space, and sharing never waits on it.
+      </p>
+    </div>
+
+    <ul class="meta">
+      <li><span class="k">Phases shipped</span><span class="v">P0 &ndash; P3</span></li>
+      <li><span class="k">Migration</span><span class="v">0017 &middot; unapplied</span></li>
+      <li><span class="k">Repos touched</span><span class="v">client + backend</span></li>
+      <li><span class="k">Defects closed</span><span class="v">#13, #14</span></li>
+      <li><span class="k">Committed</span><span class="v">no</span></li>
+    </ul>
+  </header>
+
+  <!-- ══ HERO: the share gesture, then and now ══════════════════ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The change, in one gesture</span>
+      <h2>Sharing into a space you cannot read yet</h2>
+      <p>
+        This is the whole thing. Before, that gesture had nowhere to go: the row
+        was greyed out and the command refused. Now the intent is recorded, the
+        entry is held, and it goes out by itself when the key lands.
+      </p>
+    </div>
+
+    <div class="rails">
+      <div class="rail rail--was">
+        <span class="rail-cap"><span class="dot"></span>Was &middot; dead end</span>
+        <svg viewBox="0 0 340 96" role="img" aria-label="Before: the share control had two states, shared when a key was present and blocked when it was not, with no path out of blocked.">
+          <defs>
+            <marker id="ar-was" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+          <g stroke="currentColor" fill="none" stroke-width="1.25" color="var(--ink-3)">
+            <rect x="1" y="6" width="104" height="30" rx="2"></rect>
+            <rect x="1" y="58" width="104" height="30" rx="2"></rect>
+            <line x1="105" y1="21" x2="196" y2="21" marker-end="url(#ar-was)"></line>
+          </g>
+          <g fill="none" stroke="var(--rust)" stroke-width="1.25">
+            <rect x="198" y="6" width="112" height="30" rx="2"></rect>
+            <rect x="198" y="58" width="112" height="30" rx="2"></rect>
+            <path d="M254 88 a 26 22 0 1 0 0 -30" marker-end="url(#ar-rust)"></path>
+          </g>
+          <defs>
+            <marker id="ar-rust" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--rust)"></path>
+            </marker>
+          </defs>
+          <g font-family="JetBrains Mono, monospace" font-size="10.5">
+            <text x="53" y="25" text-anchor="middle" fill="var(--ink-2)">key present</text>
+            <text x="53" y="77" text-anchor="middle" fill="var(--ink-2)">no key</text>
+            <text x="254" y="25" text-anchor="middle" fill="var(--ink)">Delivered</text>
+            <text x="254" y="77" text-anchor="middle" fill="var(--rust)">Blocked</text>
+            <text x="150" y="16" text-anchor="middle" fill="var(--ink-3)" font-size="9.5">share</text>
+            <text x="300" y="80" text-anchor="start" fill="var(--rust)" font-size="9.5">click</text>
+            <text x="300" y="91" text-anchor="start" fill="var(--rust)" font-size="9.5">ignored</text>
+          </g>
+        </svg>
+        <p>
+          Two states with no edge between them. The only way out was to come back
+          later and share again by hand &mdash; if you remembered.
+        </p>
+      </div>
+
+      <div class="rail rail--now">
+        <span class="rail-cap"><span class="dot"></span>Now &middot; one path through</span>
+        <svg viewBox="0 0 340 96" role="img" aria-label="After: a share with no key enters a queued state, which becomes delivered on its own when the key arrives, and survives a restart.">
+          <defs>
+            <marker id="ar-now" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+            </marker>
+            <marker id="ar-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--slate)"></path>
+            </marker>
+          </defs>
+          <g fill="none" stroke="var(--slate)" stroke-width="1.25">
+            <rect x="1" y="58" width="104" height="30" rx="2"></rect>
+            <line x1="105" y1="73" x2="196" y2="73" marker-end="url(#ar-slate)"></line>
+            <path d="M56 58 a 30 20 0 1 1 -46 0" marker-end="url(#ar-slate)"></path>
+          </g>
+          <g fill="none" stroke="var(--accent)" stroke-width="1.4">
+            <rect x="198" y="58" width="112" height="30" rx="2"></rect>
+            <rect x="198" y="6" width="112" height="30" rx="2"></rect>
+            <line x1="254" y1="58" x2="254" y2="40" marker-end="url(#ar-now)"></line>
+          </g>
+          <g stroke="var(--ink-3)" fill="none" stroke-width="1.25">
+            <rect x="1" y="6" width="104" height="30" rx="2"></rect>
+            <line x1="105" y1="21" x2="196" y2="21" marker-end="url(#ar-was)"></line>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="10.5">
+            <text x="53" y="25" text-anchor="middle" fill="var(--ink-2)">key present</text>
+            <text x="53" y="77" text-anchor="middle" fill="var(--ink-2)">no key</text>
+            <text x="254" y="25" text-anchor="middle" fill="var(--accent)">Delivered</text>
+            <text x="254" y="77" text-anchor="middle" fill="var(--slate)">Queued</text>
+            <text x="150" y="16" text-anchor="middle" fill="var(--ink-3)" font-size="9.5">share</text>
+            <text x="150" y="68" text-anchor="middle" fill="var(--slate)" font-size="9.5">share</text>
+            <text x="262" y="51" text-anchor="start" fill="var(--accent)" font-size="9.5">key arrives</text>
+            <text x="33" y="36" text-anchor="middle" fill="var(--slate)" font-size="9.5">restart</text>
+          </g>
+        </svg>
+        <p>
+          The queue is the share record already on disk (<code>id_map.json</code>),
+          so a restart changes nothing. The push path still drops a keyless space,
+          so nothing unreadable ever reaches the server.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHO CAN HAND A KEY OVER ════════════════════════════════ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The mechanism underneath</span>
+      <h2>Where a key can come from</h2>
+      <p>
+        The blocked state did not need better copy, it needed to become rare. A
+        Space Key had exactly one source; it now has three, and two of them do not
+        need anybody to be at their desk.
+      </p>
+    </div>
+
+    <figure>
+      <div class="plate plate--svg">
+        <svg viewBox="0 0 760 214" role="img" aria-label="Before, a new member's Space Key could only come from the owner's running app. After, it can come pre-wrapped on the invite, from any online member holding the key, or from the owner when a key must be minted.">
+          <defs>
+            <marker id="p-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#94A1AF"></path>
+            </marker>
+            <marker id="p-arrow-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#F0873F"></path>
+            </marker>
+          </defs>
+
+          <!-- panel divider -->
+          <line x1="374" y1="4" x2="374" y2="210" stroke="#333E4B" stroke-width="1" stroke-dasharray="3 4"></line>
+
+          <g font-family="Archivo, sans-serif" font-size="10.5" font-weight="700" letter-spacing="1.6">
+            <text x="8" y="16" fill="#94A1AF">BEFORE &mdash; ONE SOURCE</text>
+            <text x="396" y="16" fill="#F0873F">AFTER &mdash; THREE</text>
+          </g>
+
+          <!-- ── before ── -->
+          <g fill="none" stroke="#4A5666" stroke-width="1.25">
+            <rect x="8" y="86" width="158" height="38" rx="2"></rect>
+            <rect x="250" y="86" width="112" height="38" rx="2"></rect>
+            <line x1="166" y1="105" x2="244" y2="105" marker-end="url(#p-arrow)" stroke="#94A1AF"></line>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="11.5">
+            <text x="87" y="109" text-anchor="middle" fill="#DEE3E9">Owner's app</text>
+            <text x="306" y="109" text-anchor="middle" fill="#DEE3E9">New member</text>
+            <text x="205" y="99" text-anchor="middle" fill="#94A1AF" font-size="9.5">wraps</text>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="10" fill="#94A1AF">
+            <text x="8" y="152">Closed app, no key. Could be</text>
+            <text x="8" y="166">minutes, could be tomorrow.</text>
+            <text x="8" y="186" fill="#E07A62">Nobody else can help.</text>
+          </g>
+
+          <!-- ── after ── -->
+          <g fill="none" stroke="#4A5666" stroke-width="1.25">
+            <rect x="396" y="34" width="182" height="34" rx="2"></rect>
+            <rect x="396" y="88" width="182" height="34" rx="2"></rect>
+            <rect x="396" y="142" width="182" height="34" rx="2"></rect>
+          </g>
+          <g fill="none" stroke="#94A1AF" stroke-width="1.25">
+            <path d="M578 51 C 612 51, 616 96, 646 99" marker-end="url(#p-arrow)"></path>
+            <path d="M578 105 L 646 105" marker-end="url(#p-arrow)"></path>
+            <path d="M578 159 C 612 159, 616 114, 646 111" marker-end="url(#p-arrow)"></path>
+          </g>
+          <rect x="648" y="86" width="104" height="38" rx="2" fill="none" stroke="#F0873F" stroke-width="1.4"></rect>
+          <g font-family="JetBrains Mono, monospace" font-size="11.5" fill="#DEE3E9">
+            <text x="410" y="55">Invite, pre-wrapped</text>
+            <text x="410" y="109">Any online keyholder</text>
+            <text x="410" y="163">Owner's app</text>
+            <text x="700" y="103" text-anchor="middle" fill="#F0873F">New</text>
+            <text x="700" y="116" text-anchor="middle" fill="#F0873F">member</text>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#94A1AF">
+            <text x="594" y="42">on accept</text>
+            <text x="590" y="98">seconds</text>
+            <text x="594" y="176">mint / rekey only</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        <b>Minting stays the owner's</b> &mdash; exactly one account decides what the
+        current key is. Handing an existing key over does not, because every member
+        already holds it in memory and could pass it on by other means; owner-only
+        never stopped anyone who meant to leak, it only stopped the ones who did not.
+        A recipient checks any ring it is handed against the fingerprint the owner
+        published, and refuses on mismatch.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ══ LEDGER ═════════════════════════════════════════════════ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Surface by surface</span>
+      <h2>What a person actually sees</h2>
+      <p>
+        Ten places changed. The rule behind all of them: a queued share must
+        never look like a delivered one, nothing on screen should be dead, and
+        anything that happens while you are away should still be there when you
+        get back.
+      </p>
+    </div>
+
+    <div class="ledger">
+      <div class="rowhead">
+        <span>Surface</span><span>Was</span><span>Now</span>
+      </div>
+
+      <div class="row">
+        <div class="surface">Share row, card menu</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Disabled. Tooltip read <span class="str">"Waiting for this space's key"</span> and the click did nothing.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Clickable, with a small <span class="str">waiting</span> tag. Tooltip: <span class="str">"Your choice is kept and sent when it arrives."</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Share row, bulk bar</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Same disabled row, so a multi-select silently skipped that space.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Same as the card menu. A bulk share into a waiting space queues every item.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Entry's share chip</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Accent icon, <span class="str">"Shared to A, B"</span>. Nothing distinguished a share that had not gone out.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Dimmed grey while any target is waiting: <span class="str">"Shared to A. Still waiting for the key to B."</span> Turns solid on its own.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">"Share new items out"</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Disabled toggle &mdash; <span class="str">"Available once this space's key arrives."</span>
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          On by choice. <span class="str">"New items that match the rules below are held until this space's key arrives, then sent."</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Space panel notice</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          <span class="str">"Until then you cannot read this space or share anything into it."</span>
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          <span class="str">"The feed stays empty until then. You can still choose to share items here and they go out as soon as the key arrives."</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Who the notice names</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Always the owner's app, because it was the only thing that could help.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Whichever member is online <em>and</em> holds the key. Falls back to the owner only when nobody does.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Notification centre &middot; key arrived</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Nothing. The only sign was the waiting notice quietly disappearing, which you saw only if you happened to be on that screen.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          A durable row: <span class="str">"Design is ready"</span> &mdash; <span class="str">"You can read it now. 3 items you shared there have gone out."</span> One per space, so a later rekey cannot raise a second.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Notification centre &middot; comments</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Silent. A comment filled in an <em>already open</em> thread panel and nothing else. A reply to your own item reached you only if you went looking.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          <span class="str">"Salman commented on your item in Design"</span>, or <span class="str">"mentioned you in Design"</span>. Only on entries you wrote, or when you are named &mdash; two other people talking on a third person's item is not your conversation.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Notification centre &middot; refused key</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Could not happen: only the owner could send a key, so there was nothing to verify against.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          A warning that stays: <span class="str">"Refused the key sent for Design"</span>, naming who sent it and saying the space stays unreadable until the owner sends a new one.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Toasts</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          <span class="str">"Shared in Design"</span> &mdash; even when it had not gone anywhere. Nothing on arrival.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          <span class="str">"Will go to Design when its key arrives"</span>, then <span class="str">"Design is ready"</span>. A mismatched key gets its own error.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SEQUENCES ══════════════════════════════════════════════ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Same two minutes, both ways</span>
+      <h2>Joining, then trying to share</h2>
+      <p>
+        Read the two together. The before diagram has two failure shapes in it: the
+        member is stuck, and the only actor who can unstick them is one specific
+        person's running process.
+      </p>
+    </div>
+
+    <div class="figpair">
+      <figure>
+        <div class="plate">
+          <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+sequenceDiagram
+    actor M as New member
+    participant App as Their app
+    participant API as Backend
+    participant O as Owner's app
+
+    M->>App: Join space with code
+    App->>API: POST /spaces/join
+    API-->>App: joined, no key
+    Note over App: feed empty<br/>share rows DISABLED
+
+    M->>App: Share an item here
+    App--xM: refused, "has not handed you its key yet"
+
+    rect rgb(58, 32, 30)
+    Note over O: owner's app is closed<br/>nothing can progress
+    end
+
+    O->>API: app opens, reconcile
+    API-->>O: member has_space_key = false
+    O->>API: POST /spaces/{id}/keys
+    API-->>App: space:rekey
+    Note over App: key adopted, feed fills
+    M->>App: Share the item again, by hand
+          </pre>
+        </div>
+        <figcaption>
+          <b>Before.</b> The refusal is honest, and that is the problem: it is a
+          correct answer to a question the user cannot do anything about. The last
+          line is the quiet cost &mdash; the share is only re-attempted if they
+          remember to come back.
+        </figcaption>
+      </figure>
+
+      <figure>
+        <div class="plate">
+          <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+sequenceDiagram
+    actor M as New member
+    participant App as Their app
+    participant API as Backend
+    participant K as Any online keyholder
+
+    alt Invited by email
+        Note over API: the invite already carries the ring,<br/>wrapped for this member
+        M->>App: Accept invite
+        App->>API: POST /invites/{id}/accept
+        API->>API: move the wrap onto the membership
+        API-->>App: joined, key present
+        Note over App: readable at once,<br/>nobody had to be online
+    else Joined with a code
+        M->>App: Join space with code
+        App->>API: POST /spaces/join
+        API-->>App: joined, no key yet
+        Note over App: feed empty, but<br/>share rows STAY CLICKABLE
+
+        M->>App: Share an item here
+        App->>App: record the intent in id_map.json
+        App-->>M: "Will go to Design when its key arrives"
+        Note over App: chip dimmed, row says waiting
+
+        API-->>K: space:membership_changed
+        K->>API: GET /spaces, this member lacks a key
+        K->>API: POST /spaces/{id}/keys
+        API-->>App: space:rekey
+        App->>App: unwrap, check key_fingerprint
+        Note over App: mismatch: refuse and say so
+        App-->>M: "Design is ready"
+        App->>API: flush, push the held item
+        Note over App: chip turns solid on its own
+    end
+          </pre>
+        </div>
+        <figcaption>
+          <b>After.</b> The invited path never reaches a waiting state at all. The
+          code path still can, but the gesture is taken, the flush is automatic, and
+          the actor who unblocks it is whoever happens to be running.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ══ WHAT DID NOT CHANGE ════════════════════════════════════ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Deliberately unchanged</span>
+      <h2>What this does not fix</h2>
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>Notifications are in-app, not desktop</h3>
+        <p>
+          All three new rows go to the notification centre, which is durable and
+          survives a restart. None of them raise an OS-level notification &mdash;
+          that is a separate decision and the app does not do it for anything yet.
+        </p>
+      </div>
+      <div class="note">
+        <h3>A comment notification carries no text</h3>
+        <p>
+          It says who and where, which is enough to make you open the thread. The
+          decrypted body is deliberately left out: the notification store outlives
+          the entry it points at, and space content should not.
+        </p>
+      </div>
+      <div class="note">
+        <h3>The feed is still empty while you wait</h3>
+        <p>
+          Content is encrypted under the Space Key, so there is genuinely nothing to
+          render. No amount of UI makes that readable, and pretending otherwise
+          would be the worse failure.
+        </p>
+      </div>
+      <div class="note">
+        <h3>A leaked space code still admits a stranger</h3>
+        <p>
+          One multi-use code per space, valid 72 hours. Per-invite tokens and
+          single-use codes were considered and dropped: they close a real hole at the
+          cost of a second code format, a second link shape, and expiry copy.
+        </p>
+      </div>
+      <div class="note">
+        <h3>A bad key is refused, not retried</h3>
+        <p>
+          A correctly wrapped <em>wrong</em> key unwraps fine and then decrypts
+          nothing. Waiting cannot turn it into the right one, so the app says so
+          instead of spinning. The owner removing whoever sent it rekeys the space.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Still passive-server end-to-end</h3>
+        <p>
+          A wrap is opened against a public key the server returned, unpinned. The
+          fingerprint check defends against another member, not against the server
+          that also serves the fingerprint.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ VERIFICATION ═══════════════════════════════════════════ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Where it stands</span>
+      <h2>Verified, and not</h2>
+      <p>
+        Worth being blunt: none of the flows above have run against a live backend.
+        Migration <code>0017</code> is unapplied, so the queued-share flush, the
+        invite pre-wrap, and the fingerprint refusal are confirmed only by
+        compilation and by reading.
+      </p>
+    </div>
+
+    <ul class="checks">
+      <li class="chk chk--pass">cargo check</li>
+      <li class="chk chk--pass">cargo test &middot; 58 passed</li>
+      <li class="chk chk--pass">bun run build</li>
+      <li class="chk chk--pass">ruff</li>
+      <li class="chk chk--pass">ty</li>
+      <li class="chk chk--open">pytest &middot; CI only</li>
+      <li class="chk chk--open">live sync &middot; needs deploy + 2 accounts</li>
+      <li class="chk chk--open">0017 &middot; applies on next deploy</li>
+    </ul>
+  </section>
+
+  <footer>
+    Decision record and dropped alternatives live in <code>docs/SPACE-ACCESS.md</code>.
+    The two defects closed on the way are <code>BUGFIX_HISTORY.md</code> #13, a member
+    leaving could make a space unreadable for everyone, and #14, a valid token was
+    enough to take over an account's future shared content.
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+</script>
+</body>
+</html>

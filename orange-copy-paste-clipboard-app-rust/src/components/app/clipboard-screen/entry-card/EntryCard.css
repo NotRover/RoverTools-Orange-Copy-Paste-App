@@ -663,6 +663,14 @@ button.card-type-chip.open .card-type-chevron {
   opacity: 0.8;
 }
 
+/* Recorded as shared, but the space's key has not arrived, so it has not gone
+   out yet. Dimmed and drained of the accent: the difference from a delivered
+   share should read without a tooltip. */
+.card-share-icon--waiting {
+  color: var(--text-dim);
+  opacity: 0.55;
+}
+
 .card-share-count {
   font-size: 11px;
   font-weight: 700;

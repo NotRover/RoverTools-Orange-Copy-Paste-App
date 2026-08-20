@@ -1100,21 +1100,11 @@ pub fn space_set_entry_shares(
         return Err(format!("unknown entry type: {entry_type}"));
     }
     let sync = sync_client(&state)?;
-    // Refuse rather than half-do it. The push path drops a space it holds no key
-    // for - encrypting under a key nobody has would produce an entry nobody can
-    // read - so going ahead here records a share locally that never reaches the
-    // space, and the user is told it worked.
-    if let Some(blocked) = space_ids.iter().find(|id| !sync.has_space_key(id)) {
-        let name = sync
-            .spaces()
-            .into_iter()
-            .find(|s| &s.id == blocked)
-            .map(|s| s.name)
-            .unwrap_or_else(|| "That space".to_string());
-        return Err(format!(
-            "{name} has not handed you its key yet, so nothing can be shared there.              It arrives on its own once the owner's app is running."
-        ));
-    }
+    // A space whose key has not arrived yet is *queued*, not refused. The record
+    // written below is the queue: `share_targets` drops a keyless space on the way
+    // out, so nothing unreadable is ever pushed, and `flush_pending_shares` sends
+    // the entry again the moment the key lands. Refusing here (which is what this
+    // did) stopped the user for a wait they cannot shorten.
     let key = format!("{entry_type}:{entry_id}");
     // Spaces this gesture takes the entry out of. Each one keeps a placeholder,
     // so the feed there says the item was pulled back rather than losing the
@@ -1427,10 +1417,16 @@ pub async fn sync_send_invite(
     email: String,
     state: State<'_, AppState>,
 ) -> Result<crate::sync::client::InviteOut, String> {
-    let (_sync, http) = sync_http(&state)?;
-    http.send_space_invite(&space_id, &email)
+    let (sync, http) = sync_http(&state)?;
+    let invite = http
+        .send_space_invite(&space_id, &email)
         .await
-        .map_err(invite_refusal)
+        .map_err(invite_refusal)?;
+    // Hand the key over now rather than when they join: the invitee already has
+    // an account, so their identity key is registered and the wrap can ride along
+    // with the invite. Failures here are silent by design - see attach_invite_key.
+    sync.attach_invite_key(&invite).await;
+    Ok(invite)
 }
 
 /// Say why an invite was refused, in words the owner can act on.
