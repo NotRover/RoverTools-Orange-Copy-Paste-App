@@ -238,6 +238,69 @@ Use live code first; docs are context and may be stale — confirm behavior in c
 - Root `docs/ARCHITECTURE.md` — shared/workspace-level context. Read selectively; if it conflicts with code, trust the code.
 - Root `docs/RELEASING.md` — the release pipeline: setup, channels, safety rails, smoke test. Read before touching `.github/workflows/release.yml`.
 - Root `docs/PERMISSIONS.md` — who can do what to an entry (yours vs another member's) and inside a space, with where each rule is enforced. Read before adding any action to a card menu, bulk bar, or space route; add the new action to its table.
+- Root `docs/_doc-template.html` — the house style for a rendered walkthrough. See Visual Docs below.
+
+## Visual Docs
+
+Some things do not land as markdown: a before/after UX change, a flow whose point is the
+*order* of events, a mechanism where the interesting part is what a person sees at each
+step. Those get a rendered HTML page with real diagrams. Prose docs stay markdown — this is
+for explaining a change to a human, not for the durable spec.
+
+**Start from the template, never from scratch.** `docs/_doc-template.html` carries the
+stylesheet, the font links, the mermaid init line, and a commented skeleton of every block.
+Copy it, replace the body, leave the `<style>` alone. Reference implementation:
+`docs/space-key-handover.html`.
+
+**The token set.** Cool graphite neutrals biased toward the accent's complement, so the
+app's orange reads as a decision. Never write a literal hex in the body, and never define a
+colour *only* inside a media query or `[data-theme]` block — a page that does renders one
+theme's text on the other theme's ground.
+
+| Role | Tokens |
+|---|---|
+| Ground / ink / rules | `--paper` `--paper-2` `--paper-3` · `--ink` `--ink-2` `--ink-3` · `--rule` `--rule-hard` |
+| States | `--accent` (the app's orange, deepened — reserved for the *after* state) · `--slate` (waiting) · `--rust` (refused, dead end), each with a `-dim` fill |
+| Diagram plates | `--plate` `--plate-2` `--plate-rule` `--plate-ink` `--plate-ink-2` — **fixed dark in both themes** |
+| Measure / scale | `--measure: 66ch` · `--step--1` through `--step-4` |
+
+Full light palette on bare `:root`; the same tokens redefined under both
+`@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }` and
+`:root[data-theme="dark"]`, so an explicit choice wins in either direction and the
+un-stamped "system" state still resolves.
+
+**Three type roles, and mono is load-bearing.** **Archivo** 500-800 for headings, eyebrows
+and labels; **Source Serif 4** for prose; **JetBrains Mono** for identifiers *and* for
+literal product strings. Mono means "this is what the product actually shows" — that is
+information, not emphasis. Never set prose in it. Fonts come from
+`https://fonts.googleapis.com`, the only font host an Artifact's CSP admits.
+
+**Diagram plates are fixed dark on purpose.** Mermaid takes one theme config per figure and
+cannot follow a theme swap, so a plate that tried to be light-aware would be unreadable in
+one of the two. Every mermaid block opens with this line verbatim, first line inside the
+`<pre class="mermaid">`, no blank line before it:
+
+```
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+```
+
+One figure, one claim. The claim goes in the `figcaption`, never inside the drawing.
+
+**The structural blocks, and what each one is for.** Structure encodes something true or it
+does not appear.
+
+- `.rails` — two panels, was and now, when one mechanism is the whole point of the page.
+- `.ledger` — `surface | cell--was | cell--now`. The only shape for a per-surface
+  comparison; a numbered list would imply an order that is not there.
+- `.plate` — a diagram on the dark ground, mermaid or hand-authored SVG.
+- `.notes` — short honest limits. **Not optional:** a doc that only lists wins is a pitch,
+  not a record.
+- `.chk--pass` / `.chk--open` — verification status. Never mark passed what was not run.
+
+**Two ways to ship the same file.** As an Artifact, publish it as-is: the host supplies the
+document wrapper and renders mermaid natively. As a repo file in `docs/`, add the doctype
+wrapper, a four-rule CSS reset, and the mermaid ESM loader from jsDelivr before `</body>`.
+Keep both copies in step when a page is published and committed.
 
 ## Token-Saving
 

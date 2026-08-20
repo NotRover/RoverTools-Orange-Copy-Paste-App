@@ -1,0 +1,660 @@
+<title>Page Name Here</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    /* Cool graphite neutrals, biased a few degrees toward the accent's
+       complement so the orange reads as a decision rather than a default. */
+    --paper:      #F4F5F7;
+    --paper-2:    #FFFFFF;
+    --paper-3:    #E9EBEF;
+    --ink:        #141922;
+    --ink-2:      #3E4855;
+    --ink-3:      #6B7787;
+    --rule:       #D3D7DE;
+    --rule-hard:  #B6BCC7;
+
+    /* The app's own orange, deepened for contrast on paper. Reserved for the
+       "after" state and nothing else. */
+    --accent:     #C9591A;
+    --accent-dim: #F3E3D6;
+    --slate:      #556475;   /* waiting */
+    --slate-dim:  #E2E6EB;
+    --rust:       #9C3D2A;   /* refused / dead end */
+    --rust-dim:   #F2DED9;
+
+    /* Diagram plates commit to one dark ground in both themes: mermaid is
+       configured once per figure and cannot follow a theme swap. */
+    --plate:      #171C23;
+    --plate-2:    #1F262F;
+    --plate-rule: #333E4B;
+    --plate-ink:  #DEE3E9;
+    --plate-ink-2:#94A1AF;
+
+    --measure: 66ch;
+
+    --step--1: 0.813rem;
+    --step-0:  1rem;
+    --step-1:  1.2rem;
+    --step-2:  1.5rem;
+    --step-3:  2rem;
+    --step-4:  2.9rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #10141A;
+      --paper-2:    #171C23;
+      --paper-3:    #1E252E;
+      --ink:        #E7EBF0;
+      --ink-2:      #B3BDC9;
+      --ink-3:      #7D8896;
+      --rule:       #2A323C;
+      --rule-hard:  #3C4652;
+
+      --accent:     #F0873F;
+      --accent-dim: #33241A;
+      --slate:      #93A2B2;
+      --slate-dim:  #202832;
+      --rust:       #E07A62;
+      --rust-dim:   #2E1F1B;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #10141A;
+    --paper-2:    #171C23;
+    --paper-3:    #1E252E;
+    --ink:        #E7EBF0;
+    --ink-2:      #B3BDC9;
+    --ink-3:      #7D8896;
+    --rule:       #2A323C;
+    --rule-hard:  #3C4652;
+
+    --accent:     #F0873F;
+    --accent-dim: #33241A;
+    --slate:      #93A2B2;
+    --slate-dim:  #202832;
+    --rust:       #E07A62;
+    --rust-dim:   #2E1F1B;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(1.75rem, 4vw, 4rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.75rem, 5vw, 4.5rem);
+  }
+
+  /* ── type roles ─────────────────────────────────────────────── */
+
+  h1, h2, h3, .eyebrow, .lede, .rail-cap, th {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: var(--step-4);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.028em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: var(--step-2);
+    font-weight: 700;
+    letter-spacing: -0.018em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: var(--step-0);
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+
+  .eyebrow {
+    font-size: 0.688rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 30ch;
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: var(--step-1);
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+
+  /* Mono is not decoration here: it means "this string is literally what the
+     product shows", so quoted copy and identifiers share one face. */
+  code, .mono, .str {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+  }
+
+  code {
+    background: var(--paper-3);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.08em 0.34em;
+  }
+
+  .str { color: var(--ink-2); }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ── header ─────────────────────────────────────────────────── */
+
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .titleblock {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(1.25rem, 4vw, 3.5rem);
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2.25rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .meta li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem 0;
+  }
+
+  .meta dt, .meta .k {
+    font-family: Archivo, sans-serif;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .meta .v {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  /* ── section shell ──────────────────────────────────────────── */
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .sechead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: var(--measure);
+  }
+
+  /* ── hero rail ──────────────────────────────────────────────── */
+
+  .rails {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .rail {
+    background: var(--paper-2);
+    padding: 1.4rem clamp(1rem, 2.5vw, 1.6rem) 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .rail-cap {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.688rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .rail-cap .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    flex: none;
+  }
+  .rail--was .dot { background: var(--rust); }
+  .rail--now .dot { background: var(--accent); }
+  .rail--was .rail-cap { color: var(--rust); }
+  .rail--now .rail-cap { color: var(--accent); }
+
+  .rail svg { display: block; width: 100%; height: auto; }
+
+  .rail p {
+    margin: 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: none;
+  }
+
+  /* ── ledger ─────────────────────────────────────────────────── */
+
+  .ledger {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--rule-hard);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.7fr);
+    gap: 0 clamp(0.9rem, 2.5vw, 2rem);
+    padding: 1.05rem 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: start;
+  }
+
+  .row > .surface {
+    font-family: Archivo, sans-serif;
+    font-weight: 600;
+    font-size: var(--step--1);
+    letter-spacing: -0.005em;
+    line-height: 1.4;
+    color: var(--ink);
+    padding-top: 0.1rem;
+  }
+
+  .cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: var(--step--1);
+    line-height: 1.5;
+  }
+
+  .cell .tag {
+    font-family: Archivo, sans-serif;
+    font-size: 0.594rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .cell--was { color: var(--ink-3); }
+  .cell--was .tag { color: var(--rust); }
+  .cell--now { color: var(--ink); }
+  .cell--now .tag { color: var(--accent); }
+
+  .rowhead {
+    display: none;
+  }
+
+  @media (min-width: 720px) {
+    .rowhead {
+      display: grid;
+      grid-template-columns: minmax(140px, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.7fr);
+      gap: 0 clamp(0.9rem, 2.5vw, 2rem);
+      padding-bottom: 0.5rem;
+    }
+    .rowhead span {
+      font-family: Archivo, sans-serif;
+      font-size: 0.594rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .cell .tag { display: none; }
+  }
+
+  @media (max-width: 719px) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 0.7rem;
+      padding: 1.15rem 0;
+    }
+  }
+
+  /* ── figures / plates ───────────────────────────────────────── */
+
+  figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .plate {
+    background: var(--plate);
+    border: 1px solid var(--plate-rule);
+    padding: clamp(0.9rem, 2.5vw, 1.6rem);
+    overflow-x: auto;
+  }
+
+  .plate .mermaid {
+    margin: 0;
+    min-width: 520px;
+  }
+
+  .plate--svg { color: var(--plate-ink); }
+  .plate--svg svg { display: block; width: 100%; height: auto; min-width: 560px; }
+
+  figcaption {
+    padding: 0.7rem 0 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: var(--measure);
+  }
+
+  figcaption b {
+    font-family: Archivo, sans-serif;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .figpair {
+    display: flex;
+    flex-direction: column;
+    gap: 2.25rem;
+  }
+
+  /* ── notes ──────────────────────────────────────────────────── */
+
+  .notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .note {
+    background: var(--paper-2);
+    padding: 1.15rem 1.3rem 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .note p {
+    margin: 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: none;
+  }
+
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .chk {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    padding: 0.28rem 0.6rem;
+    border: 1px solid var(--rule-hard);
+    background: var(--paper-2);
+  }
+
+  .chk::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    transform: translateY(-1px);
+    flex: none;
+  }
+  .chk--pass::before { background: var(--accent); }
+  .chk--open::before { background: transparent; border: 1px solid var(--slate); }
+  .chk--open { color: var(--ink-3); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.4rem;
+    font-size: var(--step--1);
+    color: var(--ink-3);
+    max-width: var(--measure);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<!--
+  ─────────────────────────────────────────────────────────────────────────────
+  RoverTools visual doc template. Copy this file, replace the body, keep the
+  stylesheet above untouched. Rules that matter, all of them load-bearing:
+
+  * Every colour comes from a token. Never write a literal hex in the body, and
+    never define a colour only inside a media query or [data-theme] block - a
+    page that does renders one theme's text on the other theme's ground.
+  * Mono (.str / <code>) means "this string is literally what the product
+    shows". It is a semantic role, not emphasis. Do not use it for prose.
+  * Diagram plates are fixed dark in both themes on purpose: mermaid takes one
+    theme config per figure and cannot follow a theme swap.
+  * The ledger is for before/after. If content is not a comparison, use prose.
+  * Numbered markers only where order carries information. Most sections are
+    not a sequence.
+  * ASCII punctuation in anything a user would read. HTML entities are fine for
+    typography inside a doc (&mdash;, &middot;).
+
+  Two ways to ship a page built from this:
+    1. As an Artifact - publish the file as-is, the host supplies the document
+       wrapper and renders mermaid natively.
+    2. As a repo file in docs/ - wrap it in <!doctype html><html><head>...<body>
+       and add the mermaid ESM loader before </body>. See
+       docs/space-key-handover.html for a worked example of both.
+  ─────────────────────────────────────────────────────────────────────────────
+-->
+
+<div class="wrap">
+
+  <!-- ══ HEADER ═══════════════════════════════════════════════════════════
+       Eyebrow names the system, h1 is the page name (2-4 words, a name and
+       not a summary), lede is the thesis in one or two sentences. The meta
+       list is for facts a reader wants before deciding to read: status,
+       scope, whether anything shipped. Skip it on a page with no such facts.
+  -->
+  <header>
+    <div class="titleblock">
+      <div style="display:flex;flex-direction:column;gap:0.9rem;">
+        <span class="eyebrow">System &middot; Area</span>
+        <h1>Page<br>Name</h1>
+      </div>
+      <p class="lede">
+        One or two sentences stating what changed and why it matters. Written
+        for someone who has not read the code.
+      </p>
+    </div>
+
+    <ul class="meta">
+      <li><span class="k">Status</span><span class="v">proposed</span></li>
+      <li><span class="k">Repos</span><span class="v">client + backend</span></li>
+      <li><span class="k">Committed</span><span class="v">no</span></li>
+    </ul>
+  </header>
+
+  <!-- ══ RAILS ════════════════════════════════════════════════════════════
+       Two side-by-side panels for a was/now pair, each with a small inline
+       SVG. Use when one mechanism is the whole point of the page. Strokes and
+       text take tokens: var(--rust) for the dead end, var(--accent) for the
+       working path, var(--slate) for an intermediate state.
+  -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The change, in one gesture</span>
+      <h2>Section heading</h2>
+      <p>What the two panels below are showing, and what to compare.</p>
+    </div>
+
+    <div class="rails">
+      <div class="rail rail--was">
+        <span class="rail-cap"><span class="dot"></span>Was</span>
+        <!-- inline SVG: viewBox sized to content, role="img", aria-label -->
+        <p>One sentence on why this shape was the problem.</p>
+      </div>
+      <div class="rail rail--now">
+        <span class="rail-cap"><span class="dot"></span>Now</span>
+        <p>One sentence on what the new shape buys.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ PLATE FIGURE ═════════════════════════════════════════════════════
+       A diagram on a fixed dark ground. Either a mermaid block (init line
+       first, no blank line before it) or a hand-authored inline SVG in a
+       .plate.plate--svg. One figure, one claim; the claim goes in the
+       figcaption, never inside the drawing.
+  -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Mechanism</span>
+      <h2>Section heading</h2>
+    </div>
+
+    <figure>
+      <div class="plate">
+        <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+sequenceDiagram
+    actor U as User
+    participant App as Their app
+    participant API as Backend
+
+    U->>App: does something
+    App->>API: the call
+    API-->>App: the answer
+    Note over App: what the user sees
+        </pre>
+      </div>
+      <figcaption>
+        <b>Lead in bold.</b> Then the claim this figure makes, in one or two
+        sentences. Not a restatement of the boxes.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ══ LEDGER ═══════════════════════════════════════════════════════════
+       Surface / Was / Now. The only structure for a per-surface comparison.
+       Real product strings go in <span class="str">, in quotes.
+  -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Surface by surface</span>
+      <h2>What a person actually sees</h2>
+      <p>The rule the rows share, stated once so no row has to repeat it.</p>
+    </div>
+
+    <div class="ledger">
+      <div class="rowhead"><span>Surface</span><span>Was</span><span>Now</span></div>
+
+      <div class="row">
+        <div class="surface">Where in the UI</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          What it did, and the string it said: <span class="str">"old copy"</span>.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          What it does now: <span class="str">"new copy"</span>.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ NOTES ════════════════════════════════════════════════════════════
+       A grid of short honest limits. This section is not optional: a doc that
+       only lists wins is a pitch, not a record.
+  -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Deliberately unchanged</span>
+      <h2>What this does not fix</h2>
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>The limit, named plainly</h3>
+        <p>Why it is out of scope, or why the trade was taken on purpose.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ CHECKS ═══════════════════════════════════════════════════════════
+       .chk--pass for something actually run, .chk--open for anything that was
+       not. Never mark a check passed that was not run.
+  -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Where it stands</span>
+      <h2>Verified, and not</h2>
+      <p>Say plainly what has not been exercised, and why.</p>
+    </div>
+
+    <ul class="checks">
+      <li class="chk chk--pass">cargo check</li>
+      <li class="chk chk--open">live sync &middot; needs a deploy</li>
+    </ul>
+  </section>
+
+  <footer>
+    Where the durable spec lives, and pointers to related docs.
+  </footer>
+
+</div>
