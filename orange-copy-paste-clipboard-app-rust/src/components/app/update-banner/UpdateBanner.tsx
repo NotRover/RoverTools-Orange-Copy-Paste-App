@@ -129,21 +129,12 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
           )}
         </div>
 
-        {status && (
+        {/* Download progress moves under the button (in the actions column); every
+            other status - ready, installing, error - stays here in the text column. */}
+        {status && stage !== "downloading" && (
           <p className={`app-update-status${stage === "error" ? " is-error" : ""}`}>
             {status}
           </p>
-        )}
-
-        {stage === "downloading" && (
-          <div className="app-update-bar">
-            {/* No content-length means no honest percentage, so the bar sweeps
-                instead of claiming a position it does not know. */}
-            <div
-              className={`app-update-bar-fill${percent === null ? " indeterminate" : ""}`}
-              style={percent === null ? undefined : { width: `${percent}%` }}
-            />
-          </div>
         )}
 
         {notesOpen && hasNotes && (
@@ -166,22 +157,42 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
       </div>
 
       <div className="app-update-actions">
-        {stage === "ready" ? (
-          <button type="button" className="app-update-primary" onClick={install} disabled={busy}>
-            <ArrowClockwise size={13} weight="bold" />
-            Restart &amp; install
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="app-update-primary"
-            onClick={download}
-            disabled={busy}
-          >
-            <DownloadSimple size={13} weight="bold" />
-            {stage === "error" ? "Try again" : "Download"}
-          </button>
-        )}
+        <div className="app-update-primary-wrap">
+          {stage === "ready" ? (
+            <button type="button" className="app-update-primary" onClick={install} disabled={busy}>
+              <ArrowClockwise size={13} weight="bold" />
+              Restart &amp; install
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="app-update-primary"
+              onClick={download}
+              disabled={busy}
+            >
+              <DownloadSimple size={13} weight="bold" />
+              {stage === "error" ? "Try again" : "Download"}
+            </button>
+          )}
+
+          {/* The bar sits directly under the button, its width, so the text column
+              is left to the release notes. */}
+          {stage === "downloading" && (
+            <div className="app-update-progress">
+              <div className="app-update-bar">
+                {/* No content-length means no honest percentage, so the bar sweeps
+                    instead of claiming a position it does not know. */}
+                <div
+                  className={`app-update-bar-fill${percent === null ? " indeterminate" : ""}`}
+                  style={percent === null ? undefined : { width: `${percent}%` }}
+                />
+              </div>
+              <span className="app-update-progress-label">
+                {percent === null ? "Downloading..." : `Downloading ${percent}%`}
+              </span>
+            </div>
+          )}
+        </div>
 
         {/* Skipping is only offered before committing to the download — once the
             bytes are on disk the useful choice is "now or next launch", not
