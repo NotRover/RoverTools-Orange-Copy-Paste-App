@@ -61,46 +61,75 @@ belongs in **Fixed**. If a range is **all** internal, fill only `### Internal` a
 the user-facing sections empty — a release cut from that fails on purpose, which is the
 signal to write real notes.
 
-## Step 3 — Write it in the app's voice, with substance
+## Step 3 — Write it in the app's voice: concrete, not wordy
 
 These lines are the whole reason the file exists — users read them in the app's
-"What's new" panel and on the GitHub release. **Substance is the point:** each entry
-explains what changed and why it helps, not a one-line restatement of the commit
-subject. A previous pass that reduced everything to bare one-liners is exactly the
-failure this rewrite exists to prevent.
+"What's new" panel and on the GitHub release. Aim for the middle: not a bare restatement
+of the commit subject, and not a three-sentence paragraph. **One clear sentence that names
+the visible change and its point** is the target. Substance comes from being specific, not
+from being long.
 
 In `changelog/next.md`: a lead, then only the sections that have entries.
 
-- **Lead:** one or two plain sentences framing what the release is about. No bullet.
-- **Entries:** one to three full sentences each, present tense, from the user's
-  perspective, ending with a period. Say the situation before, what is different now,
-  and the benefit. Describe the visible effect, never the mechanism — no file names,
-  type names, or internal detail.
+- **Lead:** one plain sentence naming the headline of the release. No bullet.
+- **Entries:** one sentence each by default — present tense, the user's perspective,
+  ending with a period. Name the change and, where it is not obvious, the benefit in the
+  same sentence. Add a second short sentence only when a change genuinely needs it (a
+  real gotcha or a before/after that matters). Never write three. Describe the visible
+  effect, never the mechanism — no file names, type names, or internal detail.
+- **Concrete, not padded.** "You can set a recovery code, so a forgotten password no
+  longer locks you out of your synced items." — one sentence, says what and why. Do NOT
+  expand that into "Your synced data is encrypted with a key only your password unlocks,
+  so a forgotten password used to mean losing access to everything; the recovery code is
+  a second way back in." That is the wordiness to avoid.
 - **Coverage — do not over-collapse.** Every distinct user-facing change gets its own
   entry; only merge commits that are genuinely the same change split apart. A release
-  with a dozen user-facing commits has close to a dozen entries, not four. Bigger
-  releases get fuller notes; order entries most to least significant.
-- **Accuracy.** Expand only what the commit subject and obvious context support. Add
-  the plain user-benefit framing that clearly follows; never invent numbers, UI names,
-  or features that are not there. If a subject is thin and you cannot say more
-  truthfully, write one solid sentence rather than padding.
+  with a dozen user-facing commits has close to a dozen entries, not four. Order entries
+  most to least significant.
+- **Accuracy.** Say only what the commit subject and obvious context support; never
+  invent numbers, UI names, or features that are not there.
 - **Copy rules (New/Improved/Fixed ship):** ASCII punctuation only — no em dashes, en
   dashes, curly quotes, ellipsis character, or the section sign. Write two sentences
   rather than joining with a dash. Obey the No-AI-Slop rules in `CLAUDE.md`: no
   "seamless / robust / effortless / unlock / transform …", no "it's not just X, it's
-  Y", no three-adjective piles. Concrete and specific — substance means real
-  information, not more adjectives.
+  Y", no three-adjective piles.
 - **`### Internal`:** the one place you still collapse hard. Terse lines for the
   record, no user voice — still ASCII, still no section sign. Fold a run of submodule
   bumps, CI, and refactors into a single line; it is a footnote, not a report.
 
-Thin (do not do this):
-`Removing items from the cloud no longer deletes your local copies.`
+### Calibration — three ways to write the same entry
 
-Substantial (do this):
-`Removing an item from the cloud used to also delete the copy on your own device. Now
-it only clears the cloud copy, so your local history stays intact when you free up
-cloud space.`
+Each row: too thin (a commit paraphrase, no point), too wordy (the mechanism spelled
+out, padded), and the target (one specific sentence, what changed and why it matters).
+
+**A fix where the old behaviour is the story:**
+- Thin: `Fixed cloud item removal.`
+- Wordy: `Removing an item from the cloud used to also delete the copy on your own
+  device, which meant freeing up cloud space could cost you local history. Now the two
+  are separate, so a cloud removal leaves your device untouched.`
+- Target: `Clearing an item from the cloud no longer deletes your local copy.`
+
+**A new capability:**
+- Thin: `Added recovery codes.`
+- Wordy: `Your synced data is encrypted with a key only your password unlocks, so a
+  forgotten password used to mean losing access to everything; a recovery code is a
+  second way back in that you generate ahead of time.`
+- Target: `Set a recovery code so a forgotten password no longer locks you out of your
+  synced items.`
+
+**A refinement (Improved):**
+- Thin: `Improved history performance.`
+- Wordy: `History used to re-render the entire list on every capture, which made the
+  window stutter once you had a few hundred entries; it now updates only the rows that
+  changed, so scrolling stays smooth no matter how long your history gets.`
+- Target: `History stays smooth to scroll even with thousands of entries.`
+
+**A fix with a genuine gotcha (the rare two-sentence case):**
+- Target: `Spaces you already belong to no longer show up as new invites on every
+  launch. Existing spaces are recognized on startup instead of re-announced.`
+
+The second sentence earns its place only because "no longer shows as new" leaves the
+reader wondering what happens instead. When one sentence answers that, stop at one.
 
 ## Step 4 — Edit, show, stop
 
