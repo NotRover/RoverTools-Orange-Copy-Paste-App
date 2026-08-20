@@ -418,3 +418,51 @@ of the UMK.
 **Why it is written down.** It became load-bearing the moment invites started
 carrying a pre-wrapped key: that wraps for whatever is in the column, on the
 strength of the server's word about who owns it.
+
+---
+
+## #15 - Password reset was a dead end: the recovery code and "start over" could never be reached
+
+**Symptom.** Open the emailed link on the machine that asked for it. The first
+attempt answers "this device has never held your encryption key, so a new
+password cannot unlock what you synced before" and reveals the two ways out - a
+recovery code, or starting over with a new key. Taking *either* one answers "this
+reset link was requested on another device or has already been used". Every
+retry, and every fresh link, ends the same way. The account cannot be recovered
+even by a user willing to abandon all of their synced data, and the old password
+still works, which makes it look as though the reset silently did nothing.
+
+**Cause.** Three faults in a chain, all in `complete_password_reset`.
+
+1. It built a fresh `SyncHttpClient` and set the access token, refresh token and
+   user id, but never `set_device_id`. `GET /api/v1/auth/umk/device` is
+   device-scoped and the backend answers 400 without the header, so the *device
+   wrap* - the source that is supposed to make a reset lossless on any machine
+   that has signed in before - could never be read. `recover_umk_for_reset` maps
+   every non-`Present` answer to `None`, so the honest "unreachable" became the
+   very final-sounding "this device has never held your encryption key".
+2. The PKCE verifier was cleared immediately after the exchange, whichever way the
+   rest of the call went. But the UI only reveals the recovery field and the
+   start-over button *after* the first attempt fails (`offerStartOver`), so
+   finishing a reset is inherently a second attempt - and every second attempt
+   died at `load_reset_verifier`.
+3. Keeping the verifier would not have been enough. The emailed code is one-time
+   at Supabase and the first attempt had already exchanged it successfully, so the
+   retry had nothing left to redeem.
+
+**Fix.** The exchanged session is held in `SyncClient::pending_reset` and reused
+by later attempts instead of re-exchanging a spent code; it is dropped once the
+reset completes, and by `sync_cancel_password_reset` when the panel closes, since
+it is a live credential. The device id from `sync_state` is set on the client
+before the wrap lookup. The verifier message now separates "already used" from
+"requested from a different install", which are different problems with different
+answers.
+
+**Why it is written down.** Two lessons, and the second is the expensive one.
+Sending a request without the header a route requires does not fail loudly; it
+fails as an ordinary error that a `_ => None` arm turns into a confident, wrong
+statement to the user. And a flow whose escape hatch only appears *after* a
+failure is a multi-attempt flow whether or not it was designed as one - so
+anything single-use it consumes on the first pass has to be preserved for the
+second. This one made accounts unrecoverable, which is the worst outcome the
+sync feature has.

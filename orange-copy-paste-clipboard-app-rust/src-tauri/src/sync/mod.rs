@@ -427,6 +427,16 @@ pub struct SyncClient {
     /// Tripping it lets the blocking accept loop drop its listener early, so a
     /// retry can bind the same port instead of waiting out the capture deadline.
     oauth_cancel: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    /// The session a reset link was already exchanged for, held between attempts.
+    ///
+    /// The emailed code is one-time *at Supabase*: the first attempt spends it, so
+    /// a second one - typing a recovery code, or choosing to start over - cannot
+    /// exchange it again and has to reuse what the first attempt got. Finishing a
+    /// reset is genuinely multi-attempt, because the UI only offers those choices
+    /// once the plain attempt has failed for want of the key.
+    ///
+    /// Memory only. Dropped on success, on cancel, and with the process.
+    pending_reset: Mutex<Option<SupabaseSession>>,
 
     /// Pending offline operation queue.
     pending_queue: Arc<Mutex<PendingQueue>>,
@@ -637,6 +647,7 @@ impl SyncClient {
             http: Mutex::new(None),
             pending_oauth: Mutex::new(None),
             oauth_cancel: Mutex::new(None),
+            pending_reset: Mutex::new(None),
             pending_queue,
             push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
             blob_budget: Arc::new(Mutex::new(None)),
@@ -884,15 +895,29 @@ impl SyncClient {
         device_name: String,
         start_over: bool,
     ) -> Result<SyncUser, String> {
-        let verifier = crypto::load_reset_verifier().ok_or(
-            "this reset link was requested on another device or has already been used.              Ask for a new one from this app.",
-        )?;
-
-        let session = self.supabase.exchange_code_pkce(&code, &verifier).await;
-        // The code is one-time whatever happened, so the verifier is spent either
-        // way - leaving it behind only keeps a capability for a dead link.
-        crypto::clear_reset_verifier();
-        let session = session?;
+        // Attempt two and later reuse the session attempt one obtained. Without
+        // this, every retry died on a spent verifier against an already-exchanged
+        // code, which made the recovery-code field and "start over" - the only two
+        // ways out of a lost password - impossible to reach.
+        // Cloned out of the lock, not matched on it: the None arm awaits, and a
+        // guard held across an await makes the whole command future non-Send.
+        let held = self.pending_reset.lock().clone();
+        let session = match held {
+            Some(session) => session,
+            None => {
+                let verifier = crypto::load_reset_verifier().ok_or(
+                    "this reset link was already used, or it was requested from a different                      install of the app. Ask for a new one from this app.",
+                )?;
+                let session = self.supabase.exchange_code_pkce(&code, &verifier).await;
+                // The code cannot be exchanged twice, so the verifier is spent
+                // either way: keeping it would only leave a capability for a link
+                // that is now dead.
+                crypto::clear_reset_verifier();
+                let session = session?;
+                *self.pending_reset.lock() = Some(session.clone());
+                session
+            }
+        };
 
         let user_id = session.user.id.clone();
         let email = session.user.email.clone();
@@ -902,6 +927,13 @@ impl SyncClient {
         http.set_access_token(session.access_token, session.expires_in);
         http.set_refresh_token(session.refresh_token);
         http.set_user_id(user_id.clone());
+        // Without this the device-wrap lookup below goes out with no `X-Device-Id`,
+        // the backend answers 400, and a machine that is holding the key is told it
+        // never held one. The id is this install's registered device from
+        // `sync_state`; its absence is the honest "never signed in here" case.
+        if let Some(device) = self.device_id() {
+            http.set_device_id(device);
+        }
 
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
@@ -950,7 +982,19 @@ impl SyncClient {
             .update_password(&access_token, &new_password)
             .await?;
 
-        self.perform_login(email, new_password, device_name).await
+        let user = self.perform_login(email, new_password, device_name).await?;
+        // Only now. A failure anywhere above is one the user can retry from the same
+        // panel, and the retry needs this session - the link behind it is dead.
+        self.pending_reset.lock().take();
+        Ok(user)
+    }
+
+    /// Forget a reset that was started and not finished.
+    ///
+    /// Called when the reset panel closes. The held session is a live credential
+    /// for the account, so it does not outlive the flow that needs it.
+    pub fn cancel_password_reset(&self) {
+        self.pending_reset.lock().take();
     }
 
     /// Change the password of the account this app is signed into.
