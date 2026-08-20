@@ -161,6 +161,15 @@ A promoted beta keeps its `-beta` filename — the name records how it was first
 Rename it (`git mv changelog/<v>-<bump>-beta.md …-stable.md`) if you want the directory
 to track the current channel.
 
+**The releases repo gets a copy too.** After the tag lands, the workflow mirrors the
+`changelog/` files into the public releases repo and regenerates that repo's `README.md`
+from them — releases split into a Stable group and a Beta group, each a collapsible entry,
+newest first — so someone browsing the releases repo reads the same notes as the app. The
+layout lives in one place, [`.github/scripts/gen-releases-readme.sh`](../.github/scripts/gen-releases-readme.sh);
+the grouping comes from each file's heading, so renaming a promoted beta's file to
+`-stable` moves it between groups on the next release. The source `changelog/` is still the
+one home you edit — the releases-repo copy is generated, never hand-edited.
+
 ---
 
 ## Beta releases
