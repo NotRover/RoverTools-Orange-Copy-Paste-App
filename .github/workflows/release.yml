@@ -323,6 +323,37 @@ jobs:
           git push origin HEAD:${{ github.ref_name }}
           git push origin "$TAG"
 
+      - name: Sync the changelog to the releases repo
+        # The per-release changelog files live in this repo (one home). This mirrors
+        # them into the PUBLIC releases repo and regenerates its README (releases
+        # grouped Stable vs Beta) so anyone browsing there reads the same notes. The
+        # source repo has already committed the freshly stamped file by now, so this
+        # copies the whole set and lets the generator rebuild the page.
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          git clone --depth 1 \
+            "https://x-access-token:${RELEASES_REPO_TOKEN}@github.com/${RELEASES_REPO}.git" "$tmp"
+          mkdir -p "$tmp/changelog"
+          # Release files start with a version digit; README.md/TEMPLATE.md/next.md
+          # start with a letter and are staging/convention docs that do not belong here.
+          cp changelog/[0-9]*.md "$tmp/changelog/"
+          bash .github/scripts/gen-releases-readme.sh "$tmp/changelog" > "$tmp/README.md"
+          cd "$tmp"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changelog changes to publish."
+          else
+            git commit -m "docs: sync changelog for $TAG"
+            git push origin HEAD
+          fi
+
   # ── 2. Build signed bundles ────────────────────────────────────────────────
   build:
     needs: prepare

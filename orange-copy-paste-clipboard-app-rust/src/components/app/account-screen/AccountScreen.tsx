@@ -650,6 +650,10 @@ Keep this. It is the only way back into your synced items if you forget your pas
     setOfferStartOver(false);
     setRecoveryEntry("");
     setChangeOpen(false);
+    // Rust holds the session the emailed link was exchanged for, because
+    // finishing a reset can take more than one attempt. Closing the panel is
+    // the end of the flow, so it does not keep a live credential around.
+    invoke("sync_cancel_password_reset").catch(() => {});
     onResetCodeConsumed?.();
   };
 

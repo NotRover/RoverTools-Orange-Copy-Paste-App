@@ -222,6 +222,20 @@ pub async fn sync_complete_password_reset(
     Ok(user)
 }
 
+/// Forget a reset that was opened and not finished.
+///
+/// Finishing a reset can take more than one attempt, so the session the emailed
+/// link was exchanged for is held between them. Closing the panel is the user
+/// saying they are done with it, and it is a live credential, so it goes.
+#[tauri::command]
+pub async fn sync_cancel_password_reset(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    get_or_create_client(&state, &app)?.cancel_password_reset();
+    Ok(())
+}
+
 /// Change the password of the account this app is signed into.
 ///
 /// Nothing is re-derived and nothing can be lost: the key is already in memory,

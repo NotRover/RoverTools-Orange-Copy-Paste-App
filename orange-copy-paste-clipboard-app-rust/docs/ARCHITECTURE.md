@@ -669,6 +669,16 @@ A supplied recovery code is tried first and its failure is returned rather than
 falling through, so a typo reads as a typo instead of "this device has never held
 your key".
 
+**Finishing a reset takes more than one attempt, by design.** The recovery field
+and the start-over button only appear once the plain attempt has failed and said
+why, so the second attempt is the normal case rather than the exception. The
+emailed code cannot be exchanged twice, so the session from the first exchange is
+held in `SyncClient::pending_reset` and reused - dropped on success, and by
+`sync_cancel_password_reset` when the panel closes, because it is a live
+credential for the account. The device id is set on the reset's HTTP client
+before the wrap is fetched; without it the device-wrap source silently cannot
+apply (bug #15 in `docs/BUGFIX_HISTORY.md`).
+
 #### Recovery code
 
 A second account-wide envelope holding the same UMK, wrapped under a secret the

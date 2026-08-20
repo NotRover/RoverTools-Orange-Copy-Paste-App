@@ -668,6 +668,7 @@ pub fn run() {
             crate::sync::commands::sync_oauth_pending,
             crate::sync::commands::sync_reset_password,
             crate::sync::commands::sync_complete_password_reset,
+            crate::sync::commands::sync_cancel_password_reset,
             crate::sync::commands::sync_change_password,
             crate::sync::commands::sync_create_recovery_code,
             crate::sync::commands::sync_has_recovery_code,
