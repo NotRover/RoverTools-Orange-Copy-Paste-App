@@ -60,7 +60,7 @@ A user copies text/images/files (or writes notes) on one device and sees them on
 - **Client** captures the clipboard, stores history + notes locally, holds all key material, and does all encryption/decryption. The Rust side owns the crypto and sync engine; React is the UI.
 - **Backend** is a stateless relay + store: it verifies Supabase JWTs (never signs), persists ciphertext, fans out changes over WebSocket, and brokers blob storage. It is the **source of truth for the wire contract**.
 
-**Core sync flow:** client authenticates with Supabase → `POST /api/v1/auth/bootstrap` (gets `kdf_salt`) → derives the User Master Key → registers a device → pushes/pulls encrypted entries (last-write-wins) → receives live updates over `/ws`. Deletes are **tombstones** (a push with `deleted_at`), not a DELETE route.
+**Core sync flow:** client authenticates with Supabase → bootstraps the account → unwraps the User Master Key → registers a device → pushes and pulls encrypted entries, last-write-wins → receives live updates over a WebSocket. Deletes travel as tombstones.
 
 **Sharing:** one primitive, the **Space** - persistent, live, any number of members, and a user can be in several at once. Each space has a random **Space Key** (kept as a keyring, newest first) distributed to members via X25519 key wrapping.
 
@@ -95,7 +95,7 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `state/app_state.rs` — shared app state, dirty flags, `sync_client` handle.
 - **`sync/`** — the cloud-sync engine:
   - `mod.rs` — `SyncClient` orchestrator (auth, push/pull, merge, group-key handling, blob upload/download).
-  - `crypto.rs` — Argon2id UMK, AES-256-GCM content, X25519 device/identity keys, key wrap, SHA-256, keychain.
+  - `crypto.rs` — password-derived key unwrap, AES-256-GCM content, X25519 device/identity keys, key wrap, SHA-256, keychain.
   - `client.rs` — async HTTP client for the backend API (auth, sync, groups, sharing, blobs).
   - `supabase.rs` — Supabase GoTrue (login/signup/refresh). `ws_listener.rs` — WebSocket receive + dispatch.
   - `commands.rs` — Tauri commands. `config.rs`, `id_map.rs`, `pending_queue.rs`, `sync_state.rs`, `types.rs`.
@@ -110,27 +110,30 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `blobs/` — presigned upload/download (`s3.py`), quota. `admin/` — internal stats/ops.
 - `migrations/versions/` — Alembic (`0001`…`0011`; `0011_spaces` is written but **not applied** and is destructive). `tests/` — pytest (`test_auth`, `test_sync`, `test_blobs`, `test_spaces_invites`).
 
-## Cross-System Contract & Invariants
+## Cross-System Contract
 
-These bind the client and backend. Changing one side usually means changing the other — document the contract (payloads, event names, behavior) when you do.
+**The backend defines the contract, and its `docs/ARCHITECTURE.md` is the readable form of
+it.** Read that file before changing anything that crosses the wire, and update it in the
+same commit — payload shapes, event names, key derivation, the entry keying tuple and the
+route prefixes all live there and are deliberately not repeated here, because a second copy
+is a copy that goes stale. Who-may-do-what is `docs/PERMISSIONS.md`; the promises neither
+side can keep alone are the root `docs/ARCHITECTURE.md`.
 
-**Auth & identity**
-- Supabase Auth owns identity (signup/login/refresh/reset). The backend **verifies** JWTs (PyJWT: ES256/RS256 via the project JWKS, legacy HS256 shared secret; `aud="authenticated"`, `sub`=user id) and **never signs**.
-- Device-scoped routes require `Authorization: Bearer <jwt>` **and** `X-Device-Id`. WebSocket: `/ws?token=<jwt>&device_id=<id>`.
+What you need before you have read any of it — shapes and prohibitions, no values:
 
-**End-to-end encryption (client-only)**
-- UMK is a **random 32-byte key** (envelope model). The password derives only a wrapping key `KEK = Argon2id(password, kdf_salt)`; the UMK is stored server-side wrapped (`pw_wrapped_umk`, AES-GCM) and unwrapped on login. Both live **in-memory only** (`Zeroizing`), never written to disk or logs. A wrong password → GCM unwrap failure. OAuth (Google) users set an account password that serves as this secret.
-- Content: AES-256-GCM with **AAD = `client_id`** (binds ciphertext to its entry). The per-user **identity keypair is derived deterministically from the UMK** (same on every device, never stored server-side; only the public half is registered).
-- Content is encrypted once under a random per-entry **CEK**; the CEK is wrapped under the UMK (`"personal"`) and under each target space's key, so one entry can be in several spaces. `wrapped_keys` is opaque to the server; `space_ids` is what it fans out on. Removing a member rekeys the space; revocation is best-effort for entries already pulled.
-- The server stores only ciphertext, public keys, and opaque wrapped keys — never plaintext.
-
-**Sync semantics**
-- Entries are keyed server-side by `(user_id, client_id, entry_type)`; `entry_type` is `"clipboard"` or `"note"` (singular).
-- Last-write-wins on `updated_at`; **tombstones always win**. Deletes = a push with `deleted_at` set — there is **no delete route**.
-- The Rust side decrypts and merges (only Rust has the UMK); the frontend refreshes on `sync:history-merged` / `sync:notes-merged`.
-
-**API versioning**
-- Client routes under `/api/v1`; admin under `/internal/v1`; `/internal/healthz` + `/internal/metrics` unversioned. Every response carries `X-API-Version`. Single source: `src/version.py`.
+- **Changing one side means changing the other.** A wire change is a two-repo change; assume
+  it until you have checked.
+- **Supabase owns identity.** The backend *verifies* tokens and **never signs** one. A design
+  that needs the backend to issue a token is the wrong design.
+- **Some routes are device-scoped.** Go through the shared dependencies in
+  `dependencies.py` — never re-parse a token inside a route.
+- **The client does all the crypto**, and the backend holds no key that opens anything it
+  stores. Key material lives in memory only (`Zeroizing`) and never reaches disk, a log, or
+  an IPC response. Never reimplement any of it in TypeScript.
+- **Deletes travel as tombstones, not a delete route.** If you are looking for a `DELETE`
+  endpoint for an entry, you are looking for something that does not exist.
+- **Content is encrypted per entry, not under a master key.** Adding a sharing target is a
+  key-wrapping change, never a re-encryption.
 
 **Migrations apply on deploy, not from your machine.** Render runs `alembic upgrade head` as a pre-deploy step, so a merged revision reaches the database on the next deploy. Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.**
 
