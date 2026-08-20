@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Standalone copy of the "Join Approval" artifact, kept in the repo so the page
+  survives without the artifact host. Same body; this file adds only the document
+  wrapper, the CSS reset the host would have supplied, and the mermaid loader.
+  Built from docs/_doc-template.html. Published copy:
+  claude.ai/code/artifact/d09c89b0-0e61-4b87-b53f-163499026c55
+-->
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  img, svg, video { display: block; max-width: 100%; }
+</style>
+</head>
+<body>
+<title>Join Approval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    /* Cool graphite neutrals, biased a few degrees toward the accent's
+       complement so the orange reads as a decision rather than a default. */
+    --paper:      #F4F5F7;
+    --paper-2:    #FFFFFF;
+    --paper-3:    #E9EBEF;
+    --ink:        #141922;
+    --ink-2:      #3E4855;
+    --ink-3:      #6B7787;
+    --rule:       #D3D7DE;
+    --rule-hard:  #B6BCC7;
+
+    /* The app's own orange, deepened for contrast on paper. Reserved for the
+       "after" state and nothing else. */
+    --accent:     #C9591A;
+    --accent-dim: #F3E3D6;
+    --slate:      #556475;   /* waiting */
+    --slate-dim:  #E2E6EB;
+    --rust:       #9C3D2A;   /* refused / dead end */
+    --rust-dim:   #F2DED9;
+
+    /* Diagram plates commit to one dark ground in both themes: mermaid is
+       configured once per figure and cannot follow a theme swap. */
+    --plate:      #171C23;
+    --plate-2:    #1F262F;
+    --plate-rule: #333E4B;
+    --plate-ink:  #DEE3E9;
+    --plate-ink-2:#94A1AF;
+
+    --measure: 66ch;
+
+    --step--1: 0.813rem;
+    --step-0:  1rem;
+    --step-1:  1.2rem;
+    --step-2:  1.5rem;
+    --step-3:  2rem;
+    --step-4:  2.9rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #10141A;
+      --paper-2:    #171C23;
+      --paper-3:    #1E252E;
+      --ink:        #E7EBF0;
+      --ink-2:      #B3BDC9;
+      --ink-3:      #7D8896;
+      --rule:       #2A323C;
+      --rule-hard:  #3C4652;
+
+      --accent:     #F0873F;
+      --accent-dim: #33241A;
+      --slate:      #93A2B2;
+      --slate-dim:  #202832;
+      --rust:       #E07A62;
+      --rust-dim:   #2E1F1B;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #10141A;
+    --paper-2:    #171C23;
+    --paper-3:    #1E252E;
+    --ink:        #E7EBF0;
+    --ink-2:      #B3BDC9;
+    --ink-3:      #7D8896;
+    --rule:       #2A323C;
+    --rule-hard:  #3C4652;
+
+    --accent:     #F0873F;
+    --accent-dim: #33241A;
+    --slate:      #93A2B2;
+    --slate-dim:  #202832;
+    --rust:       #E07A62;
+    --rust-dim:   #2E1F1B;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(1.75rem, 4vw, 4rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.75rem, 5vw, 4.5rem);
+  }
+
+  /* ── type roles ─────────────────────────────────────────────── */
+
+  h1, h2, h3, .eyebrow, .lede, .rail-cap, th {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: var(--step-4);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.028em;
+    text-wrap: balance;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: var(--step-2);
+    font-weight: 700;
+    letter-spacing: -0.018em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: var(--step-0);
+    font-weight: 700;
+    letter-spacing: -0.008em;
+  }
+
+  .eyebrow {
+    font-size: 0.688rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 30ch;
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: var(--step-1);
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+
+  /* Mono is not decoration here: it means "this string is literally what the
+     product shows", so quoted copy and identifiers share one face. */
+  code, .mono, .str {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+  }
+
+  code {
+    background: var(--paper-3);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.08em 0.34em;
+  }
+
+  .str { color: var(--ink-2); }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ── header ─────────────────────────────────────────────────── */
+
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .titleblock {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(1.25rem, 4vw, 3.5rem);
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2.25rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .meta li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem 0;
+  }
+
+  .meta dt, .meta .k {
+    font-family: Archivo, sans-serif;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .meta .v {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--step--1);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  /* ── section shell ──────────────────────────────────────────── */
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .sechead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: var(--measure);
+  }
+
+  /* ── hero rail ──────────────────────────────────────────────── */
+
+  .rails {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .rail {
+    background: var(--paper-2);
+    padding: 1.4rem clamp(1rem, 2.5vw, 1.6rem) 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .rail-cap {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.688rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .rail-cap .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    flex: none;
+  }
+  .rail--was .dot { background: var(--rust); }
+  .rail--now .dot { background: var(--accent); }
+  .rail--was .rail-cap { color: var(--rust); }
+  .rail--now .rail-cap { color: var(--accent); }
+
+  .rail svg { display: block; width: 100%; height: auto; }
+
+  .rail p {
+    margin: 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: none;
+  }
+
+  /* ── ledger ─────────────────────────────────────────────────── */
+
+  .ledger {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--rule-hard);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.7fr);
+    gap: 0 clamp(0.9rem, 2.5vw, 2rem);
+    padding: 1.05rem 0;
+    border-bottom: 1px solid var(--rule);
+    align-items: start;
+  }
+
+  .row > .surface {
+    font-family: Archivo, sans-serif;
+    font-weight: 600;
+    font-size: var(--step--1);
+    letter-spacing: -0.005em;
+    line-height: 1.4;
+    color: var(--ink);
+    padding-top: 0.1rem;
+  }
+
+  .cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: var(--step--1);
+    line-height: 1.5;
+  }
+
+  .cell .tag {
+    font-family: Archivo, sans-serif;
+    font-size: 0.594rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .cell--was { color: var(--ink-3); }
+  .cell--was .tag { color: var(--rust); }
+  .cell--now { color: var(--ink); }
+  .cell--now .tag { color: var(--accent); }
+
+  .rowhead {
+    display: none;
+  }
+
+  @media (min-width: 720px) {
+    .rowhead {
+      display: grid;
+      grid-template-columns: minmax(140px, 1.05fr) minmax(0, 1.5fr) minmax(0, 1.7fr);
+      gap: 0 clamp(0.9rem, 2.5vw, 2rem);
+      padding-bottom: 0.5rem;
+    }
+    .rowhead span {
+      font-family: Archivo, sans-serif;
+      font-size: 0.594rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .cell .tag { display: none; }
+  }
+
+  @media (max-width: 719px) {
+    .row {
+      grid-template-columns: 1fr;
+      gap: 0.7rem;
+      padding: 1.15rem 0;
+    }
+  }
+
+  /* ── figures / plates ───────────────────────────────────────── */
+
+  figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .plate {
+    background: var(--plate);
+    border: 1px solid var(--plate-rule);
+    padding: clamp(0.9rem, 2.5vw, 1.6rem);
+    overflow-x: auto;
+  }
+
+  .plate .mermaid {
+    margin: 0;
+    min-width: 520px;
+  }
+
+  .plate--svg { color: var(--plate-ink); }
+  .plate--svg svg { display: block; width: 100%; height: auto; min-width: 560px; }
+
+  figcaption {
+    padding: 0.7rem 0 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: var(--measure);
+  }
+
+  figcaption b {
+    font-family: Archivo, sans-serif;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .figpair {
+    display: flex;
+    flex-direction: column;
+    gap: 2.25rem;
+  }
+
+  /* ── notes ──────────────────────────────────────────────────── */
+
+  .notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .note {
+    background: var(--paper-2);
+    padding: 1.15rem 1.3rem 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .note p {
+    margin: 0;
+    font-size: var(--step--1);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: none;
+  }
+
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .chk {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    padding: 0.28rem 0.6rem;
+    border: 1px solid var(--rule-hard);
+    background: var(--paper-2);
+  }
+
+  .chk::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    transform: translateY(-1px);
+    flex: none;
+  }
+  .chk--pass::before { background: var(--accent); }
+  .chk--open::before { background: transparent; border: 1px solid var(--slate); }
+  .chk--open { color: var(--ink-3); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.4rem;
+    font-size: var(--step--1);
+    color: var(--ink-3);
+    max-width: var(--measure);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+<div class="wrap">
+
+  <header>
+    <div class="titleblock">
+      <div style="display:flex;flex-direction:column;gap:0.9rem;">
+        <span class="eyebrow">Spaces &middot; Joining</span>
+        <h1>Join<br>Approval</h1>
+      </div>
+      <p class="lede">
+        A space code is one string, eight characters, good for 72 hours, and it
+        cannot be rotated. Today holding it makes you a member. After this, it
+        gets you a knock at the door and somebody inside answers &mdash; and
+        answering is what finally hands you the key.
+      </p>
+    </div>
+
+    <ul class="meta">
+      <li><span class="k">Status</span><span class="v">proposed, nothing built</span></li>
+      <li><span class="k">New controls</span><span class="v">one, on the space</span></li>
+      <li><span class="k">Addressed invites</span><span class="v">unaffected</span></li>
+      <li><span class="k">Spec</span><span class="v">docs/SPACE-JOIN-APPROVAL.md</span></li>
+    </ul>
+  </header>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The change, in one gesture</span>
+      <h2>The code stops being the authorisation</h2>
+      <p>
+        Right now one string does two jobs: it introduces you to a space, and it
+        authorises you to be in it. Every leak is a silent join because those
+        two jobs are the same click. Split them and the leak becomes a knock.
+      </p>
+    </div>
+
+    <div class="rails">
+      <div class="rail rail--was">
+        <span class="rail-cap"><span class="dot"></span>Was</span>
+        <svg viewBox="0 0 300 96" role="img" aria-label="Code leads straight into membership, then stalls with no key">
+          <text x="0" y="14" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--ink-3)">CODE</text>
+          <rect x="0" y="24" width="86" height="30" rx="3" fill="none" stroke="var(--rust)" stroke-width="1.5"/>
+          <text x="43" y="43" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--rust)">K7M2QP49</text>
+          <line x1="86" y1="39" x2="128" y2="39" stroke="var(--rust)" stroke-width="1.5"/>
+          <polygon points="128,39 121,35.5 121,42.5" fill="var(--rust)"/>
+          <rect x="128" y="24" width="82" height="30" rx="3" fill="var(--rust-dim)" stroke="var(--rust)" stroke-width="1.5"/>
+          <text x="169" y="43" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" font-weight="700" fill="var(--rust)">MEMBER</text>
+          <line x1="210" y1="39" x2="252" y2="39" stroke="var(--rule-hard)" stroke-width="1.5" stroke-dasharray="3 3"/>
+          <text x="256" y="43" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--ink-3)">?</text>
+          <text x="128" y="76" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-3)">no gate</text>
+          <text x="128" y="88" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--ink-3)">no key yet</text>
+        </svg>
+        <p>
+          A member instantly, readable eventually. The owner learns about it by
+          noticing a new name.
+        </p>
+      </div>
+      <div class="rail rail--now">
+        <span class="rail-cap"><span class="dot"></span>Now</span>
+        <svg viewBox="0 0 300 96" role="img" aria-label="Code raises a pending request, approval grants membership with the key attached">
+          <text x="0" y="14" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--ink-3)">CODE</text>
+          <rect x="0" y="24" width="78" height="30" rx="3" fill="none" stroke="var(--slate)" stroke-width="1.5"/>
+          <text x="39" y="43" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--slate)">K7M2QP49</text>
+          <line x1="78" y1="39" x2="112" y2="39" stroke="var(--slate)" stroke-width="1.5"/>
+          <polygon points="112,39 105,35.5 105,42.5" fill="var(--slate)"/>
+          <rect x="112" y="24" width="76" height="30" rx="3" fill="var(--slate-dim)" stroke="var(--slate)" stroke-width="1.5"/>
+          <text x="150" y="43" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" font-weight="700" fill="var(--slate)">PENDING</text>
+          <line x1="188" y1="39" x2="222" y2="39" stroke="var(--accent)" stroke-width="1.5"/>
+          <polygon points="222,39 215,35.5 215,42.5" fill="var(--accent)"/>
+          <rect x="222" y="24" width="78" height="30" rx="3" fill="var(--accent-dim)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="261" y="43" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" font-weight="700" fill="var(--accent)">READABLE</text>
+          <text x="188" y="76" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--accent)">approve</text>
+          <text x="188" y="88" font-family="JetBrains Mono, monospace" font-size="9" fill="var(--accent)">+ key, one click</text>
+        </svg>
+        <p>
+          One extra step, and the step is the one that hands over the key. You
+          arrive able to read, not able to wait.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Correction</span>
+      <h2>Keys were never in the mail</h2>
+      <p>
+        Worth being exact, because it changes what the fix has to be. A Space Key
+        is wrapped X25519-to-X25519 between two apps; the server relays a blob it
+        cannot open, and a mailbox never holds one. What the invite email carries
+        is the <em>code</em>.
+      </p>
+      <p>
+        That does not make the concern wrong, it makes it precise: the code is a
+        <b>multi-use bearer capability</b> &mdash; about 2<sup>40</sup>, one per
+        space, no rotate route &mdash; and <span class="str">join_space</span>
+        turns it into a membership with no gate at all. A forwarded mail, a
+        screenshot in a group chat, a stale link in someone's history: each is a
+        join nobody approved.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Flow, before</span>
+      <h2>Instant membership, indefinite wait</h2>
+    </div>
+
+    <figure>
+      <div class="plate">
+        <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+sequenceDiagram
+    autonumber
+    actor J as Joiner
+    participant JA as Joiner's app
+    participant API as Backend
+    actor O as Owner
+
+    J->>JA: pastes K7M2QP49
+    JA->>API: POST /spaces/join
+    API->>API: add_membership() - no gate
+    API-->>JA: 200, you are a member
+    Note over JA: space appears, empty<br/>no key, nothing readable
+    API--)O: space:membership_changed
+    Note over O: a name they did not choose,<br/>if they happen to look
+
+    loop until some keyholder's app is running
+        JA->>API: GET /spaces
+        API-->>JA: still no wrapped key
+    end
+
+    O->>API: POST /spaces/{id}/keys
+    API--)JA: space:rekey
+    Note over JA: readable at last
+        </pre>
+      </div>
+      <figcaption>
+        <b>The wait already exists.</b> Steps 3 and 4 are instant and buy nothing
+        &mdash; the joiner holds a membership they cannot read. Everything useful
+        happens in the last three steps, whenever somebody else's app gets
+        around to it.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Flow, after</span>
+      <h2>One decision, and the key rides along</h2>
+    </div>
+
+    <figure>
+      <div class="plate">
+        <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'background':'#171C23','primaryColor':'#1F262F','primaryTextColor':'#DEE3E9','primaryBorderColor':'#3C4652','lineColor':'#7E8B99','textColor':'#C1CAD4','fontFamily':'JetBrains Mono, monospace','fontSize':'13px','actorBkg':'#1F262F','actorBorder':'#4A5666','actorTextColor':'#DEE3E9','actorLineColor':'#3C4652','signalColor':'#94A1AF','signalTextColor':'#C1CAD4','labelBoxBkgColor':'#1F262F','labelBoxBorderColor':'#3C4652','labelTextColor':'#DEE3E9','loopTextColor':'#C1CAD4','noteBkgColor':'#2A2118','noteTextColor':'#F0D9C0','noteBorderColor':'#7A5A38','altBackground':'#1B222A','sequenceNumberColor':'#171C23'}}}%%
+sequenceDiagram
+    autonumber
+    actor J as Joiner
+    participant JA as Joiner's app
+    participant API as Backend
+    participant AA as Approver's app
+    actor A as Approver
+
+    J->>JA: pastes K7M2QP49
+    JA->>API: POST /spaces/join
+    API->>API: insert join_request (pending)<br/>unique on (space, user)
+    API-->>JA: 202, pending
+    Note over JA: "Waiting for someone<br/>in this space to let you in."
+
+    API--)AA: space:join_requested
+    Note over A: badge on Invites,<br/>notification row
+
+    A->>AA: Approve
+    Note over AA: holds the ring right now -<br/>that is why they can approve
+    AA->>AA: wrap ring to joiner's identity key
+    AA->>API: POST .../approve { wrapped_space_keys }
+    API->>API: add_membership(wrapped_space_keys)
+    API--)JA: space:join_decided
+
+    Note over JA: member and readable<br/>in the same event
+        </pre>
+      </div>
+      <figcaption>
+        <b>The approver is online by construction.</b> They are the one clicking,
+        so they hold the keyring at that instant and the wrap happens in the same
+        action. The joiner never sees the empty-space state that the old flow
+        guaranteed.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Who may answer the door</span>
+      <h2>One control, and it is the only one</h2>
+      <p>
+        On the space, owner's choice: <b>owner only</b>, or <b>owner and any
+        member</b>. New spaces start owner-only. There is no second switch, no
+        per-invite setting, and no expiring-code option &mdash; approval is what
+        rotation was for.
+      </p>
+      <p>
+        No new role either. <span class="str">role</span> is already
+        <span class="str">'owner' | 'member'</span>, and a boolean grants exactly
+        the one capability asked for. Rename, delete and remove-member stay the
+        owner's, because removing a member forces a rekey and that is not a
+        capability to hand out in passing.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Surface by surface</span>
+      <h2>What a person actually sees</h2>
+      <p>
+        Approvals reuse the surface invites already own: one popover at the foot
+        of the spaces panel, one badge. Nothing new to find.
+      </p>
+    </div>
+
+    <div class="ledger">
+      <div class="rowhead"><span>Surface</span><span>Was</span><span>Now</span></div>
+
+      <div class="row">
+        <div class="surface">Pasting a code</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          The space appears in the list immediately, and is empty. Nothing says why.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          <span class="str">"Asked to join Design. Waiting for someone in this space to let you in."</span> A greyed row, no controls, honest about the state.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Invites popover</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Two lists, received and sent invites. Count on the trigger sums both.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          A third list above them: <span class="str">"Sam wants to join Design"</span>, with Approve and Decline. The count sums all three. Only shown to people who may approve.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Approving</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Did not exist. The nearest thing was noticing a stranger and removing them &mdash; which rekeys the space for everybody.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          One click. The wrap happens in Rust with a ring the approver already holds, so there is nothing to ask them and no second dialog.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Account nav badge</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Counts pending invites.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Counts pending invites and pending requests, through the same listener pattern.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Notifications</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          A join produced nothing for anyone. The owner found out by reading the member list.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          <span class="str">"Sam asked to join Design"</span> for approvers, and <span class="str">"You are in Design"</span> for the joiner. A decline stays quiet: the pending row simply goes away.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Space settings</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Share history, send filters, auto-copy.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          One line added, owner only: <span class="str">"Members can approve join requests"</span>. Off for new spaces.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">Addressed invite</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Owner names an email, invitee accepts, key already pre-wrapped, instantly readable.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Identical. The owner naming a person <em>is</em> the approval, so this path never sees a request.
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="surface">The <span class="str">/join/{code}</span> page</div>
+        <div class="cell cell--was"><span class="tag">Was</span>
+          Hands the code to the app via the deep link.
+        </div>
+        <div class="cell cell--now"><span class="tag">Now</span>
+          Unchanged. It still hands over a code; only what redeeming one <em>does</em> changed.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Deliberately unchanged</span>
+      <h2>What this does not fix</h2>
+    </div>
+
+    <div class="notes">
+      <div class="note">
+        <h3>The code still cannot be rotated</h3>
+        <p>
+          One code per space, 72 hours, no rotate route. Rotating would break
+          every link already sent. Approval is the mitigation: a leaked code buys
+          a knock, not entry.
+        </p>
+      </div>
+      <div class="note">
+        <h3>A leaked code invites knocking</h3>
+        <p>
+          Strangers can now raise requests where before they simply walked in.
+          Capped at one row per person per space, and a declined row is kept
+          precisely so the same code cannot produce a second knock.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Owner-only spaces can still stall</h3>
+        <p>
+          If the owner never opens the app, a request sits. That is strictly
+          better than today, where the joiner sits in the same silence already
+          &mdash; but flipping the member switch on is the fix, and it is one line
+          in the space's settings.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Nothing is revoked retroactively</h3>
+        <p>
+          Anyone who joined by code before this ships is a member and stays one.
+          Approval gates the door, not the room.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Where it stands</span>
+      <h2>Verified, and not</h2>
+      <p>
+        Nothing has been written. The rows below are the plan's checkpoints, not
+        results, and the migration will be the fifth in a row that applies on a
+        deploy rather than from anyone's machine.
+      </p>
+    </div>
+
+    <ul class="checks">
+      <li class="chk chk--open">design &middot; awaiting sign-off</li>
+      <li class="chk chk--open">migration 0018</li>
+      <li class="chk chk--open">backend routes + tests</li>
+      <li class="chk chk--open">client commands + UI</li>
+      <li class="chk chk--open">live join flow &middot; needs a deploy and two accounts</li>
+    </ul>
+  </section>
+
+  <footer>
+    Durable spec: <b>docs/SPACE-JOIN-APPROVAL.md</b>, which supersedes section 4
+    of <b>docs/SPACE-ACCESS.md</b>. Key handover, whose pre-wrap this reuses:
+    <b>docs/space-key-handover.html</b>.
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+</script>
+</body>
+</html>
