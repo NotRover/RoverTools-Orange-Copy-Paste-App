@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { SyncInvite } from "../../../../types";
+import type { SpaceJoinRequest, SyncInvite } from "../../../../types";
 import "./InvitesPopover.css";
 
 interface InvitesPopoverProps {
@@ -10,12 +10,17 @@ interface InvitesPopoverProps {
   anchorY: number;
   received: SyncInvite[];
   sent: SyncInvite[];
+  /** People who used a code or a join link and are waiting to be let in. Only
+      ever non-empty for someone who may approve them. */
+  requests: SpaceJoinRequest[];
   /** Answering needs an account: signed out, the rows are read-only. */
   signedIn: boolean;
   onClose: () => void;
   onAccept: (inviteId: string) => void;
   onDecline: (inviteId: string) => void;
   onRevoke: (inviteId: string) => void;
+  onApprove: (req: SpaceJoinRequest) => void;
+  onTurnDown: (req: SpaceJoinRequest) => void;
 }
 
 function ago(ms: number): string {
@@ -44,24 +49,30 @@ const InvitesPopover: React.FC<InvitesPopoverProps> = ({
   anchorY,
   received,
   sent,
+  requests,
   signedIn,
   onClose,
   onAccept,
   onDecline,
   onRevoke,
+  onApprove,
+  onTurnDown,
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<"received" | "sent">("received");
+  const [tab, setTab] = useState<"requests" | "received" | "sent">("requests");
 
   // One list at a time, and it opens on the one that is asking something of
   // the user. Landing on an empty Received tab while an invite waits under
-  // Sent would read as "nothing here".
+  // Sent would read as "nothing here". Requests come first: somebody is
+  // waiting on a door only this user can open.
   useEffect(() => {
-    if (open) setTab(received.length > 0 ? "received" : "sent");
+    if (!open) return;
+    if (requests.length > 0) setTab("requests");
+    else setTab(received.length > 0 ? "received" : "sent");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const rows = tab === "received" ? received : sent;
+  const rows = tab === "received" ? received : tab === "sent" ? sent : [];
 
   // Centred on the button and grown upward, pinned by its *bottom* edge rather
   // than a measured top: answering an invite changes the height, and a JS
@@ -110,15 +121,23 @@ const InvitesPopover: React.FC<InvitesPopoverProps> = ({
       </div>
 
       <div className="inv-tabs">
-        {(["received", "sent"] as const).map((key) => (
+        {(["requests", "received", "sent"] as const).map((key) => (
           <button
             key={key}
             className={`inv-tab${tab === key ? " active" : ""}`}
             onClick={() => setTab(key)}
           >
-            {key === "received" ? "Received" : "Sent"}
+            {key === "requests"
+              ? "Requests"
+              : key === "received"
+                ? "Received"
+                : "Sent"}
             <span className="inv-tab-count">
-              {key === "received" ? received.length : sent.length}
+              {key === "requests"
+                ? requests.length
+                : key === "received"
+                  ? received.length
+                  : sent.length}
             </span>
           </button>
         ))}
@@ -131,7 +150,38 @@ const InvitesPopover: React.FC<InvitesPopoverProps> = ({
       )}
 
       <div className="inv-list">
-        {rows.length === 0 && (
+        {tab === "requests" && requests.length === 0 && (
+          <p className="inv-empty">Nobody is waiting to be let in.</p>
+        )}
+
+        {tab === "requests" &&
+          requests.map((req) => (
+            <div key={req.id} className="inv-row">
+              <p className="inv-row-space">{req.space_name}</p>
+              <p className="inv-row-sub">
+                {req.display_name || "Someone"} used a code or a join link
+                <span className="inv-row-meta"> {ago(req.created_at)}</span>
+              </p>
+              <div className="inv-row-actions">
+                <button
+                  className="inv-btn inv-btn--primary"
+                  disabled={!signedIn}
+                  onClick={() => onApprove(req)}
+                >
+                  Approve
+                </button>
+                <button
+                  className="inv-btn"
+                  disabled={!signedIn}
+                  onClick={() => onTurnDown(req)}
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
+
+        {tab !== "requests" && rows.length === 0 && (
           <p className="inv-empty">
             {tab === "received"
               ? "No invites waiting for an answer."

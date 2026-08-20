@@ -3805,44 +3805,111 @@ impl SyncClient {
         let Some(http) = self.http.lock().clone() else {
             return;
         };
-        let Some((id_priv, _id_pub)) = self.identity_keypair() else {
+        let Some(json) = self.wrap_ring_for(&invite.space_id, invite.invitee_identity_pubkey.as_deref())
+        else {
             return;
         };
-        let Some(invitee_pub) = invite
-            .invitee_identity_pubkey
-            .as_deref()
-            .and_then(decode_pubkey)
-        else {
-            return; // no keys registered yet — they get one after joining
-        };
+        if let Err(e) = http.attach_invite_key(&invite.id, json).await {
+            eprintln!("[sync] attach invite key {}: {e}", invite.id);
+        }
+    }
+
+    /// Wrap our whole keyring for one counterparty, as the JSON array the server
+    /// stores opaquely. `None` whenever we cannot: no identity key of our own, no
+    /// public key for them yet, an empty ring (we cannot read the space either),
+    /// or a wrap failure.
+    ///
+    /// Shared by the two places that hand a key to somebody who is not yet a
+    /// member - a pre-wrapped invite and an approved join request. Both are the
+    /// same operation, and both are why a new member can read immediately instead
+    /// of waiting for a keyholder's app to wake up.
+    fn wrap_ring_for(&self, space_id: &str, counterparty_pubkey: Option<&str>) -> Option<String> {
+        let (id_priv, _id_pub) = self.identity_keypair()?;
+        let their_pub = counterparty_pubkey.and_then(decode_pubkey)?;
         let ring = self
             .space_keys
             .lock()
-            .get(&invite.space_id)
+            .get(space_id)
             .cloned()
             .unwrap_or_default();
         if ring.is_empty() {
-            return; // we cannot read the space ourselves yet
+            return None;
         }
-        let shared = crypto::x25519_shared_secret(&id_priv, &invitee_pub);
+        let shared = crypto::x25519_shared_secret(&id_priv, &their_pub);
         let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
         for key in &ring {
             match crypto::wrap_key(&shared, key) {
                 Ok(w) => wrapped.push(w),
                 Err(e) => {
-                    eprintln!("[sync] wrap invite key for {}: {e}", invite.id);
-                    return;
+                    eprintln!("[sync] wrap space key for {space_id}: {e}");
+                    return None;
                 }
             }
         }
-        match serde_json::to_string(&wrapped) {
-            Ok(json) => {
-                if let Err(e) = http.attach_invite_key(&invite.id, json).await {
-                    eprintln!("[sync] attach invite key {}: {e}", invite.id);
-                }
-            }
-            Err(e) => eprintln!("[sync] invite keyring json {}: {e}", invite.id),
-        }
+        serde_json::to_string(&wrapped)
+            .inspect_err(|e| eprintln!("[sync] keyring json {space_id}: {e}"))
+            .ok()
+    }
+
+    /// Approve a join request, handing the Space Key over in the same call.
+    ///
+    /// The wrap is what makes approval one step rather than two: we are holding
+    /// the ring right now, because we are the one approving, so the membership is
+    /// created with a key already in it. If we cannot wrap - no ring yet, or the
+    /// requester has not registered keys - the approval still goes through and
+    /// they wait for a key like any other keyless member.
+    pub(crate) async fn approve_join_request(
+        self: &Arc<Self>,
+        space_id: &str,
+        request_id: &str,
+        requester_pubkey: Option<&str>,
+    ) -> Result<(), String> {
+        let http = self.http.lock().clone().ok_or("not signed in")?;
+        let wrapped = self.wrap_ring_for(space_id, requester_pubkey);
+        http.approve_join_request(space_id, request_id, wrapped).await
+    }
+
+    /// Somebody asked to join a space we can approve for.
+    ///
+    /// Raised only for people who can act on it - the server only publishes it to
+    /// them - and keyed on the request, so a reconnect replaying the event cannot
+    /// report the same knock twice.
+    pub(crate) fn note_join_requested(&self, space_id: &str, request_id: &str, who: &str) {
+        let spaces = self.spaces();
+        let space_name = spaces
+            .iter()
+            .find(|s| s.id == space_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "a space".to_string());
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                format!("space-join:{request_id}"),
+                crate::notifications::NotificationKind::SpaceInvite,
+                format!("Somebody asked to join \"{space_name}\""),
+            )
+            .with_body(if who.is_empty() {
+                "Open Invites to let them in, or turn them down.".to_string()
+            } else {
+                format!("{who} is waiting. Open Invites to let them in, or turn them down.")
+            })
+            .with_data("space_id", space_id.to_string()),
+        );
+    }
+
+    /// Our own request was approved. The key came with it, so this is the point
+    /// the space becomes readable rather than merely joined.
+    pub(crate) fn note_join_approved(&self, space_id: &str, space_name: &str) {
+        crate::notifications::raise(
+            &self.app,
+            crate::notifications::Notification::new(
+                format!("space-joined:{space_id}"),
+                crate::notifications::NotificationKind::SpaceActivity,
+                format!("You are in \"{space_name}\""),
+            )
+            .with_body("Your request was approved.")
+            .with_data("space_id", space_id.to_string()),
+        );
     }
 
     /// Reconcile space keyrings with the server; refreshes the cached space
@@ -4090,6 +4157,9 @@ impl SyncClient {
                 share_history: s.share_history,
                 invite_code: s.invite_code,
                 invite_expires_at: s.invite_expires_at,
+                members_can_approve: s.members_can_approve,
+                i_can_approve: s.i_can_approve,
+                pending_join_requests: s.pending_join_requests,
             });
         }
 

@@ -3,6 +3,18 @@
 `docs/SPACE-ACCESS.md` closed with "Nothing changes about joining." This supersedes
 that section. Everything else in that document stands.
 
+**Status: built.** Migration 0018 is written and applies on the next deploy; nothing
+has touched a database. `ruff`, `ty`, `cargo check`, `cargo test` and `bun run build`
+pass. The eight new backend tests have not run - the fixtures need a Postgres this
+machine cannot reach - so CI is the first thing that executes them. A rendered
+walkthrough with the flow diagrams is `join-approval.html` alongside this file.
+
+**A join link is the code.** `/join/{code}` is a page whose only job is to hand the
+code to the app as `orange://join?code=...`; `extract_invite_code` strips the wrapper
+and calls the same `POST /spaces/join`. There is no link-shaped route and no
+link-shaped token, so a link cannot behave differently from the characters inside it
+and the gate covers both by construction.
+
 ## The correction worth making first
 
 A Space Key has never gone to a mailbox. What the invite email carries is the
@@ -13,8 +25,8 @@ That distinction does not rescue the design, though — it sharpens the actual
 problem. `spaces.invite_code` is a **multi-use bearer capability**: 8 characters
 from a 31-symbol alphabet (about 2^40), one per space, valid 72 hours, and there
 is no route to rotate it. Anyone holding it is a member the moment they post it
-to `POST /spaces/join`, and `join_space` calls `add_membership` with no gate of
-any kind (`src/spaces/service.py:256`). A forwarded mail, a screenshot in a
+to `POST /spaces/join`, and the old `join_space` called `add_membership` with no
+gate of any kind. A forwarded mail, a screenshot in a
 group chat, a stale link in someone's history — each is a silent join. The owner
 finds out by noticing a name in the member list.
 
@@ -76,6 +88,11 @@ Four additions. Nothing existing changes shape.
 (`pending` | `approved` | `declined`), `wrapped_space_keys`, `wrapped_by`,
 `created_at`, `decided_at`, `decided_by`.
 
+One case the design did not anticipate: an `approved` row whose membership is gone,
+because the member left afterwards. Leaving them locked out of a code they still hold
+is a dead end with no way back, so `request_join` reopens the spent row rather than
+refusing or duplicating it.
+
 A declined row is kept, not deleted — it is what stops the same person knocking
 again on a code they still hold, and it is the only record the owner has that
 somebody tried.
@@ -89,9 +106,16 @@ somebody tried.
 - `POST /spaces/{id}/join-requests/{rid}/approve` — body carries the wrapped
   ring, same shape as `AttachKeyRequest`. Calls `add_membership` with it.
 - `POST /spaces/{id}/join-requests/{rid}/decline`.
-- `PATCH /spaces/{id}` gains `members_can_approve`, owner only.
-- `SpaceOut` gains `members_can_approve` and `i_can_approve` (derived: owner, or
-  member and the flag is on), so the client never re-derives the rule.
+- `GET /spaces/my-join-requests` - the caller's own outstanding knocks, name and
+  timestamp only. A pending request is not a membership, so none of these spaces
+  come back from `GET /spaces`; without this the wait is a blank screen. Declared
+  **above** `/{space_id}`, which takes a UUID and would otherwise shadow it into
+  a 422.
+- `PATCH /spaces/{id}` gains `members_can_approve`, owner only. Both fields on that
+  route became optional, so setting one cannot clobber the other.
+- `SpaceOut` gains `members_can_approve`, `i_can_approve` (derived by
+  `service.may_approve`, the one definition of the rule) and
+  `pending_join_requests`, counted only for a caller who may act on it.
 - Fan-out: `space:join_requested` to everyone who may approve;
   `space:join_decided` to the requester. Both go through the existing space and
   user channels in `realtime.py` — no new channel.
@@ -111,18 +135,22 @@ Two rows, using the `note_*` pattern in `sync/mod.rs` built for the key work:
 ## UI
 
 Approvals live where invites already live: the **Invites** popover at the foot of
-the spaces panel (`SpacesScreen.tsx:3575`), which becomes two lists under one
-trigger. Its count (`sp-invites-count`) sums received invites, sent invites, and
+the spaces panel, which gains a third tab, `Requests`, and opens on it whenever
+anything is in it. Its count (`sp-invites-count`) sums received invites, sent invites, and
 pending requests, and the Account nav badge in `App.tsx:607` picks up requests
 the same way it picks up invites.
 
 A request row is one line: who, which space, Approve / Decline. Approving is a
 single click, because the wrap happens in Rust with a ring the approver already
-holds — there is nothing to ask them.
+holds — there is nothing to ask them. `wrap_ring_for` is shared with the invite
+pre-wrap, since handing a key to somebody who is not yet a member is the same
+operation in both places.
 
-The requester's own side is a row in their spaces list: the space name, greyed,
-with "Waiting for someone in this space to let you in." No feed, no controls. It
-is the state they are already in today, finally labelled.
+The requester's own side is a row in their spaces list, under a `Waiting` group:
+the space name, dashed and dimmed, with "Waiting for someone in this space to let
+you in". No feed, no controls, not clickable. It is the state they are already in
+today, finally labelled - and it survives a restart, because it comes from the
+server rather than from having just clicked.
 
 ## Considered and dropped
 

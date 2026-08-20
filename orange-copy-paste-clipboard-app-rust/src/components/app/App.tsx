@@ -604,7 +604,9 @@ const App: React.FC = () => {
     return () => clearTimeout(t);
   }, [syncTick]);
 
-  // Pending shared-space invites — drives the badge on the Account nav item.
+  // Pending shared-space invites and join requests — drives the badge on the
+  // Account nav item. Both arrive as notification rows raised in Rust, so the
+  // count is whatever is unread rather than a second tally kept here.
   useEffect(() => {
     let cancelled = false;
     const unlisteners: Array<() => void> = [];
@@ -637,6 +639,11 @@ const App: React.FC = () => {
     track(listen("notifications:changed", reload));
     track(listen("sync:invite-received", pull));
     track(listen("sync:invite-updated", pull));
+    // Somebody asked to join a space this account can approve for. Raised in
+    // Rust as it happens; this covers the case where the event arrives while
+    // the notification store is mid-refresh.
+    track(listen("sync:join-requested", pull));
+    track(listen("sync:join-decided", pull));
     track(
       listen<{ connected: boolean }>("sync:status-changed", (event) => {
         if (event.payload.connected) pull();

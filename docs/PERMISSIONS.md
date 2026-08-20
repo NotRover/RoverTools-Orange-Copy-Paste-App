@@ -84,6 +84,8 @@ so the damage was one-sided and invisible from the other end.
 | Mint the space's key | yes | no |
 | Hand the key to a member who lacks one | yes | yes (any keyholder) |
 | Change the share-history policy | yes | no |
+| Choose whether members may approve join requests | yes | no |
+| Approve or decline a join request | yes | only if the owner turned it on |
 | Remove a member | yes | no |
 | Leave | n/a | yes |
 | Take down any entry in the space | yes | no |
@@ -116,11 +118,13 @@ restart.
 | Comment on an entry | command refuses; nothing is readable to comment on anyway |
 | Read the feed | empty - the entries cannot be decrypted yet |
 
-**Who gets told.** Three notification rows come out of this, and all three are scoped by
+**Who gets told.** Five notification rows come out of this, and all five are scoped by
 the same ownership rule as the actions above: a space becoming readable (yours to know, you
-are in it), a comment on an entry **you wrote** or one that **names you**, and a refused
-keyring. A comment between two other members on a third member's item raises nothing - the
-notification follows authorship, not membership.
+are in it), a comment on an entry **you wrote** or one that **names you**, a refused
+keyring, somebody knocking on a space **you may approve**, and the answer to a knock **you
+made**. A comment between two other members on a third member's item raises nothing, and
+neither does a join request on a space you are only a member of - the notification follows
+who can act, not who is present.
 
 **A key that does not match is refused, not retried.** Since any member may distribute, a
 recipient checks the ring against `spaces.key_fingerprint` - written by the owner alone when
@@ -187,6 +191,10 @@ Client, Rust — the enforcement that matters, since only Rust can push:
 - `sync/mod.rs` — `note_comment`, the one place that decides a comment is worth
   interrupting for: not ours, and either on an entry we wrote or naming us.
   `note_space_readable` and `note_space_key_rejected` are the other two rows.
+- `sync/mod.rs` — `note_join_requested`, raised only for a space whose
+  `i_can_approve` is set, and `note_join_approved` for the requester's own side.
+  `wrap_ring_for` is the shared half: approving and pre-wrapping an invite are
+  the same operation, handing a key to somebody who is not a member yet.
 
 Client, React — hides what is not allowed, so nothing dead is on screen:
 
@@ -213,6 +221,14 @@ Backend — the only place a rule survives a modified client:
 - `spaces/service.py` — `_require_member` is the whole gate for reading and
   writing comments: a space is a room, and everyone in it can talk.
   `delete_comment` is the narrower one, author or space owner.
+- `spaces/service.py` — `may_approve` is the single definition of who may answer
+  a join request (owner, or member with `members_can_approve`). It is what
+  `join_requests._require_approver` gates on and what `SpaceOut.i_can_approve`
+  is derived from, so the client renders the rule rather than restating it.
+- `spaces/join_requests.py` — a code or a join link now raises a request instead
+  of a membership. This is the one place a leaked code is stopped, and it covers
+  links by construction: `/join/{code}` only hands the code to the app, which
+  calls the same `POST /spaces/join`.
 
 ## What the server does not enforce
 
