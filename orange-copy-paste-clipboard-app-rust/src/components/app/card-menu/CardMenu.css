@@ -118,9 +118,9 @@
   color: var(--danger);
 }
 
-/* Expand / Collapse button */
+/* View button */
 
-.card-menu-item--expand:hover {
+.card-menu-item--view:hover {
   background: var(--accent-dim);
   color: var(--accent);
 }
@@ -238,19 +238,6 @@
   padding: 4px 8px 8px;
   max-height: 150px;
   overflow: hidden auto;
-}
-
-.card-menu-groups-flyout-body::-webkit-scrollbar {
-  width: 4px;
-}
-
-.card-menu-groups-flyout-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.card-menu-groups-flyout-body::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
 }
 
 /* Group chip (matches entry-card chip style) */

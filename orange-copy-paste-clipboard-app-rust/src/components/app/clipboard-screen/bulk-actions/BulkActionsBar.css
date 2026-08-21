@@ -245,17 +245,6 @@
   overflow: hidden auto;
 }
 
-.bulk-popup-flyout-chips::-webkit-scrollbar {
-  width: 4px;
-}
-.bulk-popup-flyout-chips::-webkit-scrollbar-track {
-  background: transparent;
-}
-.bulk-popup-flyout-chips::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-
 .bulk-popup-flyout-chip {
   display: inline-flex;
   align-items: center;

@@ -35,44 +35,6 @@
   position: relative;
 }
 
-/* Same scrollbar as the clipboard and notes viewports: the thumb carries a
-   border in the surface colour so it reads as inset rather than pinned to the
-   edge of the window, which is where this pane sits while editing. */
-.ee-rich-shell::-webkit-scrollbar,
-.ee-textarea::-webkit-scrollbar,
-.ee-preview::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
-.ee-rich-shell::-webkit-scrollbar-track,
-.ee-textarea::-webkit-scrollbar-track,
-.ee-preview::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ee-rich-shell::-webkit-scrollbar-thumb,
-.ee-textarea::-webkit-scrollbar-thumb,
-.ee-preview::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 3px solid var(--surface);
-  background-clip: padding-box;
-}
-.ee-rich-shell::-webkit-scrollbar-thumb:hover,
-.ee-textarea::-webkit-scrollbar-thumb:hover,
-.ee-preview::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 3px solid var(--surface);
-  background-clip: padding-box;
-}
-.ee-rich-shell::-webkit-scrollbar-button,
-.ee-textarea::-webkit-scrollbar-button,
-.ee-preview::-webkit-scrollbar-button,
-.ee-rich-shell::-webkit-scrollbar-corner,
-.ee-textarea::-webkit-scrollbar-corner,
-.ee-preview::-webkit-scrollbar-corner {
-  display: none;
-}
-
 .ee-rich.ProseMirror {
   outline: none;
   padding: var(--ee-editor-pad-edit);
@@ -276,7 +238,6 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow-x: auto;
-  scrollbar-width: thin;
   font-size: 12.5px;
   line-height: 1.55;
   font-family: var(--ee-editor-mono);
@@ -629,7 +590,6 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow-x: auto;
-  scrollbar-width: thin;
   font-size: 12.5px;
   line-height: 1.55;
 }
@@ -922,17 +882,6 @@
   gap: 6px;
 }
 
-.ee-embed-panel-body::-webkit-scrollbar {
-  width: 5px;
-}
-.ee-embed-panel-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ee-embed-panel-body::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-
 /* Image preview */
 .ee-embed-panel-img {
   width: 100%;
@@ -1104,17 +1053,6 @@
   gap: 1px;
 }
 
-.ee-group-panel-body::-webkit-scrollbar {
-  width: 5px;
-}
-.ee-group-panel-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ee-group-panel-body::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-
 .ee-group-panel-empty {
   font-size: 11px;
   color: var(--text-muted);
@@ -1251,33 +1189,9 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   overflow-x: auto;
-  scrollbar-width: thin;
   margin: 8px 0;
 }
 
-/* Thin horizontal scrollbar for code blocks (editor, preview, and card). */
-.ee-rich.ProseMirror pre::-webkit-scrollbar,
-.ee-preview pre::-webkit-scrollbar,
-.ee-codeblock::-webkit-scrollbar {
-  height: 6px;
-  width: 6px;
-}
-.ee-rich.ProseMirror pre::-webkit-scrollbar-track,
-.ee-preview pre::-webkit-scrollbar-track,
-.ee-codeblock::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ee-rich.ProseMirror pre::-webkit-scrollbar-thumb,
-.ee-preview pre::-webkit-scrollbar-thumb,
-.ee-codeblock::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-.ee-rich.ProseMirror pre::-webkit-scrollbar-thumb:hover,
-.ee-preview pre::-webkit-scrollbar-thumb:hover,
-.ee-codeblock::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-}
 .ee-codeblock code {
   background: transparent;
   padding: 0;

@@ -688,17 +688,6 @@
   gap: 1px;
 }
 
-.ns-embed-list::-webkit-scrollbar {
-  width: 5px;
-}
-.ns-embed-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-.ns-embed-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-
 .ns-embed-item {
   display: flex;
   align-items: center;
@@ -831,27 +820,6 @@
   overflow: hidden auto;
   padding: 12px 12px;
   background: var(--surface);
-}
-
-.ns-editor-content::-webkit-scrollbar {
-  width: 10px;
-}
-
-.ns-editor-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.ns-editor-content::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 3px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.ns-editor-content::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 3px solid var(--bg);
-  background-clip: padding-box;
 }
 
 /* Editor surface and embed styles live in editor-engine/markdown.css. */

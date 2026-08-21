@@ -59,6 +59,53 @@
   user-select: none;
 }
 
+/* ── Scrollbars ──────────────────────────────────────────────────────────────
+   One treatment for every scrollable surface, so a panel does not get a
+   different bar from the screen behind it.
+
+   Two things make a single rule possible. The inset is a *transparent* border
+   with `background-clip: padding-box`, so no element has to know whether it
+   sits on --bg, --surface or --bg-subtle. And the size comes from custom
+   properties, so a surface that needs a different bar sets --sb-size on itself
+   rather than restating the whole set.
+
+   Kept quiet on purpose: 4px of visible thumb, and a hover that lightens
+   rather than colours. The accent is reserved for the one bar people actually
+   miss, the horizontal one in the entry viewer.
+
+   Deliberately no `scrollbar-width` / `scrollbar-color` anywhere: in Chromium
+   121 and later, setting either one switches the element to standard
+   scrollbars and every rule below is ignored. */
+
+*::-webkit-scrollbar {
+  width: var(--sb-size, 12px);
+  height: var(--sb-size, 12px);
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border-light);
+  border-radius: 999px;
+  border: var(--sb-inset, 2px) solid transparent;
+  background-clip: padding-box;
+}
+
+/* `background-color`, never the `background` shorthand: the shorthand resets
+   `background-clip` to border-box, so the thumb paints over its own
+   transparent border and appears to grow by twice the inset on hover. */
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted, var(--text-secondary));
+}
+
+/* Chromium draws stepper buttons on some platforms; nothing here wants them. */
+*::-webkit-scrollbar-button {
+  display: none;
+}
+
 html,
 body {
   height: 100%;

@@ -168,7 +168,6 @@
   gap: 14px;
   padding: 12px;
   overflow: hidden auto;
-  scrollbar-width: thin;
 }
 
 .sp-rules-foot {
@@ -635,22 +634,15 @@
   flex: 1;
   overflow: hidden auto;
   padding: 10px 0 14px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  /* Reserve a gutter on both edges and inset the scroll area from the window,
+     so the bar sits off the edge like the clipboard and notes viewports. */
+  scrollbar-gutter: stable both-edges;
+  margin: 0 8px;
 }
 
 /* Empty + error states inside scroll retain comfortable padding */
 .sp-feed-scroll .sp-feed-empty {
   padding: 48px 24px;
-}
-
-.sp-feed-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-
-.sp-feed-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 4px;
 }
 
 /* ── Feed card overlays ── */
@@ -818,16 +810,10 @@
   flex-direction: column;
   overflow: hidden auto;
   padding: 12px 10px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-
-.sp-panel-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-.sp-panel-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 4px;
+  /* Reserve a gutter on both edges and inset the scroll area from the window,
+     so the bar sits off the edge like the clipboard and notes viewports. */
+  scrollbar-gutter: stable both-edges;
+  margin: 0 8px;
 }
 
 /* ── Group sections ── */
@@ -1328,16 +1314,10 @@
   flex: 1;
   overflow: hidden auto;
   padding: 20px 24px 32px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-
-.sp-detail-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-.sp-detail-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 4px;
+  /* Reserve a gutter on both edges and inset the scroll area from the window,
+     so the bar sits off the edge like the clipboard and notes viewports. */
+  scrollbar-gutter: stable both-edges;
+  margin: 0 8px;
 }
 
 .sp-detail-note-title {
@@ -1613,7 +1593,6 @@
   background: var(--surface-2, var(--surface));
   max-height: 52vh;
   overflow: hidden auto;
-  scrollbar-width: thin;
 }
 
 .sp-settings-error {
