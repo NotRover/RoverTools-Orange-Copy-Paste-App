@@ -29,6 +29,8 @@ import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
 import BulkActionsBar from "./bulk-actions/BulkActionsBar";
+import EntryViewer from "./entry-viewer/EntryViewer";
+import { useCardClickAction } from "../../../hooks/useCardClickAction";
 import { sortableText } from "../sort-options";
 import type { SortMode } from "../sort-options";
 import Topbar, {
@@ -208,6 +210,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const entrySyncStates = useEntrySyncStates();
   const entryOwners = useEntryOwners();
   const syncBadgesVisible = useSyncBadgesVisible();
+  const clickAction = useCardClickAction();
   const spaceShares = useSpaceShares();
 
   const remoteKeys = useRemoteEntryKeys();
@@ -387,6 +390,13 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     [multiSelect.selectedIds, remoteKeys],
   );
 
+  // The entry being read in full, if any. Held as an id rather than the entry
+  // so a live update (a group change, a sync badge) reaches the open panel.
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const viewingEntry = viewingId
+    ? (entries.find((e) => e.id === viewingId) ?? null)
+    : null;
+
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -398,6 +408,53 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 
   // Close filter dropdown on outside click
   useClickOutside(sf.filterRef, sf.filtersOpen, () => sf.setFiltersOpen(false));
+
+  // The viewer takes the whole screen: the toolbar above it is search and
+  // sorting for a list that is not on screen. Falls back to the list on its own
+  // if the entry goes away underneath it (deleted here, or a tombstone synced
+  // in from another device).
+  if (viewingEntry) {
+    return (
+      <div className="clipboard-screen-root">
+        <EntryViewer
+          entry={viewingEntry}
+          onClose={() => setViewingId(null)}
+          onCopy={onCopy}
+          isInClipboard={viewingEntry.id === activeClipboardId}
+          syncState={
+            syncBadgesVisible
+              ? entrySyncStates[`clipboard:${viewingEntry.id}`]
+              : undefined
+          }
+          owner={entryOwners[`clipboard:${viewingEntry.id}`]}
+          sharedSpaceNames={spaceShares.namesFor("clipboard", viewingEntry.id)}
+          waitingSpaceNames={spaceShares.waitingNamesFor(
+            "clipboard",
+            viewingEntry.id,
+          )}
+          onDelete={onDelete}
+          onPin={onPin}
+          onSetGroups={onSetGroups}
+          availableGroups={availableGroups}
+          spaces={spaceShares.spaces}
+          signedIn={spaceShares.signedIn}
+          itemSpaceIds={spaceShares.shares[`clipboard:${viewingEntry.id}`]}
+          onToggleSpace={
+            remoteKeys.has(`clipboard:${viewingEntry.id}`)
+              ? undefined
+              : (spaceId) =>
+                  spaceShares.toggle("clipboard", viewingEntry.id, spaceId)
+          }
+          inCloud={!!entrySyncStates[`clipboard:${viewingEntry.id}`]}
+          onToggleCloud={
+            remoteKeys.has(`clipboard:${viewingEntry.id}`)
+              ? undefined
+              : (upload) => toggleEntryCloud(viewingEntry.id, upload)
+          }
+        />
+      </div>
+    );
+  }
 
   if (entries.length === 0) {
     return (
@@ -633,6 +690,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                             isSelected={multiSelect.selectedIds.has(entry.id)}
                             onToggleSelect={multiSelect.toggleSelect}
                             onRangeSelect={handleRangeSelect}
+                            onView={setViewingId}
+                            clickAction={clickAction}
                             isInClipboard={entry.id === activeClipboardId}
                             syncState={
                               syncBadgesVisible

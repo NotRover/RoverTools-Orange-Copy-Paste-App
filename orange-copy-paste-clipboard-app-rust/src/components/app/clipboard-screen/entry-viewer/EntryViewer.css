@@ -1,0 +1,564 @@
+/* Full view of one clipboard entry. Sits where the grid was, so the measure
+   below is the only thing keeping long text readable on a wide window. */
+
+.cv-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  animation: cvIn 0.16s ease-out;
+}
+
+@keyframes cvIn {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────── */
+
+.cv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* Same family as the action buttons on the right, so the row reads as one set
+   of controls rather than two. Leading with the chevron is what marks it as
+   the way out rather than another action. */
+.cv-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  corner-shape: squircle;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.cv-back:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.cv-back-chevron {
+  transform: rotate(180deg);
+}
+
+.cv-toolbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Counts and the timestamp. Tabular figures so a count that ticks while the
+   panel is open does not shuffle the row. */
+.cv-fact {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-fact + .cv-fact::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  vertical-align: middle;
+}
+
+.cv-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Grouping, not decoration: it separates how you are looking at the entry from
+   what you can do with it. The margin has to beat the row's gap, or the rule
+   reads as one more item in the run rather than a break in it. */
+.cv-btn-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border-light);
+  flex-shrink: 0;
+}
+
+/* ── Zoom ───────────────────────────────────────────────────────── */
+
+/* One control, three parts, joined: minus, the current level, plus. Joined
+   rather than spaced because they are one thing, and the level in the middle
+   is a button too - pressing it puts the zoom back. */
+.cv-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Fixed width so stepping through 25% to 400% does not shuffle everything to
+   the right of it. Tabular figures for the same reason. */
+.cv-zoom-level {
+  min-width: 48px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-zoom-step {
+  color: var(--text-muted);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────── */
+
+/* One base, five roles. Colour carries the role so it survives being scanned
+   rather than read: the primary action is filled, destructive is red, a toggle
+   that is on is accent, everything else is quiet. */
+.cv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  corner-shape: squircle;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+/* Square, for the ones carrying an icon and no label. */
+.cv-btn--icon {
+  width: 26px;
+  padding: 0;
+}
+
+.cv-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Keyboard focus must be visible on every one of these, including the ones
+   whose hover state is the only thing distinguishing them at rest. */
+.cv-btn:focus-visible,
+.cv-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Copy: the reason most people open this screen, so it is the only filled
+   button on the row. */
+.cv-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.cv-btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 86%, #000);
+  border-color: color-mix(in srgb, var(--accent) 86%, #000);
+  color: #fff;
+}
+
+.cv-btn--done,
+.cv-btn--done:hover {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+
+/* The menu button while its menu is open. */
+.cv-btn--on {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* The view switches (Wrap, Source, Actual size). Quiet by design - they change
+   how you are looking at the entry, not the entry. */
+.cv-btn--ghost {
+  color: var(--text-muted);
+}
+
+.cv-btn--ghost[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-btn,
+  .cv-back {
+    transition: none;
+  }
+
+  .cv-panel {
+    animation: none;
+  }
+}
+
+/* ── Metadata strip ─────────────────────────────────────────────── */
+
+/* A second, quieter row under the toolbar wearing the card's own chip classes,
+   so an entry looks the same here as it does in the grid. The card hides chips
+   it cannot fit; nothing is hidden here, which is half the reason to open an
+   entry in the first place. */
+.cv-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* Squircle: a slightly fuller corner than a plain radius, which reads as
+   deliberate at this size. Ignored where it is unsupported, and the radius
+   underneath is what the cards already use, so the fallback is the card. */
+.cv-meta .card-type-chip,
+.cv-meta .card-owner-chip,
+.cv-meta .type-pill {
+  corner-shape: squircle;
+  border-radius: 10px;
+}
+
+/* Nothing truncates here - the strip wraps instead. On a card the group label
+   is clipped at 74px because the row cannot grow; this row can. */
+.cv-meta .card-type-chip--group .card-type-label {
+  max-width: none;
+}
+
+/* Sharing and sync are icon-only on a card, for want of room. Given a label,
+   they need chip colours the card never had to define. */
+.cv-chip--shared {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.cv-chip--waiting {
+  background: var(--surface);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.cv-chip--synced {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--success);
+}
+
+/* Same amber the card's pending cloud badge uses. */
+.cv-chip--pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+/* ── Scroll area ────────────────────────────────────────────────── */
+
+.cv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 22px 24px 40px;
+  /* Matches the grid viewports: gutter reserved on both edges so the content
+     does not shift sideways when a scrollbar appears. */
+  scrollbar-gutter: stable both-edges;
+  margin: 0 8px;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────── */
+
+/* Size, inset and hover come from the shared rules in App.css; only the
+   horizontal accent is specific to this screen.
+
+   Horizontal only, in the accent. A sideways scrollbar is the one people miss -
+   it sits at the bottom of a block rather than the edge of the window, and
+   nothing else on screen says the content continues past the right edge. The
+   `:horizontal` pseudo-class is what keeps this off the vertical thumbs, which
+   stay neutral so the two are not competing. */
+.cv-scroll::-webkit-scrollbar-thumb:horizontal,
+.cv-text--nowrap::-webkit-scrollbar-thumb:horizontal,
+.cv-html table::-webkit-scrollbar-thumb:horizontal,
+.cv-html pre::-webkit-scrollbar-thumb:horizontal {
+  background-color: var(--accent);
+}
+
+.cv-scroll::-webkit-scrollbar-thumb:horizontal:hover,
+.cv-text--nowrap::-webkit-scrollbar-thumb:horizontal:hover,
+.cv-html table::-webkit-scrollbar-thumb:horizontal:hover,
+.cv-html pre::-webkit-scrollbar-thumb:horizontal:hover {
+  background-color: color-mix(in srgb, var(--accent) 84%, #fff);
+}
+
+/* ── Text ───────────────────────────────────────────────────────── */
+
+.cv-text {
+  margin: 0 auto;
+  /* Copied text is usually code, a path, or a token, so it is set in mono and
+     given a wide measure. Prose is the exception here, not the rule. */
+  max-width: 108ch;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Selectable: reading is most of the point, quoting part of it is the rest. */
+  user-select: text;
+  cursor: text;
+}
+
+/* Off-switch for wrapping, so a wide table or a log line can be read as it was
+   written rather than folded into a paragraph. */
+.cv-text--nowrap {
+  max-width: none;
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
+
+/* ── Rendered rich text ─────────────────────────────────────────── */
+
+.cv-html {
+  margin: 0 auto;
+  max-width: 78ch;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  word-break: break-word;
+  user-select: text;
+}
+
+.cv-html img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+
+.cv-html a {
+  color: var(--accent);
+}
+
+.cv-html table {
+  border-collapse: collapse;
+  /* A pasted table is often wider than the measure; let it scroll itself
+     rather than push the whole panel sideways. */
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.cv-html td,
+.cv-html th {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+}
+
+.cv-html blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+  margin: 8px 0;
+  color: var(--text-muted);
+}
+
+.cv-html pre,
+.cv-html code {
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12px;
+}
+
+.cv-html pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+/* ── Media ──────────────────────────────────────────────────────── */
+
+.cv-media {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* An image body is given the whole panel: chrome comes off, and the picture is
+   the thing the screen exists for. */
+.cv-scroll--media {
+  padding: 10px 10px 14px;
+  display: flex;
+  /* Zoomed in, the picture is wider than the panel, so this one scrolls both
+     ways. The base rule clips horizontally, which would have made everything
+     past 100% unreachable. */
+  overflow: auto;
+}
+
+/* `safe` centring: centred while the picture fits, and pinned to the start once
+   it does not. Plain `center` pushes the overflow past the scroll origin, and
+   the top-left corner of a zoomed image becomes unreachable. */
+.cv-scroll--media .cv-media {
+  flex: 1;
+  justify-content: safe center;
+  align-items: safe center;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Sized by the flex box it sits in rather than by viewport arithmetic: the rows
+   above it (toolbar, metadata) can change height without leaving the picture
+   either clipped or short. */
+.cv-scroll--media .cv-media-img {
+  flex: 1;
+  min-height: 0;
+}
+
+.cv-scroll--media .cv-media-img--zoomed {
+  flex: none;
+  min-height: auto;
+}
+
+.cv-media-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* Zoomed: the width is set inline from the file's own pixels, so every ceiling
+   has to come off or the picture would be scaled back down to fit. */
+.cv-media-img--zoomed {
+  max-width: none;
+  max-height: none;
+  height: auto;
+  object-fit: fill;
+}
+
+.cv-media-caption {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  word-break: break-all;
+}
+
+/* ── File list ──────────────────────────────────────────────────── */
+
+.cv-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.cv-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  min-width: 0;
+}
+
+.cv-file-thumb {
+  width: 26px;
+  height: 26px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.cv-file-icon {
+  display: flex;
+  width: 26px;
+  justify-content: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.cv-file-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* The full path, dimmed and ellipsised: useful when two files share a name,
+   never important enough to crowd out the name itself. */
+.cv-file-path {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.cv-file-row--missing .cv-file-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.cv-file-gone {
+  font-size: 10px;
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
+@media (max-width: 700px) {
+  .cv-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .cv-file-path {
+    display: none;
+  }
+}

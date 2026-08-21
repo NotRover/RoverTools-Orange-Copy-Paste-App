@@ -18,6 +18,8 @@ import { ImageIcon, FileIcon } from "../../../entry-types/EntryTypePill";
 import CardMenu from "../../card-menu/CardMenu";
 import { CheckIcon } from "../../../icons";
 import ChipBar from "./ChipBar";
+import { sanitizeHtml } from "../sanitize-html";
+import type { CardClickAction } from "../../../../hooks/useCardClickAction";
 import VideoPlayer from "./VideoPlayer";
 import { useRelativeTime } from "../../../../hooks/useRelativeTime";
 import { useImagePreviews, useMissingFiles } from "../../../../hooks/useFileMeta";
@@ -25,183 +27,12 @@ import "./EntryCard.css";
 
 const FEEDBACK_DURATION_MS = 1500;
 const TEXT_PREVIEW_LENGTH = 160;
-
-// Allow-list based HTML sanitiser for safe rendering of rich-text clipboard
-// content.  Strips all tags/attributes except a safe subset.
-const ALLOWED_TAGS = new Set([
-  "p",
-  "br",
-  "b",
-  "i",
-  "u",
-  "em",
-  "strong",
-  "s",
-  "sub",
-  "sup",
-  "span",
-  "div",
-  "a",
-  "img",
-  "ul",
-  "ol",
-  "li",
-  "blockquote",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-  "th",
-  "td",
-  "pre",
-  "code",
-  "hr",
-]);
-const ALLOWED_ATTRS: Record<string, Set<string>> = {
-  a: new Set(["href"]),
-  img: new Set(["src", "alt", "width", "height"]),
-  td: new Set(["colspan", "rowspan"]),
-  th: new Set(["colspan", "rowspan"]),
-  span: new Set(["style"]),
-  div: new Set(["style"]),
-  p: new Set(["style"]),
-};
-// Only allow safe CSS properties in inline styles
-const SAFE_STYLE_PROPS = new Set([
-  "color",
-  "background-color",
-  "background",
-  "font-weight",
-  "font-style",
-  "font-size",
-  "text-decoration",
-  "text-align",
-  "margin",
-  "padding",
-  "border",
-  "display",
-]);
-
-function sanitizeStyle(style: string): string {
-  return style
-    .split(";")
-    .map((decl) => decl.trim())
-    .filter((decl) => {
-      const prop = decl.split(":")[0]?.trim().toLowerCase() ?? "";
-      return SAFE_STYLE_PROPS.has(prop);
-    })
-    .join("; ");
-}
-
-function normalizeImageSrc(src: string): string | null {
-  const value = src.trim();
-  if (!value) return null;
-
-  // Safe URI schemes that the webview can render directly.
-  if (/^(https?:|data:|blob:|asset:)/i.test(value)) {
-    return value;
-  }
-
-  // Convert file:// URLs (common in clipboard HTML fragments) to Tauri asset URLs.
-  if (/^file:\/\//i.test(value)) {
-    try {
-      const url = new URL(value);
-      if (url.protocol.toLowerCase() !== "file:") return null;
-      const pathname = decodeURIComponent(url.pathname || "");
-      if (!pathname) return null;
-      const windowsPath = /^[A-Za-z]:/.test(pathname.slice(1))
-        ? pathname.slice(1)
-        : pathname;
-      const normalizedPath = windowsPath.replace(/\//g, "\\");
-      return convertFileSrc(normalizedPath);
-    } catch {
-      return null;
-    }
-  }
-
-  // Absolute Windows paths pasted directly into src.
-  if (/^[A-Za-z]:[\\/]/.test(value)) {
-    return convertFileSrc(value.replace(/\//g, "\\"));
-  }
-
-  return null;
-}
-
-function sanitizeHtml(html: string): string {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
-
-  function walk(node: Node): string {
-    if (node.nodeType === Node.TEXT_NODE) {
-      // Escape text content
-      const text = node.textContent ?? "";
-      return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return "";
-    const el = node as Element;
-    const tag = el.tagName.toLowerCase();
-
-    // Recurse into children
-    let inner = "";
-    for (const child of Array.from(el.childNodes)) {
-      inner += walk(child);
-    }
-
-    if (!ALLOWED_TAGS.has(tag)) return inner; // strip tag but keep children
-
-    // Build allowed attributes
-    const allowedSet = ALLOWED_ATTRS[tag];
-    let attrs = "";
-    if (allowedSet) {
-      for (const attr of Array.from(el.attributes)) {
-        const name = attr.name.toLowerCase();
-        if (!allowedSet.has(name)) continue;
-        let value = attr.value;
-        // Prevent javascript: URIs
-        if (
-          (name === "href" || name === "src") &&
-          /^\s*javascript:/i.test(value)
-        )
-          continue;
-        // img src: normalize local file paths and keep only renderable schemes
-        if (tag === "img" && name === "src") {
-          const normalized = normalizeImageSrc(value);
-          if (!normalized) continue;
-          value = normalized;
-        } else if (
-          name === "src" &&
-          !/^(https?:|data:|blob:|asset:)/i.test(value)
-        ) {
-          continue;
-        }
-        if (name === "style") value = sanitizeStyle(value);
-        attrs += ` ${name}="${value.replace(/"/g, "&quot;")}"`;
-      }
-    }
-
-    // Self-closing tags
-    if (tag === "br" || tag === "hr" || tag === "img") {
-      return `<${tag}${attrs} />`;
-    }
-
-    return `<${tag}${attrs}>${inner}</${tag}>`;
-  }
-
-  let result = "";
-  for (const child of Array.from(doc.body.childNodes)) {
-    result += walk(child);
-  }
-  return result;
-}
+/** How long a click waits to see if a second one is coming.
+ *
+ *  Only ever applied to opening the viewer, never to copying - see
+ *  `handleCardClick`. Matches the Windows default double-click speed; shorter
+ *  and a deliberate double click fires the first action on its own. */
+const DOUBLE_CLICK_GRACE_MS = 220;
 
 interface EntryCardProps {
   entry: ClipboardEntry;
@@ -218,6 +49,10 @@ interface EntryCardProps {
   onToggleSelect?: (id: string) => void;
   /** Shift+click range selection. */
   onRangeSelect?: (id: string) => void;
+  /** Open this entry in the full view. */
+  onView?: (id: string) => void;
+  /** What a plain click does. The other of the two is the double click. */
+  clickAction?: CardClickAction;
   /** Whether this entry is currently in the OS clipboard. */
   isInClipboard?: boolean;
   /** Cloud badge state for this entry, if sync is on. */
@@ -253,6 +88,8 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
   isSelected = false,
   onToggleSelect,
   onRangeSelect,
+  onView,
+  clickAction = "copy",
   isInClipboard = false,
   syncState,
   spaces,
@@ -284,9 +121,6 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
     }
   };
   const relTime = useRelativeTime(entry.timestamp);
-  const [showFileList, setShowFileList] = useState(false);
-  const [contentExpanded, setContentExpanded] = useState(false);
-  const [htmlOverflows, setHtmlOverflows] = useState(false);
   const htmlPreviewRef = useRef<HTMLDivElement>(null);
 
   // Sanitising rich-text runs a full DOMParser pass — memoise so it only
@@ -321,24 +155,6 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
     };
   }, []);
 
-  // Detect if HTML preview overflows its collapsed max-height
-  useEffect(() => {
-    const el = htmlPreviewRef.current;
-    if (!el || entry.type !== "html") {
-      setHtmlOverflows(false);
-      return;
-    }
-    // Only measure overflow in collapsed state — when expanded,
-    // scrollHeight === clientHeight so we'd lose the overflow flag.
-    if (contentExpanded) return;
-    const check = () => setHtmlOverflows(el.scrollHeight > el.clientHeight);
-    check();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [entry.type, entry.content, contentExpanded]);
-
   // Replace broken images in HTML preview with a styled placeholder
   useEffect(() => {
     const container = htmlPreviewRef.current;
@@ -365,12 +181,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
         img.removeEventListener("error", handler);
       }
     };
-  }, [entry.type, entry.content, contentExpanded]);
-
-  // Reset expand state when entry changes
-  useEffect(() => {
-    setContentExpanded(false);
-  }, [entry.id]);
+  }, [entry.type, entry.content]);
 
   const handleCopy = () => {
     onCopy(entry.id);
@@ -381,6 +192,35 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
       FEEDBACK_DURATION_MS,
     );
   };
+
+  // Guarded rather than hidden: the type chip stays visible in select mode so
+  // the card does not reflow, but clicking it there must pick the card, not
+  // walk away from the selection.
+  const handleView = () => {
+    if (isSelecting) return;
+    onView?.(entry.id);
+  };
+
+  // Nothing waits to find out whether a second click is coming, because the two
+  // actions are not equally expensive to get wrong.
+  //
+  //  - Copying is the one with a side effect: it overwrites the OS clipboard.
+  //    It is also the frequent one, so it fires on the first click, instantly.
+  //    A double click then *adds* the viewer rather than replacing the copy -
+  //    the entry you opened ends up on the clipboard, which is the price of a
+  //    copy that never lags, and is usually what you wanted anyway.
+  //  - Opening the viewer changes nothing and closes with Escape, so when it is
+  //    the single-click action it can afford to wait for the double click that
+  //    copies. A panel that appears 200ms later reads as an animation; a copy
+  //    that lands 200ms later reads as a slow app.
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+    },
+    [],
+  );
 
   const handleCardClick = (e: React.MouseEvent) => {
     // In select mode, Shift+click for range selection
@@ -394,33 +234,39 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
       onToggleSelect(entry.id);
       return;
     }
-    // Normal click: copy
-    handleCopy();
+
+    if (clickAction === "copy") {
+      // `detail` counts the clicks in this burst. Guarding on it keeps the
+      // second half of a double click from copying the same entry twice.
+      if (e.detail === 1) handleCopy();
+      return;
+    }
+
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      handleView();
+    }, DOUBLE_CLICK_GRACE_MS);
+  };
+
+  const handleCardDoubleClick = () => {
+    if (isSelecting) return;
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    // In copy mode the copy already fired on the first click, so the double
+    // click only has the viewer left to do.
+    if (clickAction === "copy") handleView();
+    else handleCopy();
   };
 
   const visibleImageThumbs = imageFiles.slice(0, 3);
-
-  const isTextExpandable =
-    (entry.type === "text" || entry.type === "html") &&
-    (entry.type === "text"
-      ? entry.content.length > TEXT_PREVIEW_LENGTH
-      : htmlOverflows);
-  const isMediaExpandable =
-    entry.type === "image" ||
-    (entry.type === "file" &&
-      !isMulti &&
-      firstFile != null &&
-      (isImageFile(firstFile) || isVideoFile(firstFile)) &&
-      !missingFiles.has(firstFile));
-  const isMultiFileExpandable = entry.type === "file" && isMulti;
-  const isExpandable =
-    isTextExpandable || isMediaExpandable || isMultiFileExpandable;
 
   const displayKind = deriveDisplayKind(entry);
   const cardClasses = [
     "entry-card",
     copied && "entry-card--copied",
-    (showFileList || contentExpanded) && "entry-card--expanded",
     isSelecting && "entry-card--selectable",
     isSelected && "entry-card--selected",
     isInClipboard && "entry-card--in-clipboard",
@@ -434,6 +280,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
       className={cardClasses}
       data-kind={displayKind}
       onClick={handleCardClick}
+      onDoubleClick={handleCardDoubleClick}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -525,15 +372,13 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
         )}
         {entry.type === "text" && (
           <p className="card-text">
-            {contentExpanded
-              ? entry.content
-              : truncateText(entry.content, TEXT_PREVIEW_LENGTH)}
+            {truncateText(entry.content, TEXT_PREVIEW_LENGTH)}
           </p>
         )}
         {entry.type === "html" && (
           <div
             ref={htmlPreviewRef}
-            className={`card-html-preview${contentExpanded ? " card-html-preview--expanded" : ""}${!contentExpanded && htmlOverflows ? " card-html-preview--faded" : ""}`}
+            className="card-html-preview card-html-preview--faded"
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         )}
@@ -561,7 +406,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
             )}
           </p>
         )}
-        {entry.type === "file" && isMulti && !showFileList && (
+        {entry.type === "file" && isMulti && (
           <div className="card-file-preview">
             {files.slice(0, 3).map((f) => {
               const name = fileNameFromPath(f);
@@ -601,58 +446,6 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
             )}
           </div>
         )}
-        {/* Expanded file list — sits above footer so button stays anchored at bottom */}
-        {entry.type === "file" && isMulti && showFileList && (
-          <div
-            className={`card-file-list${imageFiles.some((f) => !missingFiles.has(f)) ? " card-file-list--bordered" : ""}`}
-          >
-            {files.map((f) => {
-              const name = fileNameFromPath(f);
-              const isImg = isImageFile(f);
-              const isMissing = missingFiles.has(f);
-              const preview = imagePreviews[f];
-              return (
-                <div
-                  key={f}
-                  className={`card-file-list-item${isMissing ? " card-file-list-item--missing" : ""}`}
-                >
-                  {isImg && !isMissing && (
-                    <div className="card-file-thumb">
-                      {preview ? (
-                        <img
-                          src={preview}
-                          alt=""
-                          className="card-file-thumb-img"
-                        />
-                      ) : (
-                        <div className="card-file-thumb-placeholder" />
-                      )}
-                    </div>
-                  )}
-                  <span
-                    className="card-file-name"
-                    {...(missingFiles.has(f)
-                      ? {
-                          "data-tooltip": "File no longer exists on disk",
-                          "data-tooltip-pos": "above",
-                        }
-                      : {})}
-                  >
-                    {name}
-                  </span>
-                  {missingFiles.has(f) && (
-                    <span
-                      className="card-missing-hint"
-                      data-tooltip="File missing"
-                    >
-                      missing
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
         {/* Footer: type chip + pinned chip + timestamp */}
         <ChipBar
           entry={entry}
@@ -663,11 +456,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
           isMulti={isMulti}
           files={files}
           imageFiles={imageFiles}
-          showFileList={showFileList}
-          setShowFileList={setShowFileList}
-          contentExpanded={contentExpanded}
-          setContentExpanded={setContentExpanded}
-          isExpandable={isExpandable}
+          onView={handleView}
           cardRef={cardRef}
           justPinned={justPinned}
           copied={copied}
@@ -718,13 +507,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
         onToggleSpace={
           onToggleSpace ? (spaceId) => onToggleSpace(entry.id, spaceId) : undefined
         }
-        isExpandable={isExpandable}
-        isExpanded={isMultiFileExpandable ? showFileList : contentExpanded}
-        onToggleExpand={() =>
-          isMultiFileExpandable
-            ? setShowFileList((v) => !v)
-            : setContentExpanded((v) => !v)
-        }
+        onView={onView ? handleView : undefined}
       />
     </div>
   );

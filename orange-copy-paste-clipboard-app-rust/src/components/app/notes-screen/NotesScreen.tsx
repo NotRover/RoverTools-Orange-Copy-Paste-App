@@ -48,6 +48,7 @@ import NotesFilterDropdown, {
 import { deriveNoteTitle, isNoteExpandable } from "./notes-utils";
 import "../clipboard-screen/search-filter/SearchFilter.css";
 import "./NotesScreen.css";
+import { invoke } from "@tauri-apps/api/core";
 
 const NOTES_SPLIT_STORAGE_KEY = "ns-notes-list-width";
 const NOTES_SPLIT_DEFAULT = 40;
@@ -75,6 +76,9 @@ interface NotesScreenProps {
   onBulkAddGroup?: (ids: string[], group: string) => void;
   onBulkRemoveGroup?: (ids: string[], group: string) => void;
 }
+
+/** Settings key for the editor's full-screen preference. */
+const NOTES_FULLSCREEN_KEY = "notes_editor_fullscreen";
 
 const NotesScreen: React.FC<NotesScreenProps> = ({
   notes,
@@ -152,6 +156,23 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     return Math.min(NOTES_SPLIT_MAX, Math.max(NOTES_SPLIT_MIN, raw));
   });
   const [isResizingSplit, setIsResizingSplit] = useState(false);
+  // Whether the editor fills the window instead of sharing it with the list.
+  // Persisted, because it is a way of working rather than a per-note choice.
+  const [editorFullscreen, setEditorFullscreen] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean | null>("get_setting", { key: NOTES_FULLSCREEN_KEY })
+      .then((v) => setEditorFullscreen(v === true))
+      .catch(() => setEditorFullscreen(false));
+  }, []);
+
+  const toggleEditorFullscreen = useCallback(() => {
+    setEditorFullscreen((prev) => {
+      const next = !prev;
+      void invoke("set_setting", { key: NOTES_FULLSCREEN_KEY, value: next });
+      return next;
+    });
+  }, []);
   const mainRef = useRef<HTMLDivElement>(null);
 
   // Close filter dropdown on outside click
@@ -458,7 +479,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
       <div
         ref={mainRef}
-        className={`ns-main${editingNote ? " ns-main--editing" : ""}${isResizingSplit ? " ns-main--resizing" : ""}`}
+        className={`ns-main${editingNote ? " ns-main--editing" : ""}${isResizingSplit ? " ns-main--resizing" : ""}${editingNote && editorFullscreen ? " ns-main--fullscreen" : ""}`}
       >
         {/* ── Masonry grid ── */}
         <div
@@ -610,6 +631,8 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 onSetGroups={onSetGroups}
                 onCopyEntry={onCopyEntry}
                 onBack={() => setEditingId(null)}
+                fullscreen={editorFullscreen}
+                onToggleFullscreen={toggleEditorFullscreen}
                 readOnly={remoteKeys.has(`note:${editingNote.id}`)}
                 ownerName={noteOwners[`note:${editingNote.id}`]?.display_name}
               />

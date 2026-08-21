@@ -101,27 +101,6 @@
   opacity: 0;
 }
 
-.ns-viewport::-webkit-scrollbar {
-  width: 12px;
-}
-
-.ns-viewport::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.ns-viewport::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.ns-viewport::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
 .ns-grid {
   padding: 14px;
   columns: 2;
@@ -623,6 +602,23 @@
   -webkit-backdrop-filter: none;
   padding: 0;
   animation: none;
+}
+
+/* Full-screen editor: the list and the splitter step aside and the dock takes
+   the window. Same shape as the narrow-window rules below, reached by choice
+   rather than by width, so the editor also drops the seam it wears when it is
+   sharing the screen. */
+
+.ns-main--fullscreen .ns-viewport,
+.ns-main--fullscreen .ns-splitter {
+  display: none;
+}
+
+.notes-screen-root--editing .ns-main--fullscreen .ns-editor-dock {
+  margin-top: 0;
+  border-top: none;
+  border-left: none;
+  border-top-left-radius: 0;
 }
 
 /* NoteEditor visual styles live in note-editor/note-editor.css */
