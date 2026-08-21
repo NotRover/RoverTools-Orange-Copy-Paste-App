@@ -414,8 +414,14 @@ const KEYCHAIN_WRITE_BACKOFF_MS: [u64; 5] = [40, 80, 200, 600, 1500];
 /// to sign in, while an unreachable store on a launch that raced the OS is worth
 /// retrying a few seconds later. Collapsing both into an error is what turns a
 /// working login into what looks like a logout.
+/// An empty value is reported as absent, not as a secret. Windows Credential
+/// Manager answers a zero-length blob with `Ok("")` rather than `NoEntry`, and
+/// the callers here all treat `Some` as "this is usable" - so an empty string
+/// reached GoTrue as a refresh token and came back 400, which is a permanent
+/// sign-out where "nothing is stored" was the truth.
 fn read_secret(purpose: &str, user_id: &str) -> Result<Option<String>, String> {
     match entry_for(purpose, user_id)?.get_password() {
+        Ok(secret) if secret.is_empty() => Ok(None),
         Ok(secret) => Ok(Some(secret)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(e.to_string()),
@@ -540,13 +546,25 @@ pub async fn store_session_pointer(user_id: &str, device_id: &str) -> Result<(),
 }
 
 /// The `(user_id, device_id)` of the last sign-in on this install.
-pub fn load_session_pointer() -> Option<(String, String)> {
-    let raw = read_secret("session", INSTALL_SCOPE).ok().flatten()?;
-    let (user, device) = raw.split_once(':')?;
+///
+/// `Ok(None)` means no sign-in was ever recorded here; `Err` means the store
+/// would not answer, which is worth retrying (see [`read_secret`]). Collapsing
+/// the two - which this used to do with `.ok().flatten()` - turned a credential
+/// store that was busy for a moment into "you were never signed in", and that
+/// verdict is not retried. The distinction only matters when `sync_state.json`
+/// is also unreadable, but both faults have the same cause (contention at
+/// logon), so they arrive together.
+pub fn load_session_pointer() -> Result<Option<(String, String)>, String> {
+    let Some(raw) = read_secret("session", INSTALL_SCOPE)? else {
+        return Ok(None);
+    };
+    let Some((user, device)) = raw.split_once(':') else {
+        return Ok(None);
+    };
     if user.is_empty() || device.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some((user.to_string(), device.to_string()))
+    Ok(Some((user.to_string(), device.to_string())))
 }
 
 /// Forget the last sign-in. Called on an explicit sign-out, so the next launch

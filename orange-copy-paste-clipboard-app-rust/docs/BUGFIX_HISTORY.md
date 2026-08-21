@@ -496,3 +496,204 @@ and watch it happen for real. The general form: when a notification says
 *something changed*, the thing it compares against has to outlive the process, or
 the notification is really reporting that the process started.
 
+
+---
+
+## #17 - The app drew a sign-in form over a session it was busy restoring
+
+**Date**: 2026-08-21
+**Severity**: Critical (the headline complaint against the product: "it keeps logging me out")
+
+**Symptom.** Users were signed out of cloud sync on app or machine restart,
+repeatedly, for weeks, across six releases that each hardened some part of the
+credential path.
+
+**What the evidence said.** Nothing was ever rejected. On the Supabase project at
+the time of the investigation:
+
+- 111 sessions across 6 users, and the newest refresh token of **every one** of
+  them was unrevoked. No token family had ever been killed by reuse detection.
+- Zero 4xx from GoTrue in 24 hours: 41 calls to `/token`, all 200.
+- Zero 4xx from our own backend on `POST /auth/bootstrap` or
+  `GET /auth/umk/device` across three days of retained logs. Successful restores
+  were plainly visible in them - `bootstrap 200`, `umk/device 200`, socket
+  accepted - several times a day.
+- Sessions were being *abandoned*, not revoked: four or five rotations each, then
+  silence, while the user started a new one.
+
+Six rounds of fixes had gone at refresh-token durability. No refresh token had
+ever failed.
+
+**Root cause.** `sync_restore_session` awaited the whole restore, and the UI had
+no way to know one was running.
+
+`App.tsx` initialised `restoringSession` to `false` and only set it from the
+command's reply. `AccountScreen` renders the "Reconnecting to your account" card
+when `restoringSession` is true and the full "Welcome back" sign-in form when it
+is false - so that card could only ever appear *after* an attempt had already
+failed transiently. For the entire duration of the attempt the app showed a
+password field.
+
+That duration is not short. `supabase.rs` allows 15 s for the refresh grant;
+`RESTORE_TIMEOUT_SECS` is 30 s and `TRANSPORT_RETRY_DELAYS` is `[3, 8]`, applied
+to both the bootstrap and the device-wrap call - up to about three and a half
+minutes end to end, and reliably 30-60 s whenever the backend had spun down while
+idle, which is exactly the state it is in when someone boots their machine in the
+morning.
+
+So: the user restarts, opens the Account screen, is told to sign in, and does.
+Google sign-in is two clicks. A second session is minted, the first is abandoned
+with a valid refresh token that is never presented again - which is why the
+server side of this bug is completely silent, and why every fix aimed at the
+token missed.
+
+**Fix.**
+
+- `sync_restore_session` no longer awaits the restore. It answers whether a
+  session is *coming back* - from `AppState.sync_client`, `SyncConfig`, and
+  `SyncClient::has_stored_session`, none of which touch the network - and hands
+  the attempt to `SyncClient::spawn_session_restore`. The outcome arrives on
+  `sync:session-restored` / `sync:restore-gave-up`, which the UI already listened
+  for, so the frontend needed no change: `restoring` is now true from the first
+  instant and the reconnecting card is what users see.
+- Six adjacent defects found in the same sweep, each of which could end a session
+  on its own:
+  - `try_restore_session` aborted when the rotated refresh token failed to reach
+    the keychain. The rotated value lived nowhere else at that point, so the
+    abort destroyed the account's only live credential and every later launch
+    presented the spent one. It now records the fault and carries on, exactly as
+    `refresh_access_token` already did.
+  - A bare 401 or 403 on either restore call was `Terminal`. Neither is a
+    statement about the credential - our backend answered 401 when it could not
+    reach the JWKS endpoint, and `HTTPBearer` answers 403 before a route is
+    entered - so both are now `Unavailable`, retried under the existing cap.
+  - A failed token refresh inside `run()` was relabelled `status: Some(401)`, so
+    a timeout or a 429 from GoTrue read as a dead credential.
+    `refresh_access_token` now returns `AuthError` and its status survives.
+  - A `settings.json` that would not open read as "sync is off", which skipped
+    the restore entirely with no retry for the life of the process.
+    `SyncConfig::enabled_known` keeps the two apart.
+  - `load_session_pointer` collapsed "the store would not answer" into "you were
+    never signed in" - a verdict that is never retried.
+  - Windows Credential Manager answers a zero-length blob with `Ok("")` rather
+    than `NoEntry`, so an empty string could be spent as a refresh token.
+    `read_secret` reports empty as absent.
+- Backend: `PyJWKClientConnectionError` now answers `503` with `Retry-After`
+  instead of 401, and `jwt.decode` takes 30 s of leeway. See the token
+  verification section of the backend's `docs/ARCHITECTURE.md`.
+- `try_restore_session` yields to a manual sign-in that landed while it was away,
+  instead of tearing two sessions into one.
+
+**Invariant to keep**: **a slow answer is not a negative answer, and the UI has to
+be able to tell.** Any command the interface uses to decide "is this person signed
+in" must be able to say "working on it" as its *first* answer, not only as a
+report on something that already failed. The moment such a command can only speak
+once it is finished, every second it spends is a second the app spends claiming
+the user is signed out.
+
+The corollary is a debugging one, and it cost weeks here: when a client reports a
+sign-out and the identity provider and the resource server both show a clean
+record, stop looking at credentials. Nothing rejected anything. Look at what the
+app does while it is waiting.
+
+## #18 - Relaunching the app could destroy the session the old copy was renewing
+
+**Symptom.** The same complaint as #17 - signed out after a restart - from users
+whose crash log showed a restore that had been working seconds earlier. Rarer
+than #17 and, unlike it, entirely real: the credential genuinely was gone.
+
+**Cause.** `kill_previous_instance` runs before the Tauri builder exists, so any
+launch that is not a `--trigger` relaunch force-kills the running copy and takes
+over. Force is the operative word: `taskkill /F` is a `TerminateProcess`, which
+gives the victim no chance to finish anything.
+
+Meanwhile the victim may be spending a refresh token. GoTrue revokes one the
+instant it is presented, so between the request and the keychain write the
+account's only live credential exists nowhere but that process's memory. Kill it
+there and the keychain keeps the spent token; every later launch presents it,
+Supabase reuse detection revokes the family, and the user needs a password. The
+window is small - one HTTPS round trip plus a keychain write - but it is open
+during startup, which is exactly when a second launch is most likely, and the
+startup restore is itself a rotation.
+
+Three other exits had the same hole with nobody to blame but us. `RunEvent::Exit`
+flushed the stores but waited for nothing, so a tray quit landing mid-rotation
+lost the token. `health_restart_app` and `updater_install` bypass the event loop
+altogether. And `updater_install` had a second, separate defect: on Windows the
+plugin hands off to the installer and ends the process from *inside*
+`install()`, so the `flush_dirty_stores` written on the line below it had never
+once run on the platform that matters - every update quietly dropped the last
+few seconds of captures.
+
+**Fix.** `sync::client::RotationGuard` marks the window, entered at both places a
+token is spent - `refresh_access_token`, and the restore path in `sync/mod.rs`,
+which bypasses `refresh_lock` and so is invisible to anything in `client.rs`. It
+increments a process-wide count and writes a marker file naming this pid.
+
+- The count is what the exit paths poll. `RunEvent::ExitRequested` prevents the
+  exit once, drains on a worker thread and re-issues it; `health_restart_app` and
+  `updater_install` drain inline, because a restart carries its own exit code and
+  the runtime ignores an objection to it. The updater's flush moved above
+  `install()` along with the drain, which fixes the capture loss too.
+- The file is what a *relaunch* polls, because the victim never learns it is about
+  to die. `wait_out_rotation` holds the kill while the marker names a process it
+  is about to terminate. A marker abandoned by a crash names a pid that is not a
+  victim, so it costs one file read rather than the full wait.
+- `EXIT_DRAIN_MS` is 3 s, sized from the keychain write's own retry ladder so a
+  rotation that is going to succeed is not cut off one step from the end. A
+  timeout is recorded and never enforced.
+
+**Not fixed, deliberately.** The window opens the moment GoTrue commits, which is
+inside an await no exit hook can reach. A process that dies while the response is
+still on the wire never had the replacement token. Closing that needs a
+write-ahead marker, and a marker changes what the next launch is allowed to
+conclude from a rejected token - which is the classification logic #17 just
+settled.
+
+**Invariant to keep**: **a process that can be killed must never be the only
+place a credential exists.** Where that cannot be arranged, whoever ends the
+process - including a future copy of the app itself - is the one that has to wait.
+
+## #19 - Cloud sync ran without its background loops for the whole session
+
+**Symptom.** In Passive mode, nothing arrived until the user pressed Sync now.
+Reminders never fired. Restarting the app did not help; toggling sync off and on
+did, which is what made it look like a settings problem.
+
+**Cause.** Two construction sites for one object. `setup_runtime` built a
+`SyncClient` and put the `Arc` straight into `AppState`; `get_or_create_client` in
+`sync/commands.rs` built one *and* started `spawn_passive_pull_loop` and
+`spawn_reminder_loop`, which are called from nowhere else.
+
+So whenever sync was already enabled at launch - the normal case for anyone using
+it - the boot path won the race to install a client, and no command could ever
+repair it: `get_or_create_client` returns early when one is already there. The
+loops were unreachable for the life of the process. Toggling sync off and on
+cleared the slot and let the command path build the complete one.
+
+**Fix.** The boot path calls the same helper, split as
+`get_or_create_client_with(state, app, config)` so startup can pass the config it
+has already read. The `enabled` gate stays at the call site, because the helper
+deliberately does not consult it - a sign-in has to be able to build a client
+before sync was ever turned on.
+
+Making the loops actually run exposed two things that had been rare enough to
+ignore, and both are fixed here rather than left as a periodic hazard:
+
+- `flush_and_pull` had no re-entrancy guard. Five things trigger it, and two at
+  once start from the same cursor, walk the same pages, race each other writing
+  `last_server_ts`, and re-download the same blobs off a metered quota. It is now
+  serialised on `flush_lock`.
+- `PendingQueue::drain` cleared the queue file before sending anything, so for
+  the length of the flush the ops were on neither the disk nor the server. A lost
+  `Push` is recovered - the server deduplicates by `client_id` - but a lost
+  `Delete` is not: the tombstone is the only record of the deletion, so losing it
+  leaves the row on the server and the next pull hands the entry back. Ops now
+  move through `sync_pending.inflight.json`, which `load` folds back in.
+
+**Invariant to keep**: **one constructor per thing that has to be started, not
+just built.** A second construction site does not merely duplicate code; it
+creates a state the first site can reach and the rest of the program treats as
+complete. The tell is a bug that a restart does not fix but toggling the feature
+does.
+

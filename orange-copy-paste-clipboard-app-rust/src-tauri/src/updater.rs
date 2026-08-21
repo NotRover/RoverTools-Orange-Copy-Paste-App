@@ -405,10 +405,20 @@ pub fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
         return Err(err);
     };
 
-    pending.update.install(bytes).map_err(|e| e.to_string())?;
-    // `restart` bypasses the event loop's exit-time flush - run it here so the
-    // last seconds of captures survive into the new version.
+    // Before `install`, not after. On Windows the plugin hands off to the
+    // installer and ends this process from inside the call, so the two lines
+    // that used to sit below it never ran on the platform that matters: the
+    // last seconds of captures were lost on every update, and so was a rotation
+    // caught in flight. The replacement process's first act is a session
+    // restore, which makes this the single most expensive moment to lose a
+    // refresh token in.
+    //
+    // Both are idempotent, which is what makes running them ahead of a call
+    // that can still fail harmless: the flush writes stores that are already
+    // clean, and the drain returns at once when nothing is rotating.
     crate::flush_dirty_stores(&app);
+    crate::drain_token_rotation(crate::EXIT_DRAIN_MS);
+    pending.update.install(bytes).map_err(|e| e.to_string())?;
     app.restart()
 }
 

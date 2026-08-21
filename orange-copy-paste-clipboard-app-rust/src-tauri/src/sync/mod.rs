@@ -380,6 +380,34 @@ impl RestoreError {
         }
     }
 
+    /// The same classification, for the two calls the *restore* makes.
+    ///
+    /// Ending a session is a terminal act and needs a positive answer from the
+    /// server. A bare 401 or 403 is not one: our own backend answers 401 when it
+    /// cannot reach Supabase to fetch the signing keys, `HTTPBearer` answers 403
+    /// before a route is even entered, and any proxy in front of the service can
+    /// produce either without the application having seen the request. Treating
+    /// those as "your credential is dead" signs out a user whose keychain is
+    /// perfectly good, permanently, over a backend hiccup that lasted seconds.
+    ///
+    /// So they become `Unavailable`, which is retried - but `Capped`, never
+    /// `Unbounded`. A genuinely misconfigured deployment answers 401 forever,
+    /// and an unbounded loop against that would park the account screen on
+    /// "reconnecting" with no way to sign in at all. Each pass also spends a
+    /// GoTrue rotation, which is the other reason the budget stays small.
+    ///
+    /// The one 4xx that still ends a session is the device wrap saying, in a
+    /// header it stamps itself, that this device is cut off.
+    fn from_api_restore(e: crate::sync::client::ApiError) -> Self {
+        match e.status {
+            Some(401) | Some(403) => Self::Unavailable(format!(
+                "{} - the server refused the token without saying the credential is dead",
+                e.message
+            )),
+            _ => Self::from_api(e),
+        }
+    }
+
     pub fn retry(&self) -> Retry {
         match self {
             Self::NoSession(_) | Self::Terminal(_) => Retry::No,
@@ -403,6 +431,19 @@ impl std::fmt::Display for RestoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.message())
     }
+}
+
+/// Record that the live refresh token did not reach the keychain.
+///
+/// The restore carries on regardless - see the call site - so this is the only
+/// trace that the *next* launch may have to ask for a password. A release build
+/// is a Windows GUI binary and prints nowhere, so the durable note is the whole
+/// point.
+fn note_token_at_risk(headline: &str, detail: impl std::fmt::Display) {
+    eprintln!("[sync] {headline}: {detail}");
+    let detail = format!("{detail} - this session is fine, the next launch may have to sign in");
+    let headline = headline.to_string();
+    tokio::task::spawn_blocking(move || crate::health::note(&headline, &detail));
 }
 
 pub struct SyncClient {
@@ -496,6 +537,10 @@ pub struct SyncClient {
     /// [`crate::sync::client::SyncHttpClient`] is one.
     restore_lock: tokio::sync::Mutex<()>,
 
+    /// One flush + delta pull at a time. See [`Self::flush_and_pull`]; a Tokio
+    /// mutex for the same reason `restore_lock` is one.
+    flush_lock: tokio::sync::Mutex<()>,
+
     /// True while the space-key distribution retry loop is running. Reconcile
     /// runs from several triggers at once (screen mount, socket event, join),
     /// and without this each one would start its own loop.
@@ -519,8 +564,9 @@ impl Drop for SyncClient {
         // running on this very runtime — a spawned sync job that outlives
         // logout or a disabled-sync toggle. Dropping a Runtime from async
         // context panics ("Cannot drop a runtime in a context where blocking is
-        // not allowed"), and because the release profile sets `panic = "abort"`
-        // that panic takes the whole app down instead of just the worker.
+        // not allowed"), and a panic on a sync worker is not a contained
+        // failure: it poisons whatever that task was holding and leaves the
+        // engine wedged for the rest of the session.
         //
         // `shutdown_background` never blocks, so it is safe from any context:
         // in-flight tasks are abandoned rather than awaited, which is what we
@@ -663,6 +709,7 @@ impl SyncClient {
             ws_listener: Mutex::new(None),
             restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             restore_lock: tokio::sync::Mutex::new(()),
+            flush_lock: tokio::sync::Mutex::new(()),
             key_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             settings_push_at,
             settings_notify,
@@ -1332,8 +1379,16 @@ impl SyncClient {
         // while every credential survives, and that used to read as a sign-out.
         let (stored_user, stored_device) = if stored_user.is_empty() || stored_device.is_empty() {
             match crypto::load_session_pointer() {
-                Some(pair) => pair,
-                None => return Err(RestoreError::NoSession("no previous session".into())),
+                Ok(Some(pair)) => pair,
+                Ok(None) => return Err(RestoreError::NoSession("no previous session".into())),
+                // The store would not answer. Not "you were never signed in":
+                // that verdict is never retried, and this one is exactly the
+                // logon-time contention the retry loop exists for.
+                Err(e) => {
+                    return Err(RestoreError::Unavailable(format!(
+                        "keychain unavailable reading the session pointer: {e}"
+                    )))
+                }
             }
         } else {
             (stored_user, stored_device)
@@ -1367,6 +1422,13 @@ impl SyncClient {
             })?;
 
         // Fresh tokens from Supabase; the refresh token rotates, so persist it.
+        //
+        // This rotation is the one most likely to be interrupted: it runs during
+        // startup, which is exactly when a relaunch force-kills the previous
+        // instance and when the user is most likely to quit again. It also
+        // bypasses `refresh_lock` and `token_generation` entirely, so nothing in
+        // `client.rs` can see it - hence the guard here as well as there.
+        let _rotating = crate::sync::client::RotationGuard::enter();
         let session = self
             .supabase
             .refresh(&refresh)
@@ -1380,21 +1442,27 @@ impl SyncClient {
         // can report success for a value a later read does not return - so this
         // one secret is read back.
         //
-        // Failing here as `Unavailable` costs this attempt but keeps the session
-        // recoverable: the class is retryable and capped, so the retry loop
-        // tries the store again while the app is still running, and the token it
-        // will use is the one now held by `http`.
-        crypto::store_refresh_token(&stored_user, &session.refresh_token)
-            .await
-            .map_err(|e| unreachable(format!("rotated refresh token not stored: {e}")))?;
-        match crypto::load_refresh_token(&stored_user) {
-            Ok(Some(stored)) if stored == session.refresh_token => {}
-            Ok(_) => {
-                return Err(RestoreError::Unavailable(
-                    "rotated refresh token did not survive the write".into(),
-                ))
+        // None of those three failures may abort the restore, and this is the
+        // one place where getting that wrong is unrecoverable. The rotated token
+        // exists nowhere but this stack frame until `http` is built below, so
+        // returning here destroys the only live credential the account has:
+        // the keychain keeps the spent one, every later launch presents it, and
+        // the user needs a password forever. Carrying on costs nothing - the
+        // token is handed to `http` a few lines down and the session works - and
+        // it degrades the *next* launch at worst. `refresh_access_token`
+        // (client.rs) already handles the identical moment this way, and says
+        // why in as many words.
+        if let Err(e) = crypto::store_refresh_token(&stored_user, &session.refresh_token).await {
+            note_token_at_risk("rotated refresh token not stored", &e);
+        } else {
+            match crypto::load_refresh_token(&stored_user) {
+                Ok(Some(stored)) if stored == session.refresh_token => {}
+                Ok(_) => note_token_at_risk(
+                    "rotated refresh token did not survive the write",
+                    "a read back did not return the value just written",
+                ),
+                Err(e) => note_token_at_risk("rotated refresh token unreadable", &e),
             }
-            Err(e) => return Err(unreachable(format!("rotated refresh token unreadable: {e}"))),
         }
 
         let http = SyncHttpClient::with_timeout(
@@ -1407,19 +1475,23 @@ impl SyncClient {
         http.set_user_id(stored_user.clone());
         http.set_device_id(stored_device.clone());
 
-        let boot = http.bootstrap(None).await.map_err(RestoreError::from_api)?;
+        let boot = http
+            .bootstrap(None)
+            .await
+            .map_err(RestoreError::from_api_restore)?;
 
         // Recover the UMK from the device wrap — no password involved.
         //
-        // Only an explicit `Absent` is terminal. Every other unhappy answer,
-        // including an unmarked 404, arrives as an `Err` classified transient, so
-        // an outage or a half-finished deploy costs this attempt and not the
+        // Only an explicit `Absent` is terminal. Every other unhappy answer -
+        // an unmarked 404, a 401 from a backend that could not reach Supabase,
+        // a 403 from a proxy - is retryable (see `from_api_restore`), so an
+        // outage or a half-finished deploy costs this attempt and not the
         // session: the keychain still holds working credentials, and the retry
         // loop uses them.
         let wrapped = match http
             .get_device_wrapped_umk()
             .await
-            .map_err(RestoreError::from_api)?
+            .map_err(RestoreError::from_api_restore)?
         {
             crate::sync::client::DeviceWrap::Present(wrapped) => wrapped,
             crate::sync::client::DeviceWrap::Absent => {
@@ -1451,12 +1523,94 @@ impl SyncClient {
             }
         }
 
+        // A restore can run for minutes, and `perform_login` does not queue
+        // behind `restore_lock` - deliberately, so pressing Sign in is never
+        // blocked by a restore that is still waiting on a sleeping backend. That
+        // leaves this window: the user signed in by hand while we were away, and
+        // the three installs below would tear the two sessions into one, an
+        // `http` from theirs and a `umk` from ours. Theirs is the one the user
+        // is looking at, so it wins and this attempt is thrown away.
+        if let Some(live) = self.current_user() {
+            eprintln!("[sync] restore finished behind a manual sign-in; keeping the live session");
+            return Ok(live);
+        }
+
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
         self.start_ws_listener();
 
         Ok(user)
+    }
+
+    /// Whether this install has anything to restore from, answered without a
+    /// single network call.
+    ///
+    /// The startup command needs this before it can say anything useful, and it
+    /// has to be able to say it *immediately*. "Nothing is stored" is a real
+    /// sign-out and the password field is the right thing to draw; "something is
+    /// stored" means the session is on its way and drawing that field is what
+    /// makes a user sign in again over a session that was fine.
+    ///
+    /// A store that will not answer counts as yes. Guessing wrong that way costs
+    /// a "Reconnecting" card that turns into the sign-in form a few seconds
+    /// later; guessing wrong the other way is the bug this exists to fix.
+    pub fn has_stored_session(&self) -> bool {
+        let stored_user = self.sync_state.lock().data.user_id.clone();
+        let user = if stored_user.is_empty() {
+            match crypto::load_session_pointer() {
+                Ok(Some((user, _))) => user,
+                Ok(None) => return false,
+                Err(_) => return true,
+            }
+        } else {
+            stored_user
+        };
+        match crypto::load_refresh_token(&user) {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(_) => true,
+        }
+    }
+
+    /// Run the startup restore in the background, reporting through the same two
+    /// events the retry loop uses.
+    ///
+    /// Deliberately not awaited by the command that starts it. A restore can
+    /// take minutes in the ordinary case - a backend that spins down when idle,
+    /// a network still coming up after a reboot, three timeouts and two
+    /// transport retries stacked end to end - and for every second of it the
+    /// account screen had no way to know a restore was even running, so it drew
+    /// "Welcome back" and a password field over a live session. Users signed in,
+    /// which minted a second session and abandoned a perfectly good refresh
+    /// token. That is the shape of this whole bug: nothing was ever rejected,
+    /// the app just did not wait to be told.
+    pub fn spawn_session_restore(self: Arc<Self>) {
+        let handle = self.handle.clone();
+        handle.spawn(async move {
+            match self.try_restore_session().await {
+                Ok(user) => {
+                    Arc::clone(&self).trigger_initial_sync();
+                    let _ = self.app.emit("sync:session-restored", &user);
+                }
+                Err(e) if e.is_transient() => {
+                    // The credentials are good and only the server is out of
+                    // reach - very common right after an update, when the app
+                    // autostarts before the network is back.
+                    eprintln!("[sync] session restore deferred, will retry: {e}");
+                    Arc::clone(&self).spawn_session_restore_retry();
+                }
+                Err(e) => {
+                    // We only got here because `has_stored_session` said there
+                    // was something to restore, so every non-transient answer is
+                    // a real sign-out and worth recording. This is the line that
+                    // says why, on a build that prints nowhere.
+                    eprintln!("[sync] session restore refused: {e}");
+                    crate::health::note("sync restore: refused", e.message());
+                    let _ = self.app.emit("sync:restore-gave-up", serde_json::Value::Null);
+                }
+            }
+        });
     }
 
     /// Keep retrying a session restore that failed for a transient reason,
@@ -2417,7 +2571,15 @@ impl SyncClient {
     // ── Manual sync trigger ───────────────────────────────────────
 
     /// Flush the pending queue and do a delta pull.  Called by `sync_now`.
+    ///
+    /// Serialised, because five separate things trigger it - a manual Sync now,
+    /// login, a socket event, the passive tick, and a window refocus - and two
+    /// at once share one starting cursor. They then walk the same pages, race
+    /// each other writing `last_server_ts`, and re-download the same blobs off a
+    /// metered quota. Queuing the second caller costs it the first one's
+    /// duration and gives it the newer cursor, which is the answer it wanted.
     pub async fn flush_and_pull(&self) -> Result<(), String> {
+        let _flushing = self.flush_lock.lock().await;
         let http = self.http.lock().clone().ok_or("not authenticated")?;
         if !http.is_authenticated() {
             return Err("not authenticated".into());
@@ -2493,9 +2655,7 @@ impl SyncClient {
                 }
             }
         }
-        for op in unsent {
-            self.pending_queue.lock().push(op);
-        }
+        self.pending_queue.lock().settle(unsent);
 
         // Delta pull
         let after_ts = self.sync_state.lock().data.last_server_ts;

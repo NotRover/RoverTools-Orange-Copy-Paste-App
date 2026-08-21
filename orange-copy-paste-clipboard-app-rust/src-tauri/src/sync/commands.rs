@@ -38,21 +38,33 @@ fn sync_client(state: &State<'_, AppState>) -> Result<Arc<SyncClient>, String> {
 /// discarded client is then dropped by whichever of its own worker threads holds
 /// the last reference, which used to abort the process. `SyncClient::new` is
 /// synchronous and only builds a runtime, so nothing can await while we hold it.
-fn get_or_create_client(
+/// Startup has already read the config, so it passes the one it has; commands
+/// load their own. Either way this is the only place a `SyncClient` is built,
+/// which is what keeps the two periodic loops to one apiece - neither guards
+/// against a second spawn, and the `Some` installed below is the guard.
+pub(crate) fn get_or_create_client_with(
     state: &State<'_, AppState>,
     app: &tauri::AppHandle,
+    config: SyncConfig,
 ) -> Result<Arc<SyncClient>, String> {
     let mut guard = state.sync_client.lock();
     if let Some(existing) = guard.clone() {
         return Ok(existing);
     }
-    let client = Arc::new(SyncClient::new(app.clone(), SyncConfig::load(app))?);
+    let client = Arc::new(SyncClient::new(app.clone(), config)?);
     // Both loops need the Arc (they hold a Weak), so they start here rather
     // than inside `new`.
     client.spawn_passive_pull_loop();
     client.spawn_reminder_loop();
     *guard = Some(Arc::clone(&client));
     Ok(client)
+}
+
+fn get_or_create_client(
+    state: &State<'_, AppState>,
+    app: &tauri::AppHandle,
+) -> Result<Arc<SyncClient>, String> {
+    get_or_create_client_with(state, app, SyncConfig::load(app))
 }
 
 /// Resolve both the SyncClient and its authenticated HTTP client, or fail
@@ -284,50 +296,59 @@ pub struct RestoreOutcome {
     pub restoring: bool,
 }
 
-/// Silently restore the previous session (refresh token + device-wrapped UMK).
-/// Called once on app startup.
+/// Start a silent restore of the previous session (refresh token +
+/// device-wrapped UMK). Called once on app startup.
+///
+/// Returns as soon as it knows *whether* a session is coming back, not once it
+/// has come back. That distinction is the whole point of this command: the
+/// attempt can take minutes behind a backend that spins down when idle, and
+/// while it was awaited here the account screen had nothing to go on and drew a
+/// password field over a live session. The answer arrives on
+/// `sync:session-restored` or `sync:restore-gave-up`, which the UI already
+/// listens for.
 #[tauri::command]
 pub async fn sync_restore_session(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<RestoreOutcome, String> {
     let idle = || RestoreOutcome { user: None, restoring: false };
-    let config = SyncConfig::load(&app);
-    if !config.enabled || !config.is_configured() {
+
+    // A client this launch already built settles the enabled question: startup
+    // read the setting once and acted on it, and re-reading `settings.json`
+    // here only adds a second chance to misread it.
+    let existing = state.sync_client.lock().clone();
+    let sync = match existing {
+        Some(sync) => sync,
+        None => {
+            let config = SyncConfig::load(&app);
+            if !config.is_configured() {
+                return Ok(idle());
+            }
+            // `enabled == false` is only believed when the file actually said
+            // so. A settings.json that would not open reads as off, and acting
+            // on that puts the sign-in screen in front of credentials sitting
+            // untouched in the keychain, with nothing to correct it until the
+            // app is restarted.
+            if !config.enabled && config.enabled_known {
+                return Ok(idle());
+            }
+            get_or_create_client(&state, &app)?
+        }
+    };
+
+    // Already signed in: a remount, a second window, or a login that beat us.
+    if let Some(user) = sync.current_user() {
+        return Ok(RestoreOutcome { user: Some(user), restoring: false });
+    }
+
+    // Local state only, so this answer does not wait on the network. Nothing
+    // stored is a real sign-out and the password field is correct.
+    if !sync.has_stored_session() {
         return Ok(idle());
     }
-    let sync = get_or_create_client(&state, &app)?;
-    match sync.try_restore_session().await {
-        Ok(user) => {
-            Arc::clone(&sync).trigger_initial_sync();
-            let _ = app.emit("sync:session-restored", &user);
-            Ok(RestoreOutcome { user: Some(user), restoring: false })
-        }
-        Err(e) if e.is_transient() => {
-            // The stored credentials are still good, we just could not reach
-            // the server yet — very common right after an update, when the app
-            // autostarts before the network is back. Keep trying in the
-            // background instead of making the user log in again; the UI shows
-            // the login screen meanwhile and swaps over on
-            // `sync:session-restored`.
-            eprintln!("[sync] session restore deferred, will retry: {e}");
-            Arc::clone(&sync).spawn_session_restore_retry();
-            Ok(RestoreOutcome { user: None, restoring: true })
-        }
-        Err(e) => {
-            // Expected on first run / after logout, and the UI just shows the
-            // login screen. A `Terminal` failure is different: the app had a
-            // session and decided it was dead, which is the sign-out the user
-            // sees. Record that one durably - a release build prints nowhere, so
-            // this is the only way to tell a revoked device from an empty
-            // keychain after the fact.
-            eprintln!("[sync] session restore skipped: {e}");
-            if let crate::sync::RestoreError::Terminal(reason) = &e {
-                crate::health::note("sync restore: credentials rejected", reason);
-            }
-            Ok(idle())
-        }
-    }
+
+    Arc::clone(&sync).spawn_session_restore();
+    Ok(RestoreOutcome { user: None, restoring: true })
 }
 
 #[tauri::command]

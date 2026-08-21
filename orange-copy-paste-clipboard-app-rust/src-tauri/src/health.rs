@@ -793,10 +793,18 @@ pub fn health_sealed_notice() -> Option<String> {
 /// bad state precisely so this would be safe.
 #[tauri::command]
 pub fn health_restart_app(app: tauri::AppHandle) {
-    // `restart` bypasses the event loop, so the exit-time flush never runs -
-    // do it here. While degraded the writes are refused into quarantine, which
-    // is exactly what the restart is about to recover.
+    // `restart` bypasses the event loop, so neither the exit-time flush nor
+    // the rotation drain runs - do both here. While degraded the writes are
+    // refused into quarantine, which is exactly what the restart is about to
+    // recover. Preventing the exit is not an option on this path either: a
+    // restart carries its own exit code and the runtime ignores an objection to
+    // it, which is the other half of why the work has to happen inline.
+    //
+    // This blocks the main thread for up to the drain budget, so the window
+    // freezes for that long. It cannot deadlock: `SyncClient` owns its own
+    // runtime, and nothing in the sync module ever waits on this thread.
     crate::flush_dirty_stores(&app);
+    crate::drain_token_rotation(crate::EXIT_DRAIN_MS);
     app.restart()
 }
 
