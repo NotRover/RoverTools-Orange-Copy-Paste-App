@@ -4,10 +4,12 @@
   only the sections that apply and delete the empty ones.
 
   Rules (New / Improved / Fixed ship to users):
-  - Substance is the point. One to three sentences per entry: what changed and why it
-    helps the user. Not a one-line paraphrase of the commit subject.
+  - One clear sentence per entry: name the visible change and, where it is not obvious,
+    the point. Substance comes from being specific, not from being long. Not a bare
+    paraphrase of the commit subject, and not a three-sentence paragraph. Add a second
+    short sentence only for a real gotcha or before/after; never write three.
   - Give every distinct user-facing change its own entry. Do not collapse a release
-    into four lines; bigger releases get fuller notes.
+    into four lines; bigger releases get more entries, not longer ones.
   - Present tense, user perspective. End with a period. Describe the visible effect,
     not the code. No jargon, file names, or internal detail.
   - ASCII punctuation only. No em dashes, curly quotes, or the section sign. Write two

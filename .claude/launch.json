@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "website-preview",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "--cwd", "orange-copy-paste-clipboard-website", "preview", "--port", "4399"],
+      "port": 4399
+    }
+  ]
+}

@@ -2,14 +2,15 @@
 
 A cross-device smart clipboard. Copy text, images, or files on one machine and they show up on every other machine you own — with notes, group sharing, and real-time collaboration on top. Everything that leaves a device is **end-to-end encrypted**, so the server relays and stores ciphertext it cannot read.
 
-This workspace holds both halves of the product:
+This workspace holds both halves of the product, plus its public docs site:
 
 | Component | What it is | Stack |
 | --- | --- | --- |
 | [`orange-copy-paste-clipboard-app-rust/`](orange-copy-paste-clipboard-app-rust) | The desktop app — clipboard capture, history, notes, sharing UI, and all cryptography | React 19 + TypeScript + Vite on Tauri 2 / Rust |
 | [`orange-copy-paste-clipboard-backend/`](orange-copy-paste-clipboard-backend) | The cloud-sync API — encrypted store, realtime fan-out, sharing, blob brokering | Python 3.14 + FastAPI, Supabase Postgres, Redis, S3/R2 |
+| [`orange-copy-paste-clipboard-website/`](orange-copy-paste-clipboard-website) | The public docs and marketing site — how-to guides and the landing page | Astro + Starlight, bun |
 
-Each has its own README with setup, structure, and development instructions.
+The app lives in this parent repo; the backend and the website are each submodules with their own repos. Each component has its own README with setup, structure, and development instructions.
 
 ---
 

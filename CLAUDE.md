@@ -37,19 +37,20 @@ Context is lossy — compaction and long sessions wash out earlier detail. On an
 
 ## Instruction Scope
 
-- `CLAUDE.md` is the authoritative instruction file for Claude Code in this workspace (root and both components).
+- `CLAUDE.md` is the authoritative instruction file for Claude Code in this workspace (root and all three components).
 - `AGENTS.md` is for other agents/tools — **ignore it** as Claude Code.
 
 ## Workspace Layout
 
-Two components, **two git repos**:
+Three components, **three git repos**:
 
 | Path | Role | Repo |
 |------|------|------|
 | `orange-copy-paste-clipboard-app-rust/` | Desktop Smart Clipboard app (React + TypeScript + Vite + Tauri/Rust). Clipboard, notes, and cloud-sync domains. | Part of the **parent** repo (`RoverTools` → renamed `RoverTools-Smart-Clipboard-App-RUST`) |
 | `orange-copy-paste-clipboard-backend/` | Cloud-sync API: FastAPI + Supabase (Postgres + GoTrue Auth) + Redis + S3/R2 blobs. | **Submodule** — its own repo (`RoverTools-Smart-Clipboard-App-Backend`) |
+| `orange-copy-paste-clipboard-website/` | Public docs + presentation site (Astro + Starlight, bun). End-user how-to and the marketing landing page. | **Submodule** — its own repo (`RoverTools-OrangeCP-Website`) |
 
-The client lives **directly** in the parent repo; only the backend is a submodule. Default branch on both repos is `main`.
+The client lives **directly** in the parent repo; the backend and the website are each submodules with their own repos. Default branch on all three repos is `main`.
 
 ## Project Overview
 
@@ -197,11 +198,12 @@ Pick the smallest valid check set for what you touched.
 - **Client Rust/Tauri** → `cd src-tauri && cargo check`.
 - **Behavior-sensitive runtime** (watcher/hotkeys/popup/paste/sync) → `bun run tauri dev` and smoke-test that specific flow. Full E2E sync needs a live backend + Supabase + two accounts; if you can't run it, say so — don't claim it works.
 - **Backend Python** (any file) → always `uv run ty check src` and `uv run ruff check src`; fix all errors before done. Run `uv run pytest` for logic changes. Don't suppress with `# type: ignore` unless it's a documented third-party-stub false positive.
+- **Website** (`orange-copy-paste-clipboard-website/`, any content or config) → `bun run build` from the submodule; it typechecks and generates the static output. See that submodule's own `CLAUDE.md`.
 
 ## Git & Repos
 
-- The **client** is committed in the parent repo; the **backend** is a submodule with its own repo. Keep each commit scoped to one repo; don't bundle a submodule-pointer bump with client code unless coordinating a release.
-- Backend work goes on its **own dedicated branches** in the backend repo. Compare/PR against each repo's `main`.
+- The **client** is committed in the parent repo; the **backend** and the **website** are each submodules with their own repos. Keep each commit scoped to one repo; don't bundle a submodule-pointer bump with client code unless coordinating a release.
+- Backend and website work each go on their **own dedicated branches** in their own repos. Compare/PR against each repo's `main`.
 - **`uv.lock` churn:** `uv run` can regenerate `uv.lock`. If a task didn't intend a dependency change, restore it (`git checkout -- uv.lock`) so the commit stays scoped.
 - Never apply migrations, push, or commit-push without explicit approval.
 - **Commit only when the user asks in that turn** — never proactively, and never bundle a push with it.
@@ -256,6 +258,7 @@ by intention, and the copy that drifts is the one nobody was reading when it bro
 | Regressions and their root causes | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
 | The release pipeline | `docs/RELEASING.md` |
 | User-facing release history, and the next release's notes | `changelog/` — one file per release, staged in `changelog/next.md` (skeleton `changelog/TEMPLATE.md`, convention `changelog/README.md`) |
+| End-user how-to and the public marketing site | `orange-copy-paste-clipboard-website/` — its own repo (Astro + Starlight). Describes product behavior for users; links to the contract/internals homes rather than restating them |
 | How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |
 | Where everything lives, and cross-component invariants with no other home | `docs/ARCHITECTURE.md` — a map, not a description |
 
