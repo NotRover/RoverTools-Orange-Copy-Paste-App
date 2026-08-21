@@ -136,7 +136,7 @@ What you need before you have read any of it — shapes and prohibitions, no val
 - **Content is encrypted per entry, not under a master key.** Adding a sharing target is a
   key-wrapping change, never a re-encryption.
 
-**Migrations do not apply themselves.** The service runs on Render's **free** plan, where `preDeployCommand` is locked, so nothing runs `alembic upgrade head` on a deploy — and the deploy still goes green without it. A merged revision reaches the database only when someone applies it deliberately; the failure it produces otherwise is a live route 500ing on `relation ... does not exist` under a deploy that reported success. Migrate first, deploy second. Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.** Details in the backend's `docs/DEPLOY.md`.
+**Never assume a green deploy migrated.** `render.yaml` sets `preDeployCommand: alembic upgrade head`, but that field is paid-plan only and inert on `free`, and the deploy reports success either way — so a merged revision may or may not have reached the database, and the failure that produces is a live route 500ing on `relation ... does not exist`. Check rather than assume: the backend's **Migrate database** workflow previews the pending DDL automatically on any push to `main` that touches `migrations/**`, and applying is a separate deliberate dispatch of the same workflow (`action=upgrade`, `confirm=migrate`). Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.** Details in the backend's `docs/DEPLOY.md`.
 
 ## Non-Negotiable Invariants (Client App)
 
