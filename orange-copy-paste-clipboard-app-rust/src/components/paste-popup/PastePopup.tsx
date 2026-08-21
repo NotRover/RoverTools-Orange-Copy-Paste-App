@@ -26,6 +26,7 @@ import {
   FilePageIcon,
 } from "../icons";
 import "./pastePopup.css";
+import { installWebviewGuards } from "../../webview-guards";
 
 type Tab = "recent" | "pinned";
 
@@ -469,6 +470,8 @@ const PastePopup: React.FC = () => {
 };
 
 export default PastePopup;
+
+installWebviewGuards();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <PastePopup />,

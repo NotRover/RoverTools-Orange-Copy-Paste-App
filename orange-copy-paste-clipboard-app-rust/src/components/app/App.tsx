@@ -56,6 +56,7 @@ import {
   WarningIcon,
 } from "../icons";
 import "./App.css";
+import { installWebviewGuards } from "../../webview-guards";
 
 const GROUPS_STORAGE_KEY = "sc-groups";
 const SYSTEM_GROUPS = ["pinned", "saved"];
@@ -1537,6 +1538,8 @@ class AppBoundary extends React.Component<
 }
 
 // Mount
+
+installWebviewGuards();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AppBoundary>

@@ -24,6 +24,7 @@ import {
   SaveStarIcon,
 } from "../icons";
 import "./copyPopup.css";
+import { installWebviewGuards } from "../../webview-guards";
 
 // Layout constants (must match Rust COPY_POPUP_W)
 const BODY_PAD = 12; // body padding (6px * 2)
@@ -354,6 +355,8 @@ const CopyPopup: React.FC = () => {
 };
 
 export default CopyPopup;
+
+installWebviewGuards();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <CopyPopup />,
