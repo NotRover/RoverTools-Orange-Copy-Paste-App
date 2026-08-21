@@ -91,25 +91,6 @@
   flex: 1;
   /* Firefox has no ::-webkit pseudo-elements, so it gets the same treatment
      through the standard properties rather than the platform default. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-light) transparent;
-}
-
-.inv-list::-webkit-scrollbar {
-  width: 5px;
-}
-
-.inv-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.inv-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-
-.inv-list::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
 }
 
 .inv-signin {

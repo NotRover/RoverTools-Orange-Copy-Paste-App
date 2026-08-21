@@ -7,27 +7,10 @@
   flex-direction: column;
   padding: 26px 22px 32px;
   overflow: hidden auto;
-}
-
-.shortcuts-screen::-webkit-scrollbar {
-  width: 10px;
-}
-
-.shortcuts-screen::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.shortcuts-screen::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 3px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.shortcuts-screen::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 3px solid var(--bg);
-  background-clip: padding-box;
+  /* Reserve a gutter on both edges and inset the scroll area from the window,
+     so the bar sits off the edge like the clipboard and notes viewports. */
+  scrollbar-gutter: stable both-edges;
+  margin: 0 8px;
 }
 
 .shortcuts-inner {

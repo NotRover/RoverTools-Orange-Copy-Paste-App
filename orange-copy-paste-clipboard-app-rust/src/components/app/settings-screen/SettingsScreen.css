@@ -29,27 +29,6 @@
   --cta-hover: var(--accent-hover);
 }
 
-.settings-screen::-webkit-scrollbar {
-  width: 12px;
-}
-
-.settings-screen::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.settings-screen::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.settings-screen::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
 /* Centered content column */
 
 .settings-inner {
@@ -532,8 +511,7 @@
 /* ── Update release notes ─────────────────────────────────────────────
    The same lead + New/Improved/Fixed shape the update banner renders (shared
    parseNotes), shown here in a scroll well so long notes do not stretch the
-   settings column. The scrollbar matches the screen's own thin one instead of
-   the default chunky bar. */
+   settings column. */
 
 .set-update-notes {
   margin: 10px 0 0;
@@ -543,29 +521,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 10px);
   background: var(--bg-subtle);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-light) transparent;
-}
-
-.set-update-notes::-webkit-scrollbar {
-  width: 8px;
-}
-
-.set-update-notes::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.set-update-notes::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg-subtle);
-  background-clip: padding-box;
-}
-
-.set-update-notes::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg-subtle);
-  background-clip: padding-box;
 }
 
 .set-update-lead {

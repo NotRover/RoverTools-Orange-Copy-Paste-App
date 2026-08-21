@@ -410,21 +410,3 @@
 
 /* Same bar the feed and the space panel draw: 4px, no track, a thumb in the
    border colour so it reads as part of the surface rather than the OS. */
-.cmt-scroll::-webkit-scrollbar,
-.cmt-picker::-webkit-scrollbar,
-.cmt-input::-webkit-scrollbar {
-  width: 4px;
-}
-
-.cmt-scroll::-webkit-scrollbar-track,
-.cmt-picker::-webkit-scrollbar-track,
-.cmt-input::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cmt-scroll::-webkit-scrollbar-thumb,
-.cmt-picker::-webkit-scrollbar-thumb,
-.cmt-input::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 4px;
-}

@@ -71,19 +71,6 @@
   overflow: hidden auto;
 }
 
-.gm-group-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.gm-group-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.gm-group-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-
 /* Group row (system only) */
 
 .gm-group-row {

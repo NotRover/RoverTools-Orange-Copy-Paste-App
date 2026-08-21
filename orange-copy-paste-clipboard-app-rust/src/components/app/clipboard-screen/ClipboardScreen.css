@@ -32,27 +32,6 @@
 
 /* Timeline */
 
-.layout-viewport::-webkit-scrollbar {
-  width: 12px;
-}
-
-.layout-viewport::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.layout-viewport::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.layout-viewport::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
 /* Flex row: [groups] */
 .timeline-wrap {
   display: flex;
@@ -304,27 +283,6 @@
   }
 }
 
-.entry-grid::-webkit-scrollbar {
-  width: 12px;
-}
-
-.entry-grid::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.entry-grid::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.entry-grid::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
 /*  Single-column layout — full-width tile cards, one per row  */
 
 .entry-single {
@@ -333,27 +291,6 @@
   padding: 14px;
   display: flex;
   flex-direction: column;
-}
-
-.entry-single::-webkit-scrollbar {
-  width: 12px;
-}
-
-.entry-single::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.entry-single::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.entry-single::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
 }
 
 /*  Empty state  */
@@ -396,27 +333,6 @@
   padding: 14px;
   columns: 2;
   column-gap: 10px;
-}
-
-.entry-list::-webkit-scrollbar {
-  width: 12px;
-}
-
-.entry-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.entry-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
-}
-
-.entry-list::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  background-clip: padding-box;
 }
 
 /* Expanded image cards (tiles, grid & single) grow larger, but stay bounded so
