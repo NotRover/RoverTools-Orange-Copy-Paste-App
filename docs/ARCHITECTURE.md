@@ -11,15 +11,18 @@ third time, and the third copy is what went stale.
 
 ---
 
-## The two components
+## The components
 
 | Path | Role | Repo |
 |------|------|------|
 | `orange-copy-paste-clipboard-app-rust/` | Desktop app. React + TypeScript UI, Tauri v2 + Rust core. Captures the clipboard, stores history and notes locally, holds every key, does all encryption. | Lives **directly** in the parent repo |
 | `orange-copy-paste-clipboard-backend/` | Cloud sync API. FastAPI + Supabase Postgres + Redis + S3/R2. Verifies JWTs, stores ciphertext, fans out over WebSocket, brokers blobs. | **Submodule**, its own repo |
+| `orange-copy-paste-clipboard-website/` | Public docs + presentation site. Astro + Starlight. End-user how-to and the marketing landing page; not part of the product runtime. | **Submodule**, its own repo |
 
-The backend is a relay and a store. It never holds a key that could open anything it
-persists, which is why it can be stateless about content and strict about identity.
+The client and the backend are the two product halves. The backend is a relay and a
+store: it never holds a key that could open anything it persists, which is why it can be
+stateless about content and strict about identity. The website is documentation only — it
+describes product behavior and links to the homes below, it enforces nothing.
 
 ## Which doc answers which question
 
@@ -31,6 +34,7 @@ persists, which is why it can be stateless about content and strict about identi
 | Has this broken before, and why? | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
 | How does a release get cut? | `RELEASING.md` |
 | How do I work in this repo? | `CLAUDE.md` at the workspace root |
+| Where do end users learn to install and use the app? | `orange-copy-paste-clipboard-website/` — the public docs + marketing site |
 | How is a space key handed over / how does join approval work, as a walkthrough? | `space-key-handover.html`, `join-approval.html` — dated explainers, not references |
 | Why was a design chosen, and what was rejected? | `SPACE-ACCESS.md`, `SPACE-JOIN-APPROVAL.md` — decision records |
 
