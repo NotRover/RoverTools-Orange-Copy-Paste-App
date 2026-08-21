@@ -42,6 +42,16 @@ const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_ZNs6Q9HfOdUBe8bEBEdPEg_z
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
     pub enabled: bool,
+    /// Whether `enabled` is what the file said, rather than what we fell back to.
+    ///
+    /// False when `settings.json` could not be read or parsed. `enabled` is
+    /// `false` in that case because there is nothing else it could be, but the
+    /// two are not the same claim: one is "the user turned sync off", the other
+    /// is "we could not find out". Acting on the second as though it were the
+    /// first puts the sign-in screen in front of a signed-in user, with the
+    /// credentials still sitting untouched in the keychain, and nothing retries
+    /// it for the life of the process.
+    pub enabled_known: bool,
     pub server_url: String,
     pub supabase_url: String,
     pub supabase_anon_key: String,
@@ -51,6 +61,7 @@ impl Default for SyncConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            enabled_known: true,
             server_url: DEFAULT_SERVER_URL.to_string(),
             supabase_url: DEFAULT_SUPABASE_URL.to_string(),
             supabase_anon_key: DEFAULT_SUPABASE_ANON_KEY.to_string(),
@@ -69,22 +80,27 @@ impl SyncConfig {
         else {
             return defaults;
         };
-        // A read that fails is not "sync is off", and the startup path acts on
-        // the difference immediately: reporting off puts up the login screen
-        // with no retry until the app is restarted.
+        // A read that fails is not "sync is off". `enabled` still has to be
+        // something, and `false` is the only safe default - but `enabled_known`
+        // carries the difference forward so the startup path can try a restore
+        // anyway instead of drawing a sign-in screen over live credentials.
+        let unknown = || Self {
+            enabled_known: false,
+            ..Self::default()
+        };
         let map = match crate::settings_file::read_map(&path) {
             Ok(map) => map,
             Err(crate::settings_file::ReadError::Absent) => return defaults,
             Err(crate::settings_file::ReadError::Malformed(e)) => {
                 crate::health::note("sync config: settings.json unparseable", &e);
-                return defaults;
+                return unknown();
             }
             Err(crate::settings_file::ReadError::Unreadable(e)) => {
                 crate::health::note(
                     "sync config: settings.json unreadable",
-                    &format!("{e} - sync will report as off until the next launch"),
+                    &format!("{e} - falling back to the stored session"),
                 );
-                return defaults;
+                return unknown();
             }
         };
 
@@ -101,6 +117,7 @@ impl SyncConfig {
                 .get(KEY_ENABLED)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            enabled_known: true,
             server_url: str_or(KEY_SERVER_URL, &defaults.server_url),
             supabase_url: str_or(KEY_SUPABASE_URL, &defaults.supabase_url),
             supabase_anon_key: str_or(KEY_SUPABASE_ANON_KEY, &defaults.supabase_anon_key),

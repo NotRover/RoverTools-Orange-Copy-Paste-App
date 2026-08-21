@@ -237,7 +237,7 @@ src/
 
 **`lib.rs`** — Orchestrates the entire startup sequence:
 
-1. **`kill_previous_instance()`** — Terminates any existing app process so global hotkeys are released. On Windows uses `tasklist`/`taskkill`; on Linux uses `pgrep`/`kill -9`.
+1. **`kill_previous_instance()`** — Terminates any existing app process so global hotkeys are released. On Windows uses `tasklist`/`taskkill`; on Linux uses `pgrep`/`kill -9`. It waits first: see [Shutdown and the rotation window](#shutdown-and-the-rotation-window).
 2. **`create_shared_history()`** — Creates `Arc<Mutex<ClipboardHistory>>`.
 3. **`app_state_from_history()`** — Builds `AppState` from the shared history and suppress flag.
 4. **`setup_runtime()`** — Called inside `tauri::Builder::setup`:
@@ -251,8 +251,47 @@ src/
    - Sets up main-window focus handler (auto-hides popups)
    - Restores saved window geometry
    - Starts window move/resize tracking
+   - Starts cloud sync, if it was enabled when the app last quit, through
+     `sync::commands::get_or_create_client_with` — the same helper the commands
+     use. Not a second construction: building a `SyncClient` is only half of
+     starting sync, and the other half (the passive-pull and reminder loops)
+     could never be repaired later, because every command that would have
+     started them returns the client this path already installed.
 5. Registers all Tauri command handlers.
 6. Hooks `WindowEvent::Destroyed` on the main window to `exit(0)` the entire process.
+
+#### Shutdown and the rotation window
+
+GoTrue revokes a refresh token the instant it is presented. Between that request
+and the keychain write, the account's only live credential exists nowhere but
+memory, and a process that ends inside that window leaves the keychain holding a
+token the server has already thrown away — which the next launch cannot tell
+apart from a session that was genuinely revoked. So every way this process can
+end has to know about that window.
+
+`sync::client::RotationGuard` marks it. It is entered in the two places a token
+is spent (`refresh_access_token`, and the restore path in `sync/mod.rs`, which
+bypasses `refresh_lock` entirely), and it does two things: increments a
+process-wide count, and writes a marker file naming this pid under the temp
+directory.
+
+| Exit path | What it does |
+|---|---|
+| Tray quit, window close, any `AppHandle::exit` | `RunEvent::ExitRequested` prevents the exit once, drains on a worker thread, then re-issues it. Two latches — one for "the drain is running", one for "this exit is ours" — because there are two independent sources of the event and the drain re-issues it; collapsing them gives either a skipped drain or an app that cannot be quit. |
+| `health_restart_app` | Drains inline. A restart carries its own exit code and the runtime ignores an objection to it, so there is nothing to prevent — same reason the flush is inline here. Blocks the main thread for the budget. |
+| `updater_install` | Flushes and drains **before** `install()`. On Windows the plugin ends this process from inside that call, so anything after it never runs. |
+| Being force-killed by a relaunch | The victim gets no say, so the *killer* waits: `wait_out_rotation` polls the marker file and holds off while it names a process it is about to kill. A marker abandoned by a crash names a pid that is not a victim, so it costs one file read rather than the wait. |
+
+`EXIT_DRAIN_MS` (3s) bounds all four. It is sized from the keychain write's own
+retry ladder, so a rotation that is going to succeed is not cut off one step from
+the end. A timeout is recorded in `crash.log` and never enforced: an app that
+cannot be quit is a worse bug than a session that has to be signed into.
+
+The window cannot be closed completely. It opens the moment GoTrue commits, which
+is inside an await no exit hook can reach — if the process dies while the response
+is in flight, the replacement token never existed locally. Only a write-ahead
+marker closes that part, and it would change what the next launch may conclude
+from a rejected token.
 
 ### State Management
 
@@ -804,6 +843,22 @@ On startup (when sync is enabled and a Supabase session can be restored):
 1. Restore the Supabase session (the Supabase client manages token refresh). On first
    login: `POST /auth/bootstrap` (fetch `kdf_salt`, derive UMK) and `POST /auth/devices`
    (obtain `device_id`)
+
+**`sync_restore_session` does not wait for the restore.** It answers whether a session
+is *coming back*, from local state only, and then hands the attempt to
+`SyncClient::spawn_session_restore`; the outcome arrives on `sync:session-restored` or
+`sync:restore-gave-up`. The command therefore returns in milliseconds, and
+`RestoreOutcome.restoring` is true from the first instant rather than only after a
+transient failure. The UI has nothing else to go on: while it awaited this command it
+drew a sign-in form over a live session, and users signed in again — see bug #17 in
+[BUGFIX_HISTORY.md](BUGFIX_HISTORY.md). Three local questions decide the answer, none of
+them touching the network:
+
+| Question | Source | Answer |
+|---|---|---|
+| Is a client already built for this launch? | `AppState.sync_client` | Yes → use it, and do not re-read `settings.json`. |
+| Did the user turn sync off? | `SyncConfig::enabled` **and** `enabled_known` | Off only counts when the file actually said so; a `settings.json` that would not open is not a sign-out. |
+| Is there anything to restore? | `SyncClient::has_stored_session` | Keychain refresh token plus a user id from `sync_state.json` or the install session pointer. A store that will not answer counts as yes. |
 2. Pull delta: `GET /sync/pull?after_ts={last_cursor}` (paginated), with `X-Device-Id`
 3. Decrypt and merge remote entries into local store
 4. Flush `sync_pending.json`
@@ -845,6 +900,21 @@ Connection drop → automatic reconnect after 5s backoff, then exponential up to
 ```
 
 On reconnect, the queue is flushed in order before pulling the delta. This ensures local-device ordering is preserved in the LWW (last-write-wins) conflict resolution.
+
+A flush moves its ops through `sync_pending.inflight.json` rather than clearing
+the queue file and hoping: `drain` writes them there before emptying the queue,
+`settle` requeues whatever did not send and only then removes the file, and
+`load` folds a leftover copy back in at the front. The asymmetry that makes this
+worth the extra write is between op kinds. A lost `Push` or `Update` is
+recovered — the server deduplicates by `client_id` and the entry is still on this
+device to send again. A lost `Delete` is not: the tombstone is the only record
+that the user deleted anything, so dropping it leaves the row on the server and
+the next pull hands the entry back.
+
+`flush_and_pull` is serialised on its own lock. Five things trigger it — manual
+Sync now, login, a socket event, the passive tick, a window refocus — and two at
+once start from the same cursor, walk the same pages, race each other writing
+`last_server_ts`, and re-download the same blobs off a metered quota.
 
 #### `crypto.rs` — Encryption Primitives
 

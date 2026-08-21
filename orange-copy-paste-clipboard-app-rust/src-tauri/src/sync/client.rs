@@ -16,14 +16,14 @@
 //! using (Tauri's runtime for commands, or the sync module's dedicated runtime
 //! for background tasks).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-use crate::sync::supabase::SupabaseAuth;
+use crate::sync::supabase::{AuthError, SupabaseAuth};
 
 const REQUEST_TIMEOUT_SECS: u64 = 10;
 
@@ -47,6 +47,92 @@ const SERVER_RETRY_ATTEMPTS: u32 = 3;
 /// request (or a WebSocket handshake) never goes out holding a JWT that dies
 /// mid-flight.
 const TOKEN_REFRESH_SKEW_SECS: u64 = 120;
+
+// ── An in-flight refresh-token rotation ─────────────────────────────
+
+/// Rotations currently between "GoTrue has been asked" and "the replacement is
+/// durable".
+///
+/// GoTrue revokes a refresh token the moment it is spent, so a process that
+/// dies inside that window leaves the keychain holding a token the server has
+/// already thrown away - and the next launch cannot tell that from a session
+/// that was genuinely revoked. This count is what lets the exit paths wait for
+/// the window to close, and what lets a relaunch wait before killing the
+/// instance it is replacing.
+static ROTATIONS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Held for the width of one rotation.
+///
+/// A guard with a `Drop` rather than a pair of calls, because the count has to
+/// come back down through paths that never return normally: a cancelled task,
+/// an early `?`, or the runtime being torn down mid-await. A leaked count would
+/// make every later exit wait out the whole drain budget for nothing.
+pub(crate) struct RotationGuard;
+
+impl RotationGuard {
+    pub(crate) fn enter() -> Self {
+        if ROTATIONS_IN_FLIGHT.fetch_add(1, Ordering::SeqCst) == 0 {
+            write_rotation_marker();
+        }
+        Self
+    }
+}
+
+impl Drop for RotationGuard {
+    fn drop(&mut self) {
+        if ROTATIONS_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst) == 1 {
+            let _ = std::fs::remove_file(rotation_marker_path());
+        }
+    }
+}
+
+/// Whether this process is mid-rotation.
+///
+/// Reads an atomic and touches no runtime, so an exit path may call it from the
+/// main thread without violating the one-way dependency in [`crate::sync`].
+pub(crate) fn rotation_in_flight() -> bool {
+    ROTATIONS_IN_FLIGHT.load(Ordering::SeqCst) != 0
+}
+
+/// Where the cross-process marker lives.
+///
+/// Deliberately not the app data directory. The process that reads this marker
+/// runs before Tauri is built, so it has no `AppHandle` to resolve that path
+/// from, and a hand-rolled copy of Tauri's convention would turn into a silent
+/// no-op the day the convention drifted. The temp directory is the one location
+/// both processes agree on with no help from either.
+fn rotation_marker_path() -> std::path::PathBuf {
+    // `%TEMP%` is already per-user; `/tmp` is not.
+    #[cfg(windows)]
+    let scope = String::new();
+    #[cfg(not(windows))]
+    let scope = std::env::var("USER")
+        .map(|u| format!("-{u}"))
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!("orange-copy-paste-rotating{scope}.lock"))
+}
+
+/// Tell any process that might kill us that now is the wrong moment.
+///
+/// Best-effort on purpose: if the write fails, the only thing lost is a wait a
+/// relaunch would have done, which leaves exactly today's behaviour.
+fn write_rotation_marker() {
+    let _ = std::fs::write(rotation_marker_path(), std::process::id().to_string());
+}
+
+/// The pid recorded in the marker, when some process is mid-rotation.
+///
+/// `None` for a missing, empty or unparseable marker. The pid is the whole point
+/// of writing one: a marker left behind by a crash must not make every later
+/// launch wait, and the only way to tell a live rotation from a dead one is to
+/// check whether the process that claimed it is still running.
+pub(crate) fn rotation_marker_pid() -> Option<u32> {
+    std::fs::read_to_string(rotation_marker_path())
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
 
 /// What the server said about this device's copy of the master key.
 ///
@@ -833,7 +919,12 @@ impl SyncHttpClient {
     /// Single-flight: concurrent callers queue on `refresh_lock`, and whoever
     /// gets in after the token has already moved on returns straight away
     /// instead of spending the rotated token a second time.
-    pub(crate) async fn refresh_access_token(&self) -> Result<(), String> {
+    /// Returns [`AuthError`] rather than a string so the caller keeps the status.
+    /// Flattening it lost the one thing that separates "GoTrue was unreachable"
+    /// or "GoTrue rate-limited us" from "this token is dead" - and the caller
+    /// then stamped its own 401 on all three, which is a permanent sign-out for
+    /// two failures that would have cleared on their own.
+    pub(crate) async fn refresh_access_token(&self) -> Result<(), AuthError> {
         // Read the generation *before* queueing, so it reflects the token the
         // caller found stale rather than one a winner installed while we waited.
         let seen = self.token_generation.load(Ordering::SeqCst);
@@ -843,11 +934,15 @@ impl SyncHttpClient {
             return Ok(());
         }
 
-        let refresh = self
-            .refresh_token
-            .lock()
-            .clone()
-            .ok_or("session expired, log in again")?;
+        let refresh = self.refresh_token.lock().clone().ok_or_else(|| AuthError {
+            // Not transient: no amount of retrying invents a token we never had.
+            status: Some(0),
+            message: "session expired, log in again".into(),
+        })?;
+        // Everything from here to the keychain write is the window GoTrue opens
+        // when it spends this token. Announce it, so an exit or a relaunch waits
+        // for the replacement to be durable instead of destroying it.
+        let _rotating = RotationGuard::enter();
         let session = self.supabase.refresh(&refresh).await?;
         // Rotate the stored token before publishing the access token: the
         // generation bump in set_access_token is what releases queued callers,
@@ -952,9 +1047,13 @@ impl SyncHttpClient {
             };
             let code = resp.status().as_u16();
             if code == 401 && !refreshed {
-                self.refresh_access_token().await.map_err(|message| ApiError {
-                    status: Some(401),
-                    message,
+                // Carry GoTrue's own verdict, not a 401 of our own invention.
+                // A timeout, a 429 or a 5xx from the refresh grant says nothing
+                // about the credential, and stamping 401 on them made the
+                // restore path call the session dead and stop retrying.
+                self.refresh_access_token().await.map_err(|e| ApiError {
+                    status: e.status,
+                    message: e.message,
                 })?;
                 refreshed = true;
                 continue;

@@ -23,6 +23,52 @@ type SuppressFlag = Arc<AtomicBool>;
 
 const FLUSH_INTERVAL_MS: u64 = 2000;
 
+/// How long an exit or a relaunch waits for a refresh-token rotation to become
+/// durable.
+///
+/// Sized from the keychain write's own retry ladder - `KEYCHAIN_WRITE_BACKOFF_MS`
+/// in `sync/crypto.rs` spends 2420 ms across its five attempts - plus the write.
+/// A rotation that is going to succeed should not be cut off one step from the
+/// end, and the point of waiting is lost if the budget is shorter than the thing
+/// being waited for.
+const EXIT_DRAIN_MS: u64 = 3000;
+
+const DRAIN_POLL_MS: u64 = 25;
+
+/// Wait, up to `budget_ms`, for this process to finish spending a refresh token.
+///
+/// GoTrue revokes a refresh token the instant it is presented, so between that
+/// request and the keychain write the account's only live credential exists
+/// nowhere but memory. Dying there is not a retryable failure: the next launch
+/// presents a token the server has already thrown away, and the user needs a
+/// password. Every other kind of shutdown work is best-effort; this one is the
+/// difference between a session and a sign-in.
+///
+/// Synchronous and runtime-free on purpose. Every caller is either Tauri's main
+/// thread or a plain `std::thread`, and none of them may reach into the sync
+/// module's runtime - so this polls an atomic rather than awaiting anything.
+///
+/// Returns whether the window closed in time. A timeout is recorded, never
+/// enforced: an app that cannot be quit is a worse bug than a session that has
+/// to be signed into again.
+pub(crate) fn drain_token_rotation(budget_ms: u64) -> bool {
+    if !crate::sync::client::rotation_in_flight() {
+        return true;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(budget_ms);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(DRAIN_POLL_MS));
+        if !crate::sync::client::rotation_in_flight() {
+            return true;
+        }
+    }
+    crate::health::note(
+        "exit: a refresh token rotation did not finish",
+        "the process is leaving mid-rotation, so the next launch may have to sign in",
+    );
+    false
+}
+
 /// System boot timestamp (seconds since UNIX epoch) for detecting reboots.
 #[cfg(windows)]
 fn system_boot_epoch_secs() -> u64 {
@@ -113,18 +159,49 @@ fn kill_previous_instance() {
     }
 
     let current_pid = std::process::id();
-    let mut killed = false;
-    for pid in list_instance_pids(&exe) {
-        if pid != current_pid && pid != 0 {
-            kill_pid(pid);
-            killed = true;
-        }
+    let victims: Vec<u32> = list_instance_pids(&exe)
+        .into_iter()
+        .filter(|pid| *pid != current_pid && *pid != 0)
+        .collect();
+    if victims.is_empty() {
+        return;
     }
 
-    if killed {
-        // Give the OS a moment to reclaim the global hotkeys.
-        let ms = if cfg!(windows) { 400 } else { 300 };
-        std::thread::sleep(std::time::Duration::from_millis(ms));
+    wait_out_rotation(&victims);
+    for pid in &victims {
+        kill_pid(*pid);
+    }
+
+    // Give the OS a moment to reclaim the global hotkeys.
+    let ms = if cfg!(windows) { 400 } else { 300 };
+    std::thread::sleep(std::time::Duration::from_millis(ms));
+}
+
+/// Hold off the kill while the instance being replaced is spending a refresh
+/// token.
+///
+/// The exit drain cannot help here: the victim never learns it is about to die,
+/// and a forced termination gives it nothing to finish with. So the killer has
+/// to be the one that waits, which is why the rotation marker is a file rather
+/// than the in-process counter the drain reads.
+///
+/// The marker names the process that claimed it, and that name is what keeps
+/// this cheap. A marker abandoned by a crash belongs to a pid that is not among
+/// the instances we are about to kill, so it costs a single file read rather
+/// than the full wait on every launch that follows.
+fn wait_out_rotation(victims: &[u32]) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(EXIT_DRAIN_MS);
+    loop {
+        match crate::sync::client::rotation_marker_pid() {
+            Some(pid) if victims.contains(&pid) => {}
+            // Either nothing is rotating, or what is rotating belongs to a
+            // process we are not about to kill.
+            _ => return,
+        }
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(DRAIN_POLL_MS));
     }
 }
 
@@ -412,14 +489,22 @@ fn setup_runtime(
     crate::runtime::window_state::setup_tracking(app);
 
     // Initialize cloud sync if it was enabled when the app last quit.
+    //
+    // Through the same helper the commands use, not a second hand-rolled
+    // construction: building the client is only half of starting sync, and the
+    // half this path used to skip - the passive pull and reminder loops - could
+    // never be repaired later, because every command that would have started
+    // them returns the client this path already installed. The gate stays out
+    // here because the helper deliberately does not consult `enabled`; a
+    // sign-in has to be able to build a client before sync was ever turned on.
     let sync_config = crate::sync::config::SyncConfig::load(&app.handle().clone());
     if sync_config.enabled {
-        match crate::sync::SyncClient::new(app.handle().clone(), sync_config) {
-            Ok(client) => {
-                *app.state::<AppState>().sync_client.lock() =
-                    Some(std::sync::Arc::new(client));
-            }
-            Err(e) => eprintln!("[sync] init failed: {e}"),
+        let handle = app.handle().clone();
+        let state = app.state::<AppState>();
+        if let Err(e) = crate::sync::commands::get_or_create_client_with(&state, &handle, sync_config)
+        {
+            eprintln!("[sync] init failed: {e}");
+            crate::health::note("sync: could not start at launch", &e);
         }
     }
 
@@ -798,13 +883,45 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| {
+        .run(|app, event| match event {
+            // Quitting mid-rotation is the one shutdown that costs the user
+            // their session, so it is the one worth delaying. Everything else
+            // about this arm is arranged to leave the ordinary quit untouched:
+            // the check is an atomic read, and when nothing is rotating the
+            // handler returns before allocating a thread or preventing anything.
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                // Two flags, because there are two independent ways to arrive
+                // here - the last window being destroyed, and an explicit
+                // `exit` - and the drain re-issues the exit itself. One flag
+                // stops the drain starting twice; the other stops us blocking
+                // the very exit we asked for. Collapsing them into one gives
+                // either a skipped drain or an app that cannot be quit.
+                static DRAIN_STARTED: AtomicBool = AtomicBool::new(false);
+                static EXIT_REISSUED: AtomicBool = AtomicBool::new(false);
+                if EXIT_REISSUED.load(Ordering::SeqCst) {
+                    return;
+                }
+                if !crate::sync::client::rotation_in_flight() {
+                    return;
+                }
+                api.prevent_exit();
+                if DRAIN_STARTED.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                // Off the main thread: the event loop has to keep running for
+                // the re-issued exit to be delivered at all.
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    drain_token_rotation(EXIT_DRAIN_MS);
+                    EXIT_REISSUED.store(true, Ordering::SeqCst);
+                    handle.exit(0);
+                });
+            }
             // The last thing the process does with user data. `app.exit(0)` on
             // window destroy lands here too; only `app.restart()` bypasses the
             // event loop, and both restart sites flush for themselves.
-            if let tauri::RunEvent::Exit = event {
-                flush_dirty_stores(app);
-            }
+            tauri::RunEvent::Exit => flush_dirty_stores(app),
+            _ => {}
         });
 }
 
