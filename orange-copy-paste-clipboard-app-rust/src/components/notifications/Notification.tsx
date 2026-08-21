@@ -6,6 +6,7 @@ import type { AppTheme } from "../../types";
 import { readTheme } from "../../types";
 import { ClipboardIcon, ClipboardPasteIcon } from "../icons";
 import "./notification.css";
+import { installWebviewGuards } from "../../webview-guards";
 
 const DISMISS_MS = 2500;
 const FADE_MS = 250;
@@ -79,6 +80,8 @@ const Notification: React.FC = () => {
     </div>
   );
 };
+
+installWebviewGuards();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <Notification />,

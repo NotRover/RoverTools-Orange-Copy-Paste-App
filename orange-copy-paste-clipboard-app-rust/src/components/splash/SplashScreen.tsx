@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./splash.css";
+import { installWebviewGuards } from "../../webview-guards";
 
 // ── Timer config ──────────────────────────────────────────────────────────
 const READY_AT_MS  = 1100;  // when status switches to "Running in background"
@@ -64,5 +65,7 @@ const SplashScreen: React.FC = () => {
     </div>
   );
 };
+
+installWebviewGuards();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<SplashScreen />);
