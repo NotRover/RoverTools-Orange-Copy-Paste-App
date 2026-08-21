@@ -136,7 +136,7 @@ What you need before you have read any of it — shapes and prohibitions, no val
 - **Content is encrypted per entry, not under a master key.** Adding a sharing target is a
   key-wrapping change, never a re-encryption.
 
-**Migrations apply on deploy, not from your machine.** Render runs `alembic upgrade head` as a pre-deploy step, so a merged revision reaches the database on the next deploy. Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.**
+**Migrations do not apply themselves.** The service runs on Render's **free** plan, where `preDeployCommand` is locked, so nothing runs `alembic upgrade head` on a deploy — and the deploy still goes green without it. A merged revision reaches the database only when someone applies it deliberately; the failure it produces otherwise is a live route 500ing on `relation ... does not exist` under a deploy that reported success. Migrate first, deploy second. Author and review migrations freely, but **never run them against a real database or push DB changes without explicit approval.** Details in the backend's `docs/DEPLOY.md`.
 
 ## Non-Negotiable Invariants (Client App)
 
