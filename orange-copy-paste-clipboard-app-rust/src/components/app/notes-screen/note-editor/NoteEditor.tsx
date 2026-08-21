@@ -53,6 +53,8 @@ import {
   ImageIcon,
   FileIcon,
   ClipboardIcon,
+  ExpandIcon,
+  CollapseIcon,
 } from "../../../icons";
 import {
   deriveNoteTitle,
@@ -111,6 +113,10 @@ interface NoteEditorProps {
   onSetGroups: (id: string, groups: string[]) => void;
   onCopyEntry?: (id: string) => void;
   onBack: () => void;
+  /** Whether the editor is filling the screen rather than sharing it with the
+   *  list. Owned by the screen, which persists the choice. */
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
   /** Someone else wrote this note; show it, but do not let it be edited. */
   readOnly?: boolean;
   /** Their display name, for the line explaining why it is locked. */
@@ -126,6 +132,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   onPin,
   onSetGroups,
   onBack,
+  fullscreen = false,
+  onToggleFullscreen,
   readOnly = false,
   ownerName,
 }) => {
@@ -666,6 +674,16 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             >
               <PinIcon size={12} filled={note.pinned} />
             </button>
+            {onToggleFullscreen && (
+              <button
+                className={`ns-tb-btn${fullscreen ? " ns-tb-btn--active" : ""}`}
+                onClick={onToggleFullscreen}
+                data-tooltip={fullscreen ? "Show the notes list" : "Fill the window"}
+                data-tooltip-pos="below"
+              >
+                {fullscreen ? <CollapseIcon size={12} /> : <ExpandIcon size={12} />}
+              </button>
+            )}
             <button
               className="ns-tb-btn ns-tb-btn--danger"
               onClick={() => {

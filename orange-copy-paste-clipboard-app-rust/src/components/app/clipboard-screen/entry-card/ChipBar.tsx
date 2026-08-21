@@ -15,11 +15,10 @@ import {
   FileIcon,
   PinIcon,
   SaveIcon,
-  EntryTypePill,
   TYPE_ICONS,
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
-import { ChevronDownIcon, CheckIcon, ClipboardIcon } from "../../../icons";
+import { ExpandIcon, CheckIcon, ClipboardIcon } from "../../../icons";
 import { CloudArrowUp, CloudCheck } from "@phosphor-icons/react";
 import { ShareNetwork } from "@phosphor-icons/react";
 
@@ -35,11 +34,8 @@ interface ChipBarProps {
   isMulti: boolean;
   files: string[];
   imageFiles: string[];
-  showFileList: boolean;
-  setShowFileList: React.Dispatch<React.SetStateAction<boolean>>;
-  contentExpanded: boolean;
-  setContentExpanded: React.Dispatch<React.SetStateAction<boolean>>;
-  isExpandable: boolean;
+  /** Open the entry in the full view. The type chip is the affordance for it. */
+  onView: () => void;
   cardRef: React.RefObject<HTMLDivElement | null>;
   justPinned: boolean;
   copied: boolean;
@@ -60,11 +56,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
   isMulti,
   files,
   imageFiles,
-  showFileList,
-  setShowFileList,
-  contentExpanded,
-  setContentExpanded,
-  isExpandable,
+  onView,
   cardRef,
   justPinned,
   copied,
@@ -231,78 +223,58 @@ const ChipBar: React.FC<ChipBarProps> = ({
     return () => document.removeEventListener("mousedown", handler, true);
   }, [showHiddenChips, cardRef]);
 
+  /** The type chip doubles as the way into the full view.
+   *
+   *  It used to expand the card in place. Growing a card reflows the whole
+   *  grid and still could not show a long entry without turning the list into
+   *  one tall column, so the chip now opens the entry on its own screen and
+   *  the card keeps a fixed height. */
+  /** The type chip doubles as the way into the full view.
+   *
+   *  It used to expand the card in place. Growing a card reflows the whole
+   *  grid and still could not show a long entry without turning the list into
+   *  one tall column, so the chip now opens the entry on its own screen and
+   *  the card keeps a fixed height.
+   *
+   *  One markup for both calls: the hidden copy is what the overflow maths
+   *  measures, so a measure branch that rendered anything narrower would let
+   *  the visible row overflow by exactly the difference. */
   const renderTypeChip = (withMeasureRef = false) => {
-    if (entry.type === "file" && isMulti) {
-      return (
-        <button
-          ref={
-            withMeasureRef
-              ? (typeMeasureRef as React.Ref<HTMLButtonElement>)
-              : undefined
-          }
-          className={`card-type-chip card-type-chip--file card-type-chip--clickable${showFileList ? " open" : ""}`}
-          onClick={
-            withMeasureRef
-              ? undefined
-              : (e) => {
-                  e.stopPropagation();
-                  setShowFileList((v) => !v);
-                }
-          }
-          data-tooltip={
-            withMeasureRef
-              ? undefined
-              : showFileList
-                ? "Collapse"
-                : `Show ${files.length} ${imageFiles.length === files.length ? "images" : "files"}`
-          }
-        >
-          {imageFiles.length === files.length ? ImageIcon : FileIcon}
-          <span className="card-type-label">
-            {imageFiles.length === files.length ? "Images" : "Files"}
-          </span>
-          {!withMeasureRef && <ChevronDownIcon className="card-type-chevron" />}
-        </button>
-      );
-    }
+    const dk = deriveDisplayKind(entry);
+    const isFileGroup = entry.type === "file" && isMulti;
+    const allImages = imageFiles.length === files.length;
 
-    if (isExpandable) {
-      const dk = deriveDisplayKind(entry);
-      return (
-        <button
-          ref={
-            withMeasureRef
-              ? (typeMeasureRef as React.Ref<HTMLButtonElement>)
-              : undefined
-          }
-          className={`card-type-chip card-type-chip--${dk} card-type-chip--clickable${contentExpanded ? " open" : ""}`}
-          onClick={
-            withMeasureRef
-              ? undefined
-              : (e) => {
-                  e.stopPropagation();
-                  setContentExpanded((v) => !v);
-                }
-          }
-          data-tooltip={
-            withMeasureRef ? undefined : contentExpanded ? "Collapse" : "Expand"
-          }
-        >
-          {TYPE_ICONS[dk]}
-          <span className="card-type-label">{TYPE_LABELS[dk]}</span>
-          {!withMeasureRef && <ChevronDownIcon className="card-type-chevron" />}
-        </button>
-      );
-    }
-
-    if (withMeasureRef) {
-      return (
-        <span ref={typeMeasureRef as React.Ref<HTMLSpanElement>}>
-          <EntryTypePill kind={deriveDisplayKind(entry)} />
+    return (
+      <button
+        ref={
+          withMeasureRef
+            ? (typeMeasureRef as React.Ref<HTMLButtonElement>)
+            : undefined
+        }
+        className={`card-type-chip card-type-chip--${isFileGroup ? "file" : dk} card-type-chip--clickable`}
+        onClick={
+          withMeasureRef
+            ? undefined
+            : (e) => {
+                e.stopPropagation();
+                onView();
+              }
+        }
+        data-tooltip={
+          withMeasureRef
+            ? undefined
+            : isFileGroup
+              ? `View ${files.length} ${allImages ? "images" : "files"}`
+              : "View"
+        }
+      >
+        {isFileGroup ? (allImages ? ImageIcon : FileIcon) : TYPE_ICONS[dk]}
+        <span className="card-type-label">
+          {isFileGroup ? (allImages ? "Images" : "Files") : TYPE_LABELS[dk]}
         </span>
-      );
-    }
-    return <EntryTypePill kind={deriveDisplayKind(entry)} />;
+        <ExpandIcon size={9} className="card-type-view-icon" />
+      </button>
+    );
   };
 
   const renderPinnedChip = (withMeasureRef = false) =>

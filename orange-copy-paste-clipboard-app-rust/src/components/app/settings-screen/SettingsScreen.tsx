@@ -17,6 +17,10 @@ import {
 } from "@phosphor-icons/react";
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
+import {
+  CARD_CLICK_SETTING_EVENT,
+  CARD_CLICK_SETTING_KEY,
+} from "../../../hooks/useCardClickAction";
 import { configureSounds, playCue } from "../../../sounds";
 import { parseNotes, hasParsedNotes } from "../update-banner/parseNotes";
 import "./SettingsScreen.css";
@@ -116,6 +120,8 @@ const SettingsScreen: React.FC = () => {
   const [autosave, setAutosave] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
+  // False: click copies, double click views. True: the two swap over.
+  const [clickToView, setClickToView] = useState(false);
   const [notifClosing, setNotifClosing] = useState(false);
 
   // ── Sound and OS notifications ─────────────────────────────────
@@ -156,6 +162,9 @@ const SettingsScreen: React.FC = () => {
     loadBool("sound_paste", setSoundPaste, false);
     loadBool("os_notifications", setOsNotifications, true);
     loadBool("auto_check_updates", setAutoCheckUpdates, true);
+    invoke<string | null>("get_setting", { key: CARD_CLICK_SETTING_KEY })
+      .then((v) => setClickToView(v === "view"))
+      .catch(() => setClickToView(false));
     invoke<string | null>("get_setting", { key: "update_channel" })
       .then((v) => setBetaChannel(v === "beta"))
       .catch(() => {});
@@ -510,6 +519,24 @@ const SettingsScreen: React.FC = () => {
               desc="Clipboard history is preserved when the app restarts (cleared after reboot)."
               active={keepHistory}
               onToggle={handleKeepToggle}
+            />
+            <ToggleRow
+              label="Click a card to view it"
+              desc="A double click copies instead. Off, a click copies and a double click opens it too."
+              active={clickToView}
+              onToggle={() => {
+                const next = !clickToView;
+                setClickToView(next);
+                void invoke("set_setting", {
+                  key: CARD_CLICK_SETTING_KEY,
+                  value: next ? "view" : "copy",
+                });
+                document.dispatchEvent(
+                  new CustomEvent(CARD_CLICK_SETTING_EVENT, {
+                    detail: next ? "view" : "copy",
+                  }),
+                );
+              }}
             />
             <ToggleRow
               label="Auto-save copied entries"

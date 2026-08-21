@@ -199,31 +199,7 @@
   white-space: pre-wrap;
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
   font-weight: 400;
-}
-
-/* Expanded long text grows into a bounded, scrollable area rather than an
-   ever-taller card. */
-.entry-card--expanded .card-text {
-  max-height: min(480px, 60vh);
-  overflow: auto;
-  scrollbar-width: thin;
-}
-
-.entry-card--expanded .card-text::-webkit-scrollbar {
-  width: 6px;
-}
-.entry-card--expanded .card-text::-webkit-scrollbar-track {
-  background: transparent;
-}
-.entry-card--expanded .card-text::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-.entry-card--expanded .card-text::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-}
-
-.card-text--file {
+}.card-text--file {
   font-size: 12px;
   color: var(--text);
   white-space: nowrap;
@@ -269,29 +245,7 @@
 .card-html-preview li {
   margin: 2px 0;
   padding: 0;
-}
-
-.card-html-preview--expanded {
-  max-height: min(480px, 60vh);
-  overflow: auto;
-  scrollbar-width: thin;
-}
-
-.card-html-preview--expanded::-webkit-scrollbar {
-  width: 6px;
-}
-.card-html-preview--expanded::-webkit-scrollbar-track {
-  background: transparent;
-}
-.card-html-preview--expanded::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 999px;
-}
-.card-html-preview--expanded::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-}
-
-.card-html-preview--faded {
+}.card-html-preview--faded {
   -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
 }
@@ -304,13 +258,7 @@
   object-fit: contain;
   display: inline-block;
   margin: 2px 0;
-}
-
-.card-html-preview--expanded img {
-  max-height: min(360px, 45vh);
-}
-
-.card-html-img-placeholder {
+}.card-html-img-placeholder {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -439,7 +387,7 @@
   letter-spacing: -0.3px;
 }
 
-/*  Clickable type chip (multi-file/image entries)  */
+/*  Type chip: the way into the full view  */
 
 button.card-type-chip {
   border: none;
@@ -450,50 +398,7 @@ button.card-type-chip {
 
 button.card-type-chip:hover {
   opacity: 0.75;
-}
-
-.card-type-chevron {
-  margin-left: 1px;
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-button.card-type-chip.open .card-type-chevron {
-  transform: rotate(180deg);
-}
-
-.card-file-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 150px;
-  overflow: hidden auto;
-  padding: 4px 0 1px;
-}
-
-.card-file-list--bordered {
-  border-top: 1px solid var(--border);
-}
-
-.card-file-list::-webkit-scrollbar {
-  width: 3px;
-}
-
-.card-file-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 2px;
-}
-
-.card-file-list-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 1px;
-  border-radius: 3px;
-  min-width: 0;
-}
-
-.card-file-thumb {
+}.card-file-thumb {
   width: 26px;
   height: 26px;
   flex-shrink: 0;
@@ -755,18 +660,7 @@ button.card-type-chip.open .card-type-chevron {
   background: #fff;
   border: none;
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
-}
-
-/*  Missing-files states  */
-
-.card-text--missing,
-.card-file-preview-item--missing .card-file-preview-name,
-.card-file-list-item--missing .card-file-name {
-  opacity: 0.7;
-  text-decoration: line-through;
-}
-
-/* Ensure Cascadia Code is applied to all text content within folder entry cards */
+}/* Ensure Cascadia Code is applied to all text content within folder entry cards */
 .entry-card[data-kind="folder"] .card-text,
 .entry-card[data-kind="folder"] .card-text--file,
 .entry-card[data-kind="folder"] .card-file-preview-name,
@@ -785,4 +679,12 @@ button.card-type-chip.open .card-type-chevron {
   flex-shrink: 0;
   text-decoration: none;
   opacity: 1;
+}
+
+/* The arrows-out mark on the type chip. Small and dim: it names the chip's job
+   without competing with the type label next to it. */
+.card-type-view-icon {
+  margin-left: 1px;
+  flex-shrink: 0;
+  opacity: 0.55;
 }

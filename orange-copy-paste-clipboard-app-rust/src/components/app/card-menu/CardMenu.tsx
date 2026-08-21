@@ -34,11 +34,14 @@ export interface CardMenuProps {
   entryGroups: string[];
   /** Toggle a group on/off for this entry. */
   onToggleGroup: (group: string) => void;
-  /** Whether this entry can be expanded (long text / overflowing html). */
+  /** Open this item in the full view. Absent leaves the row off the menu.
+   *  Clipboard entries use this; notes still expand in place below. */
+  onView?: () => void;
+  /** Whether this item can be expanded in place (notes only). */
   isExpandable?: boolean;
-  /** Whether this entry is currently expanded. */
+  /** Whether it is currently expanded. */
   isExpanded?: boolean;
-  /** Toggle expand / collapse for this entry. */
+  /** Toggle expand / collapse. */
   onToggleExpand?: () => void;
   /** Show copy action (default true). */
   showCopy?: boolean;
@@ -73,6 +76,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
   availableGroups,
   entryGroups,
   onToggleGroup,
+  onView,
   isExpandable,
   isExpanded,
   onToggleExpand,
@@ -356,14 +360,25 @@ const CardMenu: React.FC<CardMenuProps> = ({
         </>
       )}
 
-      {/* Expand / Collapse */}
+      {/* Expand / Collapse, for items that grow in place */}
       {isExpandable && onToggleExpand && (
         <button
-          className="card-menu-item card-menu-item--expand"
+          className="card-menu-item card-menu-item--view"
           onClick={closeAfter(onToggleExpand)}
         >
           {isExpanded ? <CollapseIcon size={13} /> : <ExpandIcon size={13} />}
           <span>{isExpanded ? "Collapse" : "Expand"}</span>
+        </button>
+      )}
+
+      {/* View, for items that open on their own screen */}
+      {onView && (
+        <button
+          className="card-menu-item card-menu-item--view"
+          onClick={closeAfter(onView)}
+        >
+          <ExpandIcon size={13} />
+          <span>View</span>
         </button>
       )}
 
