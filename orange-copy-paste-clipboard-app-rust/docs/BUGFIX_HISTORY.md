@@ -697,3 +697,101 @@ creates a state the first site can reach and the rest of the program treats as
 complete. The tell is a bug that a restart does not fix but toggling the feature
 does.
 
+## #20 - The spaces list returned 500 whenever Redis had been left alone
+
+**Symptom.** `GET /api/v1/spaces` failing with
+`redis.exceptions.ConnectionError`, so the Spaces screen loaded with nothing in
+it. Intermittent in a way that pointed at nothing: it cleared on a retry, and it
+came back after any quiet spell.
+
+**Cause.** `redis.asyncio.from_url` constructs the `ConnectionPool` itself, so it
+inherits none of the defaults `Redis.__init__` would have applied - no retries,
+no health check, no timeouts. A connection the peer had closed while the service
+was idle therefore raised on its first use instead of being reconnected, and
+`ConnectionPool.ensure_connection` raises from outside the retry wrapper anyway.
+
+What turned that into a 500 is where the read sat. Every field of a spaces
+response comes from Postgres except one: `online`, a presence hint. Postgres had
+already answered in full, and the request was then failed by the one value on it
+that nothing authorizes anything against.
+
+Three more failures were in the same file, all of them the same shape:
+
+- Presence was read per member - one `SMEMBERS` plus one `EXISTS` per device,
+  for every member of every space in the list. Configuring a read timeout, which
+  is part of the fix, would have multiplied that timeout by the size of the
+  account.
+- The pub/sub listener had no supervisor, so a single `RedisError` ended
+  realtime delivery for the life of the process. It also cannot rely on
+  `health_check_interval`: `check_health` runs from `parse_response`, which a
+  listener blocked in a read never reaches. Keepalive is what notices a dead peer
+  there, and a `socket_timeout` would tear the subscription down on every quiet
+  interval - so that one client omits it deliberately.
+- Fan-out publishes raised, and every one of them runs *after* its write has
+  committed. That answers 500 for work that succeeded.
+
+**Fix.** One `client_kwargs(blocking_reads=)` builds both clients, so the
+difference between the request pool and the listener is stated in one place with
+the reason attached. `presence_for_users` batches a whole space into two
+pipelines and degrades to "everyone offline". The listener is supervised with
+backoff to a ceiling; publishes are best-effort behind a dropped-event gauge on
+the admin metrics route.
+
+`user_is_online` was left raising on purpose. Its two callers decide things -
+publishing user-offline on socket teardown, and the sweeper evicting a device -
+and reporting offline there announces that a user with live devices went away,
+with nothing to correct it, because the online announcement only fires on
+connect.
+
+**Invariant to keep**: **a value that is only displayed must never be able to
+fail a response the rest of which is already correct.** The test is not how
+reliable the store is, it is what the caller does with the answer: a hint
+degrades, a decision raises. Keeping both in one helper is what made this
+possible, so they are now two, and the boundary is the docstring.
+
+## #21 - Spaces disappeared because the deploy shipped code its database had never seen
+
+**Symptom.** Immediately after a release, a user's spaces were gone. The screen
+loaded and listed nothing; the account, the memberships and the owned spaces were
+all still in Postgres, untouched.
+
+**Cause.** Revisions `0017_space_key_handover` and `0018_space_join_requests`
+were merged but had never been applied. Pushing the backend to `main` is what
+triggers a deploy, so the push published code that selected columns and a table
+the live database did not have, and `GET /api/v1/spaces` 500'd on
+`relation ... does not exist`.
+
+Nothing caught it and nothing was going to. `render.yaml` does set
+`preDeployCommand: alembic upgrade head`, but that field is paid-plan only, and
+which plan the live service is actually on is a dashboard setting the repository
+cannot see - so a green deploy says nothing either way. `pytest` cannot catch it
+either: the harness builds its schema with `Base.metadata.create_all`, so a table
+can exist for every test and be absent from every real database.
+
+Then the recovery was delayed by the tool meant to perform it. The **Migrate
+database** workflow was dispatched with its default `action=current`, which is
+read-only. It went green, and because that action wrote only to the job log and
+never to the run summary, the run page was blank - which reads exactly like a
+migration that had nothing to do. The schema stayed at `0016` through a run that
+looked like the fix.
+
+**Fix.** `0017` and `0018` applied, and the workflow made incapable of being
+silent: every run writes where the database stands whatever action it was given;
+a read-only run that finds pending revisions warns and prints the dispatch that
+would apply them; `run-name` states whether the run applies changes; an `upgrade`
+re-reads the revision afterwards and fails if the database did not move; and an
+unreachable database now fails the step instead of being reported as an empty
+one. The backend's `docs/DEPLOY.md` documents the workflow and no longer implies
+a deploy migrates.
+
+**Not fixed, deliberately.** `action` still defaults to the read-only `current`.
+A default that writes to a production database is a worse failure than a default
+that reports, and reporting is now loud enough that skipping the second step is
+hard rather than silent.
+
+**Invariant to keep**: **a green run is not evidence; the revision is.** Any step
+that can succeed without doing the thing has to say which of the two happened -
+a job that reports nothing will be read as a job that found nothing to do, and
+that reading is unfalsifiable from the outside. The deployment order follows from
+the same point: migrate first, deploy second, and read the revision back.
+
