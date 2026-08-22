@@ -795,3 +795,57 @@ a job that reports nothing will be read as a job that found nothing to do, and
 that reading is unfalsifiable from the outside. The deployment order follows from
 the same point: migrate first, deploy second, and read the revision back.
 
+---
+
+## #22 - One large copy took the app from 15 MB to several GB and crashed the UI
+
+**Symptom.** Copying the contents of a 500 MB text file took the process from its
+usual 11-15 MB to 6-8 GB. The window crashed, and the app was slow and unresponsive
+after a restart - which made it look like a leak that survived the process.
+
+**Cause.** History capped how *many* entries it held (`MAX_HISTORY`, 100) and
+nothing capped how large one could be. That is only a problem because an entry is
+not stored once. On the way to the user a single capture is duplicated into: the
+dedupe check (`is_duplicate_top` called `top(1)`, which **cloned** the previous
+entry on every clipboard change), the store (`push` clones to return the inserted
+entry), JSON for `clipboard:new-entry` and then a UTF-16 string in the main
+webview, the copy-popup payload and the paste-popup payload in two more webviews,
+`crypto::encrypt` plus its base64 and the `push_req.clone()` kept for the queue,
+and a full MessagePack buffer on every flush. Roughly a dozen copies of whatever
+one entry holds, several of them at twice the size in UTF-16.
+
+Two frontend paths then made it feel worse than it was. `matchesQuery` built
+`entryText(entry).toLowerCase()` - a fresh full-length copy - per entry per render,
+and again per dimension for the filter option counts, so every keystroke in the
+search box allocated the whole history over again. And the entry viewer rendered
+the content into a single `<pre>`, which is what actually took the window down.
+
+It looked like a leak because it behaved like one: the entry was persisted, so it
+was reloaded on the next launch and every copy of it was made again.
+
+**Fix.** `MAX_TEXT_BYTES` (4 MiB) bounds one text, rich-text or file-list entry,
+enforced at the three doors an entry can come through - capture, the sync merge,
+and load. Capture measures the OS handle with `GlobalSize` before `arboard`
+decodes anything, so on Windows an oversized payload is never allocated at all;
+`read_clipboard_capture` returns a three-state `Capture` so a refusal is *handled*
+rather than retried, which matters because the watcher re-reads anything it did not
+handle every 220 ms. `drop_oversized` prunes a history file written before the cap,
+which is what stops the fault surviving a restart. The dedupe compares in place
+(`top_matches`), and the search box compiles one case-insensitive `RegExp` per query
+instead of lowercasing every entry.
+
+A refused copy always shows the app's own toast, ignoring both
+`notification_enabled` and `notif_copy`. That is deliberate: the copy and paste
+toasts confirm something that worked and the user already knows about, but this one
+reports something that did *not* happen, and the only other sign of it is the
+item's absence from a list.
+
+**Also found, same class.** `get_file_preview` called `fs::read(path)` and *then*
+checked the length against its limit, so asking for a preview of a 30 GB video read
+all 30 GB into memory to throw it away. It measures `metadata().len()` first now.
+
+**Invariant to keep**: **a bounded count of unbounded items is not a bound.** Every
+store that fans its contents out - to a webview, to disk, to ciphertext - has to cap
+the size of one item, not just how many it keeps. And the size check belongs where
+the bytes enter the process, not where they hurt: a limit tested after the
+allocation it was meant to prevent has already been paid.

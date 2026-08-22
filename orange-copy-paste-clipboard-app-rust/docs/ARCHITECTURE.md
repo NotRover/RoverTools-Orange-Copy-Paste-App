@@ -319,6 +319,24 @@ AppState
 
 **Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture — preventing duplicate entries.
 
+**Entry size** is capped as well as entry count. `MAX_TEXT_BYTES` (4 MiB) bounds one
+text, rich-text or file-list entry; image content is a path to a file on disk and is
+exempt. The cap exists because an entry is duplicated several times over on its way
+to the user - into the store, into each webview that shows it, into MessagePack on
+every flush, and into ciphertext when sync pushes it - so an unbounded entry is an
+unbounded multiple. It is enforced at the three places an entry can enter memory:
+`read_clipboard_capture` at capture (measuring the OS handle first on Windows, so an
+oversized payload is never decoded into the process), `upsert_synced` on the sync
+merge, and `drop_oversized` on load, which prunes a history file written before the
+cap existed. A refused capture always shows the app's own toast, whatever the
+notification preferences say, because the only other sign of it is the item's
+absence.
+
+`MAX_TEXT_BYTES` is deliberately well above what the server will store - see
+`MAX_INLINE_SYNC_BYTES` in the sync section. What this app holds locally and what a
+cloud row may weigh are different questions, and history is useful without sync; an
+entry between the two is kept and marked local-only.
+
 **History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.bin` (MessagePack binary) every 2 seconds when dirty. Image data is externalised to individual files in the `images/` directory.
 
 ### Clipboard Module
@@ -349,6 +367,8 @@ ClipboardEntry {
 | `push(entry)`                       | Prepend, trim unpinned entries beyond `MAX_HISTORY` (100) |
 | `push_if_distinct(entry)`           | Skip if top entry matches (kind + content)                |
 | `push_if_distinct_with_flag(entry)` | Same, also returns whether insertion happened             |
+| `top_matches(entry)`                | Whether the newest entry holds this content, taking no copy |
+| `drop_oversized()`                  | Drop entries past `MAX_TEXT_BYTES`, returning their sizes  |
 | `top(n)`                            | First N entries                                           |
 | `find(id)` / `find_mut(id)`         | Lookup by ID                                              |
 | `pin(id)` / `unpin(id)`             | Toggle pinned flag                                        |
@@ -910,6 +930,16 @@ recovered — the server deduplicates by `client_id` and the entry is still on t
 device to send again. A lost `Delete` is not: the tombstone is the only record
 that the user deleted anything, so dropping it leaves the row on the server and
 the next pull hands the entry back.
+
+`settle` requeues what *could* not send, which is not the same as what *will* not.
+A 400, 413 or 422 (`ApiError::is_permanent_rejection`) means the server read the
+body and will refuse it identically on every flush from here on, so the op is
+dropped and recorded as a skip the user can read instead of being retried forever.
+The list is deliberately short: a 401 or 403 is equally non-transient but says the
+session is wrong rather than the payload, and dropping a queued entry for one of
+those would be data loss nobody asked for. Push size is also checked locally before
+a send (`refuses_inline_size`), so the ordinary oversized case never reaches this
+path or the network at all.
 
 `flush_and_pull` is serialised on its own lock. Five things trigger it — manual
 Sync now, login, a socket event, the passive tick, a window refocus — and two at

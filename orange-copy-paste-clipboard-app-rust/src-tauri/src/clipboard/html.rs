@@ -19,17 +19,25 @@
 //! </body></html>
 //! ```
 
+/// Clipboard format id for CF_HTML, or 0 if it could not be registered.
+///
+/// The one place that knows the format name, so a caller that wants to measure
+/// the payload before reading it does not have to re-spell it.
+#[cfg(windows)]
+pub fn html_format_id() -> u32 {
+    use windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW;
+    unsafe {
+        let wide: Vec<u16> = "HTML Format\0".encode_utf16().collect();
+        RegisterClipboardFormatW(wide.as_ptr())
+    }
+}
+
 /// Check if CF_HTML is available on the clipboard.
 #[cfg(windows)]
 pub fn any_html_format_available() -> bool {
-    use windows_sys::Win32::System::DataExchange::{
-        IsClipboardFormatAvailable, RegisterClipboardFormatW,
-    };
-    unsafe {
-        let wide: Vec<u16> = "HTML Format\0".encode_utf16().collect();
-        let fmt = RegisterClipboardFormatW(wide.as_ptr());
-        fmt != 0 && IsClipboardFormatAvailable(fmt) != 0
-    }
+    use windows_sys::Win32::System::DataExchange::IsClipboardFormatAvailable;
+    let fmt = html_format_id();
+    fmt != 0 && unsafe { IsClipboardFormatAvailable(fmt) != 0 }
 }
 
 #[cfg(not(windows))]
@@ -42,17 +50,16 @@ pub fn any_html_format_available() -> bool {
 #[cfg(windows)]
 pub fn read_html_from_clipboard() -> Option<String> {
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatW,
+        CloseClipboard, GetClipboardData, OpenClipboard,
     };
     use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
-    unsafe {
-        let wide: Vec<u16> = "HTML Format\0".encode_utf16().collect();
-        let fmt = RegisterClipboardFormatW(wide.as_ptr());
-        if fmt == 0 {
-            return None;
-        }
+    let fmt = html_format_id();
+    if fmt == 0 {
+        return None;
+    }
 
+    unsafe {
         if OpenClipboard(std::ptr::null_mut()) == 0 {
             return None;
         }

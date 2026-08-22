@@ -167,6 +167,18 @@ impl ApiError {
             Some(status) => status == 408 || status == 429 || status >= 500,
         }
     }
+
+    /// True when the server understood the request and will refuse this exact
+    /// body however many times it is sent.
+    ///
+    /// A short explicit list rather than "not transient", because a 401 or a
+    /// 403 is also not transient and means the *session* is wrong, not the
+    /// payload - dropping a queued entry for one of those would be data loss
+    /// the user never asked for. Only a body the server has judged malformed or
+    /// oversized is safe to stop retrying.
+    pub fn is_permanent_rejection(&self) -> bool {
+        matches!(self.status, Some(400) | Some(413) | Some(422))
+    }
 }
 
 impl std::fmt::Display for ApiError {
@@ -1219,12 +1231,15 @@ impl SyncHttpClient {
 
     // ── Sync push / pull ──────────────────────────────────────────
 
+    /// Keeps the status rather than flattening it: a push that is refused for
+    /// its body must not be queued for retry, and only the status says which
+    /// kind of failure this was. See [`ApiError::is_permanent_rejection`].
     pub async fn push_entries(
         &self,
         entries: Vec<PushEntryRequest>,
-    ) -> Result<PushResult, String> {
+    ) -> Result<PushResult, ApiError> {
         let body = PushBody { entries: &entries };
-        self.get_json("push", || {
+        self.get_json_classified("push", || {
             Ok(self
                 .authed(Method::POST, "/api/v1/sync/push")?
                 .json(&body))

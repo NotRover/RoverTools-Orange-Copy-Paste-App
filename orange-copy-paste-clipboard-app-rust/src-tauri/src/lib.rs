@@ -433,6 +433,19 @@ fn setup_runtime(
         }
     }
 
+    // Drop anything a history file written before the capture cap can be
+    // holding. Placed after the loads and the sealed-leftover merges, so it
+    // sees everything that made it into memory, and after the notification
+    // store is up so the notice can be recorded.
+    {
+        let state_ref: tauri::State<'_, AppState> = app.state();
+        let dropped = state_ref.history.lock().drop_oversized();
+        if !dropped.is_empty() {
+            state_ref.history_dirty.store(true, Ordering::Relaxed);
+            crate::clipboard::commands::notify_oversized_dropped(app.handle(), &dropped);
+        }
+    }
+
     // Seed the in-memory boolean flags from disk.
     let state_ref: tauri::State<'_, AppState> = app.state();
     state_ref

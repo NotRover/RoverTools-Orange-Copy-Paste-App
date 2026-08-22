@@ -4,7 +4,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 
-use crate::clipboard::commands::read_clipboard_entry;
+use crate::clipboard::commands::{read_clipboard_capture, Capture};
 use crate::clipboard::history::{ClipboardEntry, ClipboardHistory};
 use crate::state::app_state::AppState;
 
@@ -18,14 +18,6 @@ fn clipboard_change_token() -> u32 {
 #[cfg(not(windows))]
 fn clipboard_change_token() -> u32 {
     0
-}
-
-fn is_duplicate_top(history: &ClipboardHistory, entry: &ClipboardEntry) -> bool {
-    history
-        .top(1)
-        .first()
-        .map(|top| crate::clipboard::history::content_matches(top, entry))
-        .unwrap_or(false)
 }
 
 /// Attempt to capture the current clipboard content into history.
@@ -47,15 +39,22 @@ fn capture_clipboard_change(
         return true;
     }
 
-    let Some(entry) = read_clipboard_entry() else {
+    let entry = match read_clipboard_capture() {
+        Capture::Entry(entry) => entry,
+        Capture::TooLarge { what, bytes } => {
+            // Handled, so the token advances: a payload left sitting on the
+            // clipboard is measured once, not once every poll.
+            crate::clipboard::commands::notify_capture_too_large(app, what, bytes);
+            return true;
+        }
         // Could not read the clipboard (locked by another app, etc.).
         // Signal the caller to keep the old token so we retry next cycle.
-        return false;
+        Capture::Nothing => return false,
     };
 
     let maybe_new_entry = {
         let mut hist = history.lock();
-        if is_duplicate_top(&hist, &entry) {
+        if hist.top_matches(&entry) {
             None
         } else {
             Some(hist.push(entry))

@@ -15,7 +15,7 @@ use tauri::{Emitter, Manager, State};
 use crate::clipboard::files::{
     content_to_files, files_to_content, read_files_from_clipboard, write_files_to_clipboard,
 };
-use crate::clipboard::history::ClipboardEntry;
+use crate::clipboard::history::{ClipboardEntry, MAX_TEXT_BYTES};
 use crate::runtime::platform::simulate_paste;
 use crate::runtime::popup_windows::hide_popup;
 use crate::state::AppState;
@@ -593,6 +593,13 @@ fn get_file_preview(
 ) -> Option<String> {
     let path = Path::new(path_str);
     let mime = mime_fn(path)?;
+    // Measure before reading. Reading first and rejecting the length afterwards
+    // meant asking for a preview of a 30 GB video pulled all 30 GB into memory
+    // just to throw it away.
+    let len = std::fs::metadata(path).ok()?.len();
+    if len == 0 || len > max_bytes as u64 {
+        return None;
+    }
     let bytes = std::fs::read(path).ok()?;
     if bytes.is_empty() || bytes.len() > max_bytes {
         return None;
@@ -801,56 +808,275 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
     Ok(())
 }
 
-pub(crate) fn read_clipboard_entry() -> Option<ClipboardEntry> {
+// Capture size guard
+
+/// What one attempt to read the clipboard produced.
+///
+/// The three cases have to stay apart: content to keep, a payload deliberately
+/// refused, and a read that did not work. An `Option` collapsed the last two,
+/// and the watcher treats "did not work" as retry-on-the-next-poll - so a
+/// refused payload would be re-measured every 220 ms for as long as it sat on
+/// the clipboard.
+pub(crate) enum Capture {
+    /// Content worth keeping.
+    Entry(ClipboardEntry),
+    /// Readable, but past [`MAX_TEXT_BYTES`]. `what` names the shape for the
+    /// message; `bytes` is the measured size.
+    TooLarge { what: &'static str, bytes: usize },
+    /// Nothing to take: an empty clipboard, a format this app does not handle,
+    /// or a clipboard another app has locked. The caller should retry.
+    Nothing,
+}
+
+/// What the OS will say about one clipboard format's size.
+///
+/// `Locked` has to stay distinct from `Absent`. Collapsing them into "no
+/// opinion" is what let a refused payload get read anyway: the app that just
+/// put a 500 MB selection on the clipboard is still holding it when the next
+/// poll lands, the measurement cannot be taken, and falling through to the
+/// ordinary read means waiting out the lock and then decoding the whole thing -
+/// the exact allocation the measurement exists to prevent.
+#[cfg(windows)]
+enum FormatSize {
+    /// Measured, in bytes.
+    Bytes(usize),
+    /// The format is not on the clipboard.
+    Absent,
+    /// Another app holds the clipboard. Nothing can be measured, and nothing
+    /// should be read either - try again on the next poll.
+    Locked,
+}
+
+/// Byte size of one clipboard format's payload, without copying it.
+///
+/// The point of the size guard is to never allocate what it is about to refuse,
+/// so it measures the OS handle rather than a `String` already built from it.
+#[cfg(windows)]
+fn clipboard_format_bytes(fmt: u32) -> FormatSize {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, OpenClipboard,
+    };
+    use windows_sys::Win32::System::Memory::GlobalSize;
+
+    if fmt == 0 {
+        return FormatSize::Absent;
+    }
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return FormatSize::Locked;
+        }
+        let handle = GetClipboardData(fmt);
+        let size = if handle.is_null() {
+            FormatSize::Absent
+        } else {
+            FormatSize::Bytes(GlobalSize(handle) as usize)
+        };
+        CloseClipboard();
+        size
+    }
+}
+
+/// The verdict on `CF_UNICODETEXT` before anything is decoded.
+#[cfg(windows)]
+enum TextPreflight {
+    /// Past the cap by the most generous reading. Refuse without reading.
+    Oversized(usize),
+    /// Small enough to read, or not text at all.
+    WithinCap,
+    /// The clipboard could not be opened. Do not read.
+    Locked,
+}
+
+/// Measure `CF_UNICODETEXT` so a caller can refuse it before `arboard` copies
+/// it in.
+///
+/// The handle holds UTF-16, and the UTF-8 `String` it decodes to is anywhere
+/// between half its size (all ASCII) and one and a half times it. Only the
+/// lower bound can be trusted here, so this refuses when even the all-ASCII
+/// reading would be over and leaves anything nearer the line to the exact
+/// post-read check. The most that still gets through is twice the cap, which is
+/// the point: bounded.
+#[cfg(windows)]
+fn text_preflight() -> TextPreflight {
+    const CF_UNICODETEXT: u32 = 13;
+    match clipboard_format_bytes(CF_UNICODETEXT) {
+        FormatSize::Locked => TextPreflight::Locked,
+        FormatSize::Absent => TextPreflight::WithinCap,
+        FormatSize::Bytes(utf16_bytes) => {
+            let min_utf8 = utf16_bytes / 2;
+            if min_utf8 > MAX_TEXT_BYTES {
+                TextPreflight::Oversized(min_utf8)
+            } else {
+                TextPreflight::WithinCap
+            }
+        }
+    }
+}
+
+/// Tell the user a copy was refused for its size.
+///
+/// One rolling row rather than one per copy: the same oversized selection often
+/// lands several times in a row, and a stack of identical lines would bury
+/// everything else in the centre.
+pub(crate) fn notify_capture_too_large(app: &tauri::AppHandle, what: &str, bytes: usize) {
+    eprintln!("[clipboard] refused a {bytes} byte {what} copy (cap {MAX_TEXT_BYTES})");
+    // The toast is the part the user cannot turn off: an item they copied is
+    // missing, and the alternative to saying so is letting them find out by
+    // looking for it. The row below carries the why.
+    crate::runtime::notifications::notify_capture_skipped(app, bytes);
+    let cap = crate::sync::format_bytes(MAX_TEXT_BYTES as u64);
+    crate::notifications::raise_rolling_quiet(
+        app,
+        crate::notifications::Notification::new(
+            "clipboard-too-large",
+            crate::notifications::NotificationKind::Reminder,
+            format!("Skipped a {} copy", crate::sync::format_bytes(bytes as u64)),
+        )
+        .with_body(format!(
+            "Keeping it would have cost far more memory than the item is worth, so history skipped it: one item holds up to {cap} of {what}. Nothing was lost. Your system clipboard still holds the copy, so pasting it works as usual - it just will not be here later."
+        )),
+    );
+}
+
+/// Tell the user which history items were too large to keep.
+///
+/// Raised once at startup, after a history file written before the cap was
+/// pruned. Says the size, because "an item was removed" with no number is the
+/// kind of notice that reads as a bug.
+pub(crate) fn notify_oversized_dropped(app: &tauri::AppHandle, sizes: &[usize]) {
+    let total: u64 = sizes.iter().map(|s| *s as u64).sum();
+    let title = if sizes.len() == 1 {
+        format!("Removed a {} history item", crate::sync::format_bytes(total))
+    } else {
+        format!("Removed {} oversized history items", sizes.len())
+    };
+    let cap = crate::sync::format_bytes(MAX_TEXT_BYTES as u64);
+    crate::notifications::raise_rolling(
+        app,
+        crate::notifications::Notification::new(
+            "clipboard-oversized-dropped",
+            crate::notifications::NotificationKind::Reminder,
+            title,
+        )
+        .with_body(format!(
+            "{} in all, past the {cap} one item can hold. Items that large kept the app slow every time it started.",
+            crate::sync::format_bytes(total)
+        )),
+    );
+}
+
+/// Read whatever is on the clipboard into a would-be history entry.
+///
+/// Every capture path goes through here - the watcher, the copy shortcut, and
+/// the CLI trigger - so the size guard only has to live in one place.
+pub(crate) fn read_clipboard_capture() -> Capture {
     // Handle CF_HDROP (files copied in Explorer) first.
-    // All file drops — including single image files — are stored as File entries
+    // All file drops - including single image files - are stored as File entries
     // so that re-copying writes CF_HDROP back and the files can be pasted in
     // Explorer and other apps that expect file paths.  The frontend handles
     // showing the correct "Image" chip for single-image file entries.
     #[cfg(windows)]
     if crate::clipboard::files::any_file_format_available() {
         if let Some(paths) = read_files_from_clipboard() {
-            return Some(ClipboardEntry::new_file(files_to_content(&paths)));
+            // A path is small; a selection of a few hundred thousand is not.
+            let content = files_to_content(&paths);
+            if content.len() > MAX_TEXT_BYTES {
+                return Capture::TooLarge {
+                    what: "file paths",
+                    bytes: content.len(),
+                };
+            }
+            return Capture::Entry(ClipboardEntry::new_file(content));
         }
     }
 
-    // CF_HTML — rich text with inline images (Word, Teams, etc.).
+    // CF_HTML - rich text with inline images (Word, Teams, etc.).
     // Only triggers when the HTML contains images mixed with text, or tables.
     // Pure image copies and plain styled text are intentionally skipped.
     #[cfg(windows)]
     if crate::clipboard::html::any_html_format_available() {
+        // CF_HTML is UTF-8 on the handle, so its size needs no slack.
+        match clipboard_format_bytes(crate::clipboard::html::html_format_id()) {
+            FormatSize::Bytes(bytes) if bytes > MAX_TEXT_BYTES => {
+                return Capture::TooLarge {
+                    what: "rich text",
+                    bytes,
+                }
+            }
+            FormatSize::Locked => return Capture::Nothing,
+            _ => {}
+        }
         if let Some(html_fragment) = crate::clipboard::html::read_html_from_clipboard() {
-            // Also grab the plain-text fallback for search/preview
-            let plain = Clipboard::new()
-                .ok()
-                .and_then(|mut cb| cb.get_text().ok())
-                .unwrap_or_default();
-            return Some(ClipboardEntry::new_html(html_fragment, plain));
+            // Also grab the plain-text fallback for search/preview.  It is a
+            // second rendering of the same content, so it gets the same guard.
+            let plain = match text_preflight() {
+                TextPreflight::WithinCap => Clipboard::new()
+                    .ok()
+                    .and_then(|mut cb| cb.get_text().ok())
+                    .unwrap_or_default(),
+                TextPreflight::Oversized(_) | TextPreflight::Locked => String::new(),
+            };
+            // Both halves live in one entry, so the cap is on their sum.
+            let total = html_fragment.len() + plain.len();
+            if total > MAX_TEXT_BYTES {
+                return Capture::TooLarge {
+                    what: "rich text",
+                    bytes: total,
+                };
+            }
+            return Capture::Entry(ClipboardEntry::new_html(html_fragment, plain));
         }
     }
 
-    // Plain text
-    let mut cb = Clipboard::new().ok()?;
+    // Plain text.  Measured off the OS handle first, so a payload this app will
+    // not keep is never decoded into it.
+    #[cfg(windows)]
+    match text_preflight() {
+        TextPreflight::Oversized(bytes) => {
+            return Capture::TooLarge {
+                what: "text",
+                bytes,
+            }
+        }
+        // Very often the app that just placed a huge selection is still
+        // holding the clipboard. Reading through the lock would mean
+        // `arboard` waiting it out and then decoding the payload in full,
+        // which is the allocation this guard exists to avoid. Retry instead.
+        TextPreflight::Locked => return Capture::Nothing,
+        TextPreflight::WithinCap => {}
+    }
+
+    let Ok(mut cb) = Clipboard::new() else {
+        return Capture::Nothing;
+    };
 
     if let Ok(text) = cb.get_text() {
+        // The authoritative check: the pre-flight above exists only on Windows,
+        // and deliberately allows some slack.
+        if text.len() > MAX_TEXT_BYTES {
+            return Capture::TooLarge {
+                what: "text",
+                bytes: text.len(),
+            };
+        }
         if !text.trim().is_empty() {
-            return Some(ClipboardEntry::new_text(text));
+            return Capture::Entry(ClipboardEntry::new_text(text));
         }
     }
 
     // Non-file images: screenshots, copies from browsers/apps, etc.
     #[cfg(windows)]
     if !crate::clipboard::image::any_image_format_available() {
-        return None;
+        return Capture::Nothing;
     }
     for attempt in 0..IMAGE_READ_RETRY_COUNT {
         if let Some(data_url) = crate::clipboard::image::read_image_from_clipboard() {
-            return Some(ClipboardEntry::new_image(data_url));
+            return Capture::Entry(ClipboardEntry::new_image(data_url));
         }
         if attempt + 1 < IMAGE_READ_RETRY_COUNT {
             std::thread::sleep(std::time::Duration::from_millis(IMAGE_READ_RETRY_DELAY_MS));
         }
     }
 
-    None
+    Capture::Nothing
 }

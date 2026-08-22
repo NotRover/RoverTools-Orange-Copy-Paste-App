@@ -61,12 +61,30 @@ function entryText(entry: ClipboardEntry): string {
   return entry.content;
 }
 
+/** Case-insensitive matcher for one query, compiled once and reused.
+ *
+ *  The obvious `text.toLowerCase().includes(q)` allocates a full-length
+ *  lowercased copy of every entry's content, and the predicate below runs over
+ *  the whole history on each keystroke - then again per dimension for the
+ *  option counts. A case-insensitive regexp scans the string in place instead,
+ *  so a long entry costs no allocation at all. */
+let matcherFor = "";
+let matcher = /(?:)/;
+
+function queryMatcher(q: string): RegExp {
+  if (q !== matcherFor) {
+    matcherFor = q;
+    matcher = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  }
+  return matcher;
+}
+
 /** Matches content and group names, so a word that is a filter in one place
  *  is not invisible in the other. */
 function matchesQuery(entry: ClipboardEntry, q: string): boolean {
-  const lower = q.toLowerCase();
-  if (entryText(entry).toLowerCase().includes(lower)) return true;
-  return (entry.groups ?? []).some((g) => g.toLowerCase().includes(lower));
+  const re = queryMatcher(q);
+  if (re.test(entryText(entry))) return true;
+  return (entry.groups ?? []).some((g) => re.test(g));
 }
 
 // Hook

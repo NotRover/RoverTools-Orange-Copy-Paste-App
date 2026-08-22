@@ -142,6 +142,30 @@ const PUSH_CONCURRENCY: usize = 6;
 /// caught before it is uploaded rather than rejected after.
 const BLOB_SIZE_LIMIT: u64 = 5 * 1024 * 1024;
 
+/// The server's own ceiling on one row's `encrypted_content`, mirrored here so
+/// a doomed push can be refused before it is sent. Its refusal is
+/// `entry_too_large`; see the backend's `max_entry_bytes`.
+const SERVER_ENTRY_BYTES: usize = 512 * 1024;
+
+/// Bytes [`crypto::encrypt`] adds around the plaintext: a 12-byte nonce and the
+/// 16-byte GCM tag, before base64.
+const CRYPTO_ENVELOPE_BYTES: usize = 12 + 16;
+
+/// Largest inline content that still fits the server's row limit, in plaintext
+/// bytes.
+///
+/// `encrypted_content` is base64 of `nonce || ciphertext || tag`, so the
+/// plaintext that fits is the inverse of the server's number: three bytes in
+/// for every four out, less the envelope. Derived rather than written down, so
+/// the two cannot drift apart silently.
+///
+/// Deliberately below [`crate::clipboard::history::MAX_TEXT_BYTES`]: what this
+/// app will hold locally and what the server will store are different
+/// questions, and an item between the two is kept and marked local-only rather
+/// than refused at capture.
+const MAX_INLINE_SYNC_BYTES: usize =
+    (SERVER_ENTRY_BYTES / 4) * 3 - CRYPTO_ENVELOPE_BYTES;
+
 /// Everything that differs between a clipboard push and a note push.
 struct PushJob {
     client_id: String,
@@ -2036,6 +2060,10 @@ impl SyncClient {
                 (entry.content, None, None)
             };
 
+            if refuses_inline_size(&ctx, &entry.id, &skip_label, &content) {
+                return;
+            }
+
             let job = PushJob {
                 client_id: entry.id.clone(),
                 content,
@@ -2091,12 +2119,21 @@ impl SyncClient {
 
         self.handle.spawn(async move {
             let permit = ctx.gate.clone().acquire_owned().await.ok();
+            // Taken before the title is moved into the metadata below.
+            let skip_label = if note.title.trim().is_empty() {
+                "A note".to_string()
+            } else {
+                note.title.clone()
+            };
             let metadata_json = serde_json::json!({
                 "title": note.title,
                 "groups": note.groups,
                 "pinned": note.pinned,
             })
             .to_string();
+            if refuses_inline_size(&ctx, &note.id, &skip_label, &note.content) {
+                return;
+            }
             let job = PushJob {
                 client_id: note.id.clone(),
                 content: note.content,
@@ -2523,13 +2560,17 @@ impl SyncClient {
                 };
                 // Auto-copy: only live space entries, per the receiving
                 // device's per-space toggle. Backfill never touches the
-                // clipboard.
-                let autocopy = live && self.autocopy_enabled(&e.space_ids);
+                // clipboard, and neither does an entry the merge below is about
+                // to refuse for its size.
+                let autocopy = live
+                    && crate::clipboard::history::fits(&merged)
+                    && self.autocopy_enabled(&e.space_ids);
                 if autocopy {
                     crate::clipboard::commands::copy_entry_suppressed(&self.app, &merged);
                 }
-                state.history.lock().upsert_synced(merged);
-                clip_changed = true;
+                if state.history.lock().upsert_synced(merged) {
+                    clip_changed = true;
+                }
             }
 
             let mut id_map = self.id_map.lock();
@@ -2607,6 +2648,7 @@ impl SyncClient {
                     // the op is dropped and nothing will ever reference that
                     // object, so give it back here too.
                     let queued_blob = req.blob_key.clone();
+                    let client_id = req.client_id.clone();
                     match http.push_entries(vec![req]).await {
                         Ok(result) => {
                             if let (Some(key), true) =
@@ -2625,6 +2667,25 @@ impl SyncClient {
                                 id_map.set_entry(&key, &r.server_id);
                                 id_map.set_entry_shares(&key, &space_ids);
                             }
+                        }
+                        Err(e) if e.is_permanent_rejection() => {
+                            // Dropped rather than sent back to the queue: the
+                            // server has judged this body and will judge it the
+                            // same way on every flush from here on. Re-queueing
+                            // it retries forever and tells nobody.
+                            eprintln!("[sync] queued push refused for good: {e}");
+                            if let Some(key) = queued_blob {
+                                if let Err(e) = http.release_blob_upload(&key).await {
+                                    eprintln!("[sync] release stranded blob {key}: {e}");
+                                }
+                            }
+                            let what = if entry_type == "note" { "A note" } else { "An item" };
+                            record_skip(
+                                &self.push_ctx(),
+                                &client_id,
+                                what,
+                                format!("The server refused this ({e}). It stays on this device."),
+                            );
                         }
                         Err(e) => {
                             eprintln!("[sync] queued push failed: {e}");
@@ -4527,7 +4588,7 @@ impl SyncClient {
             if meta.autocopy {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
             }
-            state.history.lock().upsert_synced(merged);
+            let _ = state.history.lock().upsert_synced(merged);
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
             let key = format!("clipboard:{}", meta.client_id);
@@ -4603,7 +4664,7 @@ fn ext_for_mime(mime: &str) -> &'static str {
 /// without letting a broken blob store grow the list without bound.
 const SKIPPED_HISTORY_LIMIT: usize = 20;
 
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     const KB: f64 = 1024.0;
     let b = bytes as f64;
@@ -4744,6 +4805,33 @@ fn record_skip(ctx: &PushCtx, client_id: &str, label: &str, reason: String) {
         )
         .with_body(reason),
     );
+}
+
+/// Refuse inline content the server will not store, before it is sent.
+///
+/// The server does answer `entry_too_large` for this, but only after the whole
+/// body has gone over the wire - and while offline it answers nothing at all,
+/// so the entry lands in the pending queue and is retried on every flush for
+/// something that can never be accepted. Same shape as the file-size and image
+/// checks in `spawn_push_clipboard_entry`: say so once, locally, and stop.
+///
+/// Image entries are unaffected - their bytes go to a blob and only a small
+/// descriptor travels inline.
+fn refuses_inline_size(ctx: &PushCtx, client_id: &str, label: &str, content: &str) -> bool {
+    if content.len() <= MAX_INLINE_SYNC_BYTES {
+        return false;
+    }
+    record_skip(
+        ctx,
+        client_id,
+        label,
+        format!(
+            "{} is over the {} limit for one synced item. It stays on this device.",
+            format_bytes(content.len() as u64),
+            format_bytes(MAX_INLINE_SYNC_BYTES as u64)
+        ),
+    );
+    true
 }
 
 /// Encrypt an image entry's bytes and upload them as a blob.  Returns
@@ -5051,6 +5139,19 @@ async fn push_entry_task(
                 ctx.status.lock().pending_count = ctx.queue.lock().len();
                 return;
             }
+            Err(e) if e.is_permanent_rejection() => {
+                // Falling through to the queue here would retry a body the
+                // server has already refused, on every flush, forever.
+                eprintln!("[sync] {entry_type} push refused for good: {e}");
+                let what = if entry_type == "note" { "A note" } else { "An item" };
+                record_skip(
+                    &ctx,
+                    &client_id,
+                    what,
+                    format!("The server refused this ({e}). It stays on this device."),
+                );
+                return;
+            }
             Err(e) => eprintln!("[sync] {entry_type} push failed: {e}"),
         }
     }
@@ -5166,5 +5267,38 @@ mod ownership_tests {
         // already holds.
         assert!(accepts_row(Some(THEM), None));
         assert!(accepts_row(None, None));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`MAX_INLINE_SYNC_BYTES`] is arithmetic about base64 and the GCM
+    /// envelope, and arithmetic about someone else's format is exactly the kind
+    /// of thing that is quietly off by a few bytes. Check it against the real
+    /// `encrypt`: content at the limit has to fit the server's row, and one
+    /// byte more has to not - otherwise the local check is either refusing
+    /// what would have synced or waving through what the server will refuse.
+    #[test]
+    fn the_inline_limit_is_exactly_what_the_server_will_take() {
+        let key = [7u8; 32];
+        let at_limit = "a".repeat(MAX_INLINE_SYNC_BYTES);
+        let over = "a".repeat(MAX_INLINE_SYNC_BYTES + 1);
+
+        let encrypted = crypto::encrypt(&key, &at_limit, "client-id").expect("encrypt");
+        assert!(
+            encrypted.len() <= SERVER_ENTRY_BYTES,
+            "content at the limit encrypts to {} bytes, over the server's {}",
+            encrypted.len(),
+            SERVER_ENTRY_BYTES
+        );
+
+        let encrypted = crypto::encrypt(&key, &over, "client-id").expect("encrypt");
+        assert!(
+            encrypted.len() > SERVER_ENTRY_BYTES,
+            "the limit is {} bytes below the real one, so items that would sync are refused",
+            SERVER_ENTRY_BYTES - encrypted.len()
+        );
     }
 }
