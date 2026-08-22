@@ -17,6 +17,27 @@ use serde::{Deserialize, Serialize};
 /// Maximum number of entries kept in history.
 pub const MAX_HISTORY: usize = 100;
 
+/// Largest text-shaped payload (text, rich text, file list) kept in history.
+///
+/// History caps how *many* entries it holds and, until this existed, not how
+/// large one could be - and every entry is duplicated several times over on its
+/// way to the user: into the store, into each webview that shows it, into
+/// MessagePack on every flush, and into ciphertext when sync pushes it. That
+/// multiplier is harmless for a paragraph and fatal for a whole file; one
+/// 500 MB copy took the process to several GB and crashed the UI.
+///
+/// Refusing past this point costs the user a history row and nothing else. The
+/// OS clipboard is never touched by the capture path, so the data is still
+/// there and an ordinary paste still works - and the refusal always shows a
+/// toast, whatever the notification settings say, because the only other sign
+/// is the item's absence.
+///
+/// Well above what the server will store (see `MAX_INLINE_SYNC_BYTES` in
+/// `sync`), on purpose: what this app holds locally and what a row in the cloud
+/// may weigh are different questions, and history is useful without sync. An
+/// item between the two is kept and marked local-only.
+pub const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
+
 /// Separator embedded in an `Html` entry's content between the HTML fragment
 /// and its plain-text fallback.  Written by `new_html`, split by `html_parts`.
 const HTML_PLAINTEXT_MARKER: &str = "\n---PLAINTEXT---\n";
@@ -237,6 +258,15 @@ pub struct ClipboardEntry {
     pub sync_status: crate::sync::types::SyncStatus,
 }
 
+/// Whether an entry's content is within [`MAX_TEXT_BYTES`], and so small
+/// enough to keep.
+///
+/// Image content is a path to a file on disk however large the picture is, so
+/// it is always within the cap.
+pub fn fits(entry: &ClipboardEntry) -> bool {
+    entry.kind == EntryKind::Image || entry.content.len() <= MAX_TEXT_BYTES
+}
+
 /// Compute a fast 64-bit hash of the given string.
 fn hash_content(s: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -390,12 +420,46 @@ impl ClipboardHistory {
     /// entries arrive already materialised, so this bypasses image
     /// externalisation and the MAX_HISTORY trim.  Call [`Self::sort_recent`]
     /// once after a merge batch to restore ordering.
-    pub fn upsert_synced(&mut self, entry: ClipboardEntry) {
+    ///
+    /// `false` when the entry was refused for its size. A device on a build
+    /// without the capture cap can push an entry of any size, and taking it
+    /// would put this device back in exactly the state the cap exists to
+    /// prevent. Image content is a path to a file on disk, so it is exempt.
+    pub fn upsert_synced(&mut self, entry: ClipboardEntry) -> bool {
+        if !fits(&entry) {
+            eprintln!(
+                "[history] merge: {} is {} bytes, past the {} byte cap (skipped)",
+                entry.id,
+                entry.content.len(),
+                MAX_TEXT_BYTES
+            );
+            return false;
+        }
         if let Some(pos) = self.entries.iter().position(|e| e.id == entry.id) {
             self.entries[pos] = entry;
         } else {
             self.entries.push(entry);
         }
+        true
+    }
+
+    /// Drop every entry past [`MAX_TEXT_BYTES`], returning the sizes removed.
+    ///
+    /// For a history file written before the cap existed. Such an entry cannot
+    /// be shown, searched or pushed without the memory blowup the cap was added
+    /// to stop, so keeping it only reproduces the fault on every launch. Image
+    /// entries are exempt: their content is a path, and a legacy inline one has
+    /// already been externalised by the time this runs.
+    pub fn drop_oversized(&mut self) -> Vec<usize> {
+        let mut dropped = Vec::new();
+        self.entries.retain(|e| {
+            if fits(e) {
+                return true;
+            }
+            dropped.push(e.content.len());
+            false
+        });
+        dropped
     }
 
     /// Re-sort most-recent first by timestamp.
@@ -411,6 +475,17 @@ impl ClipboardHistory {
     /// Return the top `n` entries (most-recent first).
     pub fn top(&self, n: usize) -> Vec<ClipboardEntry> {
         self.entries.iter().take(n).cloned().collect()
+    }
+
+    /// Whether `entry` is the same content as the newest entry already held.
+    ///
+    /// The capture dedupe's question, answered without copying anything: the
+    /// obvious `top(1)` spelling clones the newest entry on every clipboard
+    /// change just to compare it and drop it again.
+    pub fn top_matches(&self, entry: &ClipboardEntry) -> bool {
+        self.entries
+            .first()
+            .is_some_and(|top| content_matches(top, entry))
     }
 
     /// Remove the entry with the given `id`. Returns `true` if found.
@@ -647,6 +722,59 @@ mod tests {
             assert_eq!(html, "<b>hi</b>", "html half changed for {plain:?}");
             assert_eq!(recovered, plain, "plain half changed for {plain:?}");
         }
+    }
+
+    /// One 500 MB copy took the app to several GB and crashed the UI: nothing
+    /// capped how large a single entry could be, and every entry is duplicated
+    /// several times over between the store, each webview, MessagePack and
+    /// ciphertext. A history file written before the cap has to be pruned on
+    /// load, or the fault comes back on every launch.
+    #[test]
+    fn oversized_entries_are_dropped_on_load() {
+        let mut hist = ClipboardHistory::new();
+        let big = "a".repeat(MAX_TEXT_BYTES + 1);
+        hist.entries.push(ClipboardEntry::new_text("keep me".into()));
+        hist.entries.push(ClipboardEntry::new_text(big.clone()));
+        hist.entries.push(ClipboardEntry::new_html(big, "plain".into()));
+        // Image content is a path to a file on disk, however large the picture.
+        hist.entries
+            .push(ClipboardEntry::new_image("C:/images/shot.png".into()));
+
+        let dropped = hist.drop_oversized();
+
+        assert_eq!(dropped.len(), 2, "both oversized entries should go");
+        assert!(dropped.iter().all(|n| *n > MAX_TEXT_BYTES));
+        assert_eq!(hist.all().len(), 2);
+        assert_eq!(hist.all()[0].content, "keep me");
+        assert_eq!(hist.all()[1].kind, EntryKind::Image);
+    }
+
+    /// A device still on a build without the capture cap can push an entry of
+    /// any size, so the merge has to refuse what capture would have.
+    #[test]
+    fn merge_refuses_an_oversized_entry() {
+        let mut hist = ClipboardHistory::new();
+        let over = ClipboardEntry::new_text("a".repeat(MAX_TEXT_BYTES + 1));
+        let under = ClipboardEntry::new_text("a".repeat(MAX_TEXT_BYTES));
+
+        assert!(!hist.upsert_synced(over), "oversized entry was accepted");
+        assert!(hist.upsert_synced(under), "entry at the cap was refused");
+        assert_eq!(hist.all().len(), 1);
+    }
+
+    /// The capture dedupe asks whether the newest entry already holds this
+    /// content. It used to answer by cloning that entry - so every clipboard
+    /// change copied the whole of the previous one just to compare and drop it.
+    #[test]
+    fn top_matches_without_copying() {
+        let mut hist = ClipboardHistory::new();
+        assert!(!hist.top_matches(&ClipboardEntry::new_text("hello".into())));
+
+        hist.push(ClipboardEntry::new_text("hello".into()));
+        assert!(hist.top_matches(&ClipboardEntry::new_text("hello".into())));
+        assert!(!hist.top_matches(&ClipboardEntry::new_text("goodbye".into())));
+        // Same bytes, different kind, is not the same content.
+        assert!(!hist.top_matches(&ClipboardEntry::new_file("hello".into())));
     }
 
     /// Content with no marker at all — entries written before the Html kind

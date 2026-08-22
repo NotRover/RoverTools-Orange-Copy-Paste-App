@@ -19,7 +19,8 @@ body {
 
 .cn-container {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 5px;
   padding: 8px 14px;
   margin: 6px;
@@ -39,6 +40,26 @@ body {
 .cn-container.cn-visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* The one-line toasts keep the old single-row shape; only the refusal toast
+   wraps, and only it may be as wide as the window now allows. */
+.cn-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cn-container.cn-has-note {
+  max-width: 296px;
+}
+
+.cn-note {
+  margin: 0;
+  white-space: normal;
+  font-size: 11.5px;
+  line-height: 1.35;
+  opacity: 0.65;
 }
 
 /* Dark theme */

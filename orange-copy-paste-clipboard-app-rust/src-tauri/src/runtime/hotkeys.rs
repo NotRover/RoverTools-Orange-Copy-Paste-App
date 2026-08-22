@@ -5,7 +5,7 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
-use crate::clipboard::commands::read_clipboard_entry;
+use crate::clipboard::commands::{read_clipboard_capture, Capture};
 use crate::{
     clipboard::history::{ClipboardEntry, ClipboardHistory},
     runtime::platform,
@@ -98,8 +98,15 @@ fn handle_copy_shortcut(
 
         std::thread::sleep(std::time::Duration::from_millis(120));
 
-        let Some(entry) = read_clipboard_entry() else {
-            return;
+        let entry = match read_clipboard_capture() {
+            Capture::Entry(entry) => entry,
+            Capture::TooLarge { what, bytes } => {
+                // No entry to confirm, so the copy popup would have nothing to
+                // show; the notification carries the news instead.
+                crate::clipboard::commands::notify_capture_too_large(&app, what, bytes);
+                return;
+            }
+            Capture::Nothing => return,
         };
 
         let (entry, inserted): (ClipboardEntry, bool) = {

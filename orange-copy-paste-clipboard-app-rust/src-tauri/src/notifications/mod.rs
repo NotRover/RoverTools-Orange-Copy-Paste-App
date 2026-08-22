@@ -149,6 +149,20 @@ pub fn resolve(app: &tauri::AppHandle, id: &str, outcome: &str) {
     commands::commit(app, changed);
 }
 
+/// [`raise_rolling`] without the sound or the desktop toast.
+///
+/// For an event that already interrupts the user some other way - a refused
+/// copy shows the app's own toast, and a cue plus an OS notification on top of
+/// that delivers one event three times. The row is still the record.
+pub fn raise_rolling_quiet(app: &tauri::AppHandle, notification: Notification) {
+    let changed = app
+        .state::<crate::state::AppState>()
+        .notifications
+        .lock()
+        .announce(notification);
+    commands::commit(app, changed);
+}
+
 /// Raise a rolling summary, where new text means a new event. See
 /// [`NotificationStore::announce`].
 pub fn raise_rolling(app: &tauri::AppHandle, notification: Notification) {
