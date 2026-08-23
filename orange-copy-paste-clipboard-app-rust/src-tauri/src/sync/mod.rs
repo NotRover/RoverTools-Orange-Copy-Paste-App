@@ -2724,9 +2724,38 @@ impl SyncClient {
         loop {
             match http.pull_entries(cursor, 200).await {
                 Ok(pull) => {
+                    // Removals first. An entry that was withdrawn and later
+                    // re-shared carries a `server_ts` newer than its own removal
+                    // record, so applying the withdrawal and then the entry
+                    // lands on the live copy; the other order deletes something
+                    // that is currently shared.
+                    for r in &pull.removals {
+                        self.drop_space_entry(
+                            &r.space_id,
+                            &r.client_id,
+                            &r.entry_type,
+                            r.author_id == r.removed_by,
+                        );
+                    }
                     self.merge_pulled(&pull.entries, false);
-                    if let Some(last) = pull.entries.last() {
-                        let ts = last.server_ts;
+
+                    // The watermark has to cover both streams. It used to be the
+                    // last entry's timestamp alone, so a page carrying only
+                    // removals left the cursor untouched and re-delivered the
+                    // same withdrawals on every sync for the life of the install.
+                    //
+                    // `next_cursor` is the server's own answer and is already
+                    // clamped to the point both streams are complete to, so it
+                    // wins whenever it is set - even when that means standing
+                    // further back than the newest entry received. Only once the
+                    // server says there is nothing left is the newest row seen a
+                    // safe place to stand.
+                    let watermark = pull.next_cursor.or_else(|| {
+                        let newest_entry = pull.entries.last().map(|e| e.server_ts);
+                        let newest_removal = pull.removals.iter().map(|r| r.server_ts).max();
+                        newest_entry.max(newest_removal)
+                    });
+                    if let Some(ts) = watermark {
                         self.sync_state.lock().set_last_server_ts(ts);
                         let _ = http.advance_cursor(ts).await;
                     }

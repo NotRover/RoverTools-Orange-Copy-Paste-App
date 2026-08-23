@@ -380,9 +380,35 @@ pub struct PulledEntry {
     pub blob_size: Option<u64>,
 }
 
+/// One entry that left one space, as reported by a pull.
+///
+/// The durable counterpart to the `space:entry_removed` event. The event only
+/// reaches a device that is connected when it fires, and pub/sub keeps nothing
+/// for anyone who is not — so a device that was closed used to come back, pull,
+/// match nothing, and keep its copy of withdrawn content indefinitely. Pull
+/// cannot infer it either: a removal strips the space id from the entry's
+/// `space_ids`, and the entries query matches on exactly that array, so the row
+/// is absent rather than changed.
+#[derive(Debug, Deserialize)]
+pub struct RemovedEntry {
+    pub space_id: String,
+    pub client_id: String,
+    pub entry_type: String,
+    /// Who shared it, and who took it down. Equal when the author withdrew their
+    /// own post, different when a space owner moderated it — which is the only
+    /// way to tell the two apart, and decides what the placeholder says.
+    pub author_id: String,
+    pub removed_by: String,
+    pub server_ts: u64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PullResponse {
     pub entries: Vec<PulledEntry>,
+    /// `default` so a client that ships ahead of the backend still parses a
+    /// response without the field, rather than failing every sync.
+    #[serde(default)]
+    pub removals: Vec<RemovedEntry>,
     pub next_cursor: Option<u64>,
 }
 
