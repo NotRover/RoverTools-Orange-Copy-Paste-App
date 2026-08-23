@@ -1602,6 +1602,12 @@ capture_clipboard_change() → history.push(entry)
 On startup / reconnect:
   GET /api/v1/sync/pull?after_ts={last_cursor}&limit=200
          │
+         ▼ (removals first, then entries)
+  drop_space_entry(space_id, client_id, entry_type, by_author=author==remover)
+         │   an entry withdrawn and later re-shared carries a server_ts newer
+         │   than its own removal record, so this order converges on the live
+         │   copy and the reverse order deletes something still shared
+         │
          ▼ (for each entry in response)
   cek = unwrap_key(UMK, wrapped_keys["personal"])       ← own entry
         or unwrap_key(space keyring, wrapped_keys[space_id])  ← shared entry
@@ -1615,6 +1621,9 @@ On startup / reconnect:
          │
          ├─ emit clipboard:new-entry (or notes:updated) → React re-render
          └─ POST /api/v1/sync/cursor { last_server_ts }
+              next_cursor when the server sent one - it is already clamped to
+              the point both streams are complete to, so it can be behind the
+              newest entry received - otherwise the newest row seen either side
 
 Repeat until next_cursor = null
 ```
