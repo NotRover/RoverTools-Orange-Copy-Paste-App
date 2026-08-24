@@ -809,11 +809,20 @@
   display: flex;
   flex-direction: column;
   overflow: hidden auto;
-  padding: 12px 10px;
-  /* Reserve a gutter on both edges and inset the scroll area from the window,
-     so the bar sits off the edge like the clipboard and notes viewports. */
+  /* The cards line up with the Create and Join buttons directly under them, at
+     10px. Getting there is fiddlier than it looks, because three insets stack:
+     this element had 8px of margin and 10px of padding on top of a reserved
+     scrollbar gutter, which put the cards 30px in - twice the header above them
+     and three times the buttons below. The margin is gone, and the rest is the
+     gutter plus 2px.
+
+     `both-edges` stays, so a space list long enough to scroll does not shift
+     its cards sideways. That makes the gutter the floor on how tight this can
+     get, which is why the bar is thinner here than elsewhere: 8px of track
+     still leaves the same 4px thumb, since --sb-inset is what sets its width. */
+  --sb-size: 8px;
+  padding: 12px 2px;
   scrollbar-gutter: stable both-edges;
-  margin: 0 8px;
 }
 
 /* ── Group sections ── */
