@@ -344,16 +344,25 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     multiSelect.selectedIds,
   );
 
+  // The editor filling the window is the one case where the notes list is not
+  // on screen at all.
+  const listHidden = !!editingNote && editorFullscreen;
+
   return (
     <div
       className={`notes-screen-root${editingNote ? " notes-screen-root--editing" : ""}`}
     >
-      <Topbar
-        searchQuery={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search notes..."
-        searchInputRef={searchRef}
-        leftSlot={
+      {/* A full-screen editor takes the list off the screen, so the list's
+          controls go with it: searching, sorting, filtering and switching the
+          layout of notes nobody can see is chrome with nothing behind it. In
+          the split view the list is still there, so the bar stays. */}
+      {!listHidden && (
+        <Topbar
+          searchQuery={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search notes..."
+          searchInputRef={searchRef}
+          leftSlot={
           <>
             <button
               className="cs-tb-btn"
@@ -467,15 +476,18 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
             />
           </>
         }
-      />
+        />
+      )}
 
       {/* What the badge cannot say: which filters are on, and what they left. */}
-      <ActiveFilterStrip
-        names={nf.filterNames}
-        matched={nf.filteredNotes.length}
-        total={nf.totalCount}
-        onClear={nf.clearAll}
-      />
+      {!listHidden && (
+        <ActiveFilterStrip
+          names={nf.filterNames}
+          matched={nf.filteredNotes.length}
+          total={nf.totalCount}
+          onClear={nf.clearAll}
+        />
+      )}
 
       <div
         ref={mainRef}

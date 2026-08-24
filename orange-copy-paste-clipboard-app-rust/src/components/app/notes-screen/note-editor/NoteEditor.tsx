@@ -44,12 +44,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { fileNameFromPath, groupColor, timeAgo, truncateText } from "../../../../types";
 import {
-  CloseIcon,
-  TrashIcon,
   PinIcon,
   SaveStarIcon,
-  CheckIcon,
-  PlusIcon,
   ImageIcon,
   FileIcon,
   ClipboardIcon,
@@ -72,6 +68,16 @@ import {
   fileAttachmentUrl,
   noteToMarkdown,
 } from "../editor-engine";
+import {
+  ToolbarFacts,
+  ToolbarMoreButton,
+  ViewToolbar,
+  useToolbarMenu,
+} from "../../view-toolbar/ViewToolbar";
+// The note's own right-click menu, anchored under the bar's button rather
+// than at a cursor - the same thing the clipboard and Spaces reading panels
+// do with theirs.
+import CardMenu from "../../card-menu/CardMenu";
 import "./note-editor.css";
 
 const EMPTY_ACTIVE: ActiveState = { blockKind: "p" };
@@ -151,8 +157,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showCalloutPicker, setShowCalloutPicker] = useState(false);
   const calloutPickerRef = useRef<HTMLDivElement>(null);
 
-  const [showGroupDropdown, setShowGroupDropdown] = useState(false);
-  const groupDropdownRef = useRef<HTMLDivElement>(null);
 
   const [showHeadingDropdown, setShowHeadingDropdown] = useState(false);
   const headingDropdownRef = useRef<HTMLDivElement>(null);
@@ -303,20 +307,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     [note.id, note.groups, onSetGroups],
   );
 
-  // ── Dropdown close handlers ───────────────────────────────────────────
+  // CardMenu dismisses itself on any outside mousedown, so the group dropdown's
+  // own close handler went with it.
 
-  useEffect(() => {
-    if (!showGroupDropdown) return;
-    const h = (e: MouseEvent) => {
-      if (
-        groupDropdownRef.current &&
-        !groupDropdownRef.current.contains(e.target as Node)
-      )
-        setShowGroupDropdown(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showGroupDropdown]);
+  const menu = useToolbarMenu();
 
   useEffect(() => {
     if (!showHeadingDropdown) return;
@@ -606,16 +600,93 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   return (
     <div className="ns-editor-shell">
       <div className="ns-editor">
-        {/* Header */}
-        <div className="ns-editor-header">
-          <button
-            className="ns-back-btn"
-            onClick={handleClose}
-            data-tooltip="Close"
-            data-tooltip-pos="right"
-          >
-            <CloseIcon size={12} />
-          </button>
+        {/* The bar. Same shape as an opened clipboard entry and an opened item
+            in a space: the way out, then what you are looking at, then what you
+            can do with it. The title used to sit in here and set the bar's
+            height by itself; it has its own row below now. */}
+        <ViewToolbar
+          onBack={handleClose}
+          backLabel="Close"
+          actions={
+            <>
+              {/* Export */}
+              <div className="ns-export-wrap" ref={exportMenuRef}>
+                <button
+                  className={`vt-btn vt-btn--icon${showExportMenu ? " vt-btn--on" : ""}`}
+                  onClick={() => setShowExportMenu((p) => !p)}
+                  data-tooltip="Export note"
+                  data-tooltip-pos="below"
+                >
+                  <DownloadSimpleIcon size={13} weight="bold" />
+                </button>
+                {showExportMenu && (
+                  <div className="ns-export-menu">
+                    <button
+                      className="ns-export-item"
+                      onClick={handleExportMarkdown}
+                    >
+                      <DownloadSimpleIcon size={12} weight="bold" />
+                      Save as .md
+                    </button>
+                    <div className="ns-export-sep" />
+                    <button
+                      className="ns-export-item"
+                      onClick={handleCopyMarkdown}
+                    >
+                      <CopyIcon size={12} weight="bold" />
+                      Copy as Markdown
+                    </button>
+                  </div>
+                )}
+                {exportToast && (
+                  <div className="ns-export-toast">{exportToast}</div>
+                )}
+              </div>
+
+              {onToggleFullscreen && (
+                <button
+                  className={`vt-btn vt-btn--icon${fullscreen ? " vt-btn--on" : ""}`}
+                  onClick={onToggleFullscreen}
+                  data-tooltip={
+                    fullscreen ? "Show the notes list" : "Fill the window"
+                  }
+                  data-tooltip-pos="below"
+                >
+                  {fullscreen ? (
+                    <CollapseIcon size={13} />
+                  ) : (
+                    <ExpandIcon size={13} />
+                  )}
+                </button>
+              )}
+
+              {/* The rule separates how you are looking at the note from what
+                  you can do to it - the same break the other reading bars
+                  make. */}
+              <span className="vt-sep" aria-hidden="true" />
+
+              {/* Pin, groups and delete live in here. On the bar they were
+                  three more icons to learn for no reach they do not already
+                  have, and this is the note's own right-click menu rather than
+                  a rebuilt copy of it, so the two cannot offer different
+                  things. */}
+              <ToolbarMoreButton menu={menu} />
+            </>
+          }
+        >
+          <ToolbarFacts
+            facts={[
+              `${stats.words} ${stats.words === 1 ? "word" : "words"}`,
+              `${stats.chars} ${stats.chars === 1 ? "character" : "characters"}`,
+              `Updated ${timeAgo(note.updated_at)}`,
+            ]}
+          />
+        </ViewToolbar>
+
+        {/* Title, and the groups it is in. The chips only report: the menu
+            above is where they are changed, so this run never has to be both a
+            summary and a control. */}
+        <div className="ns-title-row">
           <input
             ref={titleRef}
             className="ns-title-input"
@@ -631,135 +702,28 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               }, 400);
             }}
           />
-          <div className="ns-editor-actions">
-            {/* Export */}
-            <div className="ns-export-wrap" ref={exportMenuRef}>
-              <button
-                className={`ns-tb-btn${showExportMenu ? " ns-tb-btn--active" : ""}`}
-                onClick={() => setShowExportMenu((p) => !p)}
-                data-tooltip="Export note"
-                data-tooltip-pos="below"
-              >
-                <DownloadSimpleIcon size={12} weight="bold" />
-              </button>
-              {showExportMenu && (
-                <div className="ns-export-menu">
-                  <button
-                    className="ns-export-item"
-                    onClick={handleExportMarkdown}
+          {note.groups.length > 0 && (
+            <div className="ns-title-groups">
+              {note.groups.slice(0, 3).map((g) => {
+                const c = groupColor(g);
+                return (
+                  <span
+                    key={g}
+                    className="ns-editor-group-chip"
+                    style={{ background: c.bg, color: c.fg }}
                   >
-                    <DownloadSimpleIcon size={12} weight="bold" />
-                    Save as .md
-                  </button>
-                  <div className="ns-export-sep" />
-                  <button
-                    className="ns-export-item"
-                    onClick={handleCopyMarkdown}
-                  >
-                    <CopyIcon size={12} weight="bold" />
-                    Copy as Markdown
-                  </button>
-                </div>
-              )}
-              {exportToast && (
-                <div className="ns-export-toast">{exportToast}</div>
+                    <span className="ns-chip-dot" />
+                    <span className="ns-chip-label">{g}</span>
+                  </span>
+                );
+              })}
+              {note.groups.length > 3 && (
+                <span className="ns-title-groups-more">
+                  +{note.groups.length - 3}
+                </span>
               )}
             </div>
-
-            <button
-              className={`ns-tb-btn${note.pinned ? " ns-tb-btn--active" : ""}`}
-              onClick={() => onPin(note.id, !note.pinned)}
-              data-tooltip={note.pinned ? "Unpin" : "Pin"}
-              data-tooltip-pos="below"
-            >
-              <PinIcon size={12} filled={note.pinned} />
-            </button>
-            {onToggleFullscreen && (
-              <button
-                className={`ns-tb-btn${fullscreen ? " ns-tb-btn--active" : ""}`}
-                onClick={onToggleFullscreen}
-                data-tooltip={fullscreen ? "Show the notes list" : "Fill the window"}
-                data-tooltip-pos="below"
-              >
-                {fullscreen ? <CollapseIcon size={12} /> : <ExpandIcon size={12} />}
-              </button>
-            )}
-            <button
-              className="ns-tb-btn ns-tb-btn--danger"
-              onClick={() => {
-                onDelete(note.id);
-                onBack();
-              }}
-              data-tooltip="Delete"
-              data-tooltip-pos="below"
-            >
-              <TrashIcon size={11} />
-            </button>
-          </div>
-        </div>
-
-        {/* Groups */}
-        <div className="ns-editor-groups">
-          {note.groups.map((g) => {
-            const c = groupColor(g);
-            return (
-              <button
-                key={g}
-                className="ns-editor-group-chip"
-                style={{ background: c.bg, color: c.fg }}
-                onClick={() => toggleGroup(g)}
-                title={`Remove from "${g}"`}
-              >
-                <span className="ns-chip-dot" />
-                <span className="ns-chip-label">{g}</span>
-              </button>
-            );
-          })}
-          <div style={{ position: "relative" }} ref={groupDropdownRef}>
-            <button
-              className="ns-add-group-btn"
-              onClick={() => setShowGroupDropdown((p) => !p)}
-              title="Add to group"
-            >
-              <PlusIcon size={11} strokeWidth={2.8} />
-            </button>
-            {showGroupDropdown && (
-              <div className="ns-group-dropdown">
-                {availableGroups.length === 0 ? (
-                  <div
-                    className="ns-group-dropdown-item"
-                    style={{ color: "var(--text-muted)", cursor: "default" }}
-                  >
-                    No groups yet
-                  </div>
-                ) : (
-                  availableGroups.map((g) => {
-                    const c = groupColor(g);
-                    const isIn = note.groups.includes(g);
-                    return (
-                      <button
-                        key={g}
-                        className="ns-group-dropdown-item"
-                        onClick={() => toggleGroup(g)}
-                      >
-                        <span
-                          className="ns-group-dropdown-dot"
-                          style={{ background: c.fg }}
-                        />
-                        {g}
-                        {isIn && (
-                          <CheckIcon
-                            size={11}
-                            className="ns-group-dropdown-check"
-                          />
-                        )}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         {readOnly && (
@@ -1547,16 +1511,38 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
 
         {/* Footer */}
+        {/* The word and character counts and the last-saved time moved up to
+            the bar, where every other reading screen carries them. What is left
+            is the one thing that is about where the caret is rather than what
+            the note is, and belongs at the bottom for that reason. */}
         <div className="ns-editor-footer">
-          <span className="ns-editor-footer-text">
-            Updated {timeAgo(note.updated_at)}
-          </span>
           <span className="ns-editor-footer-stats">
-            Ln {stats.line} / {stats.blocks} - {stats.words} word
-            {stats.words === 1 ? "" : "s"} - {stats.chars} char
-            {stats.chars === 1 ? "" : "s"}
+            Ln {stats.line} / {stats.blocks}{" "}
+            {stats.blocks === 1 ? "block" : "blocks"}
           </span>
         </div>
+
+        <CardMenu
+          open={menu.isOpen}
+          anchorX={menu.pos?.x ?? 0}
+          anchorY={menu.pos?.y ?? 0}
+          onClose={menu.close}
+          isPinned={note.pinned}
+          isSaved={false}
+          copied={false}
+          showCopy={false}
+          showSave={false}
+          onCopy={() => {}}
+          onToggleSave={() => {}}
+          onDelete={() => {
+            onDelete(note.id);
+            onBack();
+          }}
+          onPin={(shouldPin) => onPin(note.id, shouldPin)}
+          availableGroups={availableGroups}
+          entryGroups={note.groups}
+          onToggleGroup={toggleGroup}
+        />
       </div>
     </div>
   );
