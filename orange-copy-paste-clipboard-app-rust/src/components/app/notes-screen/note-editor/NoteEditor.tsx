@@ -69,16 +69,24 @@ import {
   noteToMarkdown,
 } from "../editor-engine";
 import {
+  TEXT_ZOOM_STEPS,
   ToolbarFacts,
   ToolbarMoreButton,
+  ToolbarZoom,
   ViewToolbar,
+  stepZoom,
   useToolbarMenu,
+  useZoomKeys,
 } from "../../view-toolbar/ViewToolbar";
 // The note's own right-click menu, anchored under the bar's button rather
 // than at a cursor - the same thing the clipboard and Spaces reading panels
 // do with theirs.
 import CardMenu from "../../card-menu/CardMenu";
 import "./note-editor.css";
+
+/** Persisted reading size for the editor. A plain UI preference, so it goes in
+ *  the generic settings store and needs nothing on the Rust side. */
+const NOTES_ZOOM_KEY = "notes_editor_zoom";
 
 const EMPTY_ACTIVE: ActiveState = { blockKind: "p" };
 
@@ -311,6 +319,39 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // own close handler went with it.
 
   const menu = useToolbarMenu();
+
+  // Reading size for the note itself. Persisted, because how big you like your
+  // text is a way of working rather than a property of one note - the same
+  // reasoning as the full-screen preference above it.
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    invoke<number | null>("get_setting", { key: NOTES_ZOOM_KEY })
+      .then((v) => setZoom(typeof v === "number" && v > 0 ? v : 1))
+      .catch(() => setZoom(1));
+  }, []);
+
+  const applyZoom = useCallback((next: number) => {
+    setZoom(next);
+    void invoke("set_setting", { key: NOTES_ZOOM_KEY, value: next });
+  }, []);
+
+  const zoomIn = useCallback(
+    () => applyZoom(stepZoom(TEXT_ZOOM_STEPS, zoom, 1)),
+    [applyZoom, zoom],
+  );
+  const zoomOut = useCallback(
+    () => applyZoom(stepZoom(TEXT_ZOOM_STEPS, zoom, -1)),
+    [applyZoom, zoom],
+  );
+  const zoomReset = useCallback(() => applyZoom(1), [applyZoom]);
+
+  // Not while the overflow menu is open: its own rows do not zoom, and a menu
+  // that swallowed the keys would be a worse surprise than one that ignores them.
+  useZoomKeys(
+    { in: zoomIn, out: zoomOut, reset: zoomReset },
+    menu.isOpen,
+  );
 
   useEffect(() => {
     if (!showHeadingDropdown) return;
@@ -612,12 +653,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               {/* Export */}
               <div className="ns-export-wrap" ref={exportMenuRef}>
                 <button
-                  className={`vt-btn vt-btn--icon${showExportMenu ? " vt-btn--on" : ""}`}
+                  className={`vt-btn${showExportMenu ? " vt-btn--on" : ""}`}
                   onClick={() => setShowExportMenu((p) => !p)}
-                  data-tooltip="Export note"
+                  aria-haspopup="menu"
+                  aria-expanded={showExportMenu}
+                  data-tooltip="Save the note out, or copy it as Markdown"
                   data-tooltip-pos="below"
                 >
                   <DownloadSimpleIcon size={13} weight="bold" />
+                  Export
                 </button>
                 {showExportMenu && (
                   <div className="ns-export-menu">
@@ -643,19 +687,37 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 )}
               </div>
 
+              {/* How big the note reads. Ctrl and plus or minus do the same,
+                  and Ctrl and nought puts it back. */}
+              <ToolbarZoom
+                label={`${Math.round(zoom * 100)}%`}
+                atDefault={zoom === 1}
+                resetTooltip="Reset to 100%"
+                onIn={zoomIn}
+                onOut={zoomOut}
+                onReset={zoomReset}
+              />
+
               {onToggleFullscreen && (
                 <button
-                  className={`vt-btn vt-btn--icon${fullscreen ? " vt-btn--on" : ""}`}
+                  className="vt-btn"
                   onClick={onToggleFullscreen}
+                  aria-pressed={fullscreen}
                   data-tooltip={
-                    fullscreen ? "Show the notes list" : "Fill the window"
+                    fullscreen
+                      ? "Bring the notes list back"
+                      : "Hide the notes list and fill the window"
                   }
                   data-tooltip-pos="below"
                 >
                   {fullscreen ? (
-                    <CollapseIcon size={13} />
+                    <>
+                      <CollapseIcon size={13} /> Collapse
+                    </>
                   ) : (
-                    <ExpandIcon size={13} />
+                    <>
+                      <ExpandIcon size={13} /> Expand
+                    </>
                   )}
                 </button>
               )}
@@ -1497,7 +1559,27 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
 
         {/* Editor content area */}
-        <div className="ns-editor-content">
+        {/* `zoom` rather than a font-size: the editor is a contenteditable full
+            of blocks with their own sizes, and zoom scales the caret and the
+            click targets with them. A font-size on the wrapper would only reach
+            the blocks that happened to inherit it.
+
+            The scrollbar is on this element too, so zoom scaled that as well
+            and the bar grew fatter the further you zoomed in. Dividing the two
+            sizes App.css exposes by the same factor cancels it, and the bar
+            stays the 12px every other screen shows. */}
+        <div
+          className="ns-editor-content"
+          style={
+            zoom === 1
+              ? undefined
+              : ({
+                  zoom,
+                  "--sb-size": `${12 / zoom}px`,
+                  "--sb-inset": `${2 / zoom}px`,
+                } as React.CSSProperties)
+          }
+        >
           <NotionEditor
             ref={editorRef}
             noteId={note.id}

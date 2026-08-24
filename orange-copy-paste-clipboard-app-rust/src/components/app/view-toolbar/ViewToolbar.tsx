@@ -14,7 +14,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon, ChevronRightIcon } from "../../icons";
-import { DotsThree } from "@phosphor-icons/react";
+import {
+  DotsThree,
+  MagnifyingGlassMinus,
+  MagnifyingGlassPlus,
+} from "@phosphor-icons/react";
 import "./view-toolbar.css";
 
 /** The bar itself: the way out, then the middle, then the actions. */
@@ -96,6 +100,104 @@ export function useToolbarMenu() {
   }, []);
 
   return { buttonRef, pos, open, close, isOpen: pos !== null };
+}
+
+/**
+ * The zoom cluster: minus, the current level, plus.
+ *
+ * Joined tighter than the row's own gap because the three are one control, and
+ * the level in the middle is a button too - pressing it puts the zoom back. What
+ * is being zoomed is the caller's business: a picture scales against its own
+ * pixels, text against a reading size, and the editor scales itself.
+ */
+export const ToolbarZoom: React.FC<{
+  /** What to show in the middle. "Fit", "150%" - whatever the caller counts in. */
+  label: string;
+  /** Whether the level is where it started, so the middle can stop shouting. */
+  atDefault: boolean;
+  /** What pressing the middle goes back to, in words. */
+  resetTooltip: string;
+  onIn: () => void;
+  onOut: () => void;
+  onReset: () => void;
+}> = ({ label, atDefault, resetTooltip, onIn, onOut, onReset }) => (
+  <div className="vt-zoom" role="group" aria-label="Zoom">
+    <button
+      className="vt-btn vt-btn--icon"
+      onClick={onOut}
+      aria-label="Zoom out"
+      data-tooltip="Zoom out (Ctrl and minus)"
+      data-tooltip-pos="below"
+    >
+      <MagnifyingGlassMinus size={13} />
+    </button>
+    <button
+      className={`vt-btn vt-zoom-level${atDefault ? "" : " vt-btn--on"}`}
+      onClick={onReset}
+      aria-label={`Zoom ${label}. Click to reset.`}
+      data-tooltip={resetTooltip}
+      data-tooltip-pos="below"
+    >
+      {label}
+    </button>
+    <button
+      className="vt-btn vt-btn--icon"
+      onClick={onIn}
+      aria-label="Zoom in"
+      data-tooltip="Zoom in (Ctrl and plus)"
+      data-tooltip-pos="below"
+    >
+      <MagnifyingGlassPlus size={13} />
+    </button>
+  </div>
+);
+
+/** Zoom stops for reading text. Coarse on purpose: a zoom that needs eight
+ *  presses to get anywhere is a slider wearing the wrong clothes. */
+export const TEXT_ZOOM_STEPS = [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2];
+
+/** The next stop above or below `from`, or `from` itself at either end. */
+export function stepZoom(
+  steps: number[],
+  from: number,
+  dir: 1 | -1,
+): number {
+  const i = steps.indexOf(from);
+  if (i === -1) return dir === 1 ? steps[steps.length - 1] : steps[0];
+  return steps[Math.min(steps.length - 1, Math.max(0, i + dir))];
+}
+
+/**
+ * Ctrl +/-/0 zoom what is on the panel, not the window.
+ *
+ * The webview's own zoom would scale the chrome along with it, which is never
+ * what somebody pressing Ctrl and plus on a reading screen is asking for.
+ */
+export function useZoomKeys(
+  zoom: { in: () => void; out: () => void; reset: () => void } | null,
+  blocked = false,
+) {
+  const ref = useRef({ zoom, blocked });
+  ref.current = { zoom, blocked };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const { zoom, blocked } = ref.current;
+      if (blocked || !zoom || !(e.ctrlKey || e.metaKey)) return;
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoom.in();
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoom.out();
+      } else if (e.key === "0") {
+        e.preventDefault();
+        zoom.reset();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 }
 
 /**
