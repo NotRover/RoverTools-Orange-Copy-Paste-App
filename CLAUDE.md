@@ -70,7 +70,7 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 ### Tech Stack
 
 - **Client app** (`orange-copy-paste-clipboard-app-rust/`): React 19 + TypeScript + Vite frontend (`src/`); Tauri v2 + Rust backend (`src-tauri/`). Package manager **bun**. Rust sync deps: `reqwest`, `tokio`, `tokio-tungstenite`, `aes-gcm`, `argon2`, `x25519-dalek`, `sha2`, `keyring`, `zeroize`. History/notes persist as MessagePack; images externalized to disk.
-- **Backend** (`orange-copy-paste-clipboard-backend/`): Python **3.14+**, FastAPI + uvicorn, SQLAlchemy async + asyncpg, Alembic, `redis[hiredis]`, `boto3` (S3/R2), `pyjwt` (HS256), `slowapi` (rate limiting). Managed with **`uv`**; lint **ruff**, types **ty**, tests **pytest** (`pytest-asyncio` + `fakeredis`). Runs self-hosted in Docker on a VPS: `Dockerfile`, `docker-compose.yml` (dev), `docker-compose.prod.yml` + `Caddyfile` + `deploy/` (the on-box build-and-deploy, polled by a systemd timer).
+- **Backend** (`orange-copy-paste-clipboard-backend/`): Python **3.14+**, FastAPI + uvicorn, SQLAlchemy async + asyncpg, Alembic, `redis[hiredis]`, `boto3` (S3/R2), `pyjwt` (HS256), `slowapi` (rate limiting). Managed with **`uv`**; lint **ruff**, types **ty**, tests **pytest** (`pytest-asyncio` + `fakeredis`). Runs self-hosted in Docker on a VPS: `Dockerfile`, `docker-compose.yml` (dev), `docker-compose.prod.yml` + `caddy/Caddyfile` + `deploy/` (the on-box build-and-deploy, polled by a systemd timer).
 
 ## Project Structure
 
@@ -109,7 +109,8 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `sync/` — push/pull/cursor, last-write-wins service. `settings/` — encrypted settings blob.
 - `spaces/` — spaces, invites, and space-key distribution.
 - `blobs/` — presigned upload/download (`s3.py`), quota. `admin/` — internal stats/ops.
-- `migrations/versions/` — Alembic (`0001`…`0011`; `0011_spaces` is written but **not applied** and is destructive). `tests/` — pytest (`test_auth`, `test_sync`, `test_blobs`, `test_spaces_invites`).
+- `announcements/` — server-authored messages to users. `web/` — human-facing HTML pages (`templates/`).
+- `migrations/versions/` — Alembic, currently through `0019`. Which of them a given database has actually seen is a separate question — see the deploy-never-migrates note above. `tests/` — pytest, one module per domain (`test_auth`, `test_sync`, `test_blobs`, `test_spaces_invites`, `test_announcements`, `test_web`, and others).
 
 ## Cross-System Contract
 
