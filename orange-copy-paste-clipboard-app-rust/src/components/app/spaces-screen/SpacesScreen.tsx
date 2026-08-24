@@ -168,7 +168,7 @@ const AVATAR_PALETTE = [
   "#f97316",
 ];
 
-export function spaceAvatarColor(seed: string): string {
+function spaceAvatarColor(seed: string): string {
   let h = 0;
   for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];

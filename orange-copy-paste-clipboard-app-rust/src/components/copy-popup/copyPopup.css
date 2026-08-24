@@ -137,18 +137,6 @@ body {
   color: var(--accent);
 }
 
-.popup-type-badge {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
 .popup-close {
   width: 22px;
   height: 22px;

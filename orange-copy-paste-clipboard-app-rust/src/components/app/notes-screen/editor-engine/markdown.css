@@ -413,10 +413,6 @@
   text-rendering: optimizeLegibility;
 }
 
-.ee-preview--full {
-  height: 100%;
-}
-
 .ee-preview h1,
 .ee-preview h2,
 .ee-preview h3,
@@ -1030,13 +1026,6 @@
   color: var(--text-muted);
   letter-spacing: 0.3px;
   text-transform: uppercase;
-}
-
-.ee-group-panel-header-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 .ee-group-panel-count {

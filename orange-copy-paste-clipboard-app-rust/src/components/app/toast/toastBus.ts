@@ -10,7 +10,7 @@
 
 import { markPending } from "../../../hooks/pendingRemoval";
 
-export type ToastTone = "info" | "success" | "error" | "danger";
+type ToastTone = "info" | "success" | "error" | "danger";
 
 export interface ToastAction {
   label: string;
@@ -43,7 +43,7 @@ export const APP_TOAST_EVENT = "app:toast";
 export const APP_TOAST_DISMISS_EVENT = "app:toast-dismiss";
 
 /** How long a destructive action waits on screen before it actually runs. */
-export const UNDO_GRACE_MS = 5000;
+const UNDO_GRACE_MS = 5000;
 
 export function showToast(
   message: string,
@@ -63,7 +63,7 @@ export function showToast(
  * Take a toast down early. `key` names which one, so undoing a slow action does
  * not pull the rug out from under a newer toast that has since replaced it.
  */
-export function dismissToast(key?: string): void {
+function dismissToast(key?: string): void {
   document.dispatchEvent(
     new CustomEvent(APP_TOAST_DISMISS_EVENT, { detail: { key } }),
   );

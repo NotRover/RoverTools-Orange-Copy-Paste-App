@@ -4,9 +4,9 @@ import { showToast, toastError } from "../components/app/toast/toastBus";
 import { listen } from "@tauri-apps/api/event";
 import type { Space } from "../types";
 
-export type ShareKind = "clipboard" | "note";
+type ShareKind = "clipboard" | "note";
 
-export interface SpaceShares {
+interface SpaceShares {
   /** Spaces this account belongs to (cached list, no network). */
   spaces: Space[];
   /** Whether a sync account is signed in, so sharing can say why it is off. */

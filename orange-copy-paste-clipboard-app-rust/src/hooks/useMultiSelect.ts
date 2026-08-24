@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-export interface MultiSelectState {
+interface MultiSelectState {
   /** Whether multi-select mode is active. */
   isSelecting: boolean;
   /** Set of currently selected entry IDs. */

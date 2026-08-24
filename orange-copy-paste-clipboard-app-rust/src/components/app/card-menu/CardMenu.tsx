@@ -16,7 +16,7 @@ import {
 } from "../../icons";
 import "./CardMenu.css";
 
-export interface CardMenuProps {
+interface CardMenuProps {
   open: boolean;
   anchorX: number;
   anchorY: number;

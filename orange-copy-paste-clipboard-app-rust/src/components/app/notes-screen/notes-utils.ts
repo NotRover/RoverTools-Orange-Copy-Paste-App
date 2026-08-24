@@ -10,7 +10,7 @@ export function stripHtml(html: string): string {
 }
 
 /** Extract plain text from raw note content (Tiptap JSON or legacy markdown). */
-export function contentPlainText(raw: string): string {
+function contentPlainText(raw: string): string {
   return extractPlainText(raw ?? "");
 }
 

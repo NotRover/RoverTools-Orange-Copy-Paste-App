@@ -17,7 +17,7 @@ import { listen } from "@tauri-apps/api/event";
  * The last two clear themselves once saving works again; a restart does nothing
  * for either, so neither offers one.
  */
-export type HealthWarning = {
+type HealthWarning = {
   kind: "degraded" | "stalled" | "unwritable";
   reason: string;
 };

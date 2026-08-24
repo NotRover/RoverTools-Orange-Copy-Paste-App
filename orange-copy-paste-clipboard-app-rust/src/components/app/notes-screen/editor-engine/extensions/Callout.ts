@@ -17,7 +17,7 @@ declare module "@tiptap/core" {
   }
 }
 
-export interface CalloutOptions {
+interface CalloutOptions {
   HTMLAttributes: Record<string, string>;
 }
 

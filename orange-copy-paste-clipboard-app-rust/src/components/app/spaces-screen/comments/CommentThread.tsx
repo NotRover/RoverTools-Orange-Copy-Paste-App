@@ -51,7 +51,7 @@ type Segment =
   | { kind: "mention"; label: string; userId: string };
 
 /** Split a stored body into what the thread draws. */
-export function parseBody(body: string): Segment[] {
+function parseBody(body: string): Segment[] {
   const out: Segment[] = [];
   let last = 0;
   MENTION_RE.lastIndex = 0;

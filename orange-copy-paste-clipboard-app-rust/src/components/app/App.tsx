@@ -941,8 +941,14 @@ const App: React.FC = () => {
         `Group "${name}" deleted`,
         async () => {
           removeGroupColor(name);
+          // Both sides, like the rename path below: a group is one thing across
+          // clipboard entries and notes, so deleting it from one and leaving it
+          // on the other makes it reappear in the notes filter with no way to
+          // remove it.
           await invoke("purge_group_from_entries", { group: name });
+          await invoke("purge_group_from_notes", { group: name });
           setEntries(await invoke<ClipboardEntry[]>("get_history"));
+          setNotes(await invoke<Note[]>("get_notes"));
         },
         {
           key: "group-delete",

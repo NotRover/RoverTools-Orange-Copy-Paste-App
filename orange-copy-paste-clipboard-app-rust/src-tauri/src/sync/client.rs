@@ -1333,13 +1333,6 @@ impl SyncHttpClient {
             .await
     }
 
-    pub async fn get_space(&self, space_id: &str) -> Result<SpaceOut, String> {
-        self.get_json("get space", || {
-            self.authed(Method::GET, &format!("/api/v1/spaces/{space_id}"))
-        })
-        .await
-    }
-
     pub async fn create_space(
         &self,
         req: CreateSpaceRequest,

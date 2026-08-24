@@ -8,7 +8,7 @@ export interface ToastAction {
   onClick: () => void;
 }
 
-export interface ToastNotificationProps {
+interface ToastNotificationProps {
   /** Main message text shown in the toast. */
   message: string;
   /** Optional icon rendered to the left of the message. */

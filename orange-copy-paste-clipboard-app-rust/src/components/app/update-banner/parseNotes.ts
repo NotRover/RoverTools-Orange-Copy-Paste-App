@@ -1,4 +1,4 @@
-export type NoteSection = { title: string | null; items: string[] };
+type NoteSection = { title: string | null; items: string[] };
 export type ParsedNotes = { lead: string | null; sections: NoteSection[] };
 
 /** Notes arrive as a release's changelog body: an optional lead sentence, then

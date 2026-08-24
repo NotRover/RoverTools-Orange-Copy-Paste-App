@@ -9,7 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-export type BulkProgress = {
+type BulkProgress = {
   mode: "upload" | "remove";
   done: number;
   total: number;
@@ -48,11 +48,6 @@ export function subscribeBulk(fn: Listener): () => void {
 export function setBulkResult(result: string | null) {
   runId += 1;
   emit({ progress: null, result });
-}
-
-/** True while a run is in flight, so the screen can keep its buttons disabled. */
-export function bulkRunning(): boolean {
-  return state.progress !== null;
 }
 
 /**
