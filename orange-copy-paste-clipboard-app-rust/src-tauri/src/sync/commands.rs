@@ -991,14 +991,28 @@ pub async fn sync_get_connection(app: tauri::AppHandle) -> SyncConnection {
 // ── Settings sync ─────────────────────────────────────────────────────
 
 /// Called by React in response to the `sync:collect-settings` event.
-/// Stores the localStorage values for inclusion in the next settings push.
+///
+/// Stores the localStorage values and then pushes. The debounce only asks React
+/// for these values in order to send them, so there is no later push to defer to:
+/// storing without pushing leaves the blob on disk and the server's copy stale
+/// forever, which is what used to happen.
+///
+/// A failed push is not a failed store. The values are on disk, and the next
+/// change reschedules the debounce, so being signed out or offline for a moment
+/// must not surface as an error on the collect path.
 #[tauri::command]
-pub fn sync_receive_local_settings(
+pub async fn sync_receive_local_settings(
     json: String,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let sync = sync_client(&state)?;
-    sync.store_local_settings_payload(json);
+    {
+        let sync = sync_client(&state)?;
+        sync.store_local_settings_payload(json);
+    }
+    if let Err(e) = push_settings(state, app).await {
+        eprintln!("[sync] settings push failed: {e}");
+    }
     Ok(())
 }
 
@@ -1709,8 +1723,12 @@ const SYNCED_JSON_KEYS: &[&str] = &[
 
 /// Encrypt and push merged settings (settings.json + localStorage) to the server.
 /// If the server wins (its settings are newer), decrypts and emits `sync:settings`.
-#[tauri::command]
-pub async fn sync_push_settings(
+///
+/// Not a command: the only thing that should push is the debounce's own
+/// collect-then-send handshake, so `sync_receive_local_settings` is the one
+/// caller. Exposing it to the frontend as well would let a push go out with a
+/// stale `sync_settings_local.json`, which is the blob it exists to send.
+async fn push_settings(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {

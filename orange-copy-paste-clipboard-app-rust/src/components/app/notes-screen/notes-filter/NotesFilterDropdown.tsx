@@ -32,7 +32,7 @@ import "../../clipboard-screen/search-filter/SearchFilter.css";
 
 /** Cloud/space context, same shape the clipboard screen builds. Keys here are
  *  `"note:{id}"`. */
-export interface NotesCloudContext {
+interface NotesCloudContext {
   syncStates: Record<string, unknown>;
   shares: Record<string, string[]>;
   remoteKeys: Set<string>;

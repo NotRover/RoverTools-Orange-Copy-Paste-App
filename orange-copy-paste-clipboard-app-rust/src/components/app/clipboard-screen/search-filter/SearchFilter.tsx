@@ -11,13 +11,7 @@ import {
   TYPE_LABELS,
   PinIcon as PinIconElement,
 } from "../../../entry-types/EntryTypePill";
-import {
-  SearchIcon,
-  CloseIcon,
-  FilterIcon,
-  SearchXIcon,
-  SaveStarIcon,
-} from "../../../icons";
+import { FilterIcon, SearchXIcon, SaveStarIcon } from "../../../icons";
 import {
   CardDivider,
   ChipRow,
@@ -91,7 +85,7 @@ function matchesQuery(entry: ClipboardEntry, q: string): boolean {
 
 /** Cloud/space context the filters read. Supplied by the screen, which already
  *  holds these for the cards, so the hook stays free of Tauri calls. */
-export interface CloudFilterContext {
+interface CloudFilterContext {
   /** Entry keys (`"clipboard:{id}"`) with a copy on the server. */
   syncStates: Record<string, unknown>;
   /** Space ids per entry key. */
@@ -106,7 +100,7 @@ export interface CloudFilterContext {
 
 /** Selections per section. The card's badge is their sum, so a section and the
  *  badge can never disagree. */
-export interface SectionCounts {
+interface SectionCounts {
   quick: number;
   kinds: number;
   cloud: number;
@@ -116,7 +110,7 @@ export interface SectionCounts {
 
 /** What each option would leave you with: every other filter applied, that
  *  option's own dimension excluded. */
-export interface OptionCounts {
+interface OptionCounts {
   kinds: CountMap;
   groups: CountMap;
   spaces: CountMap;
@@ -141,7 +135,7 @@ type Dimension =
   | "received"
   | "date";
 
-export interface SearchFilterState {
+interface SearchFilterState {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   selectedKinds: Set<DisplayKind>;
@@ -523,37 +517,6 @@ export function useSearchFilter(
     searchInputRef,
   };
 }
-
-// Search bar component
-
-interface SearchBarProps {
-  sf: SearchFilterState;
-}
-
-export const SearchBar: React.FC<SearchBarProps> = ({ sf }) => (
-  <div className="cs-searchbar">
-    <SearchIcon size={13} className="cs-search-icon" />
-    <input
-      ref={sf.searchInputRef}
-      type="text"
-      className="cs-search-input"
-      placeholder="Search..."
-      value={sf.searchQuery}
-      onChange={(e) => sf.setSearchQuery(e.target.value)}
-    />
-    {sf.searchQuery && (
-      <button
-        className="cs-search-clear"
-        onClick={() => {
-          sf.setSearchQuery("");
-          sf.searchInputRef.current?.focus();
-        }}
-      >
-        <CloseIcon size={9} />
-      </button>
-    )}
-  </div>
-);
 
 // Filter dropdown component
 

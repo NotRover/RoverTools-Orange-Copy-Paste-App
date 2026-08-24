@@ -29,7 +29,6 @@ const IMAGE_READ_RETRY_COUNT: usize = 5;
 const IMAGE_READ_RETRY_DELAY_MS: u64 = 90;
 const PASTE_DELAY_MS: u64 = 80;
 const MAX_IMAGE_PREVIEW_BYTES: usize = 12 * 1024 * 1024;
-const MAX_VIDEO_PREVIEW_BYTES: usize = 36 * 1024 * 1024;
 
 /// Retries for `Clipboard::new()` — the clipboard can be locked by the
 /// watcher thread or by external applications (e.g. Discord).
@@ -48,20 +47,6 @@ fn mime_from_image_ext(path: &Path) -> Option<&'static str> {
         "ico" => Some("image/x-icon"),
         "tif" | "tiff" => Some("image/tiff"),
         "avif" => Some("image/avif"),
-        _ => None,
-    }
-}
-
-fn mime_from_video_ext(path: &Path) -> Option<&'static str> {
-    let ext = path.extension()?.to_str()?.to_lowercase();
-    match ext.as_str() {
-        "mp4" | "m4v" => Some("video/mp4"),
-        "webm" => Some("video/webm"),
-        "mov" => Some("video/quicktime"),
-        "mkv" => Some("video/x-matroska"),
-        "avi" => Some("video/x-msvideo"),
-        "wmv" => Some("video/x-ms-wmv"),
-        "mpeg" | "mpg" => Some("video/mpeg"),
         _ => None,
     }
 }
@@ -398,20 +383,6 @@ pub fn bulk_pin_entries(
     changed
 }
 
-/// Assign the same set of groups to multiple entries at once.
-/// Returns the number of entries changed.
-#[tauri::command]
-pub fn bulk_set_groups(
-    ids: Vec<String>,
-    groups: Vec<String>,
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> u32 {
-    bulk_modify_groups(&ids, &state, &app, |hist, id| {
-        hist.set_groups(id, groups.clone())
-    })
-}
-
 /// Add a single group to multiple entries (without replacing existing groups).
 /// Returns the number of entries changed.
 #[tauri::command]
@@ -711,11 +682,6 @@ pub fn get_image_file_preview(path: String) -> Option<String> {
             .insert(path, mtime, len, data_url.clone());
     }
     Some(data_url)
-}
-
-#[tauri::command]
-pub fn get_video_file_preview(path: String) -> Option<String> {
-    get_file_preview(&path, mime_from_video_ext, MAX_VIDEO_PREVIEW_BYTES)
 }
 
 /// Given a list of file paths, return those that no longer exist on disk.

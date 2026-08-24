@@ -13,9 +13,6 @@ pub struct SyncState {
     pub device_id: String,
     /// User UUID — used to scope the keychain entry and id_map lookups.
     pub user_id: String,
-    /// Unix ms of the most recent settings blob push.  Compared with the
-    /// server's `updated_at` to determine LWW winner.
-    pub settings_updated_at: u64,
     /// Spaces whose back catalogue this device has already gone back for.
     ///
     /// An owner opening a space's history is announced over the socket, which
@@ -128,14 +125,13 @@ impl SyncStateStore {
     /// The cursor is the dangerous one: it is a wall-clock server timestamp, so
     /// the account being signed into inherits a mark set roughly "now" and pulls
     /// only what is created from here on. Its whole back catalogue is older than
-    /// that, so it silently never arrives. The settings stamp and the backfill
-    /// list are the same mistake in smaller form.
+    /// that, so it silently never arrives. The backfill list is the same mistake
+    /// in smaller form.
     ///
     /// `device_id` and `user_id` are left to the caller — it is about to write
     /// both for the account signing in.
     pub fn reset_for_new_account(&mut self) {
         self.data.last_server_ts = None;
-        self.data.settings_updated_at = 0;
         self.data.history_backfilled.clear();
         self.save();
     }
@@ -144,14 +140,60 @@ impl SyncStateStore {
         self.data.user_id = id.to_string();
         self.save();
     }
-
-    pub fn set_settings_updated_at(&mut self, ts: u64) {
-        self.data.settings_updated_at = ts;
-        self.save();
-    }
 }
 
 /// Derive the path for sync_state.json given an app_data directory.
 pub fn state_path(app_data: &Path) -> PathBuf {
     app_data.join("sync_state.json")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `sync_state.json` written by an older build still loads.
+    ///
+    /// `settings_updated_at` was dropped from this struct once nothing read it.
+    /// Every installed copy still has the key on disk, and `persist::load_json`
+    /// answers a parse failure with `Default::default()` *silently* — which would
+    /// hand the account a blank `device_id`, a blank `user_id` and no cursor, so
+    /// its whole back catalogue would never arrive. That failure is invisible at
+    /// runtime, so it is pinned here instead.
+    #[test]
+    fn an_older_state_file_still_loads() {
+        let old = r#"{
+            "last_server_ts": 1723500000000,
+            "device_id": "device-uuid",
+            "user_id": "user-uuid",
+            "settings_updated_at": 1723499999000,
+            "history_backfilled": ["space-a"],
+            "announcements_cursor": 7,
+            "spaces_announced": ["space-b"],
+            "authorship_repaired": true
+        }"#;
+
+        let state: SyncState = serde_json::from_str(old).expect("removed key must not fail parsing");
+
+        assert_eq!(state.last_server_ts, Some(1723500000000));
+        assert_eq!(state.device_id, "device-uuid");
+        assert_eq!(state.user_id, "user-uuid");
+        assert_eq!(state.history_backfilled, vec!["space-a".to_string()]);
+        assert_eq!(state.announcements_cursor, 7);
+        assert_eq!(state.spaces_announced, vec!["space-b".to_string()]);
+        assert!(state.authorship_repaired);
+    }
+
+    /// The fields a fresh install has never written must also be optional, so a
+    /// file predating them loads rather than resetting the identity above.
+    #[test]
+    fn a_state_file_missing_newer_fields_still_loads() {
+        let ancient = r#"{"last_server_ts":null,"device_id":"d","user_id":"u"}"#;
+
+        let state: SyncState = serde_json::from_str(ancient).expect("older shape must still parse");
+
+        assert_eq!(state.device_id, "d");
+        assert_eq!(state.user_id, "u");
+        assert!(state.history_backfilled.is_empty());
+        assert!(!state.authorship_repaired);
+    }
 }

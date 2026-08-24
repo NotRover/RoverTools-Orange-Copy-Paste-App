@@ -298,30 +298,6 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
-.topbar-clear-btn {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition:
-    border-color 0.13s ease,
-    color 0.13s ease,
-    background 0.13s ease;
-}
-
-.topbar-clear-btn:hover {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: var(--danger-dim);
-}
-
 /*  Search bar  */
 
 .search-bar {

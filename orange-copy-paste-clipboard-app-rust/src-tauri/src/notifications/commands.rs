@@ -38,11 +38,6 @@ pub fn notifications_list(state: State<'_, AppState>) -> Vec<Notification> {
 }
 
 #[tauri::command]
-pub fn notifications_unread_count(state: State<'_, AppState>) -> usize {
-    state.notifications.lock().unread_count()
-}
-
-#[tauri::command]
 pub fn notifications_mark_read(app: tauri::AppHandle, ids: Vec<String>) {
     let changed = app.state::<AppState>().notifications.lock().mark_read(&ids);
     commit(&app, changed);

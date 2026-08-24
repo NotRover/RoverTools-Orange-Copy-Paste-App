@@ -18,12 +18,12 @@ import "./entryTypes.css";
 
 export const ImageIcon = <ImageIconComp />;
 export const FileIcon = <FileIconComp />;
-export const TextIcon = <TextLinesIcon />;
+const TextIcon = <TextLinesIcon />;
 export const VideoIcon = <VideoIconComp />;
 export const LinkIcon = <LinkIconComp />;
 export const DocumentIcon = <DocumentIconComp />;
 export const FolderIcon = <FolderIconComp size={9} strokeWidth={2.2} />;
-export const HtmlIcon = <HtmlCodeIcon />;
+const HtmlIcon = <HtmlCodeIcon />;
 export const PinIcon = <PinIconComp size={9} filled />;
 export const SaveIcon = <SaveStarIcon size={9} filled />;
 

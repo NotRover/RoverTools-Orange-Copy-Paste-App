@@ -247,39 +247,6 @@
   padding: 2px 4px;
 }
 
-.ns-card-preview--rich .ns-preview-embed-chip,
-.ns-card-preview--rich .ns-preview-group-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0 5px 5px 0;
-  padding: 2px 8px 2px 6px;
-  border-radius: 5px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.1;
-  letter-spacing: 0.15px;
-  vertical-align: middle;
-}
-
-.ns-card-preview--rich .ns-preview-embed-chip {
-  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
-  background: color-mix(in srgb, var(--surface) 94%, var(--bg));
-  color: var(--text-muted);
-}
-
-.ns-card-preview--rich .ns-preview-group-chip {
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  color: var(--accent);
-}
-
-.ns-card-preview--rich .ns-preview-embed-chip--missing {
-  opacity: 0.6;
-  border-style: dashed;
-  font-style: italic;
-}
-
 /* Card footer */
 .ns-card-footer {
   display: flex;

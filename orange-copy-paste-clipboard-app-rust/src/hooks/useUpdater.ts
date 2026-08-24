@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 /** Mirrors `UpdateInfo` in `src-tauri/src/updater.rs`. */
-export interface UpdateInfo {
+interface UpdateInfo {
   version: string;
   current_version: string;
   notes: string | null;
@@ -25,7 +25,7 @@ interface Progress {
  * distinction matters: `ready` means the bytes are already on disk, so the button
  * restarts rather than starting a transfer.
  */
-export type UpdateStage =
+type UpdateStage =
   | "idle"
   | "checking"
   | "available"

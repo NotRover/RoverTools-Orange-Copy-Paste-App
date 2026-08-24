@@ -244,7 +244,7 @@ export interface AppNotification {
 }
 
 /** One entry sync refused to send, with the reason to show the user. */
-export interface SkippedEntry {
+interface SkippedEntry {
   client_id: string;
   label: string;
   reason: string;
@@ -423,7 +423,7 @@ export function filePaths(content: string): string[] {
     .filter(Boolean);
 }
 
-export const IMAGE_FILE_EXTENSIONS = new Set([
+const IMAGE_FILE_EXTENSIONS = new Set([
   "jpg",
   "jpeg",
   "png",
@@ -439,7 +439,7 @@ export const IMAGE_FILE_EXTENSIONS = new Set([
   "heif",
 ]);
 
-export const VIDEO_FILE_EXTENSIONS = new Set([
+const VIDEO_FILE_EXTENSIONS = new Set([
   "mp4",
   "webm",
   "mov",
@@ -451,7 +451,7 @@ export const VIDEO_FILE_EXTENSIONS = new Set([
   "mpg",
 ]);
 
-export function fileExtension(path: string): string {
+function fileExtension(path: string): string {
   const fileName = path.split(/[\\/]/).pop() ?? path;
   const dotIndex = fileName.lastIndexOf(".");
   if (dotIndex < 0 || dotIndex === fileName.length - 1) return "";
@@ -474,7 +474,7 @@ export function classifyFileEntry(content: string): "image" | "video" | "file" {
   return "file";
 }
 
-export const DOCUMENT_FILE_EXTENSIONS = new Set([
+const DOCUMENT_FILE_EXTENSIONS = new Set([
   "pdf",
   "doc",
   "docx",
@@ -495,7 +495,7 @@ export const DOCUMENT_FILE_EXTENSIONS = new Set([
   "epub",
 ]);
 
-export function isDocumentFile(path: string): boolean {
+function isDocumentFile(path: string): boolean {
   return DOCUMENT_FILE_EXTENSIONS.has(fileExtension(path));
 }
 

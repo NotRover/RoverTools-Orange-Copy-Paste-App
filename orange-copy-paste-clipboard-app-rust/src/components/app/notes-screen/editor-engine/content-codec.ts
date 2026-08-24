@@ -29,7 +29,7 @@ export function serializeDoc(doc: JSONContent): string {
 }
 
 /** Empty Tiptap document literal. */
-export function emptyDoc(): JSONContent {
+function emptyDoc(): JSONContent {
   return JSON.parse(JSON.stringify(EMPTY_DOC));
 }
 

@@ -154,14 +154,6 @@ impl IdMap {
         self.data.entries.keys().cloned().collect()
     }
 
-    pub fn get_client_id_by_server(&self, server_id: &str) -> Option<String> {
-        self.data
-            .entries
-            .iter()
-            .find(|(_, v)| v.as_str() == server_id)
-            .map(|(k, _)| k.clone())
-    }
-
     pub fn remove_entry(&mut self, client_id: &str) {
         self.data.entries.remove(client_id);
         self.data.entry_shares.remove(client_id);
@@ -352,15 +344,6 @@ impl IdMap {
             .retain(|_, m| m.local_only || m.deleted_at >= cutoff);
     }
 
-    /// Whether this item was taken away here, as opposed to merely leaving a
-    /// space. Only the first blocks a re-merge.
-    pub fn is_deleted(&self, client_id: &str) -> bool {
-        self.data
-            .deleted_markers
-            .get(client_id)
-            .is_some_and(|m| m.content_gone)
-    }
-
     /// One removal record, without cloning the whole map.
     pub fn deleted_marker(&self, client_id: &str) -> Option<DeletedMarker> {
         self.data.deleted_markers.get(client_id).cloned()
@@ -442,20 +425,6 @@ impl IdMap {
         self.data.entry_shares.clone()
     }
 
-    pub fn remove_entry_by_server_id(&mut self, server_id: &str) -> Option<String> {
-        let key = self
-            .data
-            .entries
-            .iter()
-            .find(|(_, v)| v.as_str() == server_id)
-            .map(|(k, _)| k.clone())?;
-        self.data.entries.remove(&key);
-        self.data.entry_shares.remove(&key);
-        self.data.remote_entries.remove(&key);
-        self.data.entry_owners.remove(&key);
-        self.persist();
-        Some(key)
-    }
 }
 
 /// Derive the path for id_map.json given an app_data directory.

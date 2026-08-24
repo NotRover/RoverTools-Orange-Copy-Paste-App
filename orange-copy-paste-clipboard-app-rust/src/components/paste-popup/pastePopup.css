@@ -352,19 +352,6 @@ body {
   line-height: 1.4;
 }
 
-/* ── Text snippet ── */
-
-.paste-text-snippet {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
-}
-
 /* ── Expanded file list (multi-file entries) ── */
 
 @keyframes pasteFileListSlideIn {
@@ -469,11 +456,6 @@ body {
   min-width: 0;
   flex: 1;
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
-}
-
-.paste-item:hover .paste-text-snippet,
-.paste-item--selected .paste-text-snippet {
-  color: var(--accent);
 }
 
 /* ── Image thumbnail ── */
