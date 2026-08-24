@@ -33,7 +33,7 @@ describes product behavior and links to the homes below, it enforces nothing.
 | Who may do what to an entry or inside a space, and where is it enforced? | `PERMISSIONS.md` |
 | Has this broken before, and why? | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
 | How does a release get cut? | `RELEASING.md` |
-| How do I reach, recover, and rebuild the self-hosted VPS? | `VPS-RUNBOOK.md` |
+| How do I reach, recover, harden, and deploy the self-hosted VPS? | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | How do I work in this repo? | `CLAUDE.md` at the workspace root |
 | Where do end users learn to install and use the app? | `orange-copy-paste-clipboard-website/` — the public docs + marketing site |
 | How is a space key handed over / how does join approval work, as a walkthrough? | `space-key-handover.html`, `join-approval.html` — dated explainers, not references |
