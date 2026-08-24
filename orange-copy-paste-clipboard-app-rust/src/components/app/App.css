@@ -225,6 +225,16 @@ textarea {
   pointer-events: none;
 }
 
+/* The open note editor gets the corner to itself.
+   The pill floats over whatever screen is up, and the editor puts its caret
+   position in exactly that corner - so the two sat on top of each other. Keyed
+   off the class the notes screen already sets when a note is open, rather than
+   a flag threaded up to the app shell, because a second source for the same
+   fact is a second thing that can be wrong. */
+.app:has(.notes-screen-root--editing) .bottom-pill-row {
+  display: none;
+}
+
 /* ── Cloud sync status pill ── */
 
 .sync-pill {

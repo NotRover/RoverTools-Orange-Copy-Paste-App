@@ -29,11 +29,12 @@ import {
 } from "../../../types";
 import { sanitizeHtml } from "../clipboard-screen/sanitize-html";
 import { ImageIcon, FileIcon } from "../../entry-types/EntryTypePill";
-import {
-  MagnifyingGlassPlus,
-  MagnifyingGlassMinus,
-} from "@phosphor-icons/react";
 import VideoPlayer from "../clipboard-screen/entry-card/VideoPlayer";
+import {
+  TEXT_ZOOM_STEPS,
+  ToolbarZoom,
+  stepZoom,
+} from "../view-toolbar/ViewToolbar";
 import {
   useImagePreviews,
   useMissingFiles,
@@ -43,18 +44,10 @@ import {
 // rather than approximately true.
 import "../clipboard-screen/entry-viewer/EntryViewer.css";
 
-/** Zoom stops. Coarse on purpose: a zoom control that needs eight presses to
- *  get anywhere is a slider wearing the wrong clothes. */
+/** Zoom stops for a picture: a multiple of the file's own pixels, so this range
+ *  goes far past anything you would read text at. The text stops are the shared
+ *  bar's, since every reading screen holds text to the same sizes. */
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
-/** Text is read, not inspected, so it stops well short of the image range. */
-const TEXT_ZOOM_STEPS = [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2];
-
-/** The next stop above or below `from`, or `from` itself at either end. */
-function stepZoom(steps: number[], from: number, dir: 1 | -1): number {
-  const i = steps.indexOf(from);
-  if (i === -1) return dir === 1 ? steps[steps.length - 1] : steps[0];
-  return steps[Math.min(steps.length - 1, Math.max(0, i + dir))];
-}
 
 /** What the toolbar says about the entry, to the right of the type pill. */
 export function entryFacts(entry: ClipboardEntry): string[] {
@@ -344,37 +337,16 @@ export const EntryViewControls: React.FC<{ view: EntryView }> = ({ view }) => (
     )}
 
     {view.zoomKind && (
-      <div className="vt-zoom" role="group" aria-label="Zoom">
-        <button
-          className="vt-btn vt-btn--icon vt-zoom-step"
-          onClick={view.zoomOut}
-          aria-label="Zoom out"
-          data-tooltip="Zoom out"
-          data-tooltip-pos="below"
-        >
-          <MagnifyingGlassMinus size={13} />
-        </button>
-        <button
-          className={`vt-btn vt-zoom-level${view.atDefault ? "" : " vt-btn--on"}`}
-          onClick={view.zoomReset}
-          aria-label={`Zoom ${view.zoomLabel}. Click to reset.`}
-          data-tooltip={
-            view.zoomKind === "image" ? "Reset to fit" : "Reset to 100%"
-          }
-          data-tooltip-pos="below"
-        >
-          {view.zoomLabel}
-        </button>
-        <button
-          className="vt-btn vt-btn--icon vt-zoom-step"
-          onClick={view.zoomIn}
-          aria-label="Zoom in"
-          data-tooltip="Zoom in"
-          data-tooltip-pos="below"
-        >
-          <MagnifyingGlassPlus size={13} />
-        </button>
-      </div>
+      <ToolbarZoom
+        label={view.zoomLabel}
+        atDefault={view.atDefault}
+        resetTooltip={
+          view.zoomKind === "image" ? "Reset to fit" : "Reset to 100%"
+        }
+        onIn={view.zoomIn}
+        onOut={view.zoomOut}
+        onReset={view.zoomReset}
+      />
     )}
   </>
 );
