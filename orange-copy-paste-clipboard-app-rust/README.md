@@ -147,7 +147,7 @@ Sync stays off until the app points at a deployment. Three values are needed:
 
 | Value | Where it comes from |
 | --- | --- |
-| Backend URL | Your deployed sync API, e.g. `https://your-service.onrender.com` |
+| Backend URL | Your deployed sync API, e.g. `https://sync.your-domain.com` |
 | Supabase project URL | Supabase → Settings → API Keys → Project URL |
 | Supabase publishable key | Supabase → Settings → API Keys |
 
@@ -156,7 +156,7 @@ Sync stays off until the app points at a deployment. Three values are needed:
 **Setting the endpoints.** They are compiled in, so users never enter anything. Edit the constants at the top of `src-tauri/src/sync/config.rs`:
 
 ```rust
-const DEFAULT_SERVER_URL: &str = "https://your-service.onrender.com";
+const DEFAULT_SERVER_URL: &str = "https://sync.your-domain.com";
 const DEFAULT_SUPABASE_URL: &str = "https://your-project-ref.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_xxxxxxxxxxxxxxxx";
 ```
