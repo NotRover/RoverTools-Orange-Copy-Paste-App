@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -78,7 +79,6 @@ import {
   Check,
   ChatCircle,
   Copy,
-  CaretRight,
   CaretDown,
   Prohibit,
   Circle,
@@ -92,6 +92,7 @@ import {
   SquaresFour,
   ArrowDownLeft,
   ArrowUpRight,
+  LockSimple as LockSimpleIcon,
 } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
@@ -110,6 +111,25 @@ import NotionPreview from "../notes-screen/editor-engine/NotionPreview";
 import { deriveNoteTitle } from "../notes-screen/notes-utils";
 import "../notes-screen/note-card/note-card.css";
 import "../clipboard-screen/entry-card/EntryCard.css";
+// An opened item wears the shared reading bar, and an opened note wears the
+// notes editor's chrome on top of it, so a shared note reads like a note.
+import {
+  ToolbarCopyButton,
+  ToolbarFacts,
+  ToolbarMoreButton,
+  ViewToolbar,
+  useCloseOnEscape,
+  useToolbarMenu,
+} from "../view-toolbar/ViewToolbar";
+import {
+  EntryBody,
+  EntryViewControls,
+  absoluteTime,
+  useCopyFlash,
+  useEntryView,
+  useEntryViewKeys,
+} from "./expanded-entry";
+import "../notes-screen/note-editor/note-editor.css";
 import InvitesPopover from "./invites/InvitesPopover";
 import "./SpacesScreen.css";
 
@@ -265,10 +285,15 @@ const FeedCardMenu: React.FC<{
   onClose: () => void;
   copied: boolean;
   onCopy?: () => void;
-  onOpen: () => void;
+  /** Absent on the panel that already has the item open. */
+  onOpen?: () => void;
   /** Owner-only takedown. Absent for members, who cannot moderate. */
   onRemove?: () => void;
-}> = ({ pos, onClose, copied, onCopy, onOpen, onRemove }) => {
+  /** Treat `pos.x` as the menu's right edge, not its left. For a menu hung off
+   *  a toolbar button, where opening rightwards would cross into the rules
+   *  column instead of staying over the panel the button is on. */
+  alignRight?: boolean;
+}> = ({ pos, onClose, copied, onCopy, onOpen, onRemove, alignRight }) => {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -287,19 +312,23 @@ const FeedCardMenu: React.FC<{
     };
   }, [pos, onClose]);
 
-  useEffect(() => {
+  // Before paint, not after: the width is only known once the rows are laid
+  // out, and a right-aligned menu measured after paint would flash on the wrong
+  // side of the button first.
+  useLayoutEffect(() => {
     if (!pos || !ref.current) return;
     const el = ref.current;
     el.style.left = `${pos.x}px`;
     el.style.top = `${pos.y}px`;
     const r = el.getBoundingClientRect();
-    let x = pos.x,
-      y = pos.y;
-    if (r.right > window.innerWidth) x = Math.max(0, pos.x - r.width);
+    let x = alignRight ? Math.max(0, pos.x - r.width) : pos.x;
+    let y = pos.y;
+    if (!alignRight && r.right > window.innerWidth)
+      x = Math.max(0, pos.x - r.width);
     if (r.bottom > window.innerHeight) y = Math.max(0, pos.y - r.height);
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
-  }, [pos]);
+  }, [pos, alignRight]);
 
   if (!pos) return null;
 
@@ -324,10 +353,12 @@ const FeedCardMenu: React.FC<{
           <span>{copied ? "Copied!" : "Copy"}</span>
         </button>
       )}
-      <button className="card-menu-item" onClick={closeAfter(onOpen)}>
-        <ArrowsOutSimple size={13} />
-        <span>Open</span>
-      </button>
+      {onOpen && (
+        <button className="card-menu-item" onClick={closeAfter(onOpen)}>
+          <ArrowsOutSimple size={13} />
+          <span>Open</span>
+        </button>
+      )}
       {onRemove && (
         <>
           <div className="card-menu-separator" />
@@ -428,107 +459,90 @@ const FeedFilterDropdown: React.FC<{
   );
 };
 
-// ── Clipboard detail body ─────────────────────────────────────────────
-
-function ClipDetailBody({ entry }: { entry: ClipboardEntry }) {
-  if (entry.type === "html") {
-    return (
-      <div
-        className="sp-detail-html-preview"
-        dangerouslySetInnerHTML={{ __html: htmlFragment(entry.content) }}
-      />
-    );
-  }
-  if (entry.type === "image") {
-    return (
-      <div className="sp-detail-image-wrap">
-        <img
-          src={resolveImageSrc(entry.content, convertFileSrc)}
-          alt={entry.label ?? "Image"}
-          className="sp-detail-image-img"
-        />
-        {entry.label && (
-          <p className="sp-detail-image-caption">{entry.label}</p>
-        )}
-      </div>
-    );
-  }
-  if (entry.type === "file") {
-    const paths = filePaths(entry.content);
-    return (
-      <div className="sp-detail-file-list">
-        {paths.map((p) => (
-          <div key={p} className="sp-detail-file-row">
-            <File size={11} />
-            <span>{fileNameFromPath(p)}</span>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return <p className="sp-detail-entry-text">{entry.content}</p>;
-}
-
 // ── Clipboard detail panel ────────────────────────────────────────────
 
+/**
+ * One shared clipboard item, read whole.
+ *
+ * Wears the same bar and the same body as the clipboard screen's viewer, so an
+ * item does not change shape when it travels into a space. What it does not
+ * carry is anything that would act on the entry itself: a space item may belong
+ * to another member, and the only thing anyone can do to it here is take it out
+ * of the space.
+ */
 const DetailPanel: React.FC<{
   entry: ClipboardEntry;
   onClose: () => void;
   onCopy: (id: string) => void;
   /** This entry's tally, for the chip that opens its thread. */
   comments?: CommentMark;
-}> = ({ entry, onClose, onCopy, comments }) => {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleCopy = useCallback(() => {
-    onCopy(entry.id);
-    if (timer.current) clearTimeout(timer.current);
-    setCopied(true);
-    timer.current = setTimeout(() => setCopied(false), 1600);
-  }, [entry.id, onCopy]);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
+  /** Member who shared it, when it came from someone else. */
+  owner: SpaceMember | null;
+  incoming: boolean;
+  /** Takedown, absent for members who cannot remove this item. */
+  onRemove?: () => void;
+}> = ({ entry, onClose, onCopy, comments, owner, incoming, onRemove }) => {
+  const view = useEntryView(entry);
+  const { copied, fire: handleCopy } = useCopyFlash(
+    useCallback(() => onCopy(entry.id), [onCopy, entry.id]),
   );
-
-  const dk = deriveDisplayKind(entry);
+  const menu = useToolbarMenu();
+  const popover = useCommentPopover();
+  const relTime = timeAgo(entry.timestamp);
+  useEntryViewKeys({
+    view,
+    onClose,
+    onCopy: handleCopy,
+    blocked: menu.isOpen || !!popover?.openId,
+  });
 
   return (
-    <div className="sp-detail-panel">
-      <div className="sp-detail-toolbar">
-        <button className="sp-detail-back" onClick={onClose}>
-          <CaretRight size={11} className="sp-detail-back-chevron" />
-          Back
-        </button>
-        <div className="sp-detail-toolbar-right">
-          <EntryTypePill kind={dk} />
-          <CommentChip
-            mark={comments}
-            clientId={entry.id}
-            entryType="clipboard"
-          />
-          <span className="sp-detail-time">{timeAgo(entry.timestamp)}</span>
-          <button
-            className={`sp-detail-copy-btn${copied ? " sp-detail-copy-btn--done" : ""}`}
-            onClick={handleCopy}
-          >
-            {copied ? (
-              <>
-                <Check size={11} weight="bold" /> Copied!
-              </>
-            ) : (
-              <>
-                <Copy size={11} /> Copy
-              </>
+    <div className="cv-panel">
+      <ViewToolbar
+        onBack={onClose}
+        actions={
+          <>
+            <EntryViewControls view={view} />
+            {(view.hasAlt || view.zoomKind) && (
+              <span className="vt-sep" aria-hidden="true" />
             )}
-          </button>
-        </div>
+            <ToolbarCopyButton copied={copied} onClick={handleCopy} />
+            <ToolbarMoreButton menu={menu} />
+          </>
+        }
+      >
+        <ToolbarFacts
+          facts={[...view.facts, `${absoluteTime(entry.timestamp)} (${relTime})`]}
+        />
+      </ViewToolbar>
+
+      {/* Everything the card's chip row has to drop for want of room. Same
+          chips, same colours - nothing is hidden here. */}
+      <div className="cv-meta">
+        <EntryTypePill kind={deriveDisplayKind(entry)} />
+        <DirectionBadge incoming={incoming} />
+        <OwnerBadge owner={owner} incoming={incoming} />
+        <CommentChip
+          mark={comments}
+          clientId={entry.id}
+          entryType="clipboard"
+        />
       </div>
-      <div className="sp-detail-scroll">
-        <ClipDetailBody entry={entry} />
+
+      <div className={`cv-scroll${view.isMedia ? " cv-scroll--media" : ""}`}>
+        <EntryBody entry={entry} view={view} />
       </div>
+
+      {/* The feed's own right-click menu, anchored under the button rather than
+          at a cursor. Open is dropped: the item is already open. */}
+      <FeedCardMenu
+        pos={menu.pos}
+        onClose={menu.close}
+        copied={copied}
+        onCopy={handleCopy}
+        onRemove={onRemove}
+        alignRight
+      />
     </div>
   );
 };
@@ -1083,30 +1097,113 @@ const NoteFeedCard: React.FC<{
 
 // ── Read-only note detail panel ───────────────────────────────────────
 
+/**
+ * One shared note, read whole.
+ *
+ * Wears the notes editor's own chrome - the same bar, the same title field, the
+ * same group row, the same footer - so a note that arrived from a space reads
+ * exactly like a note of your own. The difference is that nothing here is
+ * editable, which the bar under the header says in words rather than leaving
+ * for someone to discover by typing.
+ */
 const ReadOnlyNotePanel: React.FC<{
   note: Note;
   entries: ClipboardEntry[];
   onClose: () => void;
   comments?: CommentMark;
-}> = ({ note, entries, onClose, comments }) => (
-  <div className="sp-detail-panel">
-    <div className="sp-detail-toolbar">
-      <button className="sp-detail-back" onClick={onClose}>
-        <CaretRight size={11} className="sp-detail-back-chevron" />
-        Back
-      </button>
-      <div className="sp-detail-toolbar-right">
-        <span className="sp-readonly-badge">Read-only</span>
-        <CommentChip mark={comments} clientId={note.id} entryType="note" />
-        <span className="sp-detail-time">{timeAgo(note.updated_at)}</span>
+  /** Member who shared it, when it came from someone else. */
+  owner: SpaceMember | null;
+  incoming: boolean;
+  /** Takedown, absent for members who cannot remove this note. */
+  onRemove?: () => void;
+}> = ({ note, entries, onClose, comments, owner, incoming, onRemove }) => {
+  const menu = useToolbarMenu();
+  const popover = useCommentPopover();
+  const sharer = owner?.display_name?.trim();
+  useCloseOnEscape(onClose, menu.isOpen || !!popover?.openId);
+
+  return (
+    <div className="ns-editor-shell">
+      <div className="ns-editor">
+        <ViewToolbar
+          onBack={onClose}
+          actions={
+            <>
+              <CommentChip
+                mark={comments}
+                clientId={note.id}
+                entryType="note"
+              />
+              {onRemove && (
+                <>
+                  <span className="vt-sep" aria-hidden="true" />
+                  <ToolbarMoreButton menu={menu} />
+                </>
+              )}
+            </>
+          }
+        >
+          <ToolbarFacts facts={[`Updated ${timeAgo(note.updated_at)}`]} />
+        </ViewToolbar>
+
+        {/* Read-only, but still a field: a title you can select and copy is
+            worth more here than one you cannot touch. */}
+        <div className="ns-title-row">
+          <input
+            className="ns-title-input"
+            value={deriveNoteTitle(note.title, note.content)}
+            readOnly
+          />
+          {note.groups.length > 0 && (
+            <div className="ns-title-groups">
+              {note.groups.slice(0, 3).map((g) => {
+                const c = groupColor(g);
+                return (
+                  <span
+                    key={g}
+                    className="ns-editor-group-chip"
+                    style={{ background: c.bg, color: c.fg }}
+                  >
+                    <span className="ns-chip-dot" />
+                    <span className="ns-chip-label">{g}</span>
+                  </span>
+                );
+              })}
+              {note.groups.length > 3 && (
+                <span className="ns-title-groups-more">
+                  +{note.groups.length - 3}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="ns-readonly-bar">
+          <LockSimpleIcon size={12} />
+          <span>
+            {incoming
+              ? sharer
+                ? `${sharer} shared this note. Only they can edit it.`
+                : "Shared with you. Only the author can edit it."
+              : "Your note, as this space sees it. Edit it on the Notes screen."}
+          </span>
+        </div>
+
+        <div className="ns-editor-content">
+          <NotionPreview content={note.content} entries={entries} />
+        </div>
+
+        <FeedCardMenu
+          pos={menu.pos}
+          onClose={menu.close}
+          copied={false}
+          onRemove={onRemove}
+          alignRight
+        />
       </div>
     </div>
-    <div className="sp-detail-scroll">
-      {note.title && <h1 className="sp-detail-note-title">{note.title}</h1>}
-      <NotionPreview content={note.content} entries={entries} />
-    </div>
-  </div>
-);
+  );
+};
 
 // ── Create / join forms ───────────────────────────────────────────────
 
@@ -3270,14 +3367,20 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       ref={screenRef}
     >
       <div className="sp-feed-panel">
-        <Topbar
-          leftSlot={leftSlot}
-          rightSlot={rightSlot}
-          searchQuery={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="Search in space..."
-          searchInputRef={searchRef}
-        />
+        {/* An open item takes the whole panel, so the feed's controls go with
+            the feed: searching, sorting and filtering a list that is not on
+            screen is chrome nobody can act on. The clipboard and notes screens
+            do the same when they open something. */}
+        {!detailItem && (
+          <Topbar
+            leftSlot={leftSlot}
+            rightSlot={rightSlot}
+            searchQuery={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search in space..."
+            searchInputRef={searchRef}
+          />
+        )}
 
         {selected ? (
           <CommentsProvider
@@ -3290,13 +3393,16 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           >
             {/* The name, member count and the rules are all on the panel to
                 the right, so the only thing worth a line here is what the
-                filters left. */}
-            <ActiveFilterStrip
-              names={filterNames}
-              matched={feedItems.length}
-              total={allFeedItems.length}
-              onClear={clearAllFilters}
-            />
+                filters left - and only while the feed is what you are looking
+                at. */}
+            {!detailItem && (
+              <ActiveFilterStrip
+                names={filterNames}
+                matched={feedItems.length}
+                total={allFeedItems.length}
+                onClear={clearAllFilters}
+              />
+            )}
 
             {detailItem ? (
               detailItem.kind === "note" ? (
@@ -3308,15 +3414,40 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                   comments={commentMarks.get(
                     commentKey("note", detailItem.note.id),
                   )}
+                  owner={ownerFor(`note:${detailItem.note.id}`)}
+                  incoming={remoteKeys.has(`note:${detailItem.note.id}`)}
+                  onRemove={
+                    canRemoveKey(`note:${detailItem.note.id}`)
+                      ? () => {
+                          const id = detailItem.note.id;
+                          setDetailItem(null);
+                          handleRemoveFromSpace(id, "note");
+                        }
+                      : undefined
+                  }
                 />
               ) : (
                 <DetailPanel
+                  key={detailItem.entry.id}
                   entry={detailItem.entry}
                   onClose={() => setDetailItem(null)}
                   onCopy={onCopyEntry}
                   comments={commentMarks.get(
                     commentKey("clipboard", detailItem.entry.id),
                   )}
+                  owner={ownerFor(`clipboard:${detailItem.entry.id}`)}
+                  incoming={remoteKeys.has(
+                    `clipboard:${detailItem.entry.id}`,
+                  )}
+                  onRemove={
+                    canRemoveKey(`clipboard:${detailItem.entry.id}`)
+                      ? () => {
+                          const id = detailItem.entry.id;
+                          setDetailItem(null);
+                          handleRemoveFromSpace(id, "clipboard");
+                        }
+                      : undefined
+                  }
                 />
               )
             ) : (
