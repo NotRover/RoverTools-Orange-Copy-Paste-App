@@ -83,5 +83,7 @@ matters:
 3. **`PERMISSIONS.md`** only if the change is about who may do something.
 4. **This file** only if the change adds an invariant neither component can keep alone.
 
-Migrations are authored freely and **applied by the deploy**, never from a machine. Commits
-stay scoped to one repo; a submodule pointer bump is its own commit.
+Migrations are authored freely, but **the deploy never applies them** — it only rebuilds and
+restarts the service, so a merged revision has not reached the database until someone applies
+it deliberately (the backend's Migrate database workflow). Never assume a green deploy
+migrated. Commits stay scoped to one repo; a submodule pointer bump is its own commit.

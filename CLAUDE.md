@@ -70,7 +70,7 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 ### Tech Stack
 
 - **Client app** (`orange-copy-paste-clipboard-app-rust/`): React 19 + TypeScript + Vite frontend (`src/`); Tauri v2 + Rust backend (`src-tauri/`). Package manager **bun**. Rust sync deps: `reqwest`, `tokio`, `tokio-tungstenite`, `aes-gcm`, `argon2`, `x25519-dalek`, `sha2`, `keyring`, `zeroize`. History/notes persist as MessagePack; images externalized to disk.
-- **Backend** (`orange-copy-paste-clipboard-backend/`): Python **3.14+**, FastAPI + uvicorn, SQLAlchemy async + asyncpg, Alembic, `redis[hiredis]`, `boto3` (S3/R2), `pyjwt` (HS256), `slowapi` (rate limiting). Managed with **`uv`**; lint **ruff**, types **ty**, tests **pytest** (`pytest-asyncio` + `fakeredis`). `Dockerfile` + `docker-compose.yml` present.
+- **Backend** (`orange-copy-paste-clipboard-backend/`): Python **3.14+**, FastAPI + uvicorn, SQLAlchemy async + asyncpg, Alembic, `redis[hiredis]`, `boto3` (S3/R2), `pyjwt` (HS256), `slowapi` (rate limiting). Managed with **`uv`**; lint **ruff**, types **ty**, tests **pytest** (`pytest-asyncio` + `fakeredis`). Runs self-hosted in Docker on a VPS: `Dockerfile`, `docker-compose.yml` (dev), `docker-compose.prod.yml` + `Caddyfile` + `deploy/` (the on-box build-and-deploy, polled by a systemd timer).
 
 ## Project Structure
 
@@ -257,6 +257,7 @@ by intention, and the copy that drifts is the one nobody was reading when it bro
 | Who may do what, and where it is enforced | `docs/PERMISSIONS.md` |
 | Regressions and their root causes | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
 | The release pipeline | `docs/RELEASING.md` |
+| The backend's host and deployment — box access, hardening, recovery, the deploy pipeline, ops | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | User-facing release history, and the next release's notes | `changelog/` — one file per release, staged in `changelog/next.md` (skeleton `changelog/TEMPLATE.md`, convention `changelog/README.md`) |
 | End-user how-to and the public marketing site | `orange-copy-paste-clipboard-website/` — its own repo (Astro + Starlight). Describes product behavior for users; links to the contract/internals homes rather than restating them |
 | How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |

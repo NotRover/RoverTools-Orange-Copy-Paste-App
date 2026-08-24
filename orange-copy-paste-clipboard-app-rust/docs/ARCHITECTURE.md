@@ -1155,9 +1155,13 @@ Sync adds these keys to the existing `settings.json` store:
 | Key               | Type   | Default                             | Description                                                                |
 | ----------------- | ------ | ----------------------------------- | -------------------------------------------------------------------------- |
 | `sync_enabled`      | bool   | false                               | Master toggle for all sync behavior                                        |
-| `sync_server_url`   | string | `"https://api.orangeclipboard.app"` | Backend API base URL (self-hosted override)                                |
-| `supabase_url`      | string | `""`                                | Supabase project URL — used for auth (GoTrue)                              |
-| `supabase_anon_key` | string | `""`                                | Supabase anon (publishable) key — client-side auth only                    |
+| `sync_server_url`   | string | `DEFAULT_SERVER_URL`                | Backend API base URL; set to override the compiled default (self-hosting)   |
+| `supabase_url`      | string | `DEFAULT_SUPABASE_URL`              | Supabase project URL — used for auth (GoTrue)                              |
+| `supabase_anon_key` | string | `DEFAULT_SUPABASE_ANON_KEY`         | Supabase anon (publishable) key — client-side auth only                    |
+
+The three `DEFAULT_*` values are compiled in from `src-tauri/src/sync/config.rs` — that file is
+the single source for which deployment a build ships against. A key present and non-empty in
+`settings.json` wins over the constant; absent or empty falls back to it.
 | `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` — how personal cloud-sync entries move on this device |
 | `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
 | `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
