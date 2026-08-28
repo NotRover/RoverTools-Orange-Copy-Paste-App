@@ -1,3 +1,4 @@
+import { sharedNow } from "../../../../clock";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SpaceJoinRequest, SyncInvite } from "../../../../types";
@@ -24,7 +25,7 @@ interface InvitesPopoverProps {
 }
 
 function ago(ms: number): string {
-  const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  const mins = Math.max(0, Math.round((sharedNow() - ms) / 60000));
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} min ago`;
   const hours = Math.round(mins / 60);
@@ -35,7 +36,7 @@ function ago(ms: number): string {
 /** How long is left to answer. An invite the server will refuse is worth
     saying out loud before the user presses Accept on it. */
 function expiry(ms: number): string {
-  const mins = Math.round((ms - Date.now()) / 60000);
+  const mins = Math.round((ms - sharedNow()) / 60000);
   if (mins <= 0) return "Expired";
   if (mins < 60) return `Expires in ${mins} min`;
   const hours = Math.round(mins / 60);

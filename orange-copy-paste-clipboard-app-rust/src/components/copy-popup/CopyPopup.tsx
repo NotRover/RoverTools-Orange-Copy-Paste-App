@@ -1,3 +1,4 @@
+import { startClock } from "../../clock";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -357,6 +358,11 @@ const CopyPopup: React.FC = () => {
 export default CopyPopup;
 
 installWebviewGuards();
+
+// Follow this machine's error against the server, so every "x ago" in
+// this window is measured in the same frame the timestamps were written
+// in. See `clock.ts`.
+startClock();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <CopyPopup />,

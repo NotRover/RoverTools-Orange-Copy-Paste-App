@@ -1,3 +1,4 @@
+import { sharedNow } from "../../../clock";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -53,7 +54,7 @@ function startOfDay(ms: number): number {
 
 /** "Today" / "Yesterday" / a date, matched against the user's local midnight. */
 function dayLabel(ms: number): string {
-  const today = startOfDay(Date.now());
+  const today = startOfDay(sharedNow());
   const day = startOfDay(ms);
   if (day === today) return "Today";
   if (day === today - DAY_MS) return "Yesterday";
@@ -64,7 +65,7 @@ function dayLabel(ms: number): string {
 }
 
 function relativeTime(ms: number): string {
-  const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  const secs = Math.max(0, Math.round((sharedNow() - ms) / 1000));
   if (secs < 60) return "Just now";
   const mins = Math.round(secs / 60);
   if (mins < 60) return `${mins} min ago`;

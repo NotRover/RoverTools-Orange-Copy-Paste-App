@@ -1,3 +1,4 @@
+import { sharedNow, startClock } from "../../clock";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -48,7 +49,7 @@ interface PastePayload {
 }
 
 function relativeTime(ts: number): string {
-  const diff = Date.now() - ts;
+  const diff = sharedNow() - ts;
   if (diff < 60_000) return "now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
@@ -472,6 +473,11 @@ const PastePopup: React.FC = () => {
 export default PastePopup;
 
 installWebviewGuards();
+
+// Follow this machine's error against the server, so every "x ago" in
+// this window is measured in the same frame the timestamps were written
+// in. See `clock.ts`.
+startClock();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <PastePopup />,

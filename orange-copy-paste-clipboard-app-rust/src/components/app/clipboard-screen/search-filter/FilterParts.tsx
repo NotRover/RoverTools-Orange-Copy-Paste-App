@@ -1,3 +1,4 @@
+import { sharedNow } from "../../../../clock";
 import React from "react";
 import { ShareNetwork, CloudCheck, CloudSlash } from "@phosphor-icons/react";
 import type { DisplayKind, Space } from "../../../../types";
@@ -451,7 +452,7 @@ export function dateWindow(
     d.setHours(0, 0, 0, 0);
     return [d.getTime(), Infinity];
   }
-  if (preset === "7d") return [Date.now() - 7 * 86400000, Infinity];
+  if (preset === "7d") return [sharedNow() - 7 * 86400000, Infinity];
   if (preset === "range") {
     return [
       after ? new Date(after + "T00:00:00").getTime() : -Infinity,

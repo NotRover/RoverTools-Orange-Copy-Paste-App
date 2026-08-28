@@ -1,7 +1,6 @@
 //! Note data model and persistent store.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -18,11 +17,10 @@ fn advance_id_past(notes: &[Note]) {
     let _ = NEXT_NOTE_ID.fetch_max(max_id + 1, Ordering::Relaxed);
 }
 
+/// Note times are compared against other devices' - `updated_at` decides
+/// last-write-wins - so they are taken in the shared frame. See `crate::clock`.
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    crate::clock::now_ms()
 }
 
 /// A single note.

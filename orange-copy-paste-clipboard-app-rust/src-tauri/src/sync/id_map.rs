@@ -32,6 +32,22 @@ struct IdMapData {
     /// so this stays empty for a single-user account.
     #[serde(default)]
     entry_owners: HashMap<String, String>,
+    /// When this device first saw each entry that arrived over the socket, by
+    /// this machine's clock. Keyed like `entries`.
+    ///
+    /// Every timestamp on an entry is the wall clock of the device that wrote
+    /// it, and nothing in the pipeline reconciles two machines' clocks. A
+    /// sender running thirty seconds slow therefore produces an item that reads
+    /// "30s ago" the instant it lands, and keeps reading thirty seconds older
+    /// than it is forever after. This is the one time in the exchange that is
+    /// certainly right, because it was read here.
+    ///
+    /// It cannot go on the entry itself: a note's `updated_at` decides
+    /// last-write-wins, so moving it forward would make this device reject the
+    /// sender's next edit. It is a display correction and it stays out of the
+    /// fields the merge compares.
+    #[serde(default)]
+    entry_arrivals: HashMap<String, u64>,
     /// Entries this device deliberately took off the server while keeping the
     /// local copy - "Remove from cloud". Keyed like `entries`.
     ///
@@ -181,6 +197,7 @@ impl IdMap {
         self.data.entry_shares.remove(client_id);
         self.data.remote_entries.remove(client_id);
         self.data.entry_owners.remove(client_id);
+        self.data.entry_arrivals.remove(client_id);
         self.persist();
     }
 
@@ -195,6 +212,7 @@ impl IdMap {
     pub fn forget_received_copy(&mut self, client_id: &str) {
         self.data.entries.remove(client_id);
         self.data.entry_shares.remove(client_id);
+        self.data.entry_arrivals.remove(client_id);
         self.persist();
     }
 
@@ -331,6 +349,20 @@ impl IdMap {
 
     /// Owner account id per entry key, for the Spaces feed to resolve against
     /// the space's member list.
+    /// Note the moment `client_id` reached this device, if it has not already
+    /// been noted. Only a first arrival writes the file: an entry re-merged on
+    /// every pull would otherwise keep resetting its own age to now.
+    pub fn record_arrival(&mut self, client_id: &str, at: u64) {
+        if !self.data.entry_arrivals.contains_key(client_id) {
+            self.data.entry_arrivals.insert(client_id.to_string(), at);
+            self.persist();
+        }
+    }
+
+    pub fn entry_arrivals(&self) -> HashMap<String, u64> {
+        self.data.entry_arrivals.clone()
+    }
+
     pub fn entry_owners(&self) -> HashMap<String, String> {
         self.data.entry_owners.clone()
     }

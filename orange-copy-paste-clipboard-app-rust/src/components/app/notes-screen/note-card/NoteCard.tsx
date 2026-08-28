@@ -45,7 +45,7 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
   owner,
 }) => {
   const content = note.content ?? "";
-  const relTime = useRelativeTime(note.updated_at);
+  const relTime = useRelativeTime(note.updated_at, `note:${note.id}`);
 
   return (
     <div

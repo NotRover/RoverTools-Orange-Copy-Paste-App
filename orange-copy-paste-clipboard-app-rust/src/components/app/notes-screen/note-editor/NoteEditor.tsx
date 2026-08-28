@@ -42,7 +42,12 @@ import {
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
-import { fileNameFromPath, groupColor, timeAgo, truncateText } from "../../../../types";
+import {
+  fileNameFromPath,
+  groupColor,
+  truncateText,
+} from "../../../../types";
+import { timeAgoFor } from "../../../../hooks/useRelativeTime";
 import {
   PinIcon,
   SaveStarIcon,
@@ -740,7 +745,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             facts={[
               `${stats.words} ${stats.words === 1 ? "word" : "words"}`,
               `${stats.chars} ${stats.chars === 1 ? "character" : "characters"}`,
-              `Updated ${timeAgo(note.updated_at)}`,
+              `Updated ${timeAgoFor(note.updated_at, `note:${note.id}`)}`,
             ]}
           />
         </ViewToolbar>
@@ -1496,7 +1501,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                             </span>
                             <span className="ns-embed-item-text">{text}</span>
                             <span className="ns-embed-item-time">
-                              {timeAgo(entry.timestamp)}
+                              {timeAgoFor(entry.timestamp, `clipboard:${entry.id}`)}
                             </span>
                           </button>
                         );

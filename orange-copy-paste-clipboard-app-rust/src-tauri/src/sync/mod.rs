@@ -57,6 +57,18 @@ use crate::sync::ws_listener::WsListener;
 /// How long after the last `schedule_settings_push()` call before the push fires.
 const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
 
+/// How far back a live delivery may claim to have been written before this
+/// device stops treating the gap as a clock difference.
+///
+/// An entry carries the wall clock of whichever machine wrote it, so a sender
+/// running slow hands over an item that reads minutes old the moment it lands.
+/// Noting when it actually arrived fixes that - but a sender that was offline
+/// and is now flushing its backlog also delivers live, and those items really
+/// are old. The two are indistinguishable from a timestamp, so the gap decides:
+/// a few minutes is a clock, hours is a backlog. Ten minutes is well past any
+/// drift a machine accumulates between time syncs and well short of an outage.
+const ARRIVAL_SKEW_GRACE_MS: u64 = 10 * 60 * 1000;
+
 /// How often the passive-mode pull loop wakes up.  Pushes are always immediate
 /// (the backup must not lose data); passive only batches what gets *applied*.
 const PASSIVE_PULL_INTERVAL_SECS: u64 = 300;
@@ -228,12 +240,9 @@ fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFil
     (filters, mode)
 }
 
-/// Current Unix time in milliseconds.
+/// Current time in the frame every device shares. See [`crate::clock`].
 pub(crate) fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    crate::clock::now_ms()
 }
 
 /// Build a tombstone push for `client_id`.  Deletions have no dedicated route:
@@ -663,6 +672,22 @@ impl SyncClient {
         let sync_state = Arc::new(Mutex::new(SyncStateStore::load(
             sync_state::state_path(&app_data),
         )));
+
+        // Start from the last measurement rather than from "this machine is
+        // right", then keep it current off the `Date` on every API response.
+        // Both halves are `crate::clock`; this is only the wiring, because that
+        // module is a leaf and knows nothing about files or windows.
+        crate::clock::seed(sync_state.lock().data.clock_offset_ms);
+        {
+            let state = Arc::clone(&sync_state);
+            let app2 = app.clone();
+            crate::clock::on_change(move |offset| {
+                state.lock().set_clock_offset_ms(offset);
+                // The webview compares against its own `Date.now()`, so it
+                // needs the same correction or every label is off by it.
+                let _ = app2.emit("clock:offset-changed", offset);
+            });
+        }
         let status = Arc::new(Mutex::new(SyncStatusInfo {
             pending_count: pending_queue.lock().len(),
             ..Default::default()
@@ -2351,6 +2376,21 @@ impl SyncClient {
                 e.client_id
             );
 
+            // Live delivery, so this is the moment the item reached this
+            // machine. Recorded because the timestamp it carries is the
+            // *sender's* wall clock, and two machines rarely agree: a sender
+            // running thirty seconds slow makes a freshly copied item read
+            // "30s ago" the instant it appears, and keeps it thirty seconds too
+            // old forever after. A backfill pull is deliberately left out -
+            // those items really are old, and stamping them with now would
+            // report a week of history as having just happened.
+            if live {
+                let now = now_ms();
+                if now.saturating_sub(e.created_at) < ARRIVAL_SKEW_GRACE_MS {
+                    self.id_map.lock().record_arrival(&key, now);
+                }
+            }
+
             // One entry, one author. A row naming anybody else is a rival copy
             // and is dropped whole - content, tombstone and all.
             //
@@ -3002,6 +3042,12 @@ impl SyncClient {
     /// rows.
     pub fn entry_owners(&self) -> HashMap<String, String> {
         self.id_map.lock().entry_owners()
+    }
+
+    /// When each entry that arrived over the socket reached this device, by
+    /// this machine's clock. See `IdMapData::entry_arrivals`.
+    pub fn entry_arrivals(&self) -> HashMap<String, u64> {
+        self.id_map.lock().entry_arrivals()
     }
 
     /// Whether another member wrote this entry. Anything that edits content has

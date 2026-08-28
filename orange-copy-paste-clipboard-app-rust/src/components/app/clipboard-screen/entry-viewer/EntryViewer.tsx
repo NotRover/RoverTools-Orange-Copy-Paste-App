@@ -302,7 +302,7 @@ const EntryViewer: React.FC<{
   const [imageZoom, setImageZoom] = useState<number | null>(null);
   const [textZoom, setTextZoom] = useState(1);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const relTime = useRelativeTime(entry.timestamp);
+  const relTime = useRelativeTime(entry.timestamp, `clipboard:${entry.id}`);
   const facts = entryFacts(entry);
   const paths = entry.type === "file" ? filePaths(entry.content) : [];
   // "Saved" is a group in the data and a star in the UI, so it is shown as the

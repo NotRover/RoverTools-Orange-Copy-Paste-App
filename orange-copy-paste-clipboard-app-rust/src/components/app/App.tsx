@@ -1,3 +1,4 @@
+import { sharedNow, startClock } from "../../clock";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
@@ -1141,7 +1142,7 @@ const App: React.FC = () => {
       await invoke("update_note", { id, title, content });
       setNotes((prev) =>
         prev.map((n) =>
-          n.id === id ? { ...n, title, content, updated_at: Date.now() } : n,
+          n.id === id ? { ...n, title, content, updated_at: sharedNow() } : n,
         ),
       );
     },
@@ -1546,6 +1547,11 @@ class AppBoundary extends React.Component<
 // Mount
 
 installWebviewGuards();
+
+// Follow this machine's error against the server, so every "x ago" in
+// this window is measured in the same frame the timestamps were written
+// in. See `clock.ts`.
+startClock();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AppBoundary>
