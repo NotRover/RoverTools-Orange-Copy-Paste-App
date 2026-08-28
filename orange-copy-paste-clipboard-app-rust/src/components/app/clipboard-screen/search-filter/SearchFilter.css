@@ -531,25 +531,41 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* `min-width: 0` is what makes the ellipsis below reachable at all: a flex
+   item's automatic minimum size is its own content, so without it this span
+   never shrinks and the truncation is dead code - with enough filters on, the
+   names push the strip wider instead of trimming themselves. */
 .cs-filter-strip-names {
   color: var(--text-secondary);
   font-weight: 600;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* Sits right after the names, not at the far edge, with a hairline to keep it
-   from reading as part of the sentence. */
+   from reading as part of the sentence.
+
+   It has to reach the strip's own edges to read as the end of it. Left to sit
+   inside the strip's padding it kept a gap on three sides, and its hover fill
+   then drew as a rounded pill stopping short of the corner - which looks like
+   the button has been cropped rather than butted up against it. The negative
+   margins cancel the padding on the three outer sides, `stretch` takes the
+   full height, and the corner is the strip's radius less its hairline, so the
+   fill follows the strip's curve exactly. */
 .cs-filter-strip-clear {
   flex-shrink: 0;
+  align-self: stretch;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px 2px 7px;
+  margin: -3px -4px -3px 0;
+  padding: 2px 7px;
   border: 0;
   border-left: 0.5px solid var(--border);
-  border-radius: 0 var(--radius-xs, 7px) var(--radius-xs, 7px) 0;
+  border-radius: 0 calc(var(--radius-xs, 7px) - 0.5px)
+    calc(var(--radius-xs, 7px) - 0.5px) 0;
   background: transparent;
   color: var(--text-muted);
   font-family: inherit;
