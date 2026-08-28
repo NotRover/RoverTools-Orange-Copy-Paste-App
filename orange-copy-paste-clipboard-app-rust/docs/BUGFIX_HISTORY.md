@@ -849,3 +849,76 @@ store that fans its contents out - to a webview, to disk, to ciphertext - has to
 the size of one item, not just how many it keeps. And the size check belongs where
 the bytes enter the process, not where they hurt: a limit tested after the
 allocation it was meant to prevent has already been paid.
+
+---
+
+## #23 - Removal placeholders sat under the wrong day and accused the reader of moderating themselves
+
+**Symptom.** Two complaints about the same rows. A placeholder for an item taken
+out of a space appeared in a date group of its own, keyed to the day of the
+removal rather than the day the item sat on, so it read as an unrelated row with
+nothing around it to say what it referred to. And the text said "A space owner
+took this item out of the space" to the space owner, about an item they had
+taken out themselves.
+
+**Cause.** Two facts the feed needs were never written down, so both were
+inferred.
+
+*Placement.* `feedTimestamp` had only `deleted_at` to go on for a placeholder -
+`DeletedMarker` kept when the removal happened and nothing about when the item
+had. The comment on it said as much ("which is the only time it has"), which is
+true of the record and not of the item: at every point a marker is written the
+item's own timestamp is still readable, either from the local copy or off the
+tombstone that announced it.
+
+*Wording.* The copy branched on `by_author`, a *relation* between two ids
+computed upstream rather than a fact recorded on the spot, and it is wrong in at
+least two ways that both land on this reader. The WS handler reads
+`(Some(a), Some(r)) => a == r, _ => false`, so a payload arriving without either
+id is reported as moderation. And the backend takes `author_id` from
+`matched[0].user_id` while clearing every row carrying that `client_id` whoever
+wrote it, so an owner removing an item can have the removal recorded against
+another member's row - author and remover then differ, and the owner is told a
+space owner moderated them. The user's own `id_map.json` held the proof:
+`owner_id: null` (our item, so the badge read "You") with `by_author: false`,
+a combination the local command cannot produce, because it derives `by_author`
+from the same `is_remote` that picks the branch writing the marker.
+
+**Fix.** Record both facts instead of deriving them. `DeletedMarker` gains
+`entry_ts` - the item's own time, read while the copy is still there, or off the
+tombstone's `created_at` - and `removed_by`, the actor as an id. The feed places
+a placeholder by `entry_ts`, and the wording compares `removed_by` with this
+account's own id, so "You" is a fact rather than an inference.
+`drop_space_entry` takes the actor from its three callers; the delete commands
+read the timestamp before dropping the copy, since by the time sync hears about
+it there is nothing left to read.
+
+`by_author` is then computed locally rather than accepted from the wire.
+`drop_space_entry` compares `removed_by` against the author of the copy *this
+device holds* - `owner_of` for one we received, ourselves for one we wrote -
+which is the only version of the question that is about the item in front of the
+reader. The wire's value survives only as the fallback for when there is nothing
+to compare: no `removed_by` from an older server, or no session to name
+ourselves with.
+
+The backend half was fixed in the same pass. `remove_entry_from_space` now
+prefers the remover's own row when choosing which author to record, and the
+lowest id otherwise, so the field is at least stable across calls; the wire
+contract in the backend's `docs/ARCHITECTURE.md` now says outright that
+`author_id` is advisory and that a client must not compute "did the author
+remove this" from it. The record cannot be made fully correct at its current
+granularity - one row per (space, entry), and the collision is several authors
+for one `client_id` - which is the other reason the client stopped depending on
+it.
+
+Both fields are `#[serde(default)]` and absent on records already on disk. Those
+keep the old wording with one change: with no actor recorded, nothing is claimed
+about who, so a removal that is not the author's now reads "This item was taken
+out of the space" rather than naming a party it cannot identify.
+
+**Invariant to keep**: **a relation between two ids is not a fact - record the
+id.** `by_author` had to be computed by whoever published the event, from fields
+that may not have arrived, and every consumer inherited the mistake with no way
+to check it. An id can be compared against a known one at the point of use, and a
+comparison that cannot be made is visible as such rather than defaulting to a
+wrong answer about a real person.

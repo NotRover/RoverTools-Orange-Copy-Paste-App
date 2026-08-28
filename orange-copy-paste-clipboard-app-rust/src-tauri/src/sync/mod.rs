@@ -1856,8 +1856,13 @@ impl SyncClient {
     /// The user removed this one item. An item another member wrote is dropped
     /// from this device and leaves a placeholder in the space; nothing is
     /// pushed, because the row belongs to its author.
-    pub fn on_delete_clipboard_entry(&self, client_id: String) {
-        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::ThisItem);
+    ///
+    /// `entry_ts` is the item's own timestamp, which the caller has to read
+    /// before it drops the copy - by the time this runs there is nothing local
+    /// left to read it from, and the placeholder would then sort by the removal
+    /// instead of by the item it stands for.
+    pub fn on_delete_clipboard_entry(&self, client_id: String, entry_ts: Option<u64>) {
+        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::ThisItem, entry_ts);
     }
 
     /// One step of a sweep over everything this account has on the server.
@@ -1868,7 +1873,9 @@ impl SyncClient {
     /// [`Self::spawn_delete_entry`] refuses to touch one under this scope even
     /// if a caller puts it in the list.
     pub fn on_unpush_owned_clipboard_entry(&self, client_id: String) {
-        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::OwnedOnly);
+        // No timestamp needed: this scope leaves the local copy alone, so it is
+        // still there to be read.
+        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::OwnedOnly, None);
     }
 
     pub fn on_new_note(&self, note: Note) {
@@ -1907,14 +1914,14 @@ impl SyncClient {
     }
 
     /// The user removed this one note. See [`Self::on_delete_clipboard_entry`].
-    pub fn on_delete_note(&self, note_id: String) {
-        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::ThisItem);
+    pub fn on_delete_note(&self, note_id: String, entry_ts: Option<u64>) {
+        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::ThisItem, entry_ts);
     }
 
     /// One step of an account-wide sweep. See
     /// [`Self::on_unpush_owned_clipboard_entry`].
     pub fn on_unpush_owned_note(&self, note_id: String) {
-        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::OwnedOnly);
+        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::OwnedOnly, None);
     }
 
     // ── Internal spawn helpers ────────────────────────────────────
@@ -2157,6 +2164,7 @@ impl SyncClient {
         client_id: String,
         entry_type: EntryType,
         scope: RemovalScope,
+        entry_ts: Option<u64>,
     ) {
         let http = self.http.lock().clone();
         let umk = self.umk.lock().clone();
@@ -2196,6 +2204,9 @@ impl SyncClient {
         // A removal in a space leaves a placeholder, so the item does not just
         // disappear from under the other members.
         if !space_ids.is_empty() {
+            // Whatever the caller read before it dropped the copy, else the copy
+            // itself - the scopes that keep it leave it there to be read.
+            let entry_ts = entry_ts.or_else(|| self.local_entry_ts(&type_str, &client_id));
             self.id_map.lock().mark_deleted(
                 &map_key,
                 crate::sync::id_map::DeletedMarker {
@@ -2205,6 +2216,8 @@ impl SyncClient {
                     by_author: !is_remote,
                     content_gone: true,
                     local_only: is_remote,
+                    entry_ts,
+                    removed_by: self.self_user_id(),
                 },
             );
         }
@@ -2407,6 +2420,11 @@ impl SyncClient {
                             by_author: true,
                             content_gone: true,
                             local_only: false,
+                            // The tombstone carries the item's own time, so
+                            // nothing had to be kept locally to know it.
+                            entry_ts: Some(e.created_at),
+                            // A tombstone is only ever its author deleting.
+                            removed_by: e.user_id.clone(),
                         },
                     );
                 }
@@ -2735,6 +2753,7 @@ impl SyncClient {
                             &r.client_id,
                             &r.entry_type,
                             r.author_id == r.removed_by,
+                            Some(r.removed_by.clone()),
                         );
                     }
                     self.merge_pulled(&pull.entries, false);
@@ -3051,6 +3070,8 @@ impl SyncClient {
     /// one keeps a placeholder where the item used to be. The entry itself is
     /// untouched: it is still ours, and still in whatever spaces remain.
     pub fn mark_unshared(&self, key: &str, spaces: Vec<String>) {
+        let (entry_type, client_id) = key.split_once(':').unwrap_or(("clipboard", key));
+        let entry_ts = self.local_entry_ts(entry_type, client_id);
         self.id_map.lock().mark_deleted(
             key,
             crate::sync::id_map::DeletedMarker {
@@ -3060,13 +3081,57 @@ impl SyncClient {
                 by_author: true,
                 content_gone: false,
                 local_only: false,
+                entry_ts,
+                removed_by: self.self_user_id(),
             },
         );
     }
 
     /// Items removed from a space, for the feed's placeholders.
+    ///
+    /// Fills in `entry_ts` on a record written before it was kept, whenever the
+    /// item is still here to read it from - which is every removal that only
+    /// took something out of a space rather than deleting it. Without this the
+    /// placeholders already on disk keep sitting under the day they were removed
+    /// while new ones sit with their items, and the feed reads as though the fix
+    /// only half happened.
+    ///
+    /// On read rather than as a one-off rewrite: the value is derived from the
+    /// entry, so there is nothing worth persisting, and a record whose copy has
+    /// gone has no answer to persist anyway - those keep falling back to
+    /// `deleted_at`, which is the only time they have.
     pub fn deleted_markers(&self) -> HashMap<String, crate::sync::id_map::DeletedMarker> {
-        self.id_map.lock().deleted_markers()
+        let mut markers = self.id_map.lock().deleted_markers();
+        for (key, marker) in markers.iter_mut() {
+            if marker.entry_ts.is_some() {
+                continue;
+            }
+            let (entry_type, client_id) =
+                key.split_once(':').unwrap_or(("clipboard", key.as_str()));
+            marker.entry_ts = self.local_entry_ts(entry_type, client_id);
+        }
+        markers
+    }
+
+    /// When the local copy of this item says it is from, so a placeholder can
+    /// take the item's place in the feed rather than the removal's.
+    ///
+    /// The fields are the ones the feed sorts on - `timestamp` for a clipboard
+    /// entry, `updated_at` for a note - because a placeholder has to sort where
+    /// the row it replaces did. `None` once the copy has gone, which is why
+    /// every caller reads this while it is still here.
+    fn local_entry_ts(&self, entry_type: &str, client_id: &str) -> Option<u64> {
+        let state = self.app.state::<crate::state::AppState>();
+        if entry_type == "note" {
+            state.notes.lock().find(client_id).map(|n| n.updated_at)
+        } else {
+            state.history.lock().find(client_id).map(|e| e.timestamp)
+        }
+    }
+
+    /// This account's id, for the removals it performs itself.
+    fn self_user_id(&self) -> Option<String> {
+        self.current_user().map(|u| u.user_id)
     }
 
     /// An entry left a space — taken down by the space owner, or un-shared by
@@ -3080,10 +3145,24 @@ impl SyncClient {
     /// to disappear without trace, so a space could not answer "what happened
     /// to the thing I posted here" — the row simply was not there any more.
     ///
-    /// `by_author` says whether the person who wrote the entry is also the one
-    /// who removed it — the only thing this side cannot infer. It travels on the
-    /// entry-removed event as `removed_by`; the local command passes true,
-    /// since the reader can only unshare what they posted.
+    /// `removed_by` is the account that took it out. It is the one fact this
+    /// side cannot know on its own, and everything the placeholder says is built
+    /// from it: compared with our own id it gives "You", and compared with the
+    /// author of the copy we hold it gives whether the author withdrew their own
+    /// post or somebody moderated it.
+    ///
+    /// That second comparison is made *here*, not upstream. `by_author` arrives
+    /// on the wire as `author_id == removed_by`, and neither half of that pair
+    /// is trustworthy: the event omits a field on older servers, which reads as
+    /// "not the author", and the server's removal record has one row per (space,
+    /// entry) so it names a single author while rows are keyed per account -
+    /// meaning an owner clearing several accounts' rows under one `client_id`
+    /// may have the removal recorded against somebody else's. Either way the
+    /// reader was told a space owner had moderated something they took down
+    /// themselves. This device holds exactly one copy and knows who wrote it, so
+    /// it can answer the question about the copy actually in front of the user.
+    /// The parameter survives as the fallback for when there is nothing to
+    /// compare - no `removed_by`, or no session to name ourselves with.
     /// A member joined, left, was removed, or the space was deleted.
     ///
     /// Owns the reconcile as well as the notification because the two are
@@ -3236,12 +3315,31 @@ impl SyncClient {
         );
     }
 
-    pub fn drop_space_entry(&self, space_id: &str, client_id: &str, entry_type: &str, by_author: bool) {
+    pub fn drop_space_entry(
+        &self,
+        space_id: &str,
+        client_id: &str,
+        entry_type: &str,
+        by_author: bool,
+        removed_by: Option<String>,
+    ) {
         use crate::state::app_state::AppState;
         use std::sync::atomic::Ordering;
 
         let key = format!("{entry_type}:{client_id}");
         let is_remote = self.id_map.lock().is_remote(&key);
+        // Read before either branch, because the remote one drops the copy.
+        let entry_ts = self.local_entry_ts(entry_type, client_id);
+
+        // Who wrote the copy this device holds: recorded for one we received,
+        // and ourselves for one we wrote. That against `removed_by` is what
+        // "the author took it down" means locally - see the note above on why
+        // the wire's answer is not used when there is anything to compare.
+        let recorded_author = self.id_map.lock().owner_of(&key);
+        let by_author = match (&removed_by, &recorded_author.or_else(|| self.self_user_id())) {
+            (Some(remover), Some(author)) => remover == author,
+            _ => by_author,
+        };
 
         if !is_remote {
             let mut id_map = self.id_map.lock();
@@ -3263,6 +3361,8 @@ impl SyncClient {
                     by_author,
                     content_gone: false,
                     local_only: false,
+                    entry_ts,
+                    removed_by,
                 },
             );
             drop(id_map);
@@ -3306,6 +3406,8 @@ impl SyncClient {
                     by_author,
                     content_gone: true,
                     local_only: false,
+                    entry_ts,
+                    removed_by,
                 },
             );
             id_map.remove_entry(&key);

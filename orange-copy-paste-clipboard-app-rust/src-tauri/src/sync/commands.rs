@@ -1466,9 +1466,12 @@ pub async fn space_remove_entry(
     // Both paths run through here, so "did the author do this" is whether the
     // entry is ours - not simply true because we are the one clicking.
     let by_author = !sync.is_remote_entry(&entry_type, &client_id);
+    // Whoever the entry belongs to, this account is the one taking it out, and
+    // that is what the placeholder says.
+    let removed_by = sync.current_user().map(|u| u.user_id);
     http.remove_space_entry(&space_id, &client_id, &entry_type)
         .await?;
-    sync.drop_space_entry(&space_id, &client_id, &entry_type, by_author);
+    sync.drop_space_entry(&space_id, &client_id, &entry_type, by_author, removed_by);
     Ok(())
 }
 

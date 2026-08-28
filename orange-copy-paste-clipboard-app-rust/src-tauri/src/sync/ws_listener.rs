@@ -292,7 +292,13 @@ impl WsListener {
                             (Some(a), Some(r)) => a == r,
                             _ => false,
                         };
-                        sync.drop_space_entry(space_id, client_id, entry_type, by_author);
+                        sync.drop_space_entry(
+                            space_id,
+                            client_id,
+                            entry_type,
+                            by_author,
+                            removed_by.map(str::to_string),
+                        );
                     }
                 }
             }
