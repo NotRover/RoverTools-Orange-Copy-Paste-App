@@ -457,18 +457,16 @@
   color: var(--text-secondary);
 }
 
+/* Frame and fallback in one, as on the clipboard card: the picture fills it
+   when it loads, the initials show through when it does not. */
 .sp-owner-avatar {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border-radius: 6px;
-  object-fit: cover;
-}
-
-.sp-owner-avatar--initials {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 6px;
   background: var(--accent-dim-strong);
   color: var(--accent);
   font-size: 8.5px;
