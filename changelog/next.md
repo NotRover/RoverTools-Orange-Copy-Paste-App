@@ -1,33 +1,23 @@
-<!--
-  Draft the next release's notes in changelog/next.md, with /update-changelog or by
-  hand. Start with one or two plain sentences about what the release is for, then fill
-  only the sections that apply and delete the empty ones.
-
-  Rules (New / Improved / Fixed ship to users):
-  - Substance is the point. One to three sentences per entry: what changed and why it
-    helps the user. Not a one-line paraphrase of the commit subject.
-  - Give every distinct user-facing change its own entry. Do not collapse a release
-    into four lines; bigger releases get fuller notes.
-  - Present tense, user perspective. End with a period. Describe the visible effect,
-    not the code. No jargon, file names, or internal detail.
-  - ASCII punctuation only. No em dashes, curly quotes, or the section sign. Write two
-    sentences rather than joining with a dash.
-  - feat -> New, perf or a refinement -> Improved, fix -> Fixed.
-
-  Internal work (backend, MCP plumbing, refactors, CI, docs, dependency bumps) goes under
-  ### Internal. It is KEPT here for the record but NOT shown to users: the release
-  workflow drops the Internal section when it publishes the notes.
-
-  On release the workflow publishes New/Improved/Fixed (minus this comment, the Internal
-  section, and any empty section), then moves this file to
-  changelog/<version>-<bump>-<channel>.md and opens a fresh next.md. An empty user-facing
-  set fails a real release on purpose.
--->
-
-### New
-
-### Improved
+Two fixes for the Spaces feed. Placeholders for items taken out of a space now sit where
+the item was, and they say who took it out.
 
 ### Fixed
+- A placeholder for an item removed from a space now sits where the item sat, among the
+  things it was shared alongside. It used to land under the day it was taken down, in a
+  date group of its own with nothing around it to say what it referred to.
+- The placeholder now names who removed it. Taking your own item out of a space read as
+  "A space owner took this item out of the space", describing you in the third person as
+  somebody who had moderated you. It now says "You", and when it was someone else it uses
+  their name.
+- The picture on a "Shared by" chip no longer shows a broken-image icon. A profile
+  picture that cannot be loaded falls back to initials, the way every other picture in
+  the app already did.
 
 ### Internal
+- Backend: creating a space now announces it to the creator, so their connection picks up
+  the new space. The owner could not see anything a new member shared until they
+  restarted the app.
+- Backend: the realtime hub re-resolves a user's channels itself when their membership
+  changes, rather than depending on the client to ask.
+- Backend: a removal record names the remover's own row as the author when there is one,
+  instead of whichever row the database returned first.
