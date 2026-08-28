@@ -19,18 +19,18 @@
   color: var(--text-secondary);
 }
 
+/* The frame, which is also the fallback: the picture fills it when there is
+   one, and the initials show through when there is not. Both states have to
+   live on the one element, because whether the load succeeds is not known
+   until after it is drawn. */
 .card-owner-avatar {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border-radius: 6px;
-  object-fit: cover;
-}
-
-.card-owner-avatar--initials {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 6px;
   background: var(--accent-dim-strong);
   color: var(--accent);
   font-size: 8.5px;

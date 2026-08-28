@@ -1,4 +1,5 @@
 import React from "react";
+import { UserAvatar } from "../../../UserAvatar";
 import type { EntryOwner } from "../../../../hooks/useEntryOwners";
 import "./OwnerChip.css";
 
@@ -14,13 +15,12 @@ const OwnerChip: React.FC<{ owner: EntryOwner }> = ({ owner }) => {
   const name = owner.display_name?.trim() || "A member";
   return (
     <span className="card-owner-chip" data-tooltip={`Shared by ${name}`}>
-      {owner.avatar_url ? (
-        <img className="card-owner-avatar" src={owner.avatar_url} alt="" />
-      ) : (
-        <span className="card-owner-avatar card-owner-avatar--initials">
-          {name.charAt(0).toUpperCase()}
-        </span>
-      )}
+      <UserAvatar
+        className="card-owner-avatar"
+        url={owner.avatar_url}
+        label={owner.display_name?.trim() || ""}
+        glyphSize={9}
+      />
       <span className="card-owner-name">{name}</span>
     </span>
   );

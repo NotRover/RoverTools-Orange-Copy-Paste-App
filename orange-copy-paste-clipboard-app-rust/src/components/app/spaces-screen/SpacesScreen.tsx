@@ -589,13 +589,12 @@ const OwnerBadge: React.FC<{
   const name = owner?.display_name?.trim() || "A member";
   return (
     <span className="sp-owner" data-tooltip={`Shared by ${name}`}>
-      {owner?.avatar_url ? (
-        <img className="sp-owner-avatar" src={owner.avatar_url} alt="" />
-      ) : (
-        <span className="sp-owner-avatar sp-owner-avatar--initials">
-          {name.charAt(0).toUpperCase()}
-        </span>
-      )}
+      <UserAvatar
+        className="sp-owner-avatar"
+        url={owner?.avatar_url}
+        label={owner?.display_name?.trim() || ""}
+        glyphSize={9}
+      />
       <span className="sp-owner-name">{name}</span>
     </span>
   );
