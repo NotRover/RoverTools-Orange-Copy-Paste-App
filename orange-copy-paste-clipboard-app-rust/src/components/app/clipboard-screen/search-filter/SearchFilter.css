@@ -285,9 +285,15 @@
 
 /* Segmented control for the cloud/share filters. These are three-way choices
    rather than independent toggles - asking for "in cloud" and "local only" at
-   once can only ever return nothing, so the shape rules it out. */
+   once can only ever return nothing, so the shape rules it out.
+
+   Wrapping is the floor under the sizing below: past about a 600px window,
+   which takes a zoom level rather than a resize to reach, even content-sized
+   buttons run out of room. Given the choice the control drops one onto a
+   second row rather than letting two labels collide. */
 .cs-seg {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   margin: 4px 2px 6px;
   padding: 2px;
@@ -296,12 +302,25 @@
   background: var(--bg);
 }
 
+/* `auto` basis, not the flex default of zero: a zero basis sizes every button
+   by the grow ratio alone, so "Any" - three characters - is handed exactly as
+   much room as "Not shared 460". A third of the control goes to the one option
+   that needs none of it, and the two that carry counts are starved. Nothing
+   catches it either, because these are `nowrap` with no ellipsis: a button too
+   narrow for its label does not wrap or truncate, it runs into its neighbour.
+
+   Sized from content instead, with the surplus shared out, the share segment
+   needs 188px rather than 249px at a real history's counts, and 198px rather
+   than 264px at four digits - comfortably inside the column at every width the
+   card can take, including the one it clamps to in a minimum-width window.
+   Evenly-matched labels barely move: the four date presets go from 98px each to
+   108/94/96/96, because the surplus dwarfs the difference between them. */
 .cs-seg-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   padding: 4px 5px;
   border: 0;
