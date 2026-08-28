@@ -120,7 +120,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
       );
     }
   };
-  const relTime = useRelativeTime(entry.timestamp);
+  const relTime = useRelativeTime(entry.timestamp, `clipboard:${entry.id}`);
   const htmlPreviewRef = useRef<HTMLDivElement>(null);
 
   // Sanitising rich-text runs a full DOMParser pass — memoise so it only

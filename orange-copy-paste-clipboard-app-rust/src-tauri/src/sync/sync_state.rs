@@ -26,6 +26,14 @@ pub struct SyncState {
     /// of being undone by the next refresh.
     #[serde(default)]
     pub announcements_cursor: u64,
+    /// This machine's last measured error against the server's clock, in ms.
+    ///
+    /// Kept so a launch starts corrected. The watcher captures whatever is on
+    /// the clipboard within a second of startup, long before the first API
+    /// response could measure anything, and the last known offset is a far
+    /// better guess for those entries than assuming this machine is right.
+    #[serde(default)]
+    pub clock_offset_ms: i64,
     /// Spaces this device has already said "you can read this now" about.
     ///
     /// The keyring itself lives only in memory, so every launch unwraps it from
@@ -62,6 +70,13 @@ impl SyncStateStore {
     pub fn set_last_server_ts(&mut self, ts: u64) {
         self.data.last_server_ts = Some(ts);
         self.save();
+    }
+
+    pub fn set_clock_offset_ms(&mut self, offset: i64) {
+        if self.data.clock_offset_ms != offset {
+            self.data.clock_offset_ms = offset;
+            self.save();
+        }
     }
 
     /// Rewind the pull cursor so the next sync re-reads the account from the

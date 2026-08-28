@@ -1,3 +1,4 @@
+import { sharedNow } from "../../../clock";
 import React, {
   useCallback,
   useEffect,
@@ -84,8 +85,8 @@ function toLocalDateKey(ts: number): string {
 }
 
 function dayLabel(key: string): string {
-  const todayKey = toLocalDateKey(Date.now());
-  const yesterdayKey = toLocalDateKey(Date.now() - 86_400_000);
+  const todayKey = toLocalDateKey(sharedNow());
+  const yesterdayKey = toLocalDateKey(sharedNow() - 86_400_000);
   if (key === todayKey) return "Today";
   if (key === yesterdayKey) return "Yesterday";
   const [year, month, day] = key.split("-").map(Number);

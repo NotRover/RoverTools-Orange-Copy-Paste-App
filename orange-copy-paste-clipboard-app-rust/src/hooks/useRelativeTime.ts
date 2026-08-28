@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { timeAgo } from "../types";
+import { arrivalFloor, subscribeArrivals } from "./entryArrivals";
 
 // Relative-time labels only need coarse updates. A single shared interval ticks
 // every subscriber instead of each list card owning its own setInterval — with
@@ -24,12 +25,32 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-/** Live "x ago" label for `timestamp`, refreshed on a shared timer. */
-export function useRelativeTime(timestamp: number): string {
-  const [label, setLabel] = useState(() => timeAgo(timestamp));
+/** Live "x ago" label for `timestamp`, refreshed on a shared timer.
+ *
+ *  Pass `key` ("clipboard:{id}" / "note:{id}") for anything that may have come
+ *  from another device: the label then never reads older than the moment the
+ *  item arrived here, so a sender with a slow clock cannot make something that
+ *  just appeared claim to be minutes old. See `entryArrivals`. */
+export function useRelativeTime(timestamp: number, key?: string): string {
+  const label_ = () => timeAgo(arrivalFloor(timestamp, key));
+  const [label, setLabel] = useState(label_);
   useEffect(() => {
-    setLabel(timeAgo(timestamp));
-    return subscribe(() => setLabel(timeAgo(timestamp)));
-  }, [timestamp]);
+    const tick = () => setLabel(timeAgo(arrivalFloor(timestamp, key)));
+    tick();
+    const untick = subscribe(tick);
+    // The arrival map loads after the first paint, so the label has to be
+    // recomputed when it lands rather than waiting out the 15s tick.
+    const unsub = key ? subscribeArrivals(tick) : undefined;
+    return () => {
+      untick();
+      unsub?.();
+    };
+  }, [timestamp, key]);
   return label;
+}
+
+/** The one-shot form, for a label that is not on the shared timer. Same
+ *  arrival floor as [`useRelativeTime`]. */
+export function timeAgoFor(timestamp: number, key?: string): string {
+  return timeAgo(arrivalFloor(timestamp, key));
 }

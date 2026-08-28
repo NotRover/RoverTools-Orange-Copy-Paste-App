@@ -193,6 +193,24 @@ impl From<ApiError> for String {
     }
 }
 
+/// Fold a response's `Date` into this device's clock offset.
+///
+/// Cheap and unconditional: the header is already on the wire, so a device that
+/// is talking to the server at all keeps its offset current without asking for
+/// anything extra. When the offset moves enough to matter the new value is
+/// handed to `on_clock_offset`, which persists it and tells the UI.
+fn observe_server_clock(resp: &reqwest::Response, sent_at: u64) {
+    let Some(header) = resp.headers().get(reqwest::header::DATE) else {
+        return;
+    };
+    let Some(server_ms) = header.to_str().ok().and_then(crate::clock::parse_http_date) else {
+        return;
+    };
+    if let Some(offset) = crate::clock::observe(sent_at, server_ms, crate::clock::local_ms()) {
+        crate::clock::announce(offset);
+    }
+}
+
 /// Seconds since the Unix epoch, or 0 if the clock is before it.
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -1052,6 +1070,7 @@ impl SyncHttpClient {
         let mut transport_tries = 0usize;
         let mut attempt: u32 = 0;
         loop {
+            let sent_at = crate::clock::local_ms();
             let sent = factory()
                 .map_err(|message| ApiError {
                     // A request we could not even build is a local problem
@@ -1062,7 +1081,15 @@ impl SyncHttpClient {
                 .send()
                 .await;
             let resp = match sent {
-                Ok(resp) => resp,
+                Ok(resp) => {
+                    // Every response carries the server's clock, and this is the
+                    // only place all of them pass through. Reading it here is
+                    // what keeps this machine's timestamps comparable with
+                    // everyone else's - see `crate::clock`. A failure or a
+                    // header this device cannot parse leaves the offset alone.
+                    observe_server_clock(&resp, sent_at);
+                    resp
+                }
                 // Nothing came back at all.  A host that spins down when idle
                 // drops the first request that wakes it and answers the next
                 // one, so give it exactly one more try before giving up - the

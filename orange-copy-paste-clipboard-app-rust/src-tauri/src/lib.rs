@@ -1,6 +1,7 @@
 //! Smart Clipboard – Tauri/Rust backend.
 
 pub mod clipboard;
+pub mod clock;
 pub mod health;
 pub mod notes;
 pub mod notifications;
@@ -787,6 +788,8 @@ pub fn run() {
             crate::sync::commands::sync_get_entry_shares,
             crate::sync::commands::sync_get_remote_entries,
             crate::sync::commands::sync_get_entry_owners,
+            crate::sync::commands::sync_get_entry_arrivals,
+            crate::sync::commands::clock_offset_ms,
             crate::sync::commands::sync_get_deleted_markers,
             crate::sync::commands::space_clear_removed,
             crate::sync::commands::sync_get_entry_states,

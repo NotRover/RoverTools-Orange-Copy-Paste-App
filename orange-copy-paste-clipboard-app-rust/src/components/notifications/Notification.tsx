@@ -1,3 +1,4 @@
+import { startClock } from "../../clock";
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
@@ -104,6 +105,11 @@ const Notification: React.FC = () => {
 };
 
 installWebviewGuards();
+
+// Follow this machine's error against the server, so every "x ago" in
+// this window is measured in the same frame the timestamps were written
+// in. See `clock.ts`.
+startClock();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <Notification />,

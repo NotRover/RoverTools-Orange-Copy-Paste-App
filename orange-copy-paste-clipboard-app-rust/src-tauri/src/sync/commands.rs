@@ -433,6 +433,37 @@ pub fn sync_get_entry_owners(
         .unwrap_or_default()
 }
 
+/// This machine's measured error against the server's clock, in ms.
+///
+/// Every timestamp the app stores is already corrected by it, so the webview
+/// has to apply the same correction to its own `Date.now()` before subtracting
+/// one - otherwise the labels are off by exactly the amount this fixes. Zero
+/// until the first API response has been seen. See `crate::clock`.
+#[tauri::command]
+pub fn clock_offset_ms() -> i64 {
+    crate::clock::offset_ms()
+}
+
+/// When each received entry reached this device, keyed like
+/// `sync_get_entry_shares`, in ms since epoch on *this* machine's clock.
+///
+/// An entry's own timestamp is the wall clock of whichever device wrote it, and
+/// nothing reconciles the two, so a sender running slow makes an item that just
+/// arrived read as minutes old. The screens show the later of the two, which
+/// leaves an item's real age alone and only stops it claiming to predate its
+/// own arrival.
+#[tauri::command]
+pub fn sync_get_entry_arrivals(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, u64> {
+    state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.entry_arrivals())
+        .unwrap_or_default()
+}
+
 /// Items removed from a space, keyed like `sync_get_entry_shares`.  The Spaces
 /// feed renders these as placeholders so a removal is visible rather than a row
 /// quietly disappearing.
@@ -1770,10 +1801,9 @@ async fn push_settings(
         .map_err(|e| format!("serialize: {e}"))?;
     let encrypted = crypto::encrypt(&umk, &blob_str, "settings")
         .map_err(|e| format!("encrypt settings: {e}"))?;
-    let updated_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    // Compared against other devices' settings pushes, so it goes in the
+    // shared frame. See `crate::clock`.
+    let updated_at = crate::clock::now_ms();
 
     let resp = http
         .push_settings(crate::sync::client::SettingsPushRequest {

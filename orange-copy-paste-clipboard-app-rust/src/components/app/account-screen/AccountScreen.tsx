@@ -1,3 +1,4 @@
+import { sharedNow } from "../../../clock";
 import React, {
   useCallback,
   useEffect,
@@ -816,7 +817,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
   // ── Helpers ─────────────────────────────────────────────────────
   const formatLastSynced = (ts: number | null) => {
     if (!ts) return null;
-    const diff = Date.now() - ts;
+    const diff = sharedNow() - ts;
     // Lowercase because every caller embeds it mid-sentence ("last seen ...").
     if (diff < 60_000) return "just now";
     const mins = Math.floor(diff / 60_000);

@@ -42,6 +42,7 @@ import {
   TrashIcon,
 } from "../../icons";
 import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import { timeAgoFor } from "../../../hooks/useRelativeTime";
 import {
   CommentsProvider,
   useCommentPopover,
@@ -491,7 +492,7 @@ const DetailPanel: React.FC<{
   );
   const menu = useToolbarMenu();
   const popover = useCommentPopover();
-  const relTime = timeAgo(entry.timestamp);
+  const relTime = timeAgoFor(entry.timestamp, `clipboard:${entry.id}`);
   useEntryViewKeys({
     view,
     onClose,
@@ -852,7 +853,9 @@ const ClipFeedCard: React.FC<{
             clientId={entry.id}
             entryType="clipboard"
           />
-          <span className="sp-list-time">{timeAgo(entry.timestamp)}</span>
+          <span className="sp-list-time">
+            {timeAgoFor(entry.timestamp, `clipboard:${entry.id}`)}
+          </span>
           {!selecting && (
             <button
               className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
@@ -954,7 +957,9 @@ const ClipFeedCard: React.FC<{
                 Copied
               </span>
             ) : (
-              <span className="card-time">{timeAgo(entry.timestamp)}</span>
+              <span className="card-time">
+                {timeAgoFor(entry.timestamp, `clipboard:${entry.id}`)}
+              </span>
             )}
             {!selecting && (
               <button
@@ -1058,7 +1063,9 @@ const NoteFeedCard: React.FC<{
             )}
           </div>
           <CommentChip mark={comments} clientId={note.id} entryType="note" />
-          <span className="sp-list-time">{timeAgo(note.updated_at)}</span>
+          <span className="sp-list-time">
+            {timeAgoFor(note.updated_at, `note:${note.id}`)}
+          </span>
         </div>
         <FeedCardMenu
           pos={menuPos}
@@ -1122,7 +1129,7 @@ const NoteFeedCard: React.FC<{
               className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
             >
               {note.pinned && <PushPin size={8} weight="fill" />}
-              {timeAgo(note.updated_at)}
+              {timeAgoFor(note.updated_at, `note:${note.id}`)}
             </span>
           </div>
         </div>
@@ -1186,7 +1193,7 @@ const ReadOnlyNotePanel: React.FC<{
             </>
           }
         >
-          <ToolbarFacts facts={[`Updated ${timeAgo(note.updated_at)}`]} />
+          <ToolbarFacts facts={[`Updated ${timeAgoFor(note.updated_at, `note:${note.id}`)}`]} />
         </ViewToolbar>
 
         {/* Read-only, but still a field: a title you can select and copy is

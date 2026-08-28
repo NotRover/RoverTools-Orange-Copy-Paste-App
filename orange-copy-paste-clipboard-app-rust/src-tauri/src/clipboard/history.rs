@@ -7,7 +7,6 @@
 
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
@@ -276,10 +275,10 @@ fn hash_content(s: &str) -> u64 {
 
 impl ClipboardEntry {
     fn new(kind: EntryKind, content: String) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        // Corrected against the server rather than read raw, so an entry
+        // copied here is comparable with one copied on another machine. See
+        // `crate::clock`.
+        let timestamp = crate::clock::now_ms();
         let label = if kind == EntryKind::Image {
             Some(format_image_label(timestamp))
         } else {

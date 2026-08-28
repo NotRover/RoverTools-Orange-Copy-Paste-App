@@ -1,3 +1,5 @@
+import { sharedNow } from "./clock";
+
 //  Shared types and utilities
 
 /** Matches the Rust `ClipboardEntry` struct (serialised by serde). */
@@ -394,7 +396,10 @@ export function renameGroupColor(oldName: string, newName: string): void {
 //  Helpers
 
 export function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
+  // `sharedNow`, not `Date.now`: the stored time was corrected against the
+  // server when it was written, so subtracting an uncorrected local clock from
+  // it puts this machine's error straight back into the answer. See `clock.ts`.
+  const diff = sharedNow() - ts;
   const seconds = Math.floor(diff / 1000);
   if (seconds < 5) return "Just now";
   if (seconds < 60) return `${seconds}s ago`;
