@@ -69,6 +69,9 @@ pub fn get_history(state: State<'_, AppState>) -> Vec<ClipboardEntry> {
 
 #[tauri::command]
 pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    // Read before the removal: an entry shared into a space leaves a
+    // placeholder, and the placeholder sits where the entry sat.
+    let entry_ts = state.history.lock().find(&id).map(|e| e.timestamp);
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
@@ -76,7 +79,7 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
         // Tombstone must propagate to sync even when offline (invariant #5)
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
-            s.on_delete_clipboard_entry(id);
+            s.on_delete_clipboard_entry(id, entry_ts);
         }
     }
     removed
@@ -85,23 +88,23 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
 #[tauri::command]
 pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     // Capture IDs of unpinned entries before clearing so tombstones can propagate (invariant #5).
-    let deleted_ids: Vec<String> = state
+    let deleted: Vec<(String, u64)> = state
         .history
         .lock()
         .all()
         .iter()
         .filter(|e| !e.pinned)
-        .map(|e| e.id.clone())
+        .map(|e| (e.id.clone(), e.timestamp))
         .collect();
 
     state.history.lock().clear();
     auto_save_history(&app);
 
-    if !deleted_ids.is_empty() {
+    if !deleted.is_empty() {
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
-            for id in deleted_ids {
-                s.on_delete_clipboard_entry(id);
+            for (id, entry_ts) in deleted {
+                s.on_delete_clipboard_entry(id, Some(entry_ts));
             }
         }
     }
@@ -321,11 +324,14 @@ pub fn bulk_delete_entries(
 ) -> u32 {
     let mut hist = state.history.lock();
     let mut removed = 0u32;
-    let mut deleted_ids: Vec<String> = Vec::new();
+    let mut deleted_ids: Vec<(String, Option<u64>)> = Vec::new();
     for id in &ids {
+        // Timestamp first: it is gone from the store a line later, and a space
+        // placeholder has to sort where the entry did.
+        let entry_ts = hist.find(id).map(|e| e.timestamp);
         if hist.remove(id) {
             let _ = app.emit("clipboard:entry-deleted", id);
-            deleted_ids.push(id.clone());
+            deleted_ids.push((id.clone(), entry_ts));
             removed += 1;
         }
     }
@@ -334,8 +340,8 @@ pub fn bulk_delete_entries(
         auto_save_history(&app);
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
-            for id in deleted_ids {
-                s.on_delete_clipboard_entry(id);
+            for (id, entry_ts) in deleted_ids {
+                s.on_delete_clipboard_entry(id, entry_ts);
             }
         }
     }

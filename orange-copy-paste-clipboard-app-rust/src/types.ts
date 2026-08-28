@@ -161,6 +161,14 @@ export interface DeletedMarker {
   /** True when you removed your own copy of someone else's item. Nothing
    *  changed in the space - it is still there for everyone else. */
   local_only: boolean;
+  /** When the item itself was, so the placeholder sits where the item sat
+   *  rather than in a date group of its own. Null on records written before
+   *  this was kept; the feed falls back to `deleted_at`. */
+  entry_ts: number | null;
+  /** Who removed it. Null when the removal did not say. Preferred over
+   *  `by_author` for the wording, because it can be compared with your own id
+   *  instead of being a relation computed somewhere upstream. */
+  removed_by: string | null;
 }
 
 /** Per-space send filter: which of my entries auto-flow into the space.

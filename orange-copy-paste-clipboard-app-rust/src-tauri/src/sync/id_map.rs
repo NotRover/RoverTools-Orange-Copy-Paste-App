@@ -89,6 +89,28 @@ pub struct DeletedMarker {
     /// not one that took place.
     #[serde(default)]
     pub local_only: bool,
+    /// When the item itself was, ms since epoch.
+    ///
+    /// The feed places a row by its own timestamp, and a removal only ever had
+    /// `deleted_at` - so a placeholder appeared under the day it was taken
+    /// down rather than the day the item sat on, in a date group of its own
+    /// with nothing around it to explain what it referred to. This is the
+    /// item's own time, captured while the copy is still here to read it from.
+    ///
+    /// `None` on records written before it was kept; the feed falls back to
+    /// `deleted_at` for those.
+    #[serde(default)]
+    pub entry_ts: Option<u64>,
+    /// Account that removed it, when the removal said so.
+    ///
+    /// `by_author` is a relation between two ids computed elsewhere - on the
+    /// wire, from a payload that may be missing a field, or from a server row
+    /// whose author id came off an arbitrary matching row. Getting it wrong
+    /// tells the reader a space owner moderated something they took down
+    /// themselves. An id can be compared against our own, which is the one
+    /// question the wording actually turns on.
+    #[serde(default)]
+    pub removed_by: Option<String>,
 }
 
 fn yes() -> bool {

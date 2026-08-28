@@ -145,20 +145,23 @@ type FeedItem =
 /** A feed item that still has content, which is everything but a placeholder. */
 type ContentFeedItem = Exclude<FeedItem, { kind: "removed" }>;
 
-/** When a feed item happened. A placeholder is placed by when it was removed,
- *  which is the only time it has. */
 /** A feed key ("clipboard:<id>") back into the pair the commands take. */
 function splitFeedKey(key: string): ["clipboard" | "note", string] {
   const at = key.indexOf(":");
   return [key.slice(0, at) as "clipboard" | "note", key.slice(at + 1)];
 }
 
+/** When a feed item happened, which is what sorts it and which day it lands
+ *  under. A placeholder takes the time of the item it stands for, so it sits
+ *  where the item sat: keyed on the removal it appeared under whatever day it
+ *  was taken down, in a date group of its own, with nothing around it to say
+ *  what it referred to. Older records kept no item time, and fall back. */
 const feedTimestamp = (item: FeedItem): number =>
   item.kind === "clipboard"
     ? item.entry.timestamp
     : item.kind === "note"
       ? item.note.updated_at
-      : item.marker.deleted_at;
+      : (item.marker.entry_ts ?? item.marker.deleted_at);
 
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "text",
@@ -598,6 +601,54 @@ const OwnerBadge: React.FC<{
   );
 };
 
+/** What the placeholder says, written from the reader's side.
+ *
+ * Who did it comes first, because that is what a reader wants to know and
+ * getting it wrong is what made these rows confusing: an account that removed
+ * its own item was told "a space owner took this item out of the space",
+ * describing the reader in the third person as somebody who had moderated
+ * them. `removed_by` is compared with this account's own id, so "You" is a
+ * fact rather than something inferred from `by_author` - a relation computed
+ * upstream that is wrong whenever a payload arrives without one of its two ids.
+ *
+ * `byMe === null` is a record written before the actor was kept. Those keep the
+ * old wording, minus the claim about who it was: it cannot be known now, and
+ * naming the wrong person is worse than naming nobody. */
+function removedText(
+  item: Extract<FeedItem, { kind: "removed" }>,
+  byMe: boolean | null,
+  remover: SpaceMember | null,
+  incoming: boolean,
+  what: string,
+): string {
+  const { local_only, content_gone, by_author } = item.marker;
+  // Nothing happened in the space - the item is still there for everyone else.
+  if (local_only) return `Removed your copy of this ${what}`;
+  if (byMe === true)
+    // Somebody else's item is only ever taken out of the space, whatever it
+    // cost this device locally. Ours can genuinely be deleted, and the two are
+    // worth telling apart: one is recoverable from its author, the other is not.
+    return incoming
+      ? `You took this ${what} out of the space`
+      : content_gone
+        ? `You deleted this ${what}`
+        : `You stopped sharing this ${what} here`;
+  // Only the space owner may take down an item they did not write, so an
+  // unresolvable name is still worth saying that much about.
+  const who =
+    remover?.display_name?.trim() || (by_author ? "A member" : "A space owner");
+  if (byMe === false)
+    return by_author
+      ? `${who} stopped sharing this ${what}`
+      : `${who} took this ${what} out of the space`;
+  // No actor on the record, so nothing may be claimed about who.
+  return by_author
+    ? content_gone && !incoming
+      ? `Removed this ${what}`
+      : `Stopped sharing this ${what} here`
+    : `This ${what} was taken out of the space`;
+}
+
 /** What is left after an item is taken out of a space.
  *
  * Deliberately shows nothing of the content — it is gone from this device, and
@@ -606,8 +657,12 @@ const OwnerBadge: React.FC<{
 const RemovedRow: React.FC<{
   item: Extract<FeedItem, { kind: "removed" }>;
   owner: SpaceMember | null;
+  /** Who took it out, when the record says and they are still in the space. */
+  remover: SpaceMember | null;
+  /** Whether this account did it. Null when the record does not say. */
+  byMe: boolean | null;
   isNote: boolean;
-}> = ({ item, owner, isNote }) => {
+}> = ({ item, owner, remover, byMe, isNote }) => {
   // The content is gone, but the record of it is not: an owner id on the
   // marker means someone else put it here, which is the same thing the arrow
   // and the name pill say on a live card.
@@ -625,18 +680,7 @@ const RemovedRow: React.FC<{
       >
         {isNote ? <NoteIcon size={10} /> : <Clipboard size={10} />}
       </span>
-      <span className="sp-removed-text">
-        {/* Who did it, not what it cost us locally. The old wording keyed off
-            whether the copy went, so an author withdrawing their own post was
-            reported to every other member as a moderator takedown. */}
-        {item.marker.local_only
-          ? `Removed your copy of this ${what}`
-          : !item.marker.by_author
-            ? `A space owner took this ${what} out of the space`
-            : item.marker.content_gone && !incoming
-              ? `Removed this ${what}`
-              : `Stopped sharing this ${what} here`}
-      </span>
+      <span className="sp-removed-text">{removedText(item, byMe, remover, incoming, what)}</span>
       <span
         className="sp-removed-time"
         data-tooltip={new Date(item.marker.deleted_at).toLocaleString()}
@@ -2175,6 +2219,30 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [selected],
   );
 
+  /* Who took it out. Null for a record written before the actor was kept, and
+     for one naming somebody who has since left - the wording falls back to
+     "A member" rather than to a name it cannot resolve. */
+  const removerFor = useCallback(
+    (marker: DeletedMarker): SpaceMember | null => {
+      if (!marker.removed_by || !selected) return null;
+      return (
+        selected.members.find((m) => m.user_id === marker.removed_by) ?? null
+      );
+    },
+    [selected],
+  );
+
+  /* Whether this account did it. Null means the record does not say, which is
+     different from "no" and has to stay different: guessing produces exactly
+     the third-person wording this replaces. */
+  const removedByMe = useCallback(
+    (marker: DeletedMarker): boolean | null => {
+      if (!marker.removed_by || !selfUserId) return null;
+      return marker.removed_by === selfUserId;
+    },
+    [selfUserId],
+  );
+
   // How much is in each space, counted from the share map rather than the feed
   // so a space that is not selected still has a number.
   const itemCounts = useMemo(() => {
@@ -3525,6 +3593,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       key={item.key}
                                       item={item}
                                       owner={removedOwnerFor(item.marker)}
+                                      remover={removerFor(item.marker)}
+                                      byMe={removedByMe(item.marker)}
                                       isNote={item.key.startsWith("note:")}
                                     />
                                   ) : item.kind === "clipboard" ? (
