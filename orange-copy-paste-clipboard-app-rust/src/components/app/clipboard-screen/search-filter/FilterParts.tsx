@@ -1,6 +1,12 @@
 import { sharedNow } from "../../../../clock";
 import React from "react";
-import { ShareNetwork, CloudCheck, CloudSlash } from "@phosphor-icons/react";
+import {
+  ShareNetwork,
+  CloudCheck,
+  CloudSlash,
+  ArrowUp,
+  ArrowDown,
+} from "@phosphor-icons/react";
 import type { DisplayKind, Space } from "../../../../types";
 import { groupColor } from "../../../../types";
 import { TYPE_ICONS, TYPE_LABELS } from "../../../entry-types/EntryTypePill";
@@ -93,6 +99,32 @@ export const SectionLabel: React.FC<SectionLabelProps> = ({
 );
 
 export const CardDivider: React.FC = () => <div className="cs-card-divider" />;
+
+/** The owner pair, in one place so the clipboard, notes and Spaces filters all
+ *  offer the same two chips with the same words. Picking one clears the other:
+ *  they are two halves of one set, and holding both on would mean everything. */
+export const OwnerChips: React.FC<{
+  value: OwnerFilter;
+  set: (v: OwnerFilter) => void;
+  counts?: { mine?: number; others?: number };
+}> = ({ value, set, counts }) => (
+  <>
+    <FilterChip
+      label="Mine"
+      on={value === "mine"}
+      onToggle={() => set(value === "mine" ? "any" : "mine")}
+      count={counts?.mine}
+      icon={<ArrowUp size={10} weight="bold" />}
+    />
+    <FilterChip
+      label="From others"
+      on={value === "others"}
+      onToggle={() => set(value === "others" ? "any" : "others")}
+      count={counts?.others}
+      icon={<ArrowDown size={10} weight="bold" />}
+    />
+  </>
+);
 
 /* ── Card shell ───────────────────────────────────────────────────────
  * A header that does not move, holding the one number a filter exists to
@@ -252,6 +284,15 @@ export const GroupChips: React.FC<GroupChipsProps> = ({
  * opposites, so asking for both at once can only ever return nothing. */
 
 /** Server-copy filter: either state, only uploaded, or only local. */
+/** Who an item came from. `remoteKeys` holds every key that arrived from
+ *  another member, so "mine" is the absence of an entry there rather than a
+ *  field on the item - which is also why this is only offered while signed in.
+ *
+ *  Three states rather than one switch: "show me only what other people sent"
+ *  and "show me only my own" are different questions, and a single "From
+ *  others" toggle could ask just the first. */
+export type OwnerFilter = "any" | "mine" | "others";
+
 export type CloudFilter = "any" | "in" | "out";
 /** Sharing filter: either state, in at least one space, or in none. */
 export type ShareFilter = "any" | "shared" | "private";

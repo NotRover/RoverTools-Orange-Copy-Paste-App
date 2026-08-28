@@ -59,10 +59,12 @@ import "../clipboard-screen/search-filter/SearchFilter.css";
 import {
   ActiveFilterStrip,
   CardDivider,
+  ChipRow,
   DateSection,
   FilterCardShell,
   FilterChip,
   GroupChips,
+  OwnerChips,
   SectionLabel,
   TypeGrid,
   dateWindow,
@@ -70,6 +72,7 @@ import {
 import type {
   CountMap,
   DatePreset,
+  OwnerFilter,
 } from "../clipboard-screen/search-filter/FilterParts";
 import {
   Plus,
@@ -391,6 +394,10 @@ interface FeedFilterState {
   setDateAfter: (v: string) => void;
   dateBefore: string;
   setDateBefore: (v: string) => void;
+  ownerFilter: OwnerFilter;
+  setOwnerFilter: React.Dispatch<React.SetStateAction<OwnerFilter>>;
+  /** What each half of the owner pair would leave, other filters applied. */
+  ownerCounts: { mine: number; others: number };
   activeFilterCount: number;
   clearAll: () => void;
   filtersOpen: boolean;
@@ -431,6 +438,20 @@ const FeedFilterDropdown: React.FC<{
           activeCount={sf.activeFilterCount}
           onClear={sf.clearAll}
         >
+          <div className="cs-card-section">
+            <SectionLabel
+              name="Quick"
+              count={sf.ownerFilter === "any" ? 0 : 1}
+            />
+            <ChipRow>
+              <OwnerChips
+                value={sf.ownerFilter}
+                set={sf.setOwnerFilter}
+                counts={sf.ownerCounts}
+              />
+            </ChipRow>
+          </div>
+          <CardDivider />
           {feedFilter !== "notes" && (
             <>
               <div className="cs-card-section">
@@ -2139,6 +2160,14 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [selectedKinds, setSelectedKinds] = useStickySet<DisplayKind>(
     "sp-f-kinds",
   );
+  /* Whose items to show. The feed is the one screen where everything is, by
+     definition, shared with other people, so it is also where "only mine" and
+     "only theirs" are worth asking - and it was the one screen with no way to
+     ask either. */
+  const [ownerFilter, setOwnerFilter] = useSticky<OwnerFilter>(
+    "sp-f-owner",
+    "any",
+  );
   const [datePreset, setDatePreset] = useSticky<DatePreset>("sp-f-date", "any");
   const [dateAfter, setDateAfter] = useSticky("sp-f-date-after", "");
   const [dateBefore, setDateBefore] = useSticky("sp-f-date-before", "");
@@ -2325,9 +2354,27 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     return fallback;
   };
 
+  /* A content item is ours when its key never arrived from anyone else, which
+     is the same test the cards use to draw the direction badge. A placeholder
+     has no entry left to ask, so it carries the answer on the marker. */
+  const itemIsMine = useCallback(
+    (item: FeedItem): boolean =>
+      item.kind === "removed"
+        ? !item.marker.owner_id
+        : !remoteKeys.has(
+            item.kind === "clipboard"
+              ? `clipboard:${item.entry.id}`
+              : `note:${item.note.id}`,
+          ),
+    [remoteKeys],
+  );
+
   const activeFilterCount = useMemo(
-    () => selectedKinds.size + (datePreset === "any" ? 0 : 1),
-    [selectedKinds, datePreset],
+    () =>
+      selectedKinds.size +
+      (datePreset === "any" ? 0 : 1) +
+      (ownerFilter !== "any" ? 1 : 0),
+    [selectedKinds, datePreset, ownerFilter],
   );
 
   // What the badge on the funnel cannot say: which filters are on. Same strip
@@ -2336,14 +2383,17 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     const out = ALL_DISPLAY_KINDS.filter((k) => selectedKinds.has(k)).map(
       (k) => TYPE_LABELS[k],
     );
+    if (ownerFilter === "mine") out.push("Mine");
+    else if (ownerFilter === "others") out.push("From others");
     if (datePreset === "today") out.push("Today");
     if (datePreset === "7d") out.push("Last 7 days");
     if (datePreset === "range") out.push("Date range");
     return out;
-  }, [selectedKinds, datePreset]);
+  }, [selectedKinds, datePreset, ownerFilter]);
 
   const clearAllFilters = useCallback(() => {
     setSelectedKinds(new Set());
+    setOwnerFilter("any");
     setDatePreset("any");
     setDateAfter("");
     setDateBefore("");
@@ -2748,7 +2798,10 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     placeholdersOn,
   ]);
 
-  const feedItems = useMemo((): FeedItem[] => {
+  /* Everything the other filters leave. Split out so the owner counts can be
+     read off the same set the owner filter is about to narrow, rather than
+     re-running the type, date and search passes to say what each half holds. */
+  const feedPool = useMemo((): FeedItem[] => {
     let pool = allFeedItems;
     // A placeholder has no content, so a type filter or a search can only ever
     // exclude it. Both drop it rather than showing a row that matches nothing.
@@ -2770,6 +2823,20 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       pool = pool.filter(
         (item) => item.kind !== "removed" && matchesSearch(item, search.trim()),
       );
+    return pool;
+  }, [allFeedItems, selectedKinds, datePreset, dateAfter, dateBefore, search]);
+
+  const ownerCounts = useMemo(() => {
+    let mine = 0;
+    for (const item of feedPool) if (itemIsMine(item)) mine += 1;
+    return { mine, others: feedPool.length - mine };
+  }, [feedPool, itemIsMine]);
+
+  const feedItems = useMemo((): FeedItem[] => {
+    const pool =
+      ownerFilter === "any"
+        ? feedPool
+        : feedPool.filter((i) => itemIsMine(i) === (ownerFilter === "mine"));
 
     const sorted = [...pool];
     const getTs = feedTimestamp;
@@ -2804,15 +2871,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         sorted.sort((a, b) => getTs(b) - getTs(a));
     }
     return sorted;
-  }, [
-    allFeedItems,
-    selectedKinds,
-    datePreset,
-    dateAfter,
-    dateBefore,
-    search,
-    sort,
-  ]);
+  }, [feedPool, ownerFilter, itemIsMine, sort]);
 
   // Every key in the feed this account may remove, in the order they are on
   // screen, so shift-click picks the range the user sees.
@@ -2912,6 +2971,9 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     setDateAfter,
     dateBefore,
     setDateBefore,
+    ownerFilter,
+    setOwnerFilter,
+    ownerCounts,
     activeFilterCount,
     clearAll: clearAllFilters,
     filtersOpen,

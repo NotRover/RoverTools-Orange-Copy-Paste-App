@@ -39,21 +39,31 @@
 .cs-filter-card--shell {
   padding: 0;
   width: 304px;
+  /* Never wider than the window it opens in. The widths below are chosen to
+     clear the 640px window minimum, but a user can be at that minimum with a
+     scrollbar or a zoom level in play, and a card hanging off the edge hides
+     the options it was widened to show. */
+  max-width: calc(100vw - 20px);
   overflow: hidden;
 }
 
 /* Two columns, for a screen with enough sections that one column would run
    past the window. Wider beats taller: every option stays on screen. Sized so
-   a column still fits the three Quick switches on one line, and so the card
-   clears the 640px window minimum with room to spare. */
+   a column still fits the four Quick switches on one line, and so the card
+   stays inside the 640px window minimum.
+
+   Four, not three: Pinned, Saved, Mine and From others come to 392px of chips
+   at four-digit counts, and at the old 604px the first column had 305px to
+   give them, so the last one dropped to a line of its own. */
 .cs-filter-card--wide {
-  width: 604px;
+  width: 688px;
 }
 
-/* No type grid to fit, so the card needs less room and the columns can share
-   it evenly. */
+/* No type grid to fit, so the card needs less room. What sets the number is
+   still the Quick row - Pinned, Mine and From others, 302px at four-digit
+   counts - rather than any of the sections below it. */
 .cs-filter-card--compact {
-  width: 540px;
+  width: 620px;
 }
 
 /* Card header: title, live match count, Clear. Fixed, so the card does not
@@ -134,15 +144,24 @@
   min-width: 0;
 }
 
-/* The first column carries the widest content - the three Quick switches on
-   one line, and the two-across type grid - so it gets the larger share. The
-   second holds chips that wrap happily either way. */
+/* The first column carries the widest content - the four Quick switches on one
+   line, and the two-across type grid - so it gets the larger share.
+
+   Both numbers here are measured at four-digit counts, which is what a full
+   history produces and what makes each row as wide as it will ever get. The
+   Quick switches come to 392px. The second column's widest is the share
+   segment at 198px; everything else on that side is chips, which wrap happily.
+
+   392 to 198 is where the ratio comes from, and 392 + 198 + padding is where
+   the card width comes from. The ratio is a little kinder to the second column
+   than that, so the segments keep some slack. */
 .cs-card-col:first-child {
-  flex: 1.18;
+  flex: 1.7;
 }
 
+/* Same reasoning, one switch fewer to fit: 302px against the same 198px. */
 .cs-filter-card--compact .cs-card-col:first-child {
-  flex: 1;
+  flex: 1.35;
 }
 
 /* Column rule, drawn on the second column so a one-column card has none. */
