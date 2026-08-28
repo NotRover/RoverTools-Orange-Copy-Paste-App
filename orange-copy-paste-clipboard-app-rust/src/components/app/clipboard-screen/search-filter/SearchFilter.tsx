@@ -1,5 +1,4 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ArrowDown } from "@phosphor-icons/react";
 import type { ClipboardEntry, DisplayKind, Space } from "../../../../types";
 import { useSticky, useStickySet } from "../../../../hooks/useSticky";
 import {
@@ -20,6 +19,7 @@ import {
   FilterCardShell,
   FilterChip,
   GroupChips,
+  OwnerChips,
   SectionLabel,
   TypeGrid,
   dateWindow,
@@ -28,11 +28,12 @@ import type {
   CloudFilter,
   CountMap,
   DatePreset,
+  OwnerFilter,
   ShareFilter,
 } from "./FilterParts";
 import "./SearchFilter.css";
 
-export type { CloudFilter, ShareFilter, DatePreset };
+export type { CloudFilter, ShareFilter, OwnerFilter, DatePreset };
 
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "text",
@@ -116,7 +117,8 @@ interface OptionCounts {
   spaces: CountMap;
   pinned: number;
   saved: number;
-  received: number;
+  mine: number;
+  others: number;
   inCloud: number;
   localOnly: number;
   shared: number;
@@ -132,7 +134,7 @@ type Dimension =
   | "share"
   | "spaces"
   | "groups"
-  | "received"
+  | "owner"
   | "date";
 
 interface SearchFilterState {
@@ -158,8 +160,8 @@ interface SearchFilterState {
   setShareFilter: React.Dispatch<React.SetStateAction<ShareFilter>>;
   selectedSpaceIds: Set<string>;
   toggleSpaceFilter: (id: string) => void;
-  receivedOnly: boolean;
-  setReceivedOnly: React.Dispatch<React.SetStateAction<boolean>>;
+  ownerFilter: OwnerFilter;
+  setOwnerFilter: React.Dispatch<React.SetStateAction<OwnerFilter>>;
   cloud: CloudFilterContext | null;
   sectionCounts: SectionCounts;
   activeFilterCount: number;
@@ -182,6 +184,7 @@ const FILTER_KEYS = [
   "sc-f-share",
   "sc-f-spaces",
   "sc-f-received",
+  "sc-f-owner",
   "sc-f-kinds",
   "sc-f-pinned",
   "sc-f-date",
@@ -234,7 +237,10 @@ export function useSearchFilter(
     "any",
   );
   const [selectedSpaceIds, setSelectedSpaceIds] = useStickySet("sc-f-spaces");
-  const [receivedOnly, setReceivedOnly] = useSticky("sc-f-received", false);
+  const [ownerFilter, setOwnerFilter] = useSticky<OwnerFilter>(
+    "sc-f-owner",
+    "any",
+  );
   const [selectedKinds, setSelectedKinds] = useStickySet<DisplayKind>(
     "sc-f-kinds",
   );
@@ -286,7 +292,10 @@ export function useSearchFilter(
 
   const sectionCounts = useMemo<SectionCounts>(
     () => ({
-      quick: (pinnedOnly ? 1 : 0) + (savedOnly ? 1 : 0) + (receivedOnly ? 1 : 0),
+      quick:
+        (pinnedOnly ? 1 : 0) +
+        (savedOnly ? 1 : 0) +
+        (ownerFilter !== "any" ? 1 : 0),
       kinds: selectedKinds.size,
       cloud: cloud?.signedIn
         ? (cloudFilter !== "any" ? 1 : 0) +
@@ -299,7 +308,7 @@ export function useSearchFilter(
     [
       pinnedOnly,
       savedOnly,
-      receivedOnly,
+      ownerFilter,
       selectedKinds,
       cloud?.signedIn,
       cloudFilter,
@@ -325,7 +334,7 @@ export function useSearchFilter(
     setCloudFilter("any");
     setShareFilter("any");
     setSelectedSpaceIds(new Set());
-    setReceivedOnly(false);
+    setOwnerFilter("any");
   }, []);
 
   /** One predicate for the list and for every count. `skip` leaves a single
@@ -361,8 +370,12 @@ export function useSearchFilter(
           const ids = cloud.shares[key] ?? [];
           if (!ids.some((id) => selectedSpaceIds.has(id))) return false;
         }
-        if (skip !== "received" && receivedOnly && !cloud.remoteKeys.has(key))
-          return false;
+        if (skip !== "owner" && ownerFilter !== "any") {
+          // Present in `remoteKeys` means it arrived from someone else, so
+          // "mine" is its absence rather than a fact recorded on the entry.
+          const mine = !cloud.remoteKeys.has(key);
+          if (mine !== (ownerFilter === "mine")) return false;
+        }
       }
       if (searchQuery.trim() && !matchesQuery(e, searchQuery.trim()))
         return false;
@@ -380,7 +393,7 @@ export function useSearchFilter(
       cloudFilter,
       shareFilter,
       selectedSpaceIds,
-      receivedOnly,
+      ownerFilter,
       searchQuery,
     ],
   );
@@ -426,8 +439,11 @@ export function useSearchFilter(
       pinned: pool("pinned").filter((e) => e.pinned).length,
       saved: pool("saved").filter((e) => e.groups?.includes(SAVED_GROUP))
         .length,
-      received: cloud
-        ? pool("received").filter((e) => cloud.remoteKeys.has(key(e))).length
+      mine: cloud
+        ? pool("owner").filter((e) => !cloud.remoteKeys.has(key(e))).length
+        : 0,
+      others: cloud
+        ? pool("owner").filter((e) => cloud.remoteKeys.has(key(e))).length
         : 0,
       inCloud: cloudPool.filter((e) => !!cloud?.syncStates[key(e)]).length,
       localOnly: cloudPool.filter((e) => !cloud?.syncStates[key(e)]).length,
@@ -444,7 +460,8 @@ export function useSearchFilter(
     const out: string[] = [];
     if (pinnedOnly) out.push("Pinned");
     if (savedOnly) out.push("Saved");
-    if (receivedOnly) out.push("From others");
+    if (ownerFilter === "mine") out.push("Mine");
+    else if (ownerFilter === "others") out.push("From others");
     for (const k of ALL_DISPLAY_KINDS) {
       if (selectedKinds.has(k)) out.push(TYPE_LABELS[k]);
     }
@@ -467,7 +484,7 @@ export function useSearchFilter(
   }, [
     pinnedOnly,
     savedOnly,
-    receivedOnly,
+    ownerFilter,
     selectedKinds,
     cloud,
     cloudFilter,
@@ -502,8 +519,8 @@ export function useSearchFilter(
     setShareFilter,
     selectedSpaceIds,
     toggleSpaceFilter,
-    receivedOnly,
-    setReceivedOnly,
+    ownerFilter,
+    setOwnerFilter,
     cloud,
     sectionCounts,
     activeFilterCount,
@@ -640,12 +657,13 @@ export const FilterDropdown: React.FC<FilterDropdownProps> = ({
                 icon={<SaveStarIcon size={9} filled />}
               />
               {sf.cloud?.signedIn && (
-                <FilterChip
-                  label="From others"
-                  on={sf.receivedOnly}
-                  onToggle={() => sf.setReceivedOnly((v) => !v)}
-                  count={sf.optionCounts.received}
-                  icon={<ArrowDown size={10} weight="bold" />}
+                <OwnerChips
+                  value={sf.ownerFilter}
+                  set={sf.setOwnerFilter}
+                  counts={{
+                    mine: sf.optionCounts.mine,
+                    others: sf.optionCounts.others,
+                  }}
                 />
               )}
             </ChipRow>

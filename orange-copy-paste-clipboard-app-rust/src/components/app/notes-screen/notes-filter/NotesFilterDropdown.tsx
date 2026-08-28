@@ -1,5 +1,4 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ArrowDown } from "@phosphor-icons/react";
 import type { Note, Space } from "../../../../types";
 import { useSticky, useStickySet } from "../../../../hooks/useSticky";
 import { FilterIcon } from "../../../icons";
@@ -12,6 +11,7 @@ import {
   FilterCardShell,
   FilterChip,
   GroupChips,
+  OwnerChips,
   SectionLabel,
   dateWindow,
 } from "../../clipboard-screen/search-filter/FilterParts";
@@ -19,6 +19,7 @@ import type {
   CloudFilter,
   CountMap,
   DatePreset,
+  OwnerFilter,
   ShareFilter,
 } from "../../clipboard-screen/search-filter/FilterParts";
 import { stripHtml } from "../notes-utils";
@@ -41,7 +42,7 @@ interface NotesCloudContext {
 }
 
 type Dimension =
-  "pinned" | "cloud" | "share" | "spaces" | "groups" | "received" | "date";
+  "pinned" | "cloud" | "share" | "spaces" | "groups" | "owner" | "date";
 
 interface NotesFilterState {
   pinnedOnly: boolean;
@@ -54,8 +55,8 @@ interface NotesFilterState {
   setShareFilter: React.Dispatch<React.SetStateAction<ShareFilter>>;
   selectedSpaceIds: Set<string>;
   toggleSpaceFilter: (id: string) => void;
-  receivedOnly: boolean;
-  setReceivedOnly: React.Dispatch<React.SetStateAction<boolean>>;
+  ownerFilter: OwnerFilter;
+  setOwnerFilter: React.Dispatch<React.SetStateAction<OwnerFilter>>;
   datePreset: DatePreset;
   setDatePreset: (p: DatePreset) => void;
   dateAfter: string;
@@ -69,7 +70,8 @@ interface NotesFilterState {
     groups: CountMap;
     spaces: CountMap;
     pinned: number;
-    received: number;
+    mine: number;
+    others: number;
     inCloud: number;
     localOnly: number;
     shared: number;
@@ -103,7 +105,10 @@ export function useNotesFilter(
     "any",
   );
   const [selectedSpaceIds, setSelectedSpaceIds] = useStickySet("ns-f-spaces");
-  const [receivedOnly, setReceivedOnly] = useSticky("ns-f-received", false);
+  const [ownerFilter, setOwnerFilter] = useSticky<OwnerFilter>(
+    "ns-f-owner",
+    "any",
+  );
   const [datePreset, setDatePreset] = useSticky<DatePreset>("ns-f-date", "any");
   const [dateAfter, setDateAfter] = useSticky("ns-f-date-after", "");
   const [dateBefore, setDateBefore] = useSticky("ns-f-date-before", "");
@@ -130,7 +135,7 @@ export function useNotesFilter(
 
   const sectionCounts = useMemo(
     () => ({
-      quick: (pinnedOnly ? 1 : 0) + (receivedOnly ? 1 : 0),
+      quick: (pinnedOnly ? 1 : 0) + (ownerFilter !== "any" ? 1 : 0),
       cloud: cloud?.signedIn
         ? (cloudFilter !== "any" ? 1 : 0) +
           (shareFilter !== "any" ? 1 : 0) +
@@ -141,7 +146,7 @@ export function useNotesFilter(
     }),
     [
       pinnedOnly,
-      receivedOnly,
+      ownerFilter,
       cloud?.signedIn,
       cloudFilter,
       shareFilter,
@@ -162,7 +167,7 @@ export function useNotesFilter(
     setCloudFilter("any");
     setShareFilter("any");
     setSelectedSpaceIds(new Set());
-    setReceivedOnly(false);
+    setOwnerFilter("any");
     setDatePreset("any");
     setDateAfter("");
     setDateBefore("");
@@ -191,8 +196,12 @@ export function useNotesFilter(
           const ids = cloud.shares[key] ?? [];
           if (!ids.some((id) => selectedSpaceIds.has(id))) return false;
         }
-        if (skip !== "received" && receivedOnly && !cloud.remoteKeys.has(key))
-          return false;
+        if (skip !== "owner" && ownerFilter !== "any") {
+          // A key in `remoteKeys` arrived from someone else, so "mine" is its
+          // absence rather than a field on the note.
+          const mine = !cloud.remoteKeys.has(key);
+          if (mine !== (ownerFilter === "mine")) return false;
+        }
       }
       const q = search.trim().toLowerCase();
       if (q) {
@@ -214,7 +223,7 @@ export function useNotesFilter(
       cloudFilter,
       shareFilter,
       selectedSpaceIds,
-      receivedOnly,
+      ownerFilter,
       search,
     ],
   );
@@ -251,8 +260,11 @@ export function useNotesFilter(
         cloud ? (cloud.shares[key(n)] ?? []) : [],
       ),
       pinned: pool("pinned").filter((n) => n.pinned).length,
-      received: cloud
-        ? pool("received").filter((n) => cloud.remoteKeys.has(key(n))).length
+      mine: cloud
+        ? pool("owner").filter((n) => !cloud.remoteKeys.has(key(n))).length
+        : 0,
+      others: cloud
+        ? pool("owner").filter((n) => cloud.remoteKeys.has(key(n))).length
         : 0,
       inCloud: cloudPool.filter((n) => !!cloud?.syncStates[key(n)]).length,
       localOnly: cloudPool.filter((n) => !cloud?.syncStates[key(n)]).length,
@@ -267,7 +279,8 @@ export function useNotesFilter(
   const filterNames = useMemo(() => {
     const out: string[] = [];
     if (pinnedOnly) out.push("Pinned");
-    if (receivedOnly) out.push("From others");
+    if (ownerFilter === "mine") out.push("Mine");
+    else if (ownerFilter === "others") out.push("From others");
     if (cloud?.signedIn) {
       if (cloudFilter !== "any") {
         out.push(cloudFilter === "in" ? "In cloud" : "Local only");
@@ -286,7 +299,7 @@ export function useNotesFilter(
     return out;
   }, [
     pinnedOnly,
-    receivedOnly,
+    ownerFilter,
     cloud,
     cloudFilter,
     shareFilter,
@@ -306,8 +319,8 @@ export function useNotesFilter(
     setShareFilter,
     selectedSpaceIds,
     toggleSpaceFilter,
-    receivedOnly,
-    setReceivedOnly,
+    ownerFilter,
+    setOwnerFilter,
     datePreset,
     setDatePreset,
     dateAfter,
@@ -416,12 +429,13 @@ const NotesFilterDropdown: React.FC<NotesFilterDropdownProps> = ({
                 icon={PinIconElement}
               />
               {nf.cloud?.signedIn && (
-                <FilterChip
-                  label="From others"
-                  on={nf.receivedOnly}
-                  onToggle={() => nf.setReceivedOnly((v) => !v)}
-                  count={nf.optionCounts.received}
-                  icon={<ArrowDown size={10} weight="bold" />}
+                <OwnerChips
+                  value={nf.ownerFilter}
+                  set={nf.setOwnerFilter}
+                  counts={{
+                    mine: nf.optionCounts.mine,
+                    others: nf.optionCounts.others,
+                  }}
                 />
               )}
             </ChipRow>
