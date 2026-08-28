@@ -531,14 +531,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* `min-width: 0` is what makes the ellipsis below reachable at all: a flex
-   item's automatic minimum size is its own content, so without it this span
-   never shrinks and the truncation is dead code - with enough filters on, the
-   names push the strip wider instead of trimming themselves. */
 .cs-filter-strip-names {
   color: var(--text-secondary);
   font-weight: 600;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
