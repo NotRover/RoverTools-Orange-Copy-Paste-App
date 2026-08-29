@@ -481,6 +481,10 @@ fn note_token_at_risk(headline: &str, detail: impl std::fmt::Display) {
 
 pub struct SyncClient {
     pub server_url: String,
+    /// Where a password-reset mail lands, and so the `redirect_to` Supabase is
+    /// asked for. Held apart from `server_url` because it is deliberately not on
+    /// the API host - see `config::DEFAULT_RESET_PAGE_URL`.
+    reset_page_url: String,
     app: tauri::AppHandle,
     app_data: PathBuf,
 
@@ -734,6 +738,7 @@ impl SyncClient {
 
         Ok(Self {
             server_url: config.server_url,
+            reset_page_url: config.reset_page_url,
             app,
             app_data,
             supabase,
@@ -960,9 +965,12 @@ impl SyncClient {
         // user cannot use is worse than an error here.
         let (verifier, challenge) = crypto::pkce_pair();
         crypto::store_reset_verifier(&verifier).await?;
-        let redirect_to = format!("{}/reset", self.server_url.trim_end_matches('/'));
+        // Used verbatim. Supabase only honours a `redirect_to` that matches an
+        // entry in the project's Redirect URLs allow-list exactly; anything else
+        // is dropped in silence and the mail points at the Site URL instead,
+        // which is how a reset breaks without a single error anywhere.
         self.supabase
-            .recover(&email, &redirect_to, &challenge)
+            .recover(&email, &self.reset_page_url, &challenge)
             .await
     }
 

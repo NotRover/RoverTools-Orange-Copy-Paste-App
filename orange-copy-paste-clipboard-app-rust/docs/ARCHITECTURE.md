@@ -750,10 +750,10 @@ so a reset that mints a new one would leave everything already synced unreadable
 Both flows therefore re-wrap the **same** UMK.
 
 The emailed link is PKCE, not the implicit flow: `recover()` sends
-`redirect_to = {server_url}/reset` plus an S256 challenge, and the verifier goes
+`redirect_to = reset_page_url` plus an S256 challenge, and the verifier goes
 into the **OS keychain** - install-scoped, because a reset is requested while
 signed out, and the two halves are usually separated by an app restart. The link
-lands on the backend page, which hands the code to `orange://reset?code=`. The
+lands on a static page, which hands the code to `orange://reset?code=`. The
 code alone is useless: redeeming it needs the verifier, which never left the
 machine that asked.
 
@@ -823,10 +823,16 @@ already signed in - nothing has to be recovered, so nothing can be lost. It is
 what the account screen offers, and why the reset link is the fallback rather than
 the route.
 
-**Requires one dashboard entry:** `{public_base_url}/reset` must be in Supabase
-Authentication -> URL Configuration -> Redirect URLs. Without it GoTrue ignores
-the redirect and falls back to the Site URL, which is how this used to mail a
-localhost link.
+**Requires a dashboard entry:** `reset_page_url` must be in Supabase
+Authentication -> URL Configuration -> Redirect URLs, character for character.
+Without it GoTrue ignores the redirect and falls back to the Site URL, which is
+how this used to mail a localhost link, and how it broke again when the backend
+changed hostname.
+
+An older release sends its own compiled-in value, and no later release can change
+that, so every value ever shipped has to stay listed until those installs have
+aged out. Releases up to 0.2.2 send `{server_url}/reset`, which the backend now
+answers with a 302 to the static page.
 
 #### Overview
 
@@ -1158,8 +1164,9 @@ Sync adds these keys to the existing `settings.json` store:
 | `sync_server_url`   | string | `DEFAULT_SERVER_URL`                | Backend API base URL; set to override the compiled default (self-hosting)   |
 | `supabase_url`      | string | `DEFAULT_SUPABASE_URL`              | Supabase project URL — used for auth (GoTrue)                              |
 | `supabase_anon_key` | string | `DEFAULT_SUPABASE_ANON_KEY`         | Supabase anon (publishable) key — client-side auth only                    |
+| `reset_page_url`    | string | `DEFAULT_RESET_PAGE_URL`            | Where a password-reset mail lands; must match a Supabase Redirect URLs entry exactly |
 
-The three `DEFAULT_*` values are compiled in from `src-tauri/src/sync/config.rs` — that file is
+The four `DEFAULT_*` values are compiled in from `src-tauri/src/sync/config.rs` — that file is
 the single source for which deployment a build ships against. A key present and non-empty in
 `settings.json` wins over the constant; absent or empty falls back to it.
 | `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` — how personal cloud-sync entries move on this device |
