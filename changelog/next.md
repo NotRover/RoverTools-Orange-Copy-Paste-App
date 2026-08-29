@@ -24,10 +24,15 @@
   set fails a real release on purpose.
 -->
 
-### New
-
-### Improved
+A fix for password reset, which stopped working after the sync service changed
+addresses.
 
 ### Fixed
 
+- The link in your password reset email opens the app again. Requesting a new
+  password from the sign-in screen now works from start to finish.
+
 ### Internal
+
+- Reset landing page moved to the public site, with the API host forwarding to it.
+  Client, backend and website docs updated to match.
