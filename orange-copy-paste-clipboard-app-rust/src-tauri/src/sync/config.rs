@@ -6,6 +6,7 @@
 //!   - `sync_server_url`      our FastAPI backend base URL
 //!   - `supabase_url`         Supabase project URL (GoTrue auth lives here)
 //!   - `supabase_anon_key`    Supabase anon/public API key
+//!   - `reset_page_url`       where a password-reset mail lands
 //!
 //! Endpoints come from the `DEFAULT_*` constants below, optionally overridden
 //! per-install by `settings.json`.
@@ -20,6 +21,7 @@ const KEY_ENABLED: &str = "sync_enabled";
 const KEY_SERVER_URL: &str = "sync_server_url";
 const KEY_SUPABASE_URL: &str = "supabase_url";
 const KEY_SUPABASE_ANON_KEY: &str = "supabase_anon_key";
+const KEY_RESET_PAGE_URL: &str = "reset_page_url";
 
 // ── Deployment endpoints ──────────────────────────────────────────────
 //
@@ -39,6 +41,18 @@ const DEFAULT_SERVER_URL: &str = "https://rovertools-temp.ctx.cl";
 const DEFAULT_SUPABASE_URL: &str = "https://dmtdusebizngdjtuhzzm.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_ZNs6Q9HfOdUBe8bEBEdPEg_z__qKE8e";
 
+// Where the password-reset mail lands, and so also the `redirect_to` Supabase is
+// asked for. The whole URL, not a base: it is the one thing this value is for,
+// and building a path onto it here would only hide a mismatch with the
+// allow-list entry it has to equal.
+//
+// The public site rather than the API: this page needs nothing from a server -
+// it reads a code out of the query and hands it to the app - and hosting it
+// away from the API means a reset no longer breaks when the API changes
+// hostname. That is not hypothetical; it is what happened when the backend left
+// Render and the new `/reset` was never added to Supabase's allow-list.
+const DEFAULT_RESET_PAGE_URL: &str = "https://orange-copy-paste-app.pages.dev/reset";
+
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
     pub enabled: bool,
@@ -55,6 +69,7 @@ pub struct SyncConfig {
     pub server_url: String,
     pub supabase_url: String,
     pub supabase_anon_key: String,
+    pub reset_page_url: String,
 }
 
 impl Default for SyncConfig {
@@ -65,6 +80,7 @@ impl Default for SyncConfig {
             server_url: DEFAULT_SERVER_URL.to_string(),
             supabase_url: DEFAULT_SUPABASE_URL.to_string(),
             supabase_anon_key: DEFAULT_SUPABASE_ANON_KEY.to_string(),
+            reset_page_url: DEFAULT_RESET_PAGE_URL.to_string(),
         }
     }
 }
@@ -121,6 +137,7 @@ impl SyncConfig {
             server_url: str_or(KEY_SERVER_URL, &defaults.server_url),
             supabase_url: str_or(KEY_SUPABASE_URL, &defaults.supabase_url),
             supabase_anon_key: str_or(KEY_SUPABASE_ANON_KEY, &defaults.supabase_anon_key),
+            reset_page_url: str_or(KEY_RESET_PAGE_URL, &defaults.reset_page_url),
         }
     }
 
