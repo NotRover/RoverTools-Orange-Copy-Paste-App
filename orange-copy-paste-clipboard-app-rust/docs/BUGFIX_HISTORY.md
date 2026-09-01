@@ -922,3 +922,70 @@ that may not have arrived, and every consumer inherited the mistake with no way
 to check it. An id can be compared against a known one at the point of use, and a
 comparison that cannot be made is visible as such rather than defaulting to a
 wrong answer about a real person.
+
+## #24 - An image copied offline was dropped, and never synced even after reconnect
+
+**Symptom.** With no connection, the notification centre showed "N items were not
+sent - Image upload failed: could not reach the server". When the connection came
+back, those images still never synced. Text copied in the same window did sync on
+reconnect; only images were lost.
+
+**Cause.** An image entry stores its bytes in a blob, so its push uploads the blob
+*first* and then sends an entry that points at it. `spawn_push_clipboard_entry`
+ran the blob upload before building the push, and on any error at all recorded a
+skip and returned. `upload_image_blob` flattened its error to a plain string, so
+"the host could not be reached" (a transport failure, no HTTP status, transient by
+definition) was indistinguishable from "the server refused this body" (a 413 or a
+402, permanent). Both were reported to the user as "not sent" and dropped.
+
+Text never hit this. A text push has no blob, so it reaches `push_entry_task`,
+which on a transient failure queues a ready-to-send `PendingOp::Push` that the
+next flush retries. An image could not use that queue: the blob was never
+uploaded, so there was no `blob_key` to serialize, so there was nothing to park.
+
+**Fix.** `upload_image_blob` now returns whether the failure was retryable
+(`request-upload`'s `ApiError::is_transient`; the transfer and confirm stages run
+only once connected, so a drop there is retryable too). A retryable failure no
+longer records a skip - it queues a new `PendingOp::PushLocal { client_id }`, a
+queue op that carries only the id. On the next flush that op re-reads the local
+entry and re-runs the whole push, blob and all; if the server is still unreachable
+its own image branch queues a fresh `PushLocal`, so a connection that never comes
+back cannot drop the entry. A genuine refusal (over 5 MB, or the account full) is
+still a recorded skip, because retrying it forever would tell nobody. The entry
+carries the amber "waiting to upload" badge the whole time, the same as a queued
+text push.
+
+**Invariant to keep**: **a failure that is a wait must not be reported as a
+refusal.** The two are the same `Err` at the call site and only the status tells
+them apart; collapsing them to a string threw away the one bit that decided
+whether the user's data was recoverable.
+
+## #25 - Realtime sync sat idle in the tray until the window was reopened
+
+**Symptom.** On Realtime, an item copied on another device did not appear until
+the user opened the app from the tray; likewise a local push made while briefly
+offline did not go up on its own. Bringing the window to the front fixed it every
+time, which made it look like the app only synced when watched.
+
+**Cause.** The only thing that flushed the pending queue and pulled the delta in
+the background was `sync_catch_up`, wired to the window **refocus** event. While
+minimized to the tray the window never refocuses, so that path never ran. The two
+mechanisms that should have covered it did not: the WebSocket reconnect handler
+reconciled spaces on connect but never flushed or pulled, and the 5-minute
+background loop fired only in Passive mode (`due = mode == Passive`). So a Realtime
+device that lost its socket - laptop sleep, a NAT recycle, a network blip - came
+back on the socket but never caught up on anything sent during the gap, and a push
+that queued on a transient failure sat until the user happened to focus the window.
+
+**Fix.** Two triggers, matching the two gaps. The reconnect handler now runs a
+`flush_and_pull` after its spaces reconcile whenever the mode is not Manual - the
+socket only carries what arrives after it comes up, so this is what recovers the
+gap. And the background loop runs in every non-manual mode, not just Passive: a
+delta pull from `last_server_ts` is one request that returns nothing when the
+socket already kept up, but it flushes a queue no socket event happened to touch.
+Manual mode is untouched - it still goes up only on Sync now.
+
+**Invariant to keep**: **a mode that syncs on its own must not depend on the window
+being visible.** Refocus is a fine *extra* nudge, but making it the only
+background trigger meant the product quietly stopped working exactly when it was
+doing its job - running in the tray.

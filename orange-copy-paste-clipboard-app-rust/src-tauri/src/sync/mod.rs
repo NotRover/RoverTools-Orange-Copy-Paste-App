@@ -2090,9 +2090,35 @@ impl SyncClient {
                     .await
                 {
                     Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
-                    Err(e) => {
-                        eprintln!("[sync] image blob upload failed: {e}");
-                        record_skip(&ctx, &entry.id, &skip_label, e);
+                    Err(fail) if fail.retryable => {
+                        // The server could not be reached - the blob never went
+                        // up, so there is nothing to park in the queue as a
+                        // ready-to-send push the way a text entry would. Queue a
+                        // re-drive of the whole entry instead, and light the
+                        // amber "waiting to upload" badge. No skip is recorded:
+                        // this is a wait, not a refusal, and telling the user it
+                        // was "not sent" and dropping it is the bug being fixed.
+                        eprintln!(
+                            "[sync] image blob upload deferred (retryable): {}",
+                            fail.message
+                        );
+                        ctx.queue.lock().push(PendingOp::PushLocal {
+                            client_id: entry.id.clone(),
+                            entry_type: "clipboard".into(),
+                        });
+                        ctx.status.lock().pending_count = ctx.queue.lock().len();
+                        let _ = ctx.app.emit(
+                            "sync:entry-queued",
+                            serde_json::json!({
+                                "client_id": entry.id,
+                                "entry_type": "clipboard",
+                            }),
+                        );
+                        return;
+                    }
+                    Err(fail) => {
+                        eprintln!("[sync] image blob upload failed: {}", fail.message);
+                        record_skip(&ctx, &entry.id, &skip_label, fail.message);
                         return;
                     }
                 }
@@ -2679,9 +2705,10 @@ impl SyncClient {
 
     /// Flush the pending queue and do a delta pull.  Called by `sync_now`.
     ///
-    /// Serialised, because five separate things trigger it - a manual Sync now,
-    /// login, a socket event, the passive tick, and a window refocus - and two
-    /// at once share one starting cursor. They then walk the same pages, race
+    /// Serialised, because several things trigger it - a manual Sync now, login,
+    /// a socket reconnect, the background tick (every non-manual mode), and a
+    /// window refocus - and two at once share one starting cursor. They then
+    /// walk the same pages, race
     /// each other writing `last_server_ts`, and re-download the same blobs off a
     /// metered quota. Queuing the second caller costs it the first one's
     /// duration and gives it the newer cursor, which is the answer it wanted.
@@ -2777,6 +2804,44 @@ impl SyncClient {
                                     unsent.push(PendingOp::Delete { client_id, entry_type });
                                 }
                             }
+                        }
+                    }
+                }
+                PendingOp::PushLocal { client_id, entry_type } => {
+                    let map_key = format!("{entry_type}:{client_id}");
+                    // Already on the server - a later attempt beat this one, or a
+                    // pull filled it in. Drop the op by not requeuing it.
+                    if self.id_map.lock().get_server_id(&map_key).is_some() {
+                        continue;
+                    }
+                    let Some(umk) = self.umk_clone() else {
+                        // No key in memory yet; keep it for a flush that has one.
+                        unsent.push(PendingOp::PushLocal { client_id, entry_type });
+                        continue;
+                    };
+                    // Re-drive the whole push (blob upload included) through the
+                    // normal path. UserInitiated because a queued op flushes
+                    // regardless of mode, the same as Push/Update/Delete on a
+                    // Sync now. If the server is still unreachable, that path's
+                    // own image branch queues a fresh PushLocal, so a connection
+                    // that never comes back cannot lose the entry - and if the
+                    // entry was deleted locally meanwhile, neither store finds
+                    // it and the op simply drops.
+                    let state = self.app.state::<crate::state::AppState>();
+                    if entry_type == "note" {
+                        let note = state.notes.lock().find(&client_id).cloned();
+                        if let Some(note) = note {
+                            self.spawn_push_note(note, umk, false, None, PushOrigin::UserInitiated);
+                        }
+                    } else {
+                        let entry = state.history.lock().find(&client_id).cloned();
+                        if let Some(entry) = entry {
+                            self.spawn_push_clipboard_entry(
+                                entry,
+                                umk,
+                                false,
+                                PushOrigin::UserInitiated,
+                            );
                         }
                     }
                 }
@@ -3712,21 +3777,30 @@ impl SyncClient {
         );
     }
 
-    /// Start the passive-mode pull loop: every 5 minutes, if the mode is
-    /// Passive and a session exists, run a flush + delta pull.  Holds only a
-    /// `Weak` so the loop cannot keep a logged-out client (and its runtime)
-    /// alive; it ends when the client is dropped.
-    pub fn spawn_passive_pull_loop(self: &Arc<Self>) {
+    /// Start the background pull loop: every 5 minutes, in any mode that syncs
+    /// on its own, run a flush + delta pull. Holds only a `Weak` so the loop
+    /// cannot keep a logged-out client
+    /// (and its runtime) alive; it ends when the client is dropped.
+    ///
+    /// Not just passive mode. Realtime leans on the socket for both halves, but
+    /// the socket only delivers what arrives while it is up: a push that queued
+    /// on a transient failure, or an entry another device sent during a gap the
+    /// reconnect handler did not cover, would otherwise wait for the user to
+    /// refocus the window. A delta pull from `last_server_ts` is one request and
+    /// returns nothing when the socket already kept up, so the cost of running
+    /// it in realtime too is a single no-op request per interval. Manual is the
+    /// only mode held back - it goes up only on an explicit Sync now.
+    pub fn spawn_background_pull_loop(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
         self.handle.spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(PASSIVE_PULL_INTERVAL_SECS)).await;
                 let Some(sync) = weak.upgrade() else { break };
-                let due = *sync.sync_mode.lock() == SyncMode::Passive
+                let due = *sync.sync_mode.lock() != SyncMode::Manual
                     && sync.user.lock().is_some();
                 if due {
                     if let Err(e) = sync.flush_and_pull().await {
-                        eprintln!("[sync] passive pull: {e}");
+                        eprintln!("[sync] background pull: {e}");
                     }
                 }
             }
@@ -5022,33 +5096,55 @@ fn refuses_inline_size(ctx: &PushCtx, client_id: &str, label: &str, content: &st
 /// Encrypt an image entry's bytes and upload them as a blob.  Returns
 /// `(blob_key, ciphertext_size, descriptor_json)` — the descriptor (`{"mime":…}`)
 /// is what gets stored inline as the entry's `encrypted_content`.
+/// Why an image blob did not go up, and whether trying again could help.
+///
+/// The message is what the user reads; `retryable` is what the caller acts on.
+/// The distinction is the whole point: a server that could not be reached is a
+/// wait, not a refusal, and reporting it as "not sent" - then dropping the
+/// entry - is how an image copied offline vanished for good. A body the server
+/// (or a local ceiling) has judged too big or over quota will fail the same way
+/// every time, so that one is a real skip.
+struct BlobUploadFailed {
+    message: String,
+    retryable: bool,
+}
+
+impl BlobUploadFailed {
+    fn permanent(message: String) -> Self {
+        Self { message, retryable: false }
+    }
+}
+
 async fn upload_image_blob(
     http: &SyncHttpClient,
     enc_key: &[u8; 32],
     client_id: &str,
     content: &str,
     budget: &BlobBudget,
-) -> Result<(String, u64, String), String> {
-    let (bytes, mime) = read_image_bytes(content)?;
-    let ciphertext = crypto::encrypt_bytes(enc_key, &bytes, client_id)?;
+) -> Result<(String, u64, String), BlobUploadFailed> {
+    // A local read or encrypt failure is about this file, not the network - it
+    // will not fix itself on a retry.
+    let (bytes, mime) = read_image_bytes(content).map_err(BlobUploadFailed::permanent)?;
+    let ciphertext =
+        crypto::encrypt_bytes(enc_key, &bytes, client_id).map_err(BlobUploadFailed::permanent)?;
     let size = ciphertext.len() as u64;
     // The server enforces this too, but finding out from a 413 means the user
     // reads a raw error for something we could have measured before sending.
     if size > BLOB_SIZE_LIMIT {
-        return Err(format!(
+        return Err(BlobUploadFailed::permanent(format!(
             "{} is over the 5 MB limit for synced images",
             format_bytes(size)
-        ));
+        )));
     }
     // Refuse locally when the account is known to be out of room, so a bulk
     // upload asks the server once rather than once per image.
     if let Some(remaining) = *budget.lock() {
         if size > remaining {
-            return Err(format!(
+            return Err(BlobUploadFailed::permanent(format!(
                 "Cloud storage is full - {} free, this image needs {}",
                 format_bytes(remaining),
                 format_bytes(size)
-            ));
+            )));
         }
     }
     let checksum = crypto::sha256_hex(&ciphertext);
@@ -5062,19 +5158,36 @@ async fn upload_image_blob(
         .map_err(|e| {
             if e.status == Some(402) {
                 // The server is the authority; latch it so the rest of the
-                // batch stops asking.
+                // batch stops asking. Out of room is not a wait: it stays until
+                // the user frees space, so it is a skip, not a retry.
                 *budget.lock() = Some(0);
-                "Cloud storage is full - remove some synced images to make room".to_string()
+                BlobUploadFailed::permanent(
+                    "Cloud storage is full - remove some synced images to make room".to_string(),
+                )
             } else {
-                format!("Image upload failed: {e}")
+                // A transport failure (no host, no route) carries no status and
+                // reads as transient - that is the offline case this recovers.
+                BlobUploadFailed {
+                    message: format!("Image upload failed: {e}"),
+                    retryable: e.is_transient(),
+                }
             }
         })?;
+    // The transfer and confirm run only once the request succeeded, so reaching
+    // them means we had a connection that then dropped mid-upload: worth
+    // another try rather than a "not sent".
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, &mime)
         .await
-        .map_err(|e| format!("Image upload failed: {e}"))?;
+        .map_err(|e| BlobUploadFailed {
+            message: format!("Image upload failed: {e}"),
+            retryable: true,
+        })?;
     http.confirm_blob_upload(&up.blob_key)
         .await
-        .map_err(|e| format!("Image upload failed: {e}"))?;
+        .map_err(|e| BlobUploadFailed {
+            message: format!("Image upload failed: {e}"),
+            retryable: true,
+        })?;
     if let Some(remaining) = budget.lock().as_mut() {
         *remaining = remaining.saturating_sub(size);
     }

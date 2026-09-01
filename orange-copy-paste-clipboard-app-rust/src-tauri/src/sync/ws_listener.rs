@@ -143,9 +143,23 @@ impl WsListener {
         // - including the membership change that tells an owner to hand a new
         // member their Space Key. Reconcile once on connect so a reconnect
         // catches up instead of waiting for the next event.
+        //
+        // The socket only carries entries pushed *after* it comes up, so a
+        // delta pull + queue flush here is what recovers everything missed
+        // during the gap: entries other devices pushed while this one was
+        // offline, and this device's own pushes that queued while it could not
+        // reach the server. Without it a realtime device that dropped its
+        // connection - laptop sleep, a network blip, minimized to the tray -
+        // stayed silent until the user brought the window back and the refocus
+        // handler ran. Manual mode is left alone: it flushes only on Sync now.
         if let Some(sync) = self.sync_client() {
             tokio::runtime::Handle::current().spawn(async move {
                 sync.reconcile_spaces().await;
+                if sync.sync_mode() != crate::sync::types::SyncMode::Manual {
+                    if let Err(e) = sync.flush_and_pull().await {
+                        eprintln!("[sync:ws] catch-up on reconnect failed: {e}");
+                    }
+                }
             });
         }
 

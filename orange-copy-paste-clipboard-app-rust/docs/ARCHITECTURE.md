@@ -919,13 +919,23 @@ Connection drop → automatic reconnect after 5s backoff, then exponential up to
 
 ```jsonc
 [
-  { "op": "push",   "entry": { ...encrypted_entry } },
-  { "op": "delete", "client_id": "42", "entry_type": "clipboard" },
-  { "op": "update", "entry": { ...encrypted_entry } }
+  { "op": "push",       "entry": { ...encrypted_entry } },
+  { "op": "delete",     "client_id": "42", "entry_type": "clipboard" },
+  { "op": "update",     "entry": { ...encrypted_entry } },
+  { "op": "push_local", "client_id": "7b1", "entry_type": "clipboard" }
 ]
 ```
 
 On reconnect, the queue is flushed in order before pulling the delta. This ensures local-device ordering is preserved in the LWW (last-write-wins) conflict resolution.
+
+`push`/`update` carry the finished ciphertext, ready to POST. `push_local` carries
+only an id: it is for the one push that cannot be pre-encrypted and parked — an
+image whose blob upload could not reach the server. The blob has to go up before
+the entry can, so there is nothing to serialize while offline; the flush re-reads
+the local entry and re-runs the whole push (blob included). Without it an image
+copied offline was reported "not sent" and dropped, so it never synced even once
+the connection came back. Only a *retryable* blob failure queues one — a genuine
+refusal (over the 5 MB limit, or the account out of room) is still a recorded skip.
 
 A flush moves its ops through `sync_pending.inflight.json` rather than clearing
 the queue file and hoping: `drain` writes them there before emptying the queue,
@@ -947,10 +957,20 @@ those would be data loss nobody asked for. Push size is also checked locally bef
 a send (`refuses_inline_size`), so the ordinary oversized case never reaches this
 path or the network at all.
 
-`flush_and_pull` is serialised on its own lock. Five things trigger it — manual
-Sync now, login, a socket event, the passive tick, a window refocus — and two at
-once start from the same cursor, walk the same pages, race each other writing
-`last_server_ts`, and re-download the same blobs off a metered quota.
+`flush_and_pull` is serialised on its own lock. Several things trigger it — manual
+Sync now, login, a socket reconnect, the background tick, a window refocus — and
+two at once start from the same cursor, walk the same pages, race each other
+writing `last_server_ts`, and re-download the same blobs off a metered quota.
+
+Two of those triggers exist so a device that syncs on its own keeps doing so while
+minimized to the tray, where the window never refocuses. On every WebSocket
+reconnect the listener runs a flush + delta pull (not just its spaces reconcile):
+the socket only carries what arrives after it comes up, so this is what recovers a
+push that queued during the gap and an entry another device sent while this one
+was down. And the 5-minute background loop runs in every non-manual mode, not only
+passive — a single delta pull from `last_server_ts` that returns nothing when the
+socket already kept up, but flushes a stuck queue that no socket event happened to
+trigger. Manual mode is the only one held back: it flushes solely on Sync now.
 
 #### `crypto.rs` — Encryption Primitives
 
@@ -1690,7 +1710,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Group colors       | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                           | On color change          | On mount           |
 | Recent searches    | `localStorage.sc-recent-searches`      | JSON string array (max 8)                                        | On search                | On mount           |
 | Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, settings_updated_at }`    | After each pull/settings push | On sync init  |
-| Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update ops (encrypted content) | On mutation when offline | On reconnect       |
+| Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update/push_local ops (encrypted content, except push_local which is an id) | On mutation when offline | On reconnect       |
 | ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", … }` plus `entry_shares`        | After each push          | On sync init       |
 
 **Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.bin` every 2 seconds.
@@ -1792,8 +1812,8 @@ gone because they had drifted — verify anything load-bearing in the source.
 - **Spaces UI** — create, join by code, invite by email, accept/decline, member list with
   presence, remove (rekeys), leave, delete, per-space auto-copy and send filters, driven by
   the `space:*` WebSocket events. Device list with revoke lives in the account screen.
-- **Cloud sync modes** — realtime, passive or manual per device, with a 5-minute pull loop backing
-  passive mode.
+- **Cloud sync modes** — realtime, passive or manual per device, with a 5-minute pull loop and a
+  flush on every socket reconnect backing every non-manual mode.
 
 **Known gaps**
 

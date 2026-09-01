@@ -37,6 +37,18 @@ pub enum PendingOp {
         entry_json: String,
         entry_type: String,
     },
+    /// Re-drive a local entry's push from scratch on the next flush.
+    ///
+    /// Unlike `Push`/`Update`, this carries no ciphertext - only the id of an
+    /// entry still in the local store. It exists for the one push that cannot
+    /// be pre-encrypted and parked: an image whose blob upload could not reach
+    /// the server. The blob has to go up before the entry can, so there is
+    /// nothing to serialize until connectivity is back; the flush re-reads the
+    /// entry and runs the whole push (blob included) again.
+    PushLocal {
+        client_id: String,
+        entry_type: String,
+    },
 }
 
 pub struct PendingQueue {
@@ -124,7 +136,8 @@ impl PendingQueue {
                         })
                         .map(|id| format!("{entry_type}:{id}"))
                 }
-                PendingOp::Delete { client_id, entry_type } => {
+                PendingOp::Delete { client_id, entry_type }
+                | PendingOp::PushLocal { client_id, entry_type } => {
                     Some(format!("{entry_type}:{client_id}"))
                 }
             })
@@ -230,6 +243,24 @@ mod tests {
         assert_eq!(ids(&queue), vec!["old", "arrived-during-flush"]);
         let reloaded = PendingQueue::load(path);
         assert_eq!(ids(&reloaded), vec!["old", "arrived-during-flush"]);
+    }
+
+    /// A `PushLocal` carries only an id, so its pending key comes straight from
+    /// the two fields - and it has to survive a restart, since the image it
+    /// stands for cannot go up until the network is back.
+    #[test]
+    fn a_push_local_op_keys_and_persists() {
+        let path = scratch_queue("push-local");
+        let mut queue = PendingQueue::load(path.clone());
+        queue.push(PendingOp::PushLocal {
+            client_id: "img-1".to_string(),
+            entry_type: "clipboard".to_string(),
+        });
+        assert_eq!(queue.pending_keys(), vec!["clipboard:img-1"]);
+
+        let reloaded = PendingQueue::load(path);
+        assert_eq!(reloaded.pending_keys(), vec!["clipboard:img-1"]);
+        assert_eq!(reloaded.len(), 1);
     }
 
     #[test]
