@@ -2310,18 +2310,27 @@ impl SyncClient {
             );
         }
 
-        // Someone else wrote this one, so removing it here is a local decision
-        // and must stay local. Pushing a tombstone would not update their row
-        // (rows are keyed by owner) — it would insert one of ours carrying the
-        // same space ids, and take the item down for every member. The marker
-        // above is what stops the next pull handing it straight back.
+        // Someone else wrote this one. Deleting it is "remove from my devices"
+        // for a received item: it must reach this account's other devices, but
+        // never the space. So forget our copy and fall through to push a
+        // tombstone under OUR account with NO space ids. Rows are keyed by
+        // (user_id, client_id, entry_type), so this inserts a row we own — it
+        // never touches the author's — and the server fans it out on
+        // `user:{id}` only. Our devices drop their copy while every member keeps
+        // theirs; our other devices accept it through the self-hide path in
+        // `merge_pulled`. The local_only marker written above is what stops the
+        // author's live row handing it straight back on the next pull.
+        //
+        // Authorship is kept: `forget_received_copy` drops the copy but not the
+        // record of who wrote it, so the entry can never be mistaken later for
+        // an unsynced local one and published under this account.
         if is_remote {
-            // Authorship is kept: `forget_received_copy` drops the copy but not
-            // the record of who wrote it, so the entry can never be mistaken
-            // later for an unsynced local one and published under this account.
             self.id_map.lock().forget_received_copy(&map_key);
-            return;
         }
+        // What the tombstone carries: the item's own spaces when we own it, so
+        // members remove it too; none for a received item, so it stays in the
+        // space for everyone and only this account's devices drop it.
+        let push_space_ids = if is_remote { Vec::new() } else { space_ids };
 
         // What this removal means, written down before the tombstone leaves.
         //
@@ -2373,7 +2382,7 @@ impl SyncClient {
                 http.as_ref().filter(|h| h.is_authenticated()),
                 umk.as_ref(),
             ) {
-                if let Some(req) = tombstone_req(umk, &client_id, &type_str, space_ids) {
+                if let Some(req) = tombstone_req(umk, &client_id, &type_str, push_space_ids) {
                     match http.push_entries(vec![req]).await {
                         Ok(_) => {
                             id_map.lock().remove_entry(&map_key);
@@ -2438,6 +2447,53 @@ impl SyncClient {
                 if is_note { "note" } else { "clipboard" },
                 e.client_id
             );
+
+            // A tombstone this account pushed for an item another member wrote:
+            // this user hiding a received entry across their own devices
+            // ("remove from my devices"). It carries no space ids — it never
+            // reached the space, so every member still has theirs — and it names
+            // us, not the author, so the authority guard below would otherwise
+            // drop it as a rival row. Apply it as a local removal that keeps
+            // blocking re-merge (a local_only marker, like the device the delete
+            // happened on writes), never as the author taking the item down.
+            let self_hide = e.deleted_at.is_some()
+                && e.space_ids.is_empty()
+                && e.user_id.is_some()
+                && e.user_id == self.self_user_id()
+                && self.id_map.lock().is_remote(&key);
+            if self_hide {
+                let gone = if is_note {
+                    state.notes.lock().delete(&e.client_id)
+                } else {
+                    state.history.lock().remove(&e.client_id)
+                };
+                if is_note {
+                    notes_changed |= gone;
+                } else {
+                    clip_changed |= gone;
+                }
+                let mut id_map = self.id_map.lock();
+                let local_spaces = id_map.shares_for(&key);
+                let owner_id = id_map.owner_of(&key);
+                id_map.mark_deleted(
+                    &key,
+                    crate::sync::id_map::DeletedMarker {
+                        space_ids: local_spaces,
+                        owner_id,
+                        deleted_at: e.deleted_at.unwrap_or_else(now_ms),
+                        // We hid it; the author did not remove it from the space.
+                        by_author: false,
+                        content_gone: true,
+                        // Keeps the resurrect guard blocking the author's live
+                        // row: a local decision that says nothing about the space.
+                        local_only: true,
+                        entry_ts: Some(e.created_at),
+                        removed_by: e.user_id.clone(),
+                    },
+                );
+                id_map.forget_received_copy(&key);
+                continue;
+            }
 
             // Live delivery, so this is the moment the item reached this
             // machine. Recorded because the timestamp it carries is the
