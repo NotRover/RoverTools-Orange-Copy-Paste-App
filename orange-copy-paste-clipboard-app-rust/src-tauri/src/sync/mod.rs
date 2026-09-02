@@ -224,6 +224,29 @@ struct ImageMergeMeta {
     owner_id: Option<String>,
 }
 
+/// Everything [`SyncClient::spawn_blob_files_merge`] needs to download an entry's
+/// archive blob, extract it, and upsert the file entry. Mirrors [`ImageMergeMeta`]
+/// minus the MIME (a ZIP is self-describing) — the content becomes the extracted
+/// paths, not a single file.
+struct FilesMergeMeta {
+    client_id: String,
+    server_id: String,
+    blob_key: String,
+    label: Option<String>,
+    groups: Vec<String>,
+    /// Spaces this entry was shared into, recorded alongside its server id so a
+    /// file entry lands under the right space like every other entry.
+    space_ids: Vec<String>,
+    created_at: u64,
+    pinned: bool,
+    /// Write the extracted files to the clipboard once merged (auto-copy).
+    autocopy: bool,
+    /// Another member wrote this one (its key came from a space keyring).
+    remote: bool,
+    /// Which account wrote it, when `remote`. Names the sender on a space row.
+    owner_id: Option<String>,
+}
+
 /// Read the send-filter map and sync mode from `settings.json` (both default
 /// to "off"/Realtime when absent or unreadable — the safe interpretations).
 fn load_local_sync_prefs(app_data: &std::path::Path) -> (HashMap<String, SendFilter>, SyncMode) {
@@ -2044,16 +2067,13 @@ impl SyncClient {
             let permit = ctx.gate.clone().acquire_owned().await.ok();
             let skip_label = skip_label_for(&entry);
 
-            // Skip file entries larger than 5 MB (Phase 7 enforcement)
+            // Refuse an over-limit file entry before it is archived, so a huge
+            // folder is never zipped into memory just to be rejected. The sum is
+            // recursive: a folder path's own metadata length says nothing about
+            // what it holds. The upload's ciphertext size is a second, exact gate.
             if entry.kind == EntryKind::File {
-                let total_bytes: u64 = entry
-                    .content
-                    .lines()
-                    .filter_map(|path| std::fs::metadata(path).ok())
-                    .map(|m| m.len())
-                    .sum();
-                const FILE_SIZE_LIMIT: u64 = 5 * 1024 * 1024;
-                if total_bytes > FILE_SIZE_LIMIT {
+                let total_bytes = total_input_bytes(&entry.content);
+                if total_bytes > BLOB_SIZE_LIMIT {
                     record_skip(
                         &ctx,
                         &entry.id,
@@ -2074,57 +2094,66 @@ impl SyncClient {
             })
             .to_string();
 
-            // Image entries store their (encrypted) bytes in a blob and keep only
-            // a small descriptor inline; text/html/file keep content inline.
-            let (content, blob_key, blob_size) = if entry.kind == EntryKind::Image {
-                let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) else {
-                    record_skip(
-                        &ctx,
-                        &entry.id,
-                        &skip_label,
-                        "Not signed in to sync when this image was copied".into(),
-                    );
-                    return; // image sync needs connectivity — nothing to queue
+            // Image and file entries store their (encrypted) bytes in a blob and
+            // keep only a small descriptor inline; text/html keep content inline.
+            // An image is one file's bytes; a file entry is a ZIP of its files and
+            // folders. Both share the same not-signed-in / retry / skip handling.
+            let (content, blob_key, blob_size) =
+                if entry.kind == EntryKind::Image || entry.kind == EntryKind::File {
+                    let noun = if entry.kind == EntryKind::Image { "image" } else { "file" };
+                    let Some(http) = ctx.http.as_ref().filter(|h| h.is_authenticated()) else {
+                        record_skip(
+                            &ctx,
+                            &entry.id,
+                            &skip_label,
+                            format!("Not signed in to sync when this {noun} was copied"),
+                        );
+                        return; // blob sync needs connectivity — nothing to queue
+                    };
+                    let upload = if entry.kind == EntryKind::Image {
+                        upload_image_blob(http, &enc_key, &entry.id, &entry.content, &ctx.budget)
+                            .await
+                    } else {
+                        upload_files_blob(http, &enc_key, &entry.id, &entry.content, &ctx.budget)
+                            .await
+                    };
+                    match upload {
+                        Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
+                        Err(fail) if fail.retryable => {
+                            // The server could not be reached - the blob never went
+                            // up, so there is nothing to park in the queue as a
+                            // ready-to-send push the way a text entry would. Queue a
+                            // re-drive of the whole entry instead, and light the
+                            // amber "waiting to upload" badge. No skip is recorded:
+                            // this is a wait, not a refusal, and telling the user it
+                            // was "not sent" and dropping it is the bug being fixed.
+                            eprintln!(
+                                "[sync] {noun} blob upload deferred (retryable): {}",
+                                fail.message
+                            );
+                            ctx.queue.lock().push(PendingOp::PushLocal {
+                                client_id: entry.id.clone(),
+                                entry_type: "clipboard".into(),
+                            });
+                            ctx.status.lock().pending_count = ctx.queue.lock().len();
+                            let _ = ctx.app.emit(
+                                "sync:entry-queued",
+                                serde_json::json!({
+                                    "client_id": entry.id,
+                                    "entry_type": "clipboard",
+                                }),
+                            );
+                            return;
+                        }
+                        Err(fail) => {
+                            eprintln!("[sync] {noun} blob upload failed: {}", fail.message);
+                            record_skip(&ctx, &entry.id, &skip_label, fail.message);
+                            return;
+                        }
+                    }
+                } else {
+                    (entry.content, None, None)
                 };
-                match upload_image_blob(http, &enc_key, &entry.id, &entry.content, &ctx.budget)
-                    .await
-                {
-                    Ok((key, size, descriptor)) => (descriptor, Some(key), Some(size)),
-                    Err(fail) if fail.retryable => {
-                        // The server could not be reached - the blob never went
-                        // up, so there is nothing to park in the queue as a
-                        // ready-to-send push the way a text entry would. Queue a
-                        // re-drive of the whole entry instead, and light the
-                        // amber "waiting to upload" badge. No skip is recorded:
-                        // this is a wait, not a refusal, and telling the user it
-                        // was "not sent" and dropping it is the bug being fixed.
-                        eprintln!(
-                            "[sync] image blob upload deferred (retryable): {}",
-                            fail.message
-                        );
-                        ctx.queue.lock().push(PendingOp::PushLocal {
-                            client_id: entry.id.clone(),
-                            entry_type: "clipboard".into(),
-                        });
-                        ctx.status.lock().pending_count = ctx.queue.lock().len();
-                        let _ = ctx.app.emit(
-                            "sync:entry-queued",
-                            serde_json::json!({
-                                "client_id": entry.id,
-                                "entry_type": "clipboard",
-                            }),
-                        );
-                        return;
-                    }
-                    Err(fail) => {
-                        eprintln!("[sync] image blob upload failed: {}", fail.message);
-                        record_skip(&ctx, &entry.id, &skip_label, fail.message);
-                        return;
-                    }
-                }
-            } else {
-                (entry.content, None, None)
-            };
 
             if refuses_inline_size(&ctx, &entry.id, &skip_label, &content) {
                 return;
@@ -2633,9 +2662,43 @@ impl SyncClient {
                     }
                     continue;
                 }
-                // File-content sync is not wired (paths are machine-specific);
-                // file entries remain local-only on the receiving device.
+                // File bodies live in a blob too: download + decrypt + extract
+                // the archive to a local dir asynchronously, then upsert the
+                // entry pointing at the extracted paths. A file entry from before
+                // file sync was wired has no blob_key; nothing to materialize, so
+                // it stays local-only on the sender as it always did.
                 if kind == EntryKind::File {
+                    if let Some(blob_key) = e.blob_key.clone() {
+                        let http = self.http.lock().clone();
+                        if let Some(http) = http {
+                            self.spawn_blob_files_merge(
+                                http,
+                                content_key.clone(),
+                                FilesMergeMeta {
+                                    client_id: e.client_id.clone(),
+                                    server_id: e.server_id.clone(),
+                                    blob_key,
+                                    label,
+                                    groups,
+                                    space_ids: e.space_ids.clone(),
+                                    created_at: e.created_at,
+                                    pinned: e.pinned,
+                                    autocopy: live && self.autocopy_enabled(&e.space_ids),
+                                    remote: from_space,
+                                    owner_id: e.user_id.clone(),
+                                },
+                            );
+                        }
+                    }
+                    // Ownership is known now and independent of the download, so
+                    // record it up front — same reasoning as the image branch.
+                    if from_space {
+                        let mut id_map = self.id_map.lock();
+                        id_map.mark_entry_remote(&key);
+                        if let Some(owner) = e.user_id.as_deref() {
+                            id_map.set_entry_owner(&key, owner);
+                        }
+                    }
                     continue;
                 }
                 let merged = ClipboardEntry {
@@ -2823,8 +2886,9 @@ impl SyncClient {
                     // normal path. UserInitiated because a queued op flushes
                     // regardless of mode, the same as Push/Update/Delete on a
                     // Sync now. If the server is still unreachable, that path's
-                    // own image branch queues a fresh PushLocal, so a connection
-                    // that never comes back cannot lose the entry - and if the
+                    // own blob branch (image or file archive) queues a fresh
+                    // PushLocal, so a connection that never comes back cannot
+                    // lose the entry - and if the
                     // entry was deleted locally meanwhile, neither store finds
                     // it and the op simply drops.
                     let state = self.app.state::<crate::state::AppState>();
@@ -4867,6 +4931,97 @@ impl SyncClient {
         });
     }
 
+    /// Download, decrypt, and extract a file entry's archive blob into a
+    /// per-entry dir under `received-files/`, then upsert the entry pointing at
+    /// the extracted top-level paths. The counterpart to
+    /// [`Self::spawn_blob_image_merge`]; a download or extract failure is logged
+    /// and skipped, not fatal (same as an image blob owned by another member).
+    fn spawn_blob_files_merge(
+        &self,
+        http: Arc<SyncHttpClient>,
+        key: Zeroizing<[u8; 32]>,
+        meta: FilesMergeMeta,
+    ) {
+        use std::sync::atomic::Ordering;
+        let app = self.app.clone();
+        // Kept apart from `images/`, which a save sweep prunes by referenced
+        // filename — an extracted tree would look unreferenced and be deleted.
+        let files_root = self
+            .app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|d| d.join("received-files"));
+        let id_map = Arc::clone(&self.id_map);
+        let in_flight = Arc::clone(&self.in_flight);
+
+        self.handle.spawn(async move {
+            let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
+                eprintln!("[sync] file blob {} download-url failed (skipped)", meta.blob_key);
+                return;
+            };
+            let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
+                return;
+            };
+            let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
+                eprintln!("[sync] file blob {} decrypt failed", meta.client_id);
+                return;
+            };
+            let Some(root) = files_root else { return };
+            let dest = root.join(&meta.client_id);
+            let paths = match extract_zip_to_dir(&bytes, &dest) {
+                Ok(paths) if !paths.is_empty() => paths,
+                Ok(_) => {
+                    eprintln!("[sync] file blob {} extracted to nothing", meta.client_id);
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("[sync] file blob {} extract failed: {e}", meta.client_id);
+                    return;
+                }
+            };
+            let content = paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let state = app.state::<crate::state::AppState>();
+            let merged = ClipboardEntry {
+                id: meta.client_id.clone(),
+                kind: EntryKind::File,
+                content,
+                timestamp: meta.created_at,
+                pinned: meta.pinned,
+                groups: meta.groups,
+                label: meta.label,
+                content_hash: None,
+                server_id: Some(meta.server_id.clone()),
+                sync_status: crate::sync::types::SyncStatus::Synced,
+            };
+            if meta.autocopy {
+                crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
+            }
+            let _ = state.history.lock().upsert_synced(merged);
+            state.history.lock().sort_recent();
+            state.history_dirty.store(true, Ordering::Relaxed);
+            let key = format!("clipboard:{}", meta.client_id);
+            let mut id_map = id_map.lock();
+            id_map.set_entry(&key, &meta.server_id);
+            if !in_flight.lock().contains(&key) {
+                id_map.set_entry_shares(&key, &meta.space_ids);
+            }
+            if meta.remote {
+                id_map.mark_entry_remote(&key);
+                if let Some(owner) = meta.owner_id.as_deref() {
+                    id_map.set_entry_owner(&key, owner);
+                }
+            }
+            drop(id_map);
+            let _ = app.emit("sync:history-merged", serde_json::Value::Null);
+        });
+    }
+
     pub fn http(&self) -> Option<Arc<SyncHttpClient>> {
         self.http.lock().clone()
     }
@@ -5193,6 +5348,247 @@ async fn upload_image_blob(
     }
     let descriptor = serde_json::json!({ "mime": mime }).to_string();
     Ok((up.blob_key, size, descriptor))
+}
+
+/// Total size of every file an entry names, recursing into folders. A folder
+/// path's own metadata length is not its contents, so a plain `metadata().len()`
+/// sum would let a large tree through the pre-archive gate.
+fn total_input_bytes(content: &str) -> u64 {
+    fn walk(path: &std::path::Path) -> u64 {
+        let Ok(meta) = std::fs::symlink_metadata(path) else {
+            return 0;
+        };
+        if meta.is_file() {
+            meta.len()
+        } else if meta.is_dir() {
+            std::fs::read_dir(path)
+                .map(|rd| rd.flatten().map(|e| walk(&e.path())).sum())
+                .unwrap_or(0)
+        } else {
+            0 // symlink / special — not followed
+        }
+    }
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| walk(std::path::Path::new(l)))
+        .sum()
+}
+
+/// The file-entry counterpart to [`upload_image_blob`]: pack the entry's files
+/// and folders into one ZIP, encrypt it, and store it as a single blob. Returns
+/// `(blob_key, ciphertext_size, descriptor_json)`; the descriptor is a small
+/// marker (the ZIP is self-describing) kept inline like every other entry.
+async fn upload_files_blob(
+    http: &SyncHttpClient,
+    enc_key: &[u8; 32],
+    client_id: &str,
+    content: &str,
+    budget: &BlobBudget,
+) -> Result<(String, u64, String), BlobUploadFailed> {
+    // A local read or archive failure is about these paths, not the network - it
+    // will not fix itself on a retry.
+    let archive = zip_paths_to_bytes(content).map_err(BlobUploadFailed::permanent)?;
+    let ciphertext =
+        crypto::encrypt_bytes(enc_key, &archive, client_id).map_err(BlobUploadFailed::permanent)?;
+    let size = ciphertext.len() as u64;
+    if size > BLOB_SIZE_LIMIT {
+        return Err(BlobUploadFailed::permanent(format!(
+            "{} is over the 5 MB limit for synced files",
+            format_bytes(size)
+        )));
+    }
+    // Hoisted out of the `if let` scrutinee so the budget guard drops here, not
+    // at the end of the block (see the significant_drop lint note in Cargo.toml).
+    let budget_left = *budget.lock();
+    if let Some(remaining) = budget_left {
+        if size > remaining {
+            return Err(BlobUploadFailed::permanent(format!(
+                "Cloud storage is full - {} free, these files need {}",
+                format_bytes(remaining),
+                format_bytes(size)
+            )));
+        }
+    }
+    // Opaque ciphertext to the server; the MIME is just the container kind.
+    const MIME: &str = "application/zip";
+    let checksum = crypto::sha256_hex(&ciphertext);
+    let up = http
+        .request_blob_upload(BlobUploadRequest {
+            mime_type: MIME.to_string(),
+            size_bytes: size,
+            checksum,
+        })
+        .await
+        .map_err(|e| {
+            if e.status == Some(402) {
+                *budget.lock() = Some(0);
+                BlobUploadFailed::permanent(
+                    "Cloud storage is full - remove some synced items to make room".to_string(),
+                )
+            } else {
+                BlobUploadFailed {
+                    message: format!("File upload failed: {e}"),
+                    retryable: e.is_transient(),
+                }
+            }
+        })?;
+    http.upload_blob_bytes(&up.presigned_put_url, ciphertext, MIME)
+        .await
+        .map_err(|e| BlobUploadFailed {
+            message: format!("File upload failed: {e}"),
+            retryable: true,
+        })?;
+    http.confirm_blob_upload(&up.blob_key)
+        .await
+        .map_err(|e| BlobUploadFailed {
+            message: format!("File upload failed: {e}"),
+            retryable: true,
+        })?;
+    if let Some(remaining) = budget.lock().as_mut() {
+        *remaining = remaining.saturating_sub(size);
+    }
+    let descriptor = serde_json::json!({ "archive": "zip" }).to_string();
+    Ok((up.blob_key, size, descriptor))
+}
+
+/// A ZIP options value (deflate, no extra data). `SimpleFileOptions` is `Copy`,
+/// so it is cheap to hand to each `start_file`/`add_directory` call.
+fn zip_opts() -> zip::write::SimpleFileOptions {
+    zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)
+}
+
+/// Disambiguate a top-level archive name against those already used, the way a
+/// file manager does (`name (2)`), so two sources sharing a basename don't clash
+/// on extraction.
+fn unique_top_name(base: &str, used: &mut std::collections::HashSet<String>) -> String {
+    if used.insert(base.to_string()) {
+        return base.to_string();
+    }
+    let (stem, ext) = match base.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (base.to_string(), String::new()),
+    };
+    for n in 2.. {
+        let candidate = format!("{stem} ({n}){ext}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+/// Pack every newline-separated path the entry names (files and, recursively,
+/// folders) into an in-memory ZIP, preserving each top-level item's name and any
+/// folder structure beneath it. Unreadable or non-regular entries are skipped;
+/// an empty result is an error so nothing empty is ever uploaded.
+fn zip_paths_to_bytes(content: &str) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    let mut buf = Vec::<u8>::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let opts = zip_opts();
+        let mut used_top = std::collections::HashSet::<String>::new();
+        let mut wrote = 0usize;
+        for line in content.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let path = std::path::Path::new(line);
+            let base = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "item".to_string());
+            let top = unique_top_name(&base, &mut used_top);
+            let Ok(meta) = std::fs::symlink_metadata(path) else {
+                continue; // a path that vanished since capture — skip it
+            };
+            if meta.is_file() {
+                let data =
+                    std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+                zip.start_file(top, opts).map_err(|e| e.to_string())?;
+                zip.write_all(&data).map_err(|e| e.to_string())?;
+                wrote += 1;
+            } else if meta.is_dir() {
+                wrote += zip_dir_into(&mut zip, path, &top, opts)?;
+            }
+        }
+        if wrote == 0 {
+            return Err("no readable files to sync".to_string());
+        }
+        zip.finish().map_err(|e| e.to_string())?;
+    }
+    Ok(buf)
+}
+
+/// Recursively add a directory's contents under `prefix`, preserving structure
+/// (including empty directories). Returns how many files it wrote.
+fn zip_dir_into<W: std::io::Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    dir: &std::path::Path,
+    prefix: &str,
+    opts: zip::write::SimpleFileOptions,
+) -> Result<usize, String> {
+    use std::io::Write;
+    let mut wrote = 0usize;
+    zip.add_directory(format!("{prefix}/"), opts)
+        .map_err(|e| e.to_string())?;
+    let rd = std::fs::read_dir(dir).map_err(|e| format!("read dir {}: {e}", dir.display()))?;
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let child = format!("{prefix}/{name}");
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.is_file() {
+            let data = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+            zip.start_file(child, opts).map_err(|e| e.to_string())?;
+            zip.write_all(&data).map_err(|e| e.to_string())?;
+            wrote += 1;
+        } else if meta.is_dir() {
+            wrote += zip_dir_into(zip, &path, &child, opts)?;
+        }
+    }
+    Ok(wrote)
+}
+
+/// Extract an archive into `dest` (replacing any prior extraction) and return
+/// the extracted top-level paths, which become the file entry's content. Entry
+/// names are validated with `enclosed_name`, so a crafted archive cannot write
+/// outside `dest` (zip-slip).
+fn extract_zip_to_dir(
+    bytes: &[u8],
+    dest: &std::path::Path,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    use std::io::Read;
+    let _ = std::fs::remove_dir_all(dest); // idempotent re-merge
+    std::fs::create_dir_all(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("open archive: {e}"))?;
+    let mut tops: Vec<std::path::PathBuf> = Vec::new();
+    let mut seen = std::collections::HashSet::<std::ffi::OsString>::new();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(rel) = file.enclosed_name() else {
+            continue; // absolute or `..`-escaping name — refuse it
+        };
+        if let Some(std::path::Component::Normal(top)) = rel.components().next() {
+            if seen.insert(top.to_os_string()) {
+                tops.push(dest.join(top));
+            }
+        }
+        let out = dest.join(&rel);
+        if file.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut data = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut data).map_err(|e| e.to_string())?;
+            std::fs::write(&out, &data).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(tops)
 }
 
 /// Encrypt and push one entry (clipboard or note); queue it when offline.
@@ -5598,5 +5994,87 @@ mod tests {
             "the limit is {} bytes below the real one, so items that would sync are refused",
             SERVER_ENTRY_BYTES - encrypted.len()
         );
+    }
+
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rovertools-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    /// A file entry's content is the file bytes, not its machine-specific paths:
+    /// zipping the entry and extracting it on "another device" has to reproduce a
+    /// loose file and a folder tree byte-for-byte, or a shared file arrives empty
+    /// or malformed. Covers the whole push/receive archive contract.
+    #[test]
+    fn file_archive_round_trips_files_and_folders() {
+        let src = scratch_dir("ziptest-src");
+        std::fs::write(src.join("note.txt"), b"hello world").unwrap();
+        std::fs::create_dir_all(src.join("proj/sub")).unwrap();
+        std::fs::write(src.join("proj/a.txt"), b"aaa").unwrap();
+        std::fs::write(src.join("proj/sub/b.bin"), &[0u8, 1, 2, 3, 255]).unwrap();
+
+        // The entry names one loose file and one folder, as CF_HDROP would.
+        let content = format!(
+            "{}\n{}",
+            src.join("note.txt").display(),
+            src.join("proj").display()
+        );
+        let archive = zip_paths_to_bytes(&content).expect("zip");
+
+        let dest = scratch_dir("ziptest-dest");
+        let mut tops = extract_zip_to_dir(&archive, &dest).expect("extract");
+        tops.sort();
+
+        assert_eq!(tops.len(), 2, "two top-level items: the file and the folder");
+        assert_eq!(std::fs::read(dest.join("note.txt")).unwrap(), b"hello world");
+        assert_eq!(std::fs::read(dest.join("proj/a.txt")).unwrap(), b"aaa");
+        assert_eq!(
+            std::fs::read(dest.join("proj/sub/b.bin")).unwrap(),
+            vec![0u8, 1, 2, 3, 255]
+        );
+
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    /// Two sources sharing a basename must not overwrite each other on the far
+    /// side; the second is disambiguated `name (2)` so both survive extraction.
+    #[test]
+    fn file_archive_disambiguates_basename_clashes() {
+        let a = scratch_dir("ziptest-a");
+        let b = scratch_dir("ziptest-b");
+        std::fs::write(a.join("data.txt"), b"first").unwrap();
+        std::fs::write(b.join("data.txt"), b"second").unwrap();
+
+        let content = format!("{}\n{}", a.join("data.txt").display(), b.join("data.txt").display());
+        let archive = zip_paths_to_bytes(&content).expect("zip");
+        let dest = scratch_dir("ziptest-clash");
+        let tops = extract_zip_to_dir(&archive, &dest).expect("extract");
+
+        assert_eq!(tops.len(), 2, "both files land under distinct names");
+        assert_eq!(std::fs::read(dest.join("data.txt")).unwrap(), b"first");
+        assert_eq!(std::fs::read(dest.join("data (2).txt")).unwrap(), b"second");
+
+        for d in [a, b, dest] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    /// The pre-archive size gate sums a folder's contents recursively — a folder's
+    /// own metadata length says nothing about what it holds, so a naive sum would
+    /// wave a large tree straight past the 5 MB limit.
+    #[test]
+    fn total_input_bytes_recurses_into_folders() {
+        let dir = scratch_dir("ziptest-size");
+        std::fs::write(dir.join("loose"), vec![0u8; 100]).unwrap();
+        std::fs::create_dir_all(dir.join("nested/deep")).unwrap();
+        std::fs::write(dir.join("nested/x"), vec![0u8; 250]).unwrap();
+        std::fs::write(dir.join("nested/deep/y"), vec![0u8; 400]).unwrap();
+
+        let content = format!("{}\n{}", dir.join("loose").display(), dir.join("nested").display());
+        assert_eq!(total_input_bytes(&content), 100 + 250 + 400);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

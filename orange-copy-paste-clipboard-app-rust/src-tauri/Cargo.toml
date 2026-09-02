@@ -65,6 +65,11 @@ rmp-serde = "1"
 parking_lot = "0.12"
 uuid = { version = "1.23.4", features = ["v4"] }
 
+# ZIP archiving for file/folder sync: an entry's files and folders are packed
+# into a single archive, encrypted, and stored as one blob (deflate only — no
+# bzip2/zstd/aes, which the encrypted-blob layer already covers).
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 # ── Cloud sync dependencies ──────────────────────────────────────────────────
 # These are loaded only when the sync module is active (runtime-gated by
 # sync_enabled setting).  They are compiled unconditionally so the binary is
