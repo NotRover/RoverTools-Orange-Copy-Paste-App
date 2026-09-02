@@ -106,6 +106,10 @@ const CopyPopup: React.FC = () => {
   // The height the loaded preview image renders at, so the box (and window) can
   // size to the image instead of a fixed budget. Null until an image loads.
   const [mediaH, setMediaH] = useState<number | null>(null);
+  // Bumped on each capture so the size-and-reveal effect re-runs even when the
+  // popup was still `visible` from the previous open (Rust hides it, React state
+  // does not reset), avoiding the extra frame a setVisible(false)->true toggle costs.
+  const [showNonce, setShowNonce] = useState(0);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newGroupRef = useRef<HTMLInputElement>(null);
   // The window is shown by React (not Rust) once it has rendered and sized the
@@ -114,14 +118,17 @@ const CopyPopup: React.FC = () => {
   const needPresent = useRef(false);
   const presentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const present = useCallback(() => {
+  // Show the already-sized window. `height` sizes and reveals in one IPC hop on
+  // the reveal path; omitted, it just shows (the fallback timer, when a resize
+  // already sized the hidden window).
+  const present = useCallback((height?: number) => {
     if (!needPresent.current) return;
     needPresent.current = false;
     if (presentTimer.current) {
       clearTimeout(presentTimer.current);
       presentTimer.current = null;
     }
-    invoke("present_copy_popup").catch(console.error);
+    invoke("present_copy_popup", { height }).catch(console.error);
   }, []);
 
   const saved = groups.includes(SAVED);
@@ -171,21 +178,16 @@ const CopyPopup: React.FC = () => {
         needPresent.current = true;
         if (presentTimer.current) clearTimeout(presentTimer.current);
         presentTimer.current = setTimeout(present, 200);
-        setVisible(false);
-        requestAnimationFrame(() => setVisible(true));
+        // Reveal on the same render — no setVisible(false)->rAF->true toggle. The
+        // nonce re-arms the size-and-reveal effect even if the popup was still
+        // `visible` from the last open, without spending a frame.
+        setVisible(true);
+        setShowNonce((n) => n + 1);
 
-        // The rest only feeds the pickers (group options, space names, sign-in
-        // state); it never changes what the chips show for a fresh capture, so
-        // it can resolve after the window is already up without any visible jump.
-        try {
-          const history = await invoke<ClipboardEntry[]>("get_history");
-          if (cancelled) return;
-          const names = new Set<string>();
-          for (const h of history) for (const g of h.groups ?? []) names.add(g);
-          setAllGroups([...names]);
-        } catch {
-          /* state unavailable, defaults are fine */
-        }
+        // The rest only feeds the pickers (space names, sign-in state); it never
+        // changes what the chips show for a fresh capture, so it can resolve after
+        // the window is already up. The heavier group-name scan is deferred to
+        // when the groups picker actually opens.
         try {
           const list = await invoke<Space[]>("spaces_cached");
           if (!cancelled) setSpaces(list);
@@ -299,15 +301,19 @@ const CopyPopup: React.FC = () => {
     const totalH = CHROME_H + contentH;
     // A media entry waits to be revealed until its height is measured, so it
     // doesn't pop in at an interim size and then reflow; everything else reveals
-    // as soon as the first resize lands.
+    // as soon as the first size lands.
     const measured = !mediaPreview || mediaH != null;
-    invoke("resize_copy_popup", { height: totalH })
-      .then(() => {
-        if (measured) present();
-      })
-      .catch(() => present());
+    if (needPresent.current && measured) {
+      // First reveal: size and show in a single IPC hop.
+      present(totalH);
+    } else {
+      // Already on screen (a picker opened/closed), or media still measuring —
+      // just size the (possibly hidden) window; the reveal waits for `measured`.
+      invoke("resize_copy_popup", { height: totalH }).catch(console.error);
+    }
   }, [
     visible,
+    showNonce,
     kind,
     content,
     mediaH,
@@ -323,6 +329,26 @@ const CopyPopup: React.FC = () => {
 
   useEffect(() => {
     if (picker === "groups") requestAnimationFrame(() => newGroupRef.current?.focus());
+  }, [picker]);
+
+  // Group names for the picker come from scanning the whole history — too heavy
+  // for the reveal path, so it's deferred to when the groups picker opens.
+  useEffect(() => {
+    if (picker !== "groups") return;
+    let active = true;
+    invoke<ClipboardEntry[]>("get_history")
+      .then((history) => {
+        if (!active) return;
+        const names = new Set<string>();
+        for (const h of history) for (const g of h.groups ?? []) names.add(g);
+        setAllGroups([...names]);
+      })
+      .catch(() => {
+        /* state unavailable, defaults are fine */
+      });
+    return () => {
+      active = false;
+    };
   }, [picker]);
 
   const cancelBlur = useCallback(() => {
