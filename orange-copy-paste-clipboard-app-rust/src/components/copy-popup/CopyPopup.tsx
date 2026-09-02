@@ -1,5 +1,11 @@
 import { startClock } from "../../clock";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactDOM from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -36,7 +42,6 @@ import { installWebviewGuards } from "../../webview-guards";
 // preview is flex:1, so these only need to give it enough room — a little slack
 // shows as breathing space, never a clip.
 const CHROME_H = 120; // header + command row + paddings + base gaps
-const CHIP_ROW_H = 26; // one wrapped row of state chips (+ its gap)
 // A picker takes over the content slot (replacing the preview) rather than
 // stacking below it. To avoid the window jumping taller when a picker opens, it
 // keeps the preview's height and only leaves that range at the extremes: it
@@ -290,10 +295,8 @@ const CopyPopup: React.FC = () => {
           : Math.min(52 + spaces.length * SPACE_ROW_H, SPACES_REGION_MAX);
       contentH = Math.min(Math.max(previewH, Math.min(need, SPACES_FLOOR_H)), need);
     }
-    // Chips can wrap; budget by how many rows they take (~3 fit across).
-    const chipCount = (pinned ? 1 : 0) + groups.length + entrySpaceIds.length;
-    const chipsH = chipCount > 0 ? Math.ceil(chipCount / 3) * CHIP_ROW_H + 4 : 0;
-    const totalH = CHROME_H + contentH + chipsH;
+    // Chips ride on the header line now, so they add no height of their own.
+    const totalH = CHROME_H + contentH;
     // A media entry waits to be revealed until its height is measured, so it
     // doesn't pop in at an interim size and then reflow; everything else reveals
     // as soon as the first resize lands.
@@ -473,7 +476,6 @@ const CopyPopup: React.FC = () => {
       }),
     [entrySpaceIds, spaces],
   );
-  const hasAnyState = pinned || saved || customGroups.length > 0 || sharedSpaces.length > 0;
 
   // Custom groups the picker offers, Saved excluded (it has its own top row).
   const pickerGroups = useMemo(
@@ -488,6 +490,72 @@ const CopyPopup: React.FC = () => {
       ? "Create a space on the Spaces screen first."
       : null;
 
+  // The header chip row, capped: the type pill leads, then pin / Saved / groups /
+  // shared spaces. Only the first few show; the rest collapse into a "+N" whose
+  // tooltip names them, so the row stays on one line.
+  const chips: { key: string; label: string; node: React.ReactNode }[] = [
+    { key: "type", label: displayKind, node: <EntryTypePill kind={displayKind} /> },
+  ];
+  if (pinned) {
+    chips.push({
+      key: "pin",
+      label: "Pinned",
+      node: (
+        <span className="popup-chip popup-chip--pin">
+          <PinIcon size={9} filled />
+          Pinned
+        </span>
+      ),
+    });
+  }
+  if (saved) {
+    chips.push({
+      key: "saved",
+      label: "Saved",
+      node: (
+        <span className="popup-chip popup-chip--saved">
+          <SaveStarIcon size={9} filled />
+          Saved
+        </span>
+      ),
+    });
+  }
+  for (const g of customGroups) {
+    const c = groupColor(g);
+    chips.push({
+      key: `g:${g}`,
+      label: g,
+      node: (
+        <span className="popup-chip popup-chip--group" style={{ color: c.fg, background: c.bg }}>
+          <span className="popup-chip-dot" style={{ background: c.fg }} />
+          {g}
+        </span>
+      ),
+    });
+  }
+  for (const s of sharedSpaces) {
+    chips.push({
+      key: `s:${s.id}`,
+      label: s.name + (s.waiting ? " (waiting)" : ""),
+      node: (
+        <span
+          className={`popup-chip popup-chip--space${s.waiting ? " is-waiting" : ""}`}
+          title={
+            s.waiting
+              ? "Waiting for this space's key. It goes out when the key arrives."
+              : undefined
+          }
+        >
+          <ShareNetwork size={10} weight="bold" />
+          {s.name}
+        </span>
+      ),
+    });
+  }
+  const MAX_CHIPS = 3;
+  const shownChips = chips.slice(0, MAX_CHIPS);
+  const hiddenChips = chips.slice(MAX_CHIPS);
+
   return (
     <div
       className={`popup-container${visible ? " visible" : ""}`}
@@ -501,66 +569,35 @@ const CopyPopup: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Header */}
+          {/* Header — "Copied" leads, then a single, non-wrapping chip row on the
+              same line: the type pill, then state chips (pin, Saved star, custom
+              group, shared space). Extra chips collapse into a "+N" that names
+              them on hover. */}
           <div className="popup-header">
             <div className="popup-header-left">
               <span className="popup-title">Copied</span>
-              <EntryTypePill kind={displayKind} />
               {kind === "file" && files.length > 1 && (
                 <span className="popup-file-count">{files.length} files</span>
               )}
               <DegradedPill />
+              <div className="popup-chips">
+                {shownChips.map((c) => (
+                  <React.Fragment key={c.key}>{c.node}</React.Fragment>
+                ))}
+                {hiddenChips.length > 0 && (
+                  <span
+                    className="popup-chips-more"
+                    title={hiddenChips.map((c) => c.label).join(", ")}
+                  >
+                    +{hiddenChips.length}
+                  </span>
+                )}
+              </div>
             </div>
             <button className="popup-close" onMouseDown={cancelBlur} onClick={handleClose}>
               <CloseIcon size={10} />
             </button>
           </div>
-
-          {/* State chips — each kind reads differently: pin, Saved (star),
-              custom group (its colour dot), shared space (share icon). */}
-          {hasAnyState && (
-            <div className="popup-chips">
-              {pinned && (
-                <span className="popup-chip popup-chip--pin">
-                  <PinIcon size={9} filled />
-                  Pinned
-                </span>
-              )}
-              {saved && (
-                <span className="popup-chip popup-chip--saved">
-                  <SaveStarIcon size={9} filled />
-                  Saved
-                </span>
-              )}
-              {customGroups.map((g) => {
-                const c = groupColor(g);
-                return (
-                  <span
-                    key={g}
-                    className="popup-chip popup-chip--group"
-                    style={{ color: c.fg, background: c.bg }}
-                  >
-                    <span className="popup-chip-dot" style={{ background: c.fg }} />
-                    {g}
-                  </span>
-                );
-              })}
-              {sharedSpaces.map((s) => (
-                <span
-                  key={s.id}
-                  className={`popup-chip popup-chip--space${s.waiting ? " is-waiting" : ""}`}
-                  title={
-                    s.waiting
-                      ? "Waiting for this space's key. It goes out when the key arrives."
-                      : undefined
-                  }
-                >
-                  <ShareNetwork size={10} weight="bold" />
-                  {s.name}
-                </span>
-              ))}
-            </div>
-          )}
 
           {/* Content slot: the preview, or a picker in its place while one is
               open (rather than a panel stacked below the preview). */}
@@ -726,6 +763,8 @@ const CopyPopup: React.FC = () => {
               <span>Share</span>
               <ShareNetwork size={13} weight="bold" />
             </button>
+
+            <span className="popup-menu-divider" />
 
             <button
               className="popup-menu-item popup-menu-item--danger"

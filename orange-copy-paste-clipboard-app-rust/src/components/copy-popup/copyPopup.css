@@ -13,7 +13,8 @@
   --accent-hover: #ff5535;
   --accent-dim: rgba(255, 62, 28, 0.1);
   --accent-dim-strong: rgba(255, 62, 28, 0.18);
-  --danger: #ff3e1c;
+  --danger: #ef4444;
+  --danger-dim: rgba(239, 68, 68, 0.12);
   --success: #22c55e;
   --radius: 12px;
   --radius-sm: 10px;
@@ -38,7 +39,8 @@
   --accent-hover: #e0300f;
   --accent-dim: rgba(255, 62, 28, 0.08);
   --accent-dim-strong: rgba(255, 62, 28, 0.15);
-  --danger: #ff3e1c;
+  --danger: #dc2626;
+  --danger-dim: rgba(220, 38, 38, 0.1);
   --success: #16a34a;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
@@ -121,7 +123,7 @@ body {
 .popup-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 2px 2px;
 }
 
@@ -129,12 +131,15 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .popup-title {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--accent);
+  flex-shrink: 0;
 }
 
 .popup-close {
@@ -184,10 +189,17 @@ body {
   flex-direction: column;
 }
 
-/* Image / video entries: center the media in the (taller) preview box. */
+/* Image / video entries: center the media on a soft radial wash, matching the
+   paste popup's image area. */
 .popup-preview--media {
   justify-content: center;
   align-items: center;
+  padding: 12px;
+  background: radial-gradient(
+    120% 120% at 50% 38%,
+    var(--surface-hover),
+    var(--bg) 72%
+  );
 }
 
 .popup-preview::-webkit-scrollbar {
@@ -207,9 +219,8 @@ body {
   max-width: 100%;
   max-height: 300px;
   object-fit: contain;
-  border-radius: 5px;
-  background: var(--surface-hover);
-  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: var(--shadow-sm);
 }
 
 /* File/video entries pair the media with a filename line below it. */
@@ -232,11 +243,22 @@ body {
 
 .popup-actions {
   display: flex;
+  align-items: center;
   gap: 2px;
 }
 
-/* Borderless items. Colour, not a box, is what carries each one: Pin and Groups
-   in the app's accent, Share in teal. Delete stays quiet until hovered. */
+/* Sets the destructive action apart from Pin/Groups/Share. */
+.popup-menu-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 5px 3px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Borderless items, the same neutral rest colour as the paste popup's preview
+   buttons; each one's role colour only appears on hover (or while its picker is
+   open). Delete is the exception — red at rest. */
 .popup-menu-item {
   flex: 1;
   display: flex;
@@ -271,17 +293,7 @@ body {
   cursor: default;
 }
 
-/* Resting colour by role. */
-.popup-menu-item--pin,
-.popup-menu-item--groups {
-  color: var(--accent);
-}
-
-.popup-menu-item--share {
-  color: var(--success);
-}
-
-/* Hover / open: a soft tint of the same colour behind it. */
+/* Hover / open: a soft tint of the role colour behind it, colouring the label. */
 .popup-menu-item--pin:not(:disabled):hover,
 .popup-menu-item--pin.popup-menu-item--active,
 .popup-menu-item--groups:not(:disabled):hover,
@@ -301,9 +313,15 @@ body {
   color: var(--success);
 }
 
+/* Delete reads red like the paste popup: coloured at rest, a soft red tint on
+   hover rather than a solid fill. */
+.popup-menu-item--danger {
+  color: var(--danger);
+}
+
 .popup-menu-item--danger:not(:disabled):hover {
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 /* ── Deleted state ── */
@@ -339,9 +357,31 @@ body {
 .popup-chips {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  padding: 0 2px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.popup-chips > * {
+  flex: none;
+}
+
+/* "+N" for the chips that didn't fit; its tooltip names them. */
+.popup-chips-more {
+  display: inline-flex;
+  align-items: center;
+  height: var(--chip-h);
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .popup-chip {
@@ -366,10 +406,10 @@ body {
   border: 1px solid transparent;
 }
 
-/* Saved is the one special group: a star, not a colour dot. */
+/* Saved is the one special group: a green star pill, the way the app shows it. */
 .popup-chip--saved {
-  color: #eab308;
-  background: rgba(234, 179, 8, 0.14);
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.12);
   border: 1px solid transparent;
 }
 
