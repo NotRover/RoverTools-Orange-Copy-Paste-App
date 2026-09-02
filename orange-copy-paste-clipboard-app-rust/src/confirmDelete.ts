@@ -66,9 +66,9 @@ export async function shouldConfirmDelete(keys: string[]): Promise<boolean> {
  *    your other synced devices.
  *  - owned, shared into spaces: the tombstone carries the space ids, so the
  *    item leaves every space for everyone, not just your devices.
- *  - received: another member's copy. Deleting is local-only - it drops this
- *    device's copy, never pushes a tombstone, so it stays on your other devices
- *    and in the space for everyone.
+ *  - received: another member's copy. Deleting pushes a self-scoped tombstone
+ *    (no space ids), so it is removed from all your devices but stays in the
+ *    space for everyone else.
  *
  * Counts (not just booleans) so a mixed selection can name how many of each,
  * rather than overclaiming that all are shared. All of it is Rust-owned
@@ -188,7 +188,7 @@ export function deleteMessage(origin: DeleteOrigin, count: number): MessagePart[
   const { receivedCount: r, sharedCount: s } = origin;
 
   if (count === 1) {
-    // Received: local-only delete. Removes this device's copy only.
+    // Received: removed from all your devices, but stays in the space.
     if (r === 1) {
       const stays = origin.fromSpaceNames.length
         ? [plain("It stays in "), thoseSpaces(origin.fromSpaceNames), plain(" for everyone else.")]
@@ -197,7 +197,7 @@ export function deleteMessage(origin: DeleteOrigin, count: number): MessagePart[
         hi(origin.fromMember ?? "Someone"),
         plain(" shared this with you"),
         ...inSpaces(origin.fromSpaceNames),
-        plain(". Deleting it removes it from this device only. "),
+        plain(". Deleting it removes it from all your devices. "),
         ...stays,
       ];
     }
@@ -246,7 +246,7 @@ export function deleteMessage(origin: DeleteOrigin, count: number): MessagePart[
       hi(String(count)),
       plain(" items were shared with you"),
       ...inSpaces(origin.fromSpaceNames),
-      plain(". Deleting them removes them from this device only. "),
+      plain(". Deleting them removes them from all your devices. "),
       ...stays,
     ];
   }
@@ -257,9 +257,11 @@ export function deleteMessage(origin: DeleteOrigin, count: number): MessagePart[
     hi(String(count)),
     plain(" items, "),
     hi(String(count - r)),
-    plain(" are yours and get removed from all your synced devices. The other "),
+    plain(" are yours and "),
     hi(String(r)),
-    plain(" were shared with you by others, so they are removed from this device only and stay shared with everyone else."),
+    plain(" were shared with you by others. Deleting removes all of them from your synced devices; the "),
+    hi(String(r)),
+    plain(" shared items stay shared with everyone else."),
   ];
   if (s > 0) {
     parts.push(
