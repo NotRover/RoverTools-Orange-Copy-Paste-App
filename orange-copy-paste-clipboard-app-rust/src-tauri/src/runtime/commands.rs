@@ -17,9 +17,18 @@ pub fn close_copy_popup(app: tauri::AppHandle) {
 /// Reveal the copy popup. Split from the capture path so the window stays hidden
 /// until the webview has rendered the entry and sized itself, then shows already
 /// populated — no visible chip pop-in or resize after it is on screen.
+///
+/// On the reveal, the caller passes the measured `height` so sizing and showing
+/// happen in a single IPC round-trip instead of a resize call followed by a
+/// present call — the window appears one hop sooner. `None` just shows at the
+/// current size (the fallback path, when a resize already ran).
 #[tauri::command]
-pub fn present_copy_popup(app: tauri::AppHandle) {
+pub fn present_copy_popup(app: tauri::AppHandle, height: Option<f64>) {
     if let Some(win) = app.get_webview_window("copy-popup") {
+        if let Some(h) = height {
+            let _ = win.set_size(tauri::LogicalSize::new(crate::state::COPY_POPUP_W, h));
+            crate::runtime::popup_windows::clamp_popup_into_monitor(&app, "copy-popup");
+        }
         let _ = win.show();
         let _ = win.set_focus();
     }
