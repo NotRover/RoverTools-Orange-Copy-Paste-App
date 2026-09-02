@@ -188,6 +188,16 @@ fn read_settings(path: &std::path::Path) -> Option<crate::settings_file::Map> {
     }
 }
 
+/// Read a boolean setting straight from `settings.json`, for the places that
+/// need a preference before a webview is up to answer (window placement at
+/// popup-show time). Falls back to `default` when unset or unreadable.
+pub(crate) fn read_bool_setting(app: &tauri::AppHandle, key: &str, default: bool) -> bool {
+    get_settings_file_path(app)
+        .and_then(|p| read_settings(&p))
+        .and_then(|m| m.get(key).and_then(serde_json::Value::as_bool))
+        .unwrap_or(default)
+}
+
 /// Write a user setting to `settings.json`.
 #[tauri::command]
 pub fn set_setting(

@@ -726,6 +726,7 @@ pub fn run() {
             crate::clipboard::commands::bulk_remove_group,
             crate::clipboard::commands::get_active_clipboard_id,
             crate::runtime::commands::close_copy_popup,
+            crate::runtime::commands::present_copy_popup,
             crate::runtime::commands::close_paste_popup,
             crate::runtime::commands::resize_paste_popup,
             crate::runtime::commands::resize_copy_popup,

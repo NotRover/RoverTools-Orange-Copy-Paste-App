@@ -10,8 +10,8 @@ use crate::{
     clipboard::history::{ClipboardEntry, ClipboardHistory},
     runtime::platform,
     state::{
-        CopyPopupPayload, PastePopupPayload, COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H,
-        PASTE_POPUP_W,
+        CopyPopupPayload, PastePopupPayload, COPY_POPUP_H, COPY_POPUP_W, PASTE_HISTORY_CAP,
+        PASTE_POPUP_W, PASTE_POPUP_W_WIDE,
     },
 };
 
@@ -33,19 +33,33 @@ fn toggle_popup_if_visible(app: &tauri::AppHandle, label: &str) -> bool {
 
 fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
     if let Some(win) = app.get_webview_window("copy-popup") {
+        // Anchor it now, but leave it hidden: the popup resizes to its content
+        // and then calls `present_copy_popup` once rendered, so it appears
+        // already populated and correctly sized rather than visibly updating.
         crate::runtime::popup_windows::place_popup_for_show(
             &win,
             COPY_POPUP_W as i32,
             COPY_POPUP_H as i32,
         );
+        // Spaces this entry is already in (empty for a fresh capture; non-empty
+        // only when the copy deduped onto an existing, already-shared entry).
+        let shares = {
+            let state = app.state::<crate::state::app_state::AppState>();
+            let guard = state.sync_client.lock();
+            guard
+                .as_ref()
+                .and_then(|s| s.entry_shares().get(&format!("clipboard:{}", entry.id)).cloned())
+                .unwrap_or_default()
+        };
         let payload = CopyPopupPayload {
             id: entry.id.clone(),
             kind: entry.kind.label().to_string(),
             content: entry.content.clone(),
+            pinned: entry.pinned,
+            groups: entry.groups.clone(),
+            shares,
         };
         let _ = win.emit("clipboard:copied", &payload);
-        let _ = win.show();
-        let _ = win.set_focus();
     }
 }
 
@@ -151,17 +165,27 @@ fn handle_paste_shortcut(app: tauri::AppHandle, history: Arc<Mutex<ClipboardHist
 
     let hist = history.lock();
     let payload = PastePopupPayload {
-        recent: hist.top(10),
-        pinned: hist.pinned_entries().into_iter().take(10).collect(),
+        recent: hist.top(PASTE_HISTORY_CAP),
+        pinned: hist.pinned_entries(),
     };
     drop(hist);
 
     if let Some(win) = app.get_webview_window("paste-popup") {
-        crate::runtime::popup_windows::place_popup_for_show(
-            &win,
-            PASTE_POPUP_W as i32,
-            PASTE_POPUP_H as i32,
-        );
+        // Place for the width the popup will actually show at: the side-preview
+        // panel defaults open, so a collapsed preference has to be honored here
+        // or the window is anchored as if it were wide.
+        let preview_open =
+            crate::clipboard::commands::read_bool_setting(&app, "paste_preview_open", true);
+        let width = if preview_open {
+            PASTE_POPUP_W_WIDE
+        } else {
+            PASTE_POPUP_W
+        };
+        // Show at the height the popup will settle at for this many rows, so the
+        // window doesn't visibly shrink from a fixed size once React measures it.
+        let height = crate::state::paste_popup_fit_height(payload.recent.len(), preview_open);
+        let _ = win.set_size(tauri::LogicalSize::new(width, height));
+        crate::runtime::popup_windows::place_popup_for_show(&win, width as i32, height as i32);
         let _ = win.emit("paste-popup:entries", &payload);
         let _ = win.show();
         let _ = win.set_focus();
