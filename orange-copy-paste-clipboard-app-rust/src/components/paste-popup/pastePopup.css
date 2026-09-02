@@ -86,7 +86,7 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  padding: 10px 10px 4px;
+  padding: 10px 10px 6px;
   width: 100%;
   height: 100%;
   display: flex;
@@ -120,7 +120,8 @@ body {
   display: flex;
   align-items: center;
   padding: 2px 2px 6px;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .paste-header-left {
@@ -133,6 +134,7 @@ body {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .paste-count {
@@ -153,7 +155,6 @@ body {
   display: flex;
   gap: 1px;
   margin-left: auto;
-  margin-right: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -181,31 +182,26 @@ body {
   color: var(--text-secondary);
 }
 
-.paste-tab--active {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
 .paste-tab-count {
   font-size: 9px;
   font-weight: 600;
   color: var(--text-muted);
-  min-width: 14px;
+  min-width: 12px;
   text-align: center;
+}
+
+.paste-tab--active {
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .paste-tab--active .paste-tab-count {
   color: var(--accent);
 }
 
-.paste-tab--active {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: transparent;
-}
+/* ── Preview toggle + close ── */
 
-/* ── Close ── */
-
+.paste-preview-toggle,
 .paste-close {
   width: 22px;
   height: 22px;
@@ -222,18 +218,87 @@ body {
   flex-shrink: 0;
 }
 
+.paste-preview-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-light);
+}
+
+.paste-preview-toggle.is-open {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
 .paste-close:hover {
   background: var(--danger);
   border-color: var(--danger);
   color: #fff;
 }
 
-/* ── Divider ── */
+/* ── Search ── */
 
-.paste-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 0 2px 6px;
+.paste-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  height: 32px;
+  margin: 0 2px 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: border-color 0.12s ease;
+}
+
+.paste-search:focus-within {
+  border-color: var(--accent);
+}
+
+.paste-search-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  user-select: text;
+}
+
+.paste-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.paste-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.paste-search-clear:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+/* ── Body: list + preview ── */
+
+.paste-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
 }
 
 /* ── Item list ── */
@@ -242,9 +307,19 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  padding-right: 2px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.paste-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.paste-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
 }
 
 .paste-list > .paste-item ~ .paste-item {
@@ -254,6 +329,7 @@ body {
 /* ── Item ── */
 
 .paste-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -275,11 +351,10 @@ body {
 .paste-item:hover,
 .paste-item--selected {
   border-color: var(--accent);
-  /* background: var(--accent-dim); */
 }
 
 .paste-item:active {
-  transform: scale(0.98);
+  transform: scale(0.99);
 }
 
 /* ── Keyboard badge ── */
@@ -303,159 +378,24 @@ body {
 
 .paste-item:hover .paste-key-badge,
 .paste-item--selected .paste-key-badge {
-  /* border-color: var(--accent); */
-  /* background: var(--accent-dim-strong); */
   color: var(--accent);
 }
 
-/* ── Preview wrap ── */
+.paste-key-badge--none {
+  border-style: dashed;
+  opacity: 0.4;
+}
 
-.paste-preview-wrap {
+/* ── Row preview text ── */
+
+.paste-row-preview {
   flex: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-}
-
-/* ── Type icon ── */
-
-.paste-item-icon {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  background: var(--surface-hover);
-  border: 1px solid var(--border);
-  justify-content: center;
-}
-
-.paste-item:hover .paste-item-icon,
-.paste-item--selected .paste-item-icon {
-  /* border-color: transparent; */
-  /* background: var(--accent-dim-strong); */
-  color: var(--accent);
-}
-
-/* ── Label for file / image entries ── */
-
-.paste-item-label {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   line-height: 1.4;
-}
-
-/* ── Expanded file list (multi-file entries) ── */
-
-@keyframes pasteFileListSlideIn {
-  from {
-    opacity: 0;
-    max-height: 0;
-  }
-  to {
-    opacity: 1;
-    max-height: 120px;
-  }
-}
-
-.paste-file-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0 2px 28px;
-  max-height: 120px;
-  overflow: hidden auto;
-  min-height: 0;
-  animation: pasteFileListSlideIn 0.18s ease-out;
-}
-
-.paste-file-list::-webkit-scrollbar {
-  width: 3px;
-}
-
-.paste-file-list::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 2px;
-}
-
-.paste-file-list-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-.paste-file-list-item:hover {
-  background: var(--surface-hover);
-}
-
-.paste-file-name {
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
-  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
-}
-
-.paste-filename--missing {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-
-.paste-file-list-item--missing .paste-file-name {
-  opacity: 0.6;
-  text-decoration: line-through;
-}
-
-.paste-missing-hint {
-  font-size: 10px;
-  font-weight: 600;
-  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
-  color: var(--accent);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.paste-file-icon {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
-.paste-expand-chevron {
-  margin-left: 2px;
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.paste-expand-chevron.open {
-  transform: rotate(180deg);
-}
-
-/* ── File name label for non-text items ── */
-
-.paste-filename {
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
-  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
 }
 
 /* ── Image thumbnail ── */
@@ -494,6 +434,244 @@ body {
   white-space: nowrap;
 }
 
+/* ── Inline row actions (hover / selected) ── */
+
+.paste-row-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.paste-item:hover .paste-row-actions,
+.paste-item--selected .paste-row-actions {
+  display: flex;
+}
+
+/* Hide the timestamp when actions take its place, so the row width holds. */
+.paste-item:hover .paste-item-meta,
+.paste-item--selected .paste-item-meta {
+  display: none;
+}
+
+.paste-ia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.paste-ia:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.paste-ia.is-on {
+  color: var(--accent);
+}
+
+.paste-ia--danger:hover {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ── Side preview panel ── */
+
+.paste-preview {
+  width: 184px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.paste-preview-kind {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.paste-preview-media {
+  /* A box, not a column-filling strip: fix the aspect so a long list doesn't
+     stretch the preview into a thin rectangle. */
+  flex: none;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.paste-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.paste-preview-text {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+.paste-preview-files {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.paste-preview-file {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+.paste-preview-text::-webkit-scrollbar,
+.paste-preview-files::-webkit-scrollbar {
+  width: 4px;
+}
+
+.paste-preview-text::-webkit-scrollbar-thumb,
+.paste-preview-files::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}
+
+.paste-preview-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.paste-preview-metabit {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.paste-preview-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.paste-preview-group {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paste-preview-paste {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease;
+}
+
+.paste-preview-paste:hover {
+  background: var(--accent-hover);
+}
+
+.paste-preview-paste kbd {
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.paste-preview-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.paste-pa {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.paste-pa:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.paste-pa.is-on {
+  color: var(--accent);
+}
+
+.paste-pa--danger:hover {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
 /* ── Empty state ── */
 
 .paste-empty {
@@ -510,4 +688,35 @@ body {
 
 .paste-empty svg {
   color: var(--border-light);
+}
+
+/* ── Hints ── */
+
+.paste-hints {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 2px;
+  flex-shrink: 0;
+}
+
+.paste-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.paste-hint kbd {
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  min-width: 16px;
+  text-align: center;
 }

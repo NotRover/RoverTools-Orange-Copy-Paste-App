@@ -497,9 +497,9 @@ const SettingsScreen: React.FC = () => {
           <div className="set-group">
             <div className="set-row">
               <div className="set-row-info">
-                <span className="set-row-label">Paste slots</span>
+                <span className="set-row-label">Number-key paste slots</span>
                 <span className="set-row-desc">
-                  Number of entries shown in the quick paste popup.
+                  How many entries the quick paste popup numbers 1-0 for one-key paste.
                 </span>
               </div>
               <CustomSelect value={pasteSlots} options={SLOT_OPTIONS} onChange={handleSlotsChange} />

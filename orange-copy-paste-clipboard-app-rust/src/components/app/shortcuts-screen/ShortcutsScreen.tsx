@@ -46,12 +46,28 @@ const SECTIONS: ShortcutSection[] = [
     title: "Paste Popup",
     icon: <ClipboardPasteIcon />,
     entries: [
-      { keys: ["1-9, 0"], description: "Paste entry by slot number" },
-      { keys: ["Up", "Down"], description: "Navigate entries" },
+      { keys: ["Type"], description: "Search the whole list" },
+      {
+        keys: ["1-9, 0"],
+        description: "Paste a numbered slot (while the search box is empty)",
+      },
+      { keys: ["Up", "Down"], description: "Move through the list" },
       { keys: ["Enter"], description: "Paste selected entry" },
-      { keys: ["Left", "Right"], description: "Switch between Recent / Pinned" },
+      { keys: ["Alt", "Enter"], description: "Paste and remove from Recent" },
       { keys: ["Tab"], description: "Toggle Recent / Pinned" },
+      { keys: ["Space"], description: "Show / hide the preview (search box empty)" },
       { keys: ["Esc"], description: "Close popup" },
+    ],
+  },
+  {
+    title: "Copy Popup",
+    icon: <ClipboardIcon size={13} />,
+    entries: [
+      { keys: ["P"], description: "Pin / unpin the copied entry" },
+      { keys: ["S"], description: "Save / unsave the copied entry" },
+      { keys: ["G"], description: "Open the groups picker" },
+      { keys: ["Del"], description: "Delete from history" },
+      { keys: ["Esc"], description: "Close the open picker, or the popup" },
     ],
   },
   {

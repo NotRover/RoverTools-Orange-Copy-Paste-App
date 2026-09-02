@@ -14,6 +14,17 @@ pub fn close_copy_popup(app: tauri::AppHandle) {
     hide_popup(&app, "copy-popup");
 }
 
+/// Reveal the copy popup. Split from the capture path so the window stays hidden
+/// until the webview has rendered the entry and sized itself, then shows already
+/// populated — no visible chip pop-in or resize after it is on screen.
+#[tauri::command]
+pub fn present_copy_popup(app: tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("copy-popup") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 #[tauri::command]
 pub fn close_paste_popup(app: tauri::AppHandle) {
     hide_popup(&app, "paste-popup");
@@ -31,13 +42,15 @@ fn resize_popup(app: &tauri::AppHandle, label: &str, width: f64, height: f64) {
 }
 
 #[tauri::command]
-pub fn resize_paste_popup(app: tauri::AppHandle, height: f64) {
-    resize_popup(&app, "paste-popup", crate::state::PASTE_POPUP_W, height);
+pub fn resize_paste_popup(app: tauri::AppHandle, width: f64, height: f64) {
+    resize_popup(&app, "paste-popup", width, height);
+    crate::runtime::popup_windows::clamp_popup_into_monitor(&app, "paste-popup");
 }
 
 #[tauri::command]
 pub fn resize_copy_popup(app: tauri::AppHandle, height: f64) {
     resize_popup(&app, "copy-popup", crate::state::COPY_POPUP_W, height);
+    crate::runtime::popup_windows::clamp_popup_into_monitor(&app, "copy-popup");
 }
 
 #[tauri::command]

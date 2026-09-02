@@ -174,11 +174,20 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   padding: 8px 10px;
+  /* Fills the space between the chips and the command row; scrolls if the text
+     is longer than that. flex:1 also protects the layout — a slightly-off
+     window height shrinks the preview, never the header or the actions. */
   flex: 1;
   min-height: 0;
   overflow: hidden auto;
   display: flex;
   flex-direction: column;
+}
+
+/* Image / video entries: center the media in the (taller) preview box. */
+.popup-preview--media {
+  justify-content: center;
+  align-items: center;
 }
 
 .popup-preview::-webkit-scrollbar {
@@ -195,13 +204,18 @@ body {
 
 .popup-preview-media {
   display: block;
-  width: 100%;
-  max-height: 100px;
+  max-width: 100%;
+  max-height: 300px;
   object-fit: contain;
   border-radius: 5px;
-  margin-bottom: 6px;
   background: var(--surface-hover);
   border: 1px solid var(--border);
+}
+
+/* File/video entries pair the media with a filename line below it. */
+.popup-preview--media .popup-preview-text {
+  margin-top: 6px;
+  text-align: center;
 }
 
 .popup-preview-text {
@@ -218,81 +232,78 @@ body {
 
 .popup-actions {
   display: flex;
-  gap: 1px;
+  gap: 2px;
 }
 
+/* Borderless items. Colour, not a box, is what carries each one: Pin and Groups
+   in the app's accent, Share in teal. Delete stays quiet until hovered. */
 .popup-menu-item {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  min-width: 0;
   width: 100%;
-  padding: 6px 9px;
+  padding: 7px 6px;
   border: none;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--text);
+  color: var(--text-secondary);
   font-size: 12px;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   transition:
-    background 0.1s ease,
-    color 0.1s ease;
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.popup-menu-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .popup-menu-item:disabled {
-  opacity: 0.35;
+  opacity: 0.4;
   cursor: default;
 }
 
-.popup-menu-item:not(:disabled):hover {
-  background: var(--surface-hover);
+/* Resting colour by role. */
+.popup-menu-item--pin,
+.popup-menu-item--groups {
+  color: var(--accent);
 }
 
-/* Pin */
-.popup-menu-item--pin:not(:disabled):hover {
+.popup-menu-item--share {
+  color: var(--success);
+}
+
+/* Hover / open: a soft tint of the same colour behind it. */
+.popup-menu-item--pin:not(:disabled):hover,
+.popup-menu-item--pin.popup-menu-item--active,
+.popup-menu-item--groups:not(:disabled):hover,
+.popup-menu-item--groups.popup-menu-item--active {
   background: var(--accent-dim);
   color: var(--accent);
 }
 
-.popup-menu-item--pin.popup-menu-item--active {
-  color: var(--accent);
-}
-
-.popup-menu-item--pin.popup-menu-item--active:not(:disabled):hover {
+.popup-menu-item--pin.popup-menu-item--active:not(:disabled):hover,
+.popup-menu-item--groups.popup-menu-item--active:not(:disabled):hover {
   background: var(--accent-dim-strong);
-  color: var(--accent);
 }
 
-/* Save */
-.popup-menu-item--save:not(:disabled):hover {
+.popup-menu-item--share:not(:disabled):hover,
+.popup-menu-item--share.popup-menu-item--active {
   background: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
+  color: var(--success);
 }
 
-.popup-menu-item--save.popup-menu-item--active {
-  color: #22c55e;
-}
-
-.popup-menu-item--save.popup-menu-item--active:not(:disabled):hover {
-  background: rgba(34, 197, 94, 0.18);
-  color: #22c55e;
-}
-
-/* Delete */
 .popup-menu-item--danger:not(:disabled):hover {
   background: var(--danger);
   color: #fff;
-}
-
-/* Separator */
-.popup-menu-separator {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
-  margin: 3px 2px;
 }
 
 /* ── Deleted state ── */
@@ -321,6 +332,226 @@ body {
   border-radius: 4px;
   padding: 1px 5px;
   letter-spacing: 0.2px;
+}
+
+/* ── State chips ── */
+
+.popup-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.popup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: var(--chip-h);
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-chip--pin {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid transparent;
+}
+
+/* Saved is the one special group: a star, not a colour dot. */
+.popup-chip--saved {
+  color: #eab308;
+  background: rgba(234, 179, 8, 0.14);
+  border: 1px solid transparent;
+}
+
+/* Custom groups carry their own colour, set inline from groupColor(). */
+.popup-chip--group {
+  border: 1px solid transparent;
+}
+
+.popup-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* Shared into a space: teal, with a share glyph. A share still waiting for the
+   space's key reads as muted rather than active. */
+.popup-chip--space {
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid transparent;
+}
+
+.popup-chip--space.is-waiting {
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* ── Groups / Share picker ── */
+
+/* The picker takes over the content slot, so it fills it (flex:1) the same way
+   the preview does, with its list scrolling inside. */
+.popup-picker {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.popup-picker-head {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 7px 9px 5px;
+  flex-shrink: 0;
+}
+
+.popup-picker-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  padding: 0 4px 4px;
+}
+
+.popup-picker-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.popup-picker-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 2px;
+}
+
+.popup-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.1s ease;
+}
+
+.popup-picker-item:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.popup-picker-item.is-on {
+  color: var(--accent);
+}
+
+/* Same checkbox the app uses on its space/group rows: an empty bordered box that
+   fills with the accent when the row is selected. */
+.popup-picker-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.popup-picker-item.is-on .popup-picker-check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.popup-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-picker-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.popup-picker-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  user-select: text;
+}
+
+.popup-picker-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Saved sits at the top of the Groups picker as the one special group. */
+.popup-picker-item--saved {
+  color: #eab308;
+}
+
+.popup-picker-item--saved.is-on {
+  color: #eab308;
+}
+
+.popup-picker-item--saved.is-on .popup-picker-check {
+  border-color: #eab308;
+  background: #eab308;
+}
+
+/* A space whose key has not arrived: pickable, but marked as pending. */
+.popup-picker-wait {
+  font-size: 9px;
+  font-weight: 600;
+  color: #f0d9c0;
+  background: #2a2118;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* Shown in the share picker when sharing is not possible yet. */
+.popup-picker-empty {
+  padding: 10px 12px 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 

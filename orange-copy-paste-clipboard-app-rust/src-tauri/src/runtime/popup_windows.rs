@@ -55,6 +55,43 @@ pub(crate) fn place_popup_for_show(win: &tauri::WebviewWindow, w: i32, h: i32) {
     }
 }
 
+/// Nudge a popup fully back onto its current monitor after a resize.
+///
+/// The popup is placed once at show time for the size it had then; a later
+/// resize (the paste popup widening for its preview, or either popup growing
+/// to fit content) can push an edge past the screen. This shifts the window
+/// just enough to fit, leaving it where it was when it already fits, so the
+/// cursor anchor is preserved except when it would spill off-screen. A hidden
+/// (offscreen) window is left alone.
+pub(crate) fn clamp_popup_into_monitor(app: &tauri::AppHandle, label: &str) {
+    let Some(win) = app.get_webview_window(label) else {
+        return;
+    };
+    let Ok(pos) = win.outer_position() else {
+        return;
+    };
+    // Parked offscreen while hidden — never reposition it back into view.
+    if (pos.x as f64) <= OFFSCREEN_POS + 1.0 {
+        return;
+    }
+    let (Ok(size), Some(mon)) = (win.outer_size(), win.current_monitor().ok().flatten()) else {
+        return;
+    };
+    let mp = mon.position();
+    let ms = mon.size();
+    let margin = 8i32;
+    let min_x = mp.x + margin;
+    let min_y = mp.y + margin;
+    let max_x = mp.x + ms.width as i32 - size.width as i32 - margin;
+    let max_y = mp.y + ms.height as i32 - size.height as i32 - margin;
+    // max can fall below min on a monitor smaller than the popup; clamp to min.
+    let new_x = pos.x.min(max_x.max(min_x)).max(min_x);
+    let new_y = pos.y.min(max_y.max(min_y)).max(min_y);
+    if new_x != pos.x || new_y != pos.y {
+        let _ = win.set_position(tauri::PhysicalPosition::new(new_x, new_y));
+    }
+}
+
 pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
     if let Some(win) = app.get_webview_window(label) {
         // Move offscreen FIRST so the window cannot intercept clicks during
