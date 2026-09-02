@@ -22,7 +22,8 @@ export async function setCloudCopy(
 ): Promise<void> {
   if (clientIds.length === 0) return;
   const noun = entryType === "note" ? "note" : "item";
-  const plural = clientIds.length === 1 ? noun : `${clientIds.length} ${noun}s`;
+  const single = clientIds.length === 1;
+  const plural = single ? noun : `${clientIds.length} ${noun}s`;
 
   const badges = clientIds.map((id) => `cloud:${entryType}:${id}`);
 
@@ -36,7 +37,11 @@ export async function setCloudCopy(
     // device is not soon. Uploading the item again is what puts it back.
     const unhide = markPending(badges);
     deferDestructive(
-      `Removing ${plural} from your account`,
+      // Say where the copy ends up: "remove from cloud" keeps it on this device
+      // and takes it off the others, which is not what "removing" alone implies.
+      `Removing ${plural} from the cloud. ${
+        single ? "It leaves your other devices but stays" : "They leave your other devices but stay"
+      } on this one.`,
       async () => {
         // Nothing was taken down - every item was another member's, or the
         // command failed - so the badges were telling the truth.

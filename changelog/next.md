@@ -24,10 +24,30 @@
   set fails a real release on purpose.
 -->
 
+Files and folders now sync across your devices, and deleting synced or shared items is clearer and safer to do.
+
 ### New
+
+Files and folders now sync across your devices, sent as a single zipped copy that unpacks on the other side.
+
+Deleting a synced item now asks you to confirm first, and the prompt spells out what the delete does. A "Don't ask again" option turns it off.
+
+Deleting an item someone shared with you now removes it from all your devices at once, while it stays in the space for everyone else.
 
 ### Improved
 
+The copy and paste quick popups have a cleaner, redesigned look.
+
+The quick-copy popup opens faster.
+
+Removing an item from the cloud now says it stays on this device and leaves your other devices.
+
 ### Fixed
 
+Images copied while offline now retry on their own and catch up once you are back online.
+
+Opening the delete confirmation from a quick popup no longer floods the app and can hang it.
+
 ### Internal
+
+Backend: account_full no longer refuses a new tombstone insert (the quota counts live rows only), so removing a received entry works at any quota; sync architecture docs updated. Copy and paste popup preview refactor. Submodule pointer bumps (backend, website).
