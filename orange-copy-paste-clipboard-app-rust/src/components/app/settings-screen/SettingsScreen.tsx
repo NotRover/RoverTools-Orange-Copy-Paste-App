@@ -17,6 +17,7 @@ import {
 } from "@phosphor-icons/react";
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
+import { CONFIRM_SYNC_DELETE_KEY } from "../../../confirmDelete";
 import {
   CARD_CLICK_SETTING_EVENT,
   CARD_CLICK_SETTING_KEY,
@@ -120,6 +121,7 @@ const SettingsScreen: React.FC = () => {
   const [autosave, setAutosave] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
+  const [confirmSyncDelete, setConfirmSyncDelete] = useState(true);
   // False: click copies, double click views. True: the two swap over.
   const [clickToView, setClickToView] = useState(false);
   const [notifClosing, setNotifClosing] = useState(false);
@@ -157,6 +159,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("autosave", setAutosave, false);
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
+    loadBool(CONFIRM_SYNC_DELETE_KEY, setConfirmSyncDelete, true);
     loadBool("sound", setSound, true);
     loadBool("sound_copy", setSoundCopy, false);
     loadBool("sound_paste", setSoundPaste, false);
@@ -340,6 +343,18 @@ const SettingsScreen: React.FC = () => {
                   new CustomEvent(SYNC_BADGE_SETTING_EVENT, { detail: next }),
                 );
               }}
+            />
+            <ToggleRow
+              label="Confirm before deleting synced items"
+              desc="Ask first when deleting an item that has a cloud copy, since the delete also removes it from your other devices."
+              active={confirmSyncDelete}
+              onToggle={() =>
+                toggleBoolSetting(
+                  confirmSyncDelete,
+                  setConfirmSyncDelete,
+                  CONFIRM_SYNC_DELETE_KEY,
+                )
+              }
             />
           </div>
         </section>

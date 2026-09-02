@@ -1,0 +1,161 @@
+/* Confirm-before-delete dialog. Uses the shared app tokens (--surface, --border,
+   --danger, ...), which both the main window and the popups define, so it themes
+   correctly wherever it is rendered. */
+
+.cdd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: cddFade 0.14s ease;
+}
+
+@keyframes cddFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.cdd-card {
+  width: 100%;
+  max-width: 390px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px 18px;
+  background: var(--surface, #181818);
+  border: 1px solid var(--border, #272727);
+  border-radius: var(--radius, 12px);
+  box-shadow: var(--shadow, 0 4px 16px rgba(0, 0, 0, 0.5));
+  animation: cddPop 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes cddPop {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.cdd-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.cdd-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--danger, #ef4444);
+}
+
+.cdd-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--text, #f0f0f0);
+}
+
+.cdd-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary, #a0a0a0);
+}
+
+/* The specifics - sender, counts, space names - lifted out of the muted prose
+   so they read at a glance. */
+.cdd-hi {
+  color: var(--accent, #ff3e1c);
+  font-weight: 600;
+}
+
+.cdd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 1px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border, #272727);
+}
+
+.cdd-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-secondary, #a0a0a0);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s ease;
+}
+
+.cdd-check:hover {
+  color: var(--text, #f0f0f0);
+}
+
+.cdd-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent, #ff3e1c);
+  cursor: pointer;
+}
+
+.cdd-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cdd-btn {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 15px;
+  border-radius: var(--radius-sm, 10px);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, filter 0.12s ease, border-color 0.12s ease;
+}
+
+.cdd-btn:focus-visible {
+  outline: 2px solid var(--accent, #ff3e1c);
+  outline-offset: 2px;
+}
+
+.cdd-btn--cancel {
+  background: transparent;
+  color: var(--text-secondary, #a0a0a0);
+  border-color: var(--border, #272727);
+}
+
+.cdd-btn--cancel:hover {
+  background: var(--surface-hover, #202020);
+  color: var(--text, #f0f0f0);
+  border-color: var(--border-light, #333333);
+}
+
+.cdd-btn--delete {
+  background: var(--danger, #ef4444);
+  color: #fff;
+}
+
+.cdd-btn--delete:hover {
+  filter: brightness(1.08);
+}
+
+.cdd-btn--delete:active {
+  filter: brightness(0.95);
+}
