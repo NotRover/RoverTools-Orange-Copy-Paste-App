@@ -929,13 +929,14 @@ Connection drop → automatic reconnect after 5s backoff, then exponential up to
 On reconnect, the queue is flushed in order before pulling the delta. This ensures local-device ordering is preserved in the LWW (last-write-wins) conflict resolution.
 
 `push`/`update` carry the finished ciphertext, ready to POST. `push_local` carries
-only an id: it is for the one push that cannot be pre-encrypted and parked — an
-image whose blob upload could not reach the server. The blob has to go up before
-the entry can, so there is nothing to serialize while offline; the flush re-reads
-the local entry and re-runs the whole push (blob included). Without it an image
-copied offline was reported "not sent" and dropped, so it never synced even once
-the connection came back. Only a *retryable* blob failure queues one — a genuine
-refusal (over the 5 MB limit, or the account out of room) is still a recorded skip.
+only an id: it is for the one push that cannot be pre-encrypted and parked — a
+blob-backed entry whose upload could not reach the server (an image, or a file
+entry's ZIP archive). The blob has to go up before the entry can, so there is
+nothing to serialize while offline; the flush re-reads the local entry and re-runs
+the whole push (blob included). Without it an image or file copied offline was
+reported "not sent" and dropped, so it never synced even once the connection came
+back. Only a *retryable* blob failure queues one — a genuine refusal (over the 5
+MB limit, or the account out of room) is still a recorded skip.
 
 A flush moves its ops through `sync_pending.inflight.json` rather than clearing
 the queue file and hoping: `drain` writes them there before emptying the queue,
@@ -1041,17 +1042,39 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 #### File and Video Sync (5 MB Limit)
 
-`kind: 'file'` entries captured from CF_HDROP are synced subject to a **5 MB total size cap**:
+`kind: 'file'` entries captured from CF_HDROP sync exactly like an image — one blob
+per entry — except the blob is a **ZIP of everything the entry names**, so the
+single `blob_key`/`blob_size` columns carry any number of files and folders. This
+reuses the image blob path (`upload_files_blob` mirrors `upload_image_blob`); the
+crypto, quota, retry and skip handling are identical.
 
-1. On `on_new_entry(entry)`, if `entry.kind == File`:
-   - Read each file path from `entry.content` (newline-delimited).
-   - Sum file sizes. If total > 5 MB: skip sync for this entry, increment `sync_status.skipped_count`, emit a `sync:file-skipped` Tauri event so the UI can surface a notification. Do not add to `sync_pending.json`.
-   - If within limit: for each file, call `POST /blobs/request-upload` → upload bytes to R2 via pre-signed PUT → `POST /blobs/confirm-upload`. Collect `blob_key` values.
-   - `encrypted_content` = encrypt(`[{ filename, mime_type, size_bytes, blob_key }, ...]` as JSON).
-   - `blob_key` field on the push payload = first file's blob key (for server routing).
-2. On receiving a `sync:entry` of `kind: 'file'` from the server: download each blob via pre-signed GET to `{app_data}/sync-downloads/`, update `entry.content` to the downloaded paths.
+**Push** (`spawn_push_clipboard_entry`, the `File` arm):
 
-The same flow applies to video files (CF_HDROP paths to `.mp4`, `.mov`, etc.). The 5 MB check is per-clipboard-entry (sum of all files in that single clipboard event), not per file.
+1. Sum the entry's input bytes, **recursing into folders** (a folder path's own
+   metadata length is not its contents). Over 5 MB → recorded skip, no upload.
+2. `zip_paths_to_bytes` packs each newline-separated path into one in-memory ZIP,
+   preserving top-level names (disambiguated `name (2)` on a basename clash) and any
+   folder structure. Empty/unreadable entries are skipped.
+3. Encrypt the archive with `encrypt_bytes` (same CEK as the entry's row), then
+   `request-upload` → pre-signed PUT → `confirm-upload`. A second, exact size gate
+   rejects ciphertext over 5 MB.
+4. Inline `encrypted_content` is a tiny descriptor, `{"archive":"zip"}` (the ZIP is
+   self-describing); `blob_key`/`blob_size` point at the object.
+
+A *retryable* upload failure (server unreachable) queues a `push_local` and lights
+the amber "waiting to upload" badge — same as an image. A genuine refusal (over 5
+MB, or the account out of room) is a recorded skip. Not signed in → skip.
+
+**Receive** (`spawn_blob_files_merge`, mirroring `spawn_blob_image_merge`): download
+the blob, decrypt, and `extract_zip_to_dir` into `{app_data}/received-files/{client_id}/`
+(replacing any prior extraction; `enclosed_name` blocks zip-slip). `entry.content`
+becomes the extracted top-level paths, so the entry copies/pastes as a normal
+file-drop on the receiving device. A file entry from before this was wired has no
+`blob_key`; nothing is materialized and it stays local-only on the sender.
+
+The same flow applies to video files (CF_HDROP paths to `.mp4`, `.mov`, etc.). The 5
+MB check is per-clipboard-entry (recursive sum across that single clipboard event),
+not per file.
 
 #### Spaces — Sync Module Integration
 
@@ -1697,6 +1720,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Pinned entries     | `{app_data}/pinned_entries.bin`        | MessagePack binary                                               | On pin/unpin/groups      | On startup         |
 | Full history       | `{app_data}/history.bin`               | MessagePack binary                                               | Every 2s when dirty      | On startup         |
 | Image files        | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)                      | On push to history       | Via asset protocol |
+| Received files     | `{app_data}/received-files/{client_id}/` | Files/folders extracted from a synced file entry's ZIP blob    | On pull of a file entry  | Via asset protocol |
 | Settings           | `{app_data}/settings.json`             | JSON object `{ key: value }`                                     | On `set_setting`         | On startup         |
 | Notes              | `{app_data}/notes.bin`                 | MessagePack binary                                               | Every 2s when dirty      | On startup         |
 | Notifications      | `{app_data}/notifications.bin`         | MessagePack binary                                               | Every 2s when dirty      | On startup         |

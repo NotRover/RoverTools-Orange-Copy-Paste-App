@@ -29,6 +29,8 @@ import NotificationsPopout from "./notifications/NotificationsPopout";
 import { initAttachmentResolver } from "./notes-screen/editor-engine";
 import { configureSounds, playCue, type Cue } from "../../sounds";
 import ToastNotification from "./toast/ToastNotification";
+import ConfirmDeleteDialog from "../common/ConfirmDeleteDialog";
+import { shouldConfirmDelete, disableSyncDeleteConfirm } from "../../confirmDelete";
 import {
   APP_TOAST_DISMISS_EVENT,
   APP_TOAST_EVENT,
@@ -873,24 +875,49 @@ const App: React.FC = () => {
   // Undo puts the snapshot back. All of that is `deferDestructive` - the timer,
   // the toast and the wiring between them - so each of these handlers is only
   // the two things that differ, what to hide and how to put it back.
+  // Confirm before deleting synced items: holds the item count (for the copy)
+  // and the delete to run once confirmed; null when no dialog is open.
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    keys: string[];
+    count: number;
+    run: () => void;
+  } | null>(null);
+
+  // Gate a delete behind the confirmation when it targets synced items and the
+  // preference is on; otherwise run it straight away. The keys ride along so the
+  // dialog can say what the delete does (own vs received, which spaces).
+  const guardDelete = useCallback(
+    async (keys: string[], count: number, proceed: () => void) => {
+      if (await shouldConfirmDelete(keys)) {
+        setDeleteConfirm({ keys, count, run: proceed });
+      } else {
+        proceed();
+      }
+    },
+    [],
+  );
+
   const handleDelete = useCallback(
     (id: string) => {
       const entry = entries.find((e) => e.id === id);
       if (!entry) return;
-      setEntries((prev) => prev.filter((e) => e.id !== id));
-      deferDestructive(
-        "Entry deleted",
-        async () => {
-          await invoke("delete_entry", { id });
-        },
-        {
-          key: "entry-delete",
-          onUndo: () => setEntries((prev) => restoreEntries(prev, [entry])),
-          errorPrefix: "Could not delete the entry",
-        },
-      );
+      const proceed = () => {
+        setEntries((prev) => prev.filter((e) => e.id !== id));
+        deferDestructive(
+          "Entry deleted",
+          async () => {
+            await invoke("delete_entry", { id });
+          },
+          {
+            key: "entry-delete",
+            onUndo: () => setEntries((prev) => restoreEntries(prev, [entry])),
+            errorPrefix: "Could not delete the entry",
+          },
+        );
+      };
+      void guardDelete([`clipboard:${id}`], 1, proceed);
     },
-    [entries],
+    [entries, guardDelete],
   );
 
   const handlePin = useCallback(
@@ -1001,22 +1028,29 @@ const App: React.FC = () => {
       const idSet = new Set(ids);
       const snapshot = entries.filter((e) => idSet.has(e.id));
       if (snapshot.length === 0) return;
-      setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
-      deferDestructive(
-        `${snapshot.length} entries deleted`,
-        async () => {
-          await invoke("bulk_delete_entries", { ids });
-        },
-        {
-          // Same key as the single delete: one Undo is offered at a time, and
-          // it is always for the most recent thing that went.
-          key: "entry-delete",
-          onUndo: () => setEntries((prev) => restoreEntries(prev, snapshot)),
-          errorPrefix: "Could not delete the entries",
-        },
+      const proceed = () => {
+        setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
+        deferDestructive(
+          `${snapshot.length} entries deleted`,
+          async () => {
+            await invoke("bulk_delete_entries", { ids });
+          },
+          {
+            // Same key as the single delete: one Undo is offered at a time, and
+            // it is always for the most recent thing that went.
+            key: "entry-delete",
+            onUndo: () => setEntries((prev) => restoreEntries(prev, snapshot)),
+            errorPrefix: "Could not delete the entries",
+          },
+        );
+      };
+      void guardDelete(
+        ids.map((id) => `clipboard:${id}`),
+        snapshot.length,
+        proceed,
       );
     },
-    [entries],
+    [entries, guardDelete],
   );
 
   const handleBulkPin = useCallback(async (ids: string[]) => {
@@ -1153,20 +1187,23 @@ const App: React.FC = () => {
     (id: string) => {
       const note = notes.find((n) => n.id === id);
       if (!note) return;
-      setNotes((prev) => prev.filter((n) => n.id !== id));
-      deferDestructive(
-        "Note deleted",
-        async () => {
-          await invoke("delete_note", { id });
-        },
-        {
-          key: "note-delete",
-          onUndo: () => setNotes((prev) => restoreNotes(prev, [note])),
-          errorPrefix: "Could not delete the note",
-        },
-      );
+      const proceed = () => {
+        setNotes((prev) => prev.filter((n) => n.id !== id));
+        deferDestructive(
+          "Note deleted",
+          async () => {
+            await invoke("delete_note", { id });
+          },
+          {
+            key: "note-delete",
+            onUndo: () => setNotes((prev) => restoreNotes(prev, [note])),
+            errorPrefix: "Could not delete the note",
+          },
+        );
+      };
+      void guardDelete([`note:${id}`], 1, proceed);
     },
-    [notes],
+    [notes, guardDelete],
   );
 
   const handlePinNote = useCallback(async (id: string, pin: boolean) => {
@@ -1189,20 +1226,27 @@ const App: React.FC = () => {
       const idSet = new Set(ids);
       const snapshot = notes.filter((n) => idSet.has(n.id));
       if (snapshot.length === 0) return;
-      setNotes((prev) => prev.filter((n) => !idSet.has(n.id)));
-      deferDestructive(
-        `${snapshot.length} notes deleted`,
-        async () => {
-          for (const id of ids) await invoke("delete_note", { id });
-        },
-        {
-          key: "note-delete",
-          onUndo: () => setNotes((prev) => restoreNotes(prev, snapshot)),
-          errorPrefix: "Could not delete the notes",
-        },
+      const proceed = () => {
+        setNotes((prev) => prev.filter((n) => !idSet.has(n.id)));
+        deferDestructive(
+          `${snapshot.length} notes deleted`,
+          async () => {
+            for (const id of ids) await invoke("delete_note", { id });
+          },
+          {
+            key: "note-delete",
+            onUndo: () => setNotes((prev) => restoreNotes(prev, snapshot)),
+            errorPrefix: "Could not delete the notes",
+          },
+        );
+      };
+      void guardDelete(
+        ids.map((id) => `note:${id}`),
+        snapshot.length,
+        proceed,
       );
     },
-    [notes],
+    [notes, guardDelete],
   );
 
   const handleBulkPinNotes = useCallback(async (ids: string[]) => {
@@ -1503,6 +1547,19 @@ const App: React.FC = () => {
             onDismiss={() => setScreenToast(null)}
           />
         )}
+
+        <ConfirmDeleteDialog
+          open={!!deleteConfirm}
+          count={deleteConfirm?.count ?? 1}
+          entryKeys={deleteConfirm?.keys}
+          onCancel={() => setDeleteConfirm(null)}
+          onConfirm={(dontAsk) => {
+            const pending = deleteConfirm;
+            setDeleteConfirm(null);
+            if (dontAsk) void disableSyncDeleteConfirm();
+            pending?.run();
+          }}
+        />
       </div>
     </div>
   );

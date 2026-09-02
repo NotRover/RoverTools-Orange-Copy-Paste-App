@@ -277,6 +277,7 @@ fn setup_runtime(
     let history_file = path("history.bin");
     let saved_file = path("pinned_entries.bin");
     let images_dir = path("images");
+    let received_files_dir = path("received-files");
     let settings_file = path("settings.json");
     let boot_file = path("boot_id.txt");
     let notes_file = path("notes.bin");
@@ -285,6 +286,11 @@ fn setup_runtime(
     // Configure the images directory so pushed images are saved to disk.
     if let Some(ref dir) = images_dir {
         history.lock().set_images_dir(dir.clone());
+    }
+    // And the dir where synced file entries are extracted, so a full save can
+    // prune the subdirs of entries that have since been deleted.
+    if let Some(ref dir) = received_files_dir {
+        history.lock().set_received_files_dir(dir.clone());
     }
 
     // One read of settings.json for every flag below.

@@ -355,6 +355,10 @@ pub struct ClipboardHistory {
     /// Directory where externalised image files are stored.
     /// Configured once at startup via [`Self::set_images_dir`].
     images_dir: Option<std::path::PathBuf>,
+    /// Directory where a synced file entry's blob is extracted, one subdir per
+    /// entry (`received-files/{id}/`). Configured once at startup via
+    /// [`Self::set_received_files_dir`]; swept for orphans on a full save.
+    received_files_dir: Option<std::path::PathBuf>,
 }
 
 impl ClipboardHistory {
@@ -365,6 +369,12 @@ impl ClipboardHistory {
     /// Set the directory used to persist clipboard images as files on disk.
     pub fn set_images_dir(&mut self, dir: std::path::PathBuf) {
         self.images_dir = Some(dir);
+    }
+
+    /// Set the directory holding extracted synced-file entries (one subdir per
+    /// entry id), so a full save can prune subdirs left by deleted entries.
+    pub fn set_received_files_dir(&mut self, dir: std::path::PathBuf) {
+        self.received_files_dir = Some(dir);
     }
 
     /// Prepend an entry and trim to [`MAX_HISTORY`] (excluding saved entries).
@@ -640,6 +650,26 @@ impl ClipboardHistory {
             }
         }
 
+        // Remove extracted file-entry subdirs (named by entry id) that no live
+        // file entry still points at — the local counterpart to the server's
+        // blob release when a synced file entry is deleted.
+        if let Some(ref dir) = self.received_files_dir {
+            let referenced: std::collections::HashSet<String> = self
+                .entries
+                .iter()
+                .filter(|e| e.kind == EntryKind::File)
+                .map(|e| e.id.clone())
+                .collect();
+            if let Ok(read_dir) = std::fs::read_dir(dir) {
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !referenced.contains(&name) {
+                        let _ = std::fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -721,6 +751,34 @@ mod tests {
             assert_eq!(html, "<b>hi</b>", "html half changed for {plain:?}");
             assert_eq!(recovered, plain, "plain half changed for {plain:?}");
         }
+    }
+
+    /// A deleted synced file entry must not leave its extracted files behind on
+    /// disk: a full save prunes the `received-files/{id}/` subdir of any entry no
+    /// longer in history, the local counterpart to the server releasing its blob.
+    #[test]
+    fn a_full_save_prunes_orphaned_received_file_dirs() {
+        let base = std::env::temp_dir().join(format!("rovertools-rf-{}", uuid::Uuid::new_v4()));
+        let recv = base.join("received-files");
+        std::fs::create_dir_all(recv.join("live-id")).unwrap();
+        std::fs::create_dir_all(recv.join("gone-id")).unwrap();
+        std::fs::write(recv.join("live-id/f.txt"), b"x").unwrap();
+        std::fs::write(recv.join("gone-id/f.txt"), b"y").unwrap();
+
+        let mut hist = ClipboardHistory::new();
+        hist.set_received_files_dir(recv.clone());
+        // One live file entry whose id matches the "live-id" subdir; "gone-id"
+        // has no entry, standing in for one the user deleted.
+        let mut entry = ClipboardEntry::new(EntryKind::File, "C:/somewhere/f.txt".into());
+        entry.id = "live-id".to_string();
+        hist.entries.push(entry);
+
+        hist.save_all_to_file(&base.join("history.bin")).unwrap();
+
+        assert!(recv.join("live-id").exists(), "referenced dir kept");
+        assert!(!recv.join("gone-id").exists(), "orphaned dir removed");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// One 500 MB copy took the app to several GB and crashed the UI: nothing

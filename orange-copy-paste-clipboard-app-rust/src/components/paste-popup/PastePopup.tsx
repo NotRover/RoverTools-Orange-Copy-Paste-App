@@ -32,6 +32,11 @@ import {
   TrashIcon,
   SearchIcon,
 } from "../icons";
+import ConfirmDeleteDialog from "../common/ConfirmDeleteDialog";
+import {
+  shouldConfirmDelete,
+  disableSyncDeleteConfirm,
+} from "../../confirmDelete";
 import "./pastePopup.css";
 import { installWebviewGuards } from "../../webview-guards";
 
@@ -258,11 +263,26 @@ const PastePopup: React.FC = () => {
     [applyPinLocally],
   );
 
-  const handleDelete = useCallback(async (entry: ClipboardEntry) => {
+  // A synced entry gets a confirmation first (there is no Undo in the popup, so
+  // the dialog is the only safety net); local-only entries delete immediately.
+  const [confirmEntry, setConfirmEntry] = useState<ClipboardEntry | null>(null);
+
+  const performDelete = useCallback(async (entry: ClipboardEntry) => {
     await invoke("delete_entry", { id: entry.id }).catch(console.error);
     setRecentAll((list) => list.filter((e) => e.id !== entry.id));
     setPinnedAll((list) => list.filter((e) => e.id !== entry.id));
   }, []);
+
+  const handleDelete = useCallback(
+    async (entry: ClipboardEntry) => {
+      if (await shouldConfirmDelete([`clipboard:${entry.id}`])) {
+        setConfirmEntry(entry);
+      } else {
+        void performDelete(entry);
+      }
+    },
+    [performDelete],
+  );
 
   const switchTab = useCallback((t: Tab) => {
     keyboardNav.current = true; // scroll the new tab's list back to the top
@@ -287,6 +307,9 @@ const PastePopup: React.FC = () => {
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
+      // The confirm dialog owns the keyboard while it is up (it handles its own
+      // Escape); nothing here should paste or navigate underneath it.
+      if (confirmEntry) return;
       const empty = query.length === 0;
 
       if (empty && /^[0-9]$/.test(e.key)) {
@@ -342,6 +365,7 @@ const PastePopup: React.FC = () => {
     return () => window.removeEventListener("keydown", handler);
   }, [
     visible,
+    confirmEntry,
     entries,
     selected,
     numbered,
@@ -533,6 +557,18 @@ const PastePopup: React.FC = () => {
         <span className="paste-hint"><kbd>Enter</kbd> paste</span>
         <span className="paste-hint"><kbd>type</kbd> search</span>
       </div>
+
+      <ConfirmDeleteDialog
+        open={!!confirmEntry}
+        entryKeys={confirmEntry ? [`clipboard:${confirmEntry.id}`] : undefined}
+        onCancel={() => setConfirmEntry(null)}
+        onConfirm={(dontAsk) => {
+          const entry = confirmEntry;
+          setConfirmEntry(null);
+          if (dontAsk) void disableSyncDeleteConfirm();
+          if (entry) void performDelete(entry);
+        }}
+      />
     </div>
   );
 };

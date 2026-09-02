@@ -35,6 +35,11 @@ import {
   CheckIcon,
   TagIcon,
 } from "../icons";
+import ConfirmDeleteDialog from "../common/ConfirmDeleteDialog";
+import {
+  shouldConfirmDelete,
+  disableSyncDeleteConfirm,
+} from "../../confirmDelete";
 import "./copyPopup.css";
 import { installWebviewGuards } from "../../webview-guards";
 
@@ -53,6 +58,9 @@ const SPACE_ROW_H = 30; // one space row in the share picker
 const SPACES_REGION_MAX = 152; // share list scrolls past this
 const SPACES_FLOOR_H = 112; // smallest usable share picker
 const BLOCKED_REGION_H = 96; // the "sign in / make a space" hint
+// Enough window height for the delete-confirm card (overlay padding + card) so
+// it never clips in a short popup.
+const CONFIRM_DIALOG_H = 264;
 const MIN_PREVIEW_H = 44;
 const MAX_PREVIEW_H = 172; // text cap
 const MAX_MEDIA_H = 300; // image/video cap — they get more room than text
@@ -110,6 +118,11 @@ const CopyPopup: React.FC = () => {
   // popup was still `visible` from the previous open (Rust hides it, React state
   // does not reset), avoiding the extra frame a setVisible(false)->true toggle costs.
   const [showNonce, setShowNonce] = useState(0);
+  // Confirm before deleting a synced entry. A freshly copied item is usually not
+  // synced yet, so this rarely fires here — but a re-copy that dedupes onto an
+  // already-synced entry does, and then the warning is warranted. Declared here
+  // (above the size effect that reads it) so it is in scope for the reveal sizing.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newGroupRef = useRef<HTMLInputElement>(null);
   // The window is shown by React (not Rust) once it has rendered and sized the
@@ -298,7 +311,11 @@ const CopyPopup: React.FC = () => {
       contentH = Math.min(Math.max(previewH, Math.min(need, SPACES_FLOOR_H)), need);
     }
     // Chips ride on the header line now, so they add no height of their own.
-    const totalH = CHROME_H + contentH;
+    // While the delete confirmation is up, keep the window tall enough for its
+    // card so nothing clips in a short popup.
+    const totalH = confirmDelete
+      ? Math.max(CHROME_H + contentH, CONFIRM_DIALOG_H)
+      : CHROME_H + contentH;
     // A media entry waits to be revealed until its height is measured, so it
     // doesn't pop in at an interim size and then reflow; everything else reveals
     // as soon as the first size lands.
@@ -307,8 +324,8 @@ const CopyPopup: React.FC = () => {
       // First reveal: size and show in a single IPC hop.
       present(totalH);
     } else {
-      // Already on screen (a picker opened/closed), or media still measuring —
-      // just size the (possibly hidden) window; the reveal waits for `measured`.
+      // Already on screen (a picker opened/closed, or the dialog toggled), or
+      // media still measuring — just size the (possibly hidden) window.
       invoke("resize_copy_popup", { height: totalH }).catch(console.error);
     }
   }, [
@@ -324,6 +341,7 @@ const CopyPopup: React.FC = () => {
     picker,
     spaces,
     signedIn,
+    confirmDelete,
     present,
   ]);
 
@@ -429,7 +447,7 @@ const CopyPopup: React.FC = () => {
     if (!allGroups.includes(name)) setAllGroups((a) => [...a, name]);
   }, [newGroup, groups, allGroups, commitGroups]);
 
-  const handleDelete = useCallback(async () => {
+  const performDelete = useCallback(async () => {
     if (!entryId) return;
     cancelBlur();
     await invoke("delete_entry", { id: entryId }).catch(console.error);
@@ -439,10 +457,22 @@ const CopyPopup: React.FC = () => {
     }, 800);
   }, [entryId, cancelBlur]);
 
+  const handleDelete = useCallback(async () => {
+    if (!entryId) return;
+    if (await shouldConfirmDelete([`clipboard:${entryId}`])) {
+      cancelBlur(); // don't let the popup dismiss while the dialog is up
+      setConfirmDelete(true);
+    } else {
+      void performDelete();
+    }
+  }, [entryId, cancelBlur, performDelete]);
+
   // Keyboard: one key per action. Skip letter/delete shortcuts while the
   // new-group field is focused so the user can actually type into it.
   useEffect(() => {
-    if (!visible || deleted) return;
+    // While the confirm dialog is up it owns the keyboard (including Escape), so
+    // the popup's own shortcuts stay dormant.
+    if (!visible || deleted || confirmDelete) return;
     const handler = (e: KeyboardEvent) => {
       const typing =
         document.activeElement instanceof HTMLInputElement ||
@@ -478,7 +508,7 @@ const CopyPopup: React.FC = () => {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [visible, deleted, picker, handlePin, handleQuickSave, handleDelete, handleClose]);
+  }, [visible, deleted, confirmDelete, picker, handlePin, handleQuickSave, handleDelete, handleClose]);
 
   const previewText = truncateText(content, 200);
 
@@ -804,6 +834,17 @@ const CopyPopup: React.FC = () => {
           </div>
         </>
       )}
+
+      <ConfirmDeleteDialog
+        open={confirmDelete}
+        entryKeys={[`clipboard:${entryId}`]}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={(dontAsk) => {
+          setConfirmDelete(false);
+          if (dontAsk) void disableSyncDeleteConfirm();
+          void performDelete();
+        }}
+      />
     </div>
   );
 };
