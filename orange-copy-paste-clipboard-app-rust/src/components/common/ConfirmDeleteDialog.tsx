@@ -52,18 +52,25 @@ export const ConfirmDeleteDialog: React.FC<Props> = ({
   // Resolve where the items came from once the dialog opens. Starts from the
   // own-only default so the copy is right for the common case before the async
   // lookup lands, then refines if any target turns out to be shared or received.
+  //
+  // Keyed on a joined string, not the array itself: callers pass a fresh array
+  // literal each render (`entryKeys={[`clipboard:${id}`]}`), so depending on its
+  // identity would re-run the lookup every render - an infinite setState loop
+  // that floods the Rust bridge. Entry keys never contain a newline.
+  const keyStr = (entryKeys ?? []).join("\n");
   useEffect(() => {
     if (!open) return;
     setOrigin(OWN_ONLY);
-    if (!entryKeys?.length) return;
+    const keys = keyStr ? keyStr.split("\n") : [];
+    if (!keys.length) return;
     let live = true;
-    void describeDelete(entryKeys).then((o) => {
+    void describeDelete(keys).then((o) => {
       if (live) setOrigin(o);
     });
     return () => {
       live = false;
     };
-  }, [open, entryKeys]);
+  }, [open, keyStr]);
 
   // Escape cancels. Captured and stopped so a popup's own Escape-to-close does
   // not fire underneath and yank the window away mid-decision.

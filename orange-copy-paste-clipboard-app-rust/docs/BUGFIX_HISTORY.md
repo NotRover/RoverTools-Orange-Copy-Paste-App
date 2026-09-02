@@ -989,3 +989,36 @@ Manual mode is untouched - it still goes up only on Sync now.
 being visible.** Refocus is a fine *extra* nudge, but making it the only
 background trigger meant the product quietly stopped working exactly when it was
 doing its job - running in the tray.
+
+## #26 - The delete confirmation flooded the IPC bridge and Windows killed the message queue
+
+**Symptom.** Opening the delete confirmation from either quick popup (copy or
+paste) spewed an unbounded flood of `PostMessage failed ; is the messages queue
+full? Error code 0x80070718 - Not enough quota is available to process this
+command.` (`ERROR_NOT_ENOUGH_QUOTA`). The main window's bulk-delete dialog never
+did it.
+
+**Cause.** `ConfirmDeleteDialog` resolves an entry's origin in an effect that
+depended on the `entryKeys` **array**, and `describeDelete` sets state with the
+result. The popups render the dialog with a fresh array literal every time -
+`entryKeys={[`clipboard:${entryId}`]}` - so each render produced a new array
+*identity*. New identity -> effect re-runs -> four `invoke`s + `setOrigin` ->
+re-render -> new array -> effect re-runs, with nothing to break the cycle. Each
+turn of the loop posts several messages across the Tauri IPC bridge, and Windows
+caps a thread's message queue (default 10000 posted messages, `USERPostMessageLimit`),
+so the queue saturates in a fraction of a second and every subsequent post fails.
+App.tsx escaped it only by luck: it holds the keys in state, so the array identity
+happened to be stable.
+
+**Fix.** Key the effect on a primitive instead of the array: `keyStr =
+entryKeys.join("\n")`, deps `[open, keyStr]`, and split the string back into keys
+inside the effect. Two renders with the same keys now produce the same dependency,
+so the lookup runs once per open no matter how the caller builds the array. Fixed
+centrally in the dialog so no call site has to remember to memoize.
+
+**Invariant to keep**: **never depend on an array or object passed as a prop in a
+`useEffect` that sets state - key on a primitive derived from it.** A parent that
+builds the value inline (the common, reasonable thing to do) hands you a new
+reference every render; combined with a `setState` in the effect that is an
+infinite loop, and on Windows it manifests not as a hang but as a message-queue
+quota failure several layers away from the cause.
