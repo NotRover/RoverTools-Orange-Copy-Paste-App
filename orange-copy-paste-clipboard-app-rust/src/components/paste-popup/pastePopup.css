@@ -13,8 +13,10 @@
   --accent-hover: #ff5535;
   --accent-dim: rgba(255, 62, 28, 0.1);
   --accent-dim-strong: rgba(255, 62, 28, 0.18);
-  --danger: #ff3e1c;
+  --danger: #ef4444;
+  --danger-dim: rgba(239, 68, 68, 0.12);
   --success: #22c55e;
+  --success-dim: rgba(34, 197, 94, 0.12);
   --radius: 12px;
   --radius-sm: 10px;
   --radius-xs: 7px;
@@ -38,8 +40,10 @@
   --accent-hover: #e0300f;
   --accent-dim: rgba(255, 62, 28, 0.08);
   --accent-dim-strong: rgba(255, 62, 28, 0.15);
-  --danger: #ff3e1c;
+  --danger: #dc2626;
+  --danger-dim: rgba(220, 38, 38, 0.1);
   --success: #16a34a;
+  --success-dim: rgba(22, 163, 74, 0.1);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
@@ -459,35 +463,50 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  color: var(--text-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
   cursor: pointer;
-  transition: all 0.1s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
-.paste-ia:hover {
+.paste-ia--pin:hover {
+  background: var(--accent-dim);
   color: var(--accent);
-  border-color: var(--accent);
 }
 
-.paste-ia.is-on {
+.paste-ia--pin.is-on {
   color: var(--accent);
+}
+
+.paste-ia--pin.is-on:hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+.paste-ia--copy:hover {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
+.paste-ia--danger {
+  color: var(--danger);
 }
 
 .paste-ia--danger:hover {
-  color: #fff;
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 /* ── Side preview panel ── */
 
 .paste-preview {
-  width: 184px;
+  width: 228px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -509,12 +528,12 @@ body {
 }
 
 .paste-preview-media {
-  /* A box, not a column-filling strip: fix the aspect so a long list doesn't
-     stretch the preview into a thin rectangle. */
-  flex: none;
+  /* Fills the space between the label and the footer actions, so text and
+     images use whatever vertical room the panel has instead of a fixed box. */
+  position: relative;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  max-height: 240px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -524,10 +543,37 @@ body {
   border: 1px solid var(--border);
 }
 
+/* Size / count, sat plainly in the bottom-right corner of the preview box.
+   A faint shadow keeps it legible over an image without a box around it. */
+.paste-preview-measure {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text-secondary);
+  text-shadow: 0 1px 3px var(--bg);
+  pointer-events: none;
+}
+
+/* Images fill the frame while staying contained. A soft radial wash lifts the
+   image off the panel without the noise of a checkerboard. */
+.paste-preview-media--image {
+  padding: 12px;
+  background: radial-gradient(
+    120% 120% at 50% 38%,
+    var(--surface-hover),
+    var(--bg) 72%
+  );
+}
+
 .paste-preview-img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  border-radius: 4px;
+  box-shadow: var(--shadow-sm);
 }
 
 .paste-preview-text {
@@ -577,9 +623,31 @@ body {
 .paste-preview-meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px;
   flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.paste-preview-meta > * {
+  flex: none;
+}
+
+/* "+N" for the chips that didn't fit; its tooltip names them. */
+.paste-preview-more {
+  display: inline-flex;
+  align-items: center;
+  height: var(--chip-h);
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .paste-preview-metabit {
@@ -587,22 +655,47 @@ body {
   color: var(--text-muted);
 }
 
-.paste-preview-groups {
-  display: flex;
-  flex-wrap: wrap;
+/* The one special group, shown the way the app shows it: a green star pill. */
+.paste-preview-saved {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
+  height: var(--chip-h);
+  padding: 0 7px 0 5px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+/* Custom groups: each in its own colour, the way the app's cards show them. */
+.paste-preview-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--chip-h);
+  padding: 0 7px 0 6px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  max-width: 120px;
   flex-shrink: 0;
 }
 
-.paste-preview-group {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 2px 6px;
-  max-width: 100%;
+.paste-preview-group-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.paste-preview-group-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -633,43 +726,80 @@ body {
 
 .paste-preview-paste kbd {
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
-  font-size: 11px;
-  opacity: 0.85;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 
 .paste-preview-actions {
   display: flex;
-  gap: 5px;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
 }
 
+/* Sets the destructive action apart from Pin/Copy. */
+.paste-pa-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 3px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* Borderless, matching the copy popup: colour on interaction carries them
+   rather than a box. Pin lights accent when on; delete goes red on hover. */
 .paste-pa {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
-  border-radius: 6px;
-  color: var(--text-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
+  gap: 6px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
-.paste-pa:hover {
+/* Pin: accent on hover, and lit accent while pinned — same as the app. */
+.paste-pa--pin:hover {
+  background: var(--accent-dim);
   color: var(--accent);
-  border-color: var(--accent);
 }
 
-.paste-pa.is-on {
+.paste-pa--pin.is-on {
   color: var(--accent);
+}
+
+.paste-pa--pin.is-on:hover {
+  background: var(--accent-dim-strong);
+  color: var(--accent);
+}
+
+/* Copy: green on hover. */
+.paste-pa--copy:hover {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
+/* Delete: red at rest, red tint on hover (not a solid fill). */
+.paste-pa--danger {
+  color: var(--danger);
 }
 
 .paste-pa--danger:hover {
-  color: #fff;
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 /* ── Empty state ── */
@@ -709,6 +839,10 @@ body {
 }
 
 .paste-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
   font-size: 10px;
   font-weight: 600;

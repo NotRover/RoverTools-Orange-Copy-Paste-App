@@ -14,6 +14,7 @@ import type { ClipboardEntry, AppTheme } from "../../types";
 import {
   deriveDisplayKind,
   fileNameFromPath,
+  groupColor,
   htmlPlainText,
   isImageFile as isImagePath,
   isUrl,
@@ -22,7 +23,7 @@ import {
   readTheme,
   resolveImageSrc,
 } from "../../types";
-import { EntryTypePill } from "../entry-types/EntryTypePill";
+import { EntryTypePill, SaveIcon } from "../entry-types/EntryTypePill";
 import { DegradedPill } from "../DegradedPill";
 import {
   CloseIcon,
@@ -484,7 +485,7 @@ const PastePopup: React.FC = () => {
                 {/* Inline actions on hover / selection */}
                 <span className="paste-row-actions">
                   <span
-                    className={`paste-ia${entry.pinned ? " is-on" : ""}`}
+                    className={`paste-ia paste-ia--pin${entry.pinned ? " is-on" : ""}`}
                     title={entry.pinned ? "Unpin" : "Pin"}
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -495,7 +496,7 @@ const PastePopup: React.FC = () => {
                     <PinIcon size={12} filled={entry.pinned} />
                   </span>
                   <span
-                    className="paste-ia"
+                    className="paste-ia paste-ia--copy"
                     title="Copy without pasting"
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -528,13 +529,30 @@ const PastePopup: React.FC = () => {
       {/* Hints */}
       <div className="paste-hints">
         <span className="paste-hint"><kbd>1-{numbered === 10 ? "0" : numbered}</kbd> paste</span>
-        <span className="paste-hint"><kbd>Up</kbd><kbd>Dn</kbd> move</span>
+        <span className="paste-hint"><kbd><ArrowKeyIcon dir="up" />Up</kbd><kbd><ArrowKeyIcon dir="down" />Dn</kbd> move</span>
         <span className="paste-hint"><kbd>Enter</kbd> paste</span>
         <span className="paste-hint"><kbd>type</kbd> search</span>
       </div>
     </div>
   );
 };
+
+/** Up / down arrow glyph for the move hint (SVG, not a unicode arrow). */
+const ArrowKeyIcon: React.FC<{ dir: "up" | "down" }> = ({ dir }) => (
+  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round">
+    {dir === "up" ? (
+      <>
+        <line x1="12" y1="19" x2="12" y2="5" />
+        <polyline points="6 11 12 5 18 11" />
+      </>
+    ) : (
+      <>
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <polyline points="6 13 12 19 18 13" />
+      </>
+    )}
+  </svg>
+);
 
 /** Small two-pane glyph for the preview toggle. */
 const PreviewPanelIcon: React.FC<{ open: boolean }> = ({ open }) => (
@@ -559,25 +577,82 @@ const PreviewPanel: React.FC<PreviewProps> = ({ entry, onPaste, onPin, onCopy, o
   const firstFile = files[0] ?? "";
   const isImg = entry.type === "image";
   const isFileImg = entry.type === "file" && files.length === 1 && isImagePath(firstFile);
+  const showsImage = isImg || isFileImg;
+
+  // Natural image size, filled in on load. Shown in the corner badge, so it is
+  // reset per entry to avoid flashing the previous image's size.
+  const [dims, setDims] = useState<string | null>(null);
+  useEffect(() => {
+    setDims(null);
+  }, [entry.id]);
+  const onImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    if (img.naturalWidth && img.naturalHeight) {
+      setDims(`${img.naturalWidth} x ${img.naturalHeight}`);
+    }
+  }, []);
+
 
   const kindLabel = deriveDisplayKind(entry);
-  const meta: string[] = [];
+  // The size/count sits in a corner badge on the preview box, not in the pill
+  // row, so the row is only pills (type + Saved + groups).
+  let measure: string | null = null;
+  const isLink = entry.type === "text" && isUrl(entry.content.trim());
   if (entry.type === "text" || entry.type === "html") {
     const plain = entry.type === "html" ? htmlPlainText(entry.content) : entry.content;
-    meta.push(`${plain.length} chars`);
-    if (isUrl(entry.content.trim())) meta.push("link");
+    measure = `${plain.length} chars`;
   } else if (entry.type === "file") {
-    meta.push(`${files.length} file${files.length === 1 ? "" : "s"}`);
+    measure = `${files.length} file${files.length === 1 ? "" : "s"}`;
+  } else if (showsImage && dims) {
+    measure = dims;
   }
+
+  // One line of chips: the type pill leads, then Saved and the custom groups.
+  // Only the first few are shown; the rest collapse into a "+N" whose tooltip
+  // names them, so the row never wraps.
+  const chips: { key: string; label: string; node: React.ReactNode }[] = [
+    { key: "type", label: kindLabel, node: <EntryTypePill kind={kindLabel} /> },
+  ];
+  if (isLink) {
+    chips.push({ key: "link", label: "link", node: <span className="paste-preview-metabit">link</span> });
+  }
+  if (entry.groups.includes("Saved")) {
+    chips.push({
+      key: "saved",
+      label: "Saved",
+      node: (
+        <span className="paste-preview-saved">
+          {SaveIcon}
+          Saved
+        </span>
+      ),
+    });
+  }
+  for (const g of entry.groups.filter((g) => g !== "Saved")) {
+    const gc = groupColor(g);
+    chips.push({
+      key: `g:${g}`,
+      label: g,
+      node: (
+        <span className="paste-preview-group" style={{ background: gc.bg, color: gc.fg }}>
+          <span className="paste-preview-group-dot" />
+          <span className="paste-preview-group-label">{g}</span>
+        </span>
+      ),
+    });
+  }
+  const MAX_CHIPS = 3;
+  const shownChips = chips.slice(0, MAX_CHIPS);
+  const hiddenChips = chips.slice(MAX_CHIPS);
 
   return (
     <div className="paste-preview" onMouseDown={stop}>
       <div className="paste-preview-kind">Preview</div>
-      <div className="paste-preview-media">
+      <div className={`paste-preview-media${showsImage ? " paste-preview-media--image" : ""}`}>
         {isImg ? (
-          <img className="paste-preview-img" src={resolveImageSrc(entry.content, convertFileSrc)} alt="" draggable={false} />
+          <img className="paste-preview-img" src={resolveImageSrc(entry.content, convertFileSrc)} alt="" draggable={false} onLoad={onImgLoad} />
         ) : isFileImg ? (
-          <img className="paste-preview-img" src={convertFileSrc(firstFile)} alt="" draggable={false} />
+          <img className="paste-preview-img" src={convertFileSrc(firstFile)} alt="" draggable={false} onLoad={onImgLoad} />
         ) : entry.type === "file" ? (
           <div className="paste-preview-files">
             {files.map((f) => (
@@ -591,37 +666,38 @@ const PreviewPanel: React.FC<PreviewProps> = ({ entry, onPaste, onPin, onCopy, o
             {entry.type === "html" ? htmlPlainText(entry.content) : entry.content}
           </div>
         )}
+        {measure && <span className="paste-preview-measure">{measure}</span>}
       </div>
 
       <div className="paste-preview-meta">
-        <EntryTypePill kind={kindLabel} />
-        {meta.map((m) => (
-          <span key={m} className="paste-preview-metabit">
-            {m}
-          </span>
+        {shownChips.map((c) => (
+          <React.Fragment key={c.key}>{c.node}</React.Fragment>
         ))}
+        {hiddenChips.length > 0 && (
+          <span
+            className="paste-preview-more"
+            title={hiddenChips.map((c) => c.label).join(", ")}
+          >
+            +{hiddenChips.length}
+          </span>
+        )}
       </div>
-      {entry.groups.length > 0 && (
-        <div className="paste-preview-groups">
-          {entry.groups.map((g) => (
-            <span key={g} className="paste-preview-group">
-              {g}
-            </span>
-          ))}
-        </div>
-      )}
 
       <button className="paste-preview-paste" onMouseDown={stop} onClick={() => onPaste(entry.id)}>
         Paste <kbd>Enter</kbd>
       </button>
       <div className="paste-preview-actions">
-        <button className={`paste-pa${entry.pinned ? " is-on" : ""}`} title={entry.pinned ? "Unpin" : "Pin"} onMouseDown={stop} onClick={() => onPin(entry)}>
+        <button className={`paste-pa paste-pa--pin${entry.pinned ? " is-on" : ""}`} title={entry.pinned ? "Unpin" : "Pin"} onMouseDown={stop} onClick={() => onPin(entry)}>
+          <span>{entry.pinned ? "Unpin" : "Pin"}</span>
           <PinIcon size={13} filled={entry.pinned} />
         </button>
-        <button className="paste-pa" title="Copy without pasting" onMouseDown={stop} onClick={() => onCopy(entry.id)}>
+        <button className="paste-pa paste-pa--copy" title="Copy without pasting" onMouseDown={stop} onClick={() => onCopy(entry.id)}>
+          <span>Copy</span>
           <CopyIcon size={13} />
         </button>
+        <span className="paste-pa-divider" />
         <button className="paste-pa paste-pa--danger" title="Delete" onMouseDown={stop} onClick={() => onDelete(entry)}>
+          <span>Delete</span>
           <TrashIcon size={13} />
         </button>
       </div>
