@@ -9,6 +9,20 @@ use crate::notes::NoteStore;
 use crate::notifications::NotificationStore;
 use crate::sync::SyncClient;
 
+/// What the user is currently looking at, reported by the frontend on
+/// navigation. Lets a space notification tell whether the user is already on
+/// that space (so a desktop toast would be noise) rather than only asking
+/// whether the window has focus. See `runtime::os_notify`.
+#[derive(Default, Clone)]
+pub struct UiView {
+    /// The active screen id, matching the frontend's `AppScreen` ("spaces",
+    /// "clipboard", ...). Empty until the frontend first reports.
+    pub screen: String,
+    /// The space selected on the Spaces screen, if any. Kept even when the
+    /// screen is not "spaces"; readers must check `screen` first.
+    pub space_id: Option<String>,
+}
+
 /// State managed by Tauri and injected into every command handler.
 pub struct AppState {
     /// Thread-safe clipboard history (most-recent first).
@@ -58,4 +72,8 @@ pub struct AppState {
     /// logged in.  Wrapped in a Mutex so it can be initialized lazily during
     /// `setup_runtime` or when the user enables sync via `sync_set_enabled`.
     pub sync_client: Mutex<Option<Arc<SyncClient>>>,
+    /// What screen/space the user is currently viewing. Consulted by
+    /// `runtime::os_notify` so a comment on a space you are already reading does
+    /// not also fire a desktop toast.
+    pub ui_view: Arc<Mutex<UiView>>,
 }

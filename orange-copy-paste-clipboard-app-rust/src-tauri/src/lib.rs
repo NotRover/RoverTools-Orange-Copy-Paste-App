@@ -673,6 +673,9 @@ pub fn run() {
         )),
         notifications_dirty: Arc::new(AtomicBool::new(false)),
         sync_client: parking_lot::Mutex::new(None),
+        ui_view: Arc::new(parking_lot::Mutex::new(
+            crate::state::app_state::UiView::default(),
+        )),
     };
 
     tauri::Builder::default()
@@ -747,6 +750,8 @@ pub fn run() {
             crate::updater::updater_install,
             crate::updater::updater_skip_version,
             crate::runtime::commands::close_notification,
+            crate::runtime::commands::ui_screen_changed,
+            crate::runtime::commands::ui_space_changed,
             crate::notes::commands::get_notes,
             crate::notes::commands::create_note,
             crate::notes::commands::update_note,

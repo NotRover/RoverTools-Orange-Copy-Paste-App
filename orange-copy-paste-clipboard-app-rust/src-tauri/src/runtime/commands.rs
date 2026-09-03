@@ -44,6 +44,24 @@ pub fn close_notification(app: tauri::AppHandle) {
     hide_popup(&app, "notification");
 }
 
+/// The frontend reporting which screen is now showing. Split from the space
+/// report below so the two writers - the app shell (screen) and the Spaces
+/// screen (selected space) - never overwrite each other's field, whatever order
+/// their effects run in. Cheap and frequent; nothing reads it until a space
+/// notification asks whether the user is already looking at what it is about.
+#[tauri::command]
+pub fn ui_screen_changed(screen: String, state: tauri::State<'_, crate::state::AppState>) {
+    state.ui_view.lock().screen = screen;
+}
+
+/// The frontend reporting which space is selected on the Spaces screen (or
+/// `None` when it unmounts). Meaningful only while the screen is "spaces"; the
+/// reader gates on that.
+#[tauri::command]
+pub fn ui_space_changed(space_id: Option<String>, state: tauri::State<'_, crate::state::AppState>) {
+    state.ui_view.lock().space_id = space_id;
+}
+
 fn resize_popup(app: &tauri::AppHandle, label: &str, width: f64, height: f64) {
     if let Some(win) = app.get_webview_window(label) {
         let _ = win.set_size(tauri::LogicalSize::new(width, height));

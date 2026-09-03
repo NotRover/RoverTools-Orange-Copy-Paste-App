@@ -110,6 +110,10 @@ struct Alert {
     title: String,
     body: String,
     cue: Cue,
+    kind: NotificationKind,
+    /// The space this row is about, for the os-notify "already looking at it"
+    /// test. Only space rows carry it, and only they read it.
+    space_id: Option<String>,
 }
 
 impl Alert {
@@ -118,6 +122,8 @@ impl Alert {
             title: n.title.clone(),
             body: n.body.clone(),
             cue: cue.unwrap_or_else(|| Cue::for_kind(n.kind)),
+            kind: n.kind,
+            space_id: n.data.get("space_id").cloned(),
         }
     }
 
@@ -126,7 +132,13 @@ impl Alert {
             return;
         }
         cue(app, self.cue);
-        crate::runtime::os_notify::show(app, &self.title, &self.body);
+        crate::runtime::os_notify::show(
+            app,
+            &self.title,
+            &self.body,
+            self.kind,
+            self.space_id.as_deref(),
+        );
     }
 }
 
