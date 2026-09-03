@@ -2385,7 +2385,17 @@ impl SyncClient {
                 if let Some(req) = tombstone_req(umk, &client_id, &type_str, push_space_ids) {
                     match http.push_entries(vec![req]).await {
                         Ok(_) => {
-                            id_map.lock().remove_entry(&map_key);
+                            // A received item's copy was already forgotten above,
+                            // and its authorship (remote flag + owner) is kept on
+                            // purpose - `forget_received_copy`, not `remove_entry`
+                            // - so the item can never later be taken for an
+                            // unsynced local one and published under this account.
+                            // `remove_entry` would wipe exactly that, leaving the
+                            // entry to render as ours. Only an owned item runs it,
+                            // where it drops a real server id.
+                            if !is_remote {
+                                id_map.lock().remove_entry(&map_key);
+                            }
                             status.lock().pending_count = queue.lock().len();
                             return;
                         }
@@ -2917,7 +2927,17 @@ impl SyncClient {
                         if let Some(req) = tombstone_req(&umk, &client_id, &entry_type, space_ids)
                         {
                             match http.push_entries(vec![req]).await {
-                                Ok(_) => self.id_map.lock().remove_entry(&map_key),
+                                // Same rule as the online delete path: a received
+                                // item keeps its authorship (its copy was already
+                                // forgotten when the delete was queued), so only an
+                                // owned item drops its server id here. Wiping it
+                                // would let the entry come back looking like ours.
+                                Ok(_) => {
+                                    let mut id_map = self.id_map.lock();
+                                    if !id_map.is_remote(&map_key) {
+                                        id_map.remove_entry(&map_key);
+                                    }
+                                }
                                 Err(e) => {
                                     eprintln!("[sync] queued delete failed: {e}");
                                     unsent.push(PendingOp::Delete { client_id, entry_type });
@@ -4952,6 +4972,18 @@ impl SyncClient {
             }
 
             let state = app.state::<crate::state::AppState>();
+            // Deleted while this blob was downloading - a received item the user
+            // removed from their devices, say. Re-adding the copy now resurrects
+            // a row the delete already took out, and it races the delete's
+            // authorship cleanup, so the item can come back looking like ours.
+            // The deletion marker outlives the copy, so it is what we ask.
+            if id_map
+                .lock()
+                .deleted_marker(&format!("clipboard:{}", meta.client_id))
+                .is_some_and(|m| m.content_gone)
+            {
+                return;
+            }
             let merged = ClipboardEntry {
                 id: meta.client_id.clone(),
                 kind: EntryKind::Image,
@@ -5043,6 +5075,17 @@ impl SyncClient {
                 .join("\n");
 
             let state = app.state::<crate::state::AppState>();
+            // Deleted while this blob was downloading - see the image merge for
+            // why re-adding it now would resurrect a removed row and can hand it
+            // back looking like ours. The deletion marker is what outlives the
+            // copy, so it is what we ask.
+            if id_map
+                .lock()
+                .deleted_marker(&format!("clipboard:{}", meta.client_id))
+                .is_some_and(|m| m.content_gone)
+            {
+                return;
+            }
             let merged = ClipboardEntry {
                 id: meta.client_id.clone(),
                 kind: EntryKind::File,

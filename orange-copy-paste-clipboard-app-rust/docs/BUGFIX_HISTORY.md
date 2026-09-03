@@ -1022,3 +1022,47 @@ builds the value inline (the common, reasonable thing to do) hands you a new
 reference every render; combined with a `setState` in the effect that is an
 infinite loop, and on Windows it manifests not as a hang but as a message-queue
 quota failure several layers away from the cause.
+
+## #27 - A received item, once deleted, could come back showing as yours
+
+**Symptom.** After deleting an item another member had shared ("remove from my
+devices"), a file or image item would reappear in the Spaces feed some time
+later, attributed to **You** instead of its real author. It was intermittent and
+only ever hit file/image entries.
+
+**Cause.** Two defects that only bite together. Deleting a received item is meant
+to keep the record of who wrote it: `spawn_delete_entry` calls
+`forget_received_copy`, which drops the local copy and the server id but keeps the
+`remote_entries` flag and the `entry_owners` name, precisely so the entry can
+never later be taken for an unsynced local one. But the tombstone-push success
+path (and its queued-flush twin) then called `id_map.remove_entry`, which wipes
+exactly those two records. The `remove_entry` predated the "remove from my
+devices" feature - it was written for an owned delete, where dropping the server
+id is correct - and the feature added `forget_received_copy` above it without
+removing the wipe below it, so the two directly contradicted each other. Once
+`remote_entries` no longer held the key, `is_remote_entry` returned false and the
+feed rendered the item as ours.
+
+That alone only left a placeholder, because a delete removes the local copy first.
+The second defect kept the copy on screen: file and image bodies merge on a
+separate async blob task, and that task re-adds the history row (and re-affirms
+authorship) when the download finishes. A pull or socket re-delivery of the
+author's live row during the delete starts such a task; it lands its
+`upsert_synced` **after** the delete removed the copy but around the same time as
+the deferred `remove_entry` - so the row is present while its remote flag is gone.
+Text entries have no blob task, so they never showed the live "You" card.
+
+**Fix.** Two parts. The delete paths run `remove_entry` only for an owned item;
+for a received one the copy is already forgotten and the authorship is left
+standing. And both blob merge tasks check for a `content_gone` deletion marker
+under the id_map lock right before `upsert_synced`, and skip the re-add if the
+item was deleted while the blob was in flight - so a removed item stays removed
+instead of racing back in.
+
+**Invariant to keep**: **a received item's authorship (`remote_entries` +
+`entry_owners`) must outlive its local copy.** It is the only thing standing
+between "someone else shared this" and "this is mine to publish", and every path
+that drops the copy has to use `forget_received_copy`, never `remove_entry`,
+unless the item is genuinely being deleted for everyone. And an async merge that
+re-adds a row has to re-check that the row was not deleted while it was working -
+the delete that ran meanwhile left a marker for exactly that reason.
