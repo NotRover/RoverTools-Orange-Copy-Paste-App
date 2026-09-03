@@ -35,11 +35,10 @@ import OwnerChip from "../entry-card/OwnerChip";
 import CardMenu from "../../card-menu/CardMenu";
 import {
   EntryTypePill,
-  ImageIcon,
-  FileIcon,
   PinIcon,
   SaveIcon,
 } from "../../../entry-types/EntryTypePill";
+import { FileEntryList } from "../../../entry-types/FileEntryList";
 import {
   CheckIcon,
   CopyIcon,
@@ -217,31 +216,7 @@ const FileBody: React.FC<{ paths: string[]; zoom: number | null }> = ({
     );
   }
 
-  return (
-    <div className="cv-files">
-      {paths.map((p) => {
-        const gone = missing.has(p);
-        const preview = previews[p];
-        return (
-          <div
-            key={p}
-            className={`cv-file-row${gone ? " cv-file-row--missing" : ""}`}
-          >
-            {preview && !gone ? (
-              <img src={preview} alt="" className="cv-file-thumb" />
-            ) : (
-              <span className="cv-file-icon">
-                {isImageFile(p) ? ImageIcon : FileIcon}
-              </span>
-            )}
-            <span className="cv-file-name">{fileNameFromPath(p)}</span>
-            <span className="cv-file-path">{p}</span>
-            {gone && <span className="cv-file-gone">missing</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
+  return <FileEntryList paths={paths} />;
 };
 
 // ── The panel ─────────────────────────────────────────────────────────
@@ -563,7 +538,7 @@ const EntryViewer: React.FC<{
           chips, same colours - the card hides what does not fit, and here
           nothing is hidden. */}
       <div className="cv-meta">
-        <EntryTypePill kind={deriveDisplayKind(entry)} />
+        <EntryTypePill kind={deriveDisplayKind(entry)} count={paths.length} />
         {entry.pinned && (
           <span className="card-type-chip card-type-chip--pinned">
             {PinIcon}

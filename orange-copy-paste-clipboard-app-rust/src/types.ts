@@ -512,6 +512,84 @@ function isDocumentFile(path: string): boolean {
   return DOCUMENT_FILE_EXTENSIONS.has(fileExtension(path));
 }
 
+// ── Per-file type, for the multi-file grid/list ────────────────────────────
+// Finer-grained than DisplayKind: a folder-full of files shows a distinct glyph
+// and hue per family so a type is recognisable before the name is read.
+
+const SHEET_FILE_EXTENSIONS = new Set(["xls", "xlsx", "csv", "tsv", "ods", "numbers"]);
+const ARCHIVE_FILE_EXTENSIONS = new Set([
+  "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst",
+]);
+const AUDIO_FILE_EXTENSIONS = new Set([
+  "mp3", "wav", "flac", "aac", "ogg", "oga", "m4a", "wma", "opus",
+]);
+const TEXT_FILE_EXTENSIONS = new Set([
+  "txt", "md", "markdown", "log", "text", "ini", "cfg", "conf", "yaml", "yml",
+  "json", "xml",
+]);
+
+export type FileType =
+  | "image"
+  | "video"
+  | "text"
+  | "sheet"
+  | "doc"
+  | "pdf"
+  | "folder"
+  | "archive"
+  | "audio"
+  | "file";
+
+export interface FileTypeInfo {
+  type: FileType;
+  label: string;
+}
+
+const FILE_TYPE_LABELS: Record<FileType, string> = {
+  image: "Image",
+  video: "Video",
+  text: "Text",
+  sheet: "Spreadsheet",
+  doc: "Document",
+  pdf: "PDF",
+  folder: "Folder",
+  archive: "Archive",
+  audio: "Audio",
+  file: "File",
+};
+
+/** Classify one path for the multi-file viewer. `isDir` comes from the on-disk
+ *  stat when known; without it we fall back to the extension-less heuristic. */
+export function fileTypeInfo(path: string, isDir?: boolean): FileTypeInfo {
+  const type = ((): FileType => {
+    if (isDir ?? isDirectory(path)) return "folder";
+    const ext = fileExtension(path);
+    if (IMAGE_FILE_EXTENSIONS.has(ext)) return "image";
+    if (VIDEO_FILE_EXTENSIONS.has(ext)) return "video";
+    if (ext === "pdf") return "pdf";
+    if (SHEET_FILE_EXTENSIONS.has(ext)) return "sheet";
+    if (ARCHIVE_FILE_EXTENSIONS.has(ext)) return "archive";
+    if (AUDIO_FILE_EXTENSIONS.has(ext)) return "audio";
+    if (TEXT_FILE_EXTENSIONS.has(ext)) return "text";
+    if (DOCUMENT_FILE_EXTENSIONS.has(ext)) return "doc";
+    return "file";
+  })();
+  return { type, label: FILE_TYPE_LABELS[type] };
+}
+
+/** A file's byte size as a short human string (e.g. "1.2 MB", "940 B"). */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
 export function isUrl(text: string): boolean {
   const t = text.trim();
   if (t.includes("\n")) return false;
@@ -546,6 +624,12 @@ export function deriveDisplayKind(entry: ClipboardEntry): DisplayKind {
   if (paths.every(isVideoFile)) return "video";
   if (paths.length === 1 && isDocumentFile(paths[0])) return "document";
   return "file";
+}
+
+/** How many files a file entry carries (1 for any non-file entry). Drives the
+ *  multi-file bundle chip, which shows the count instead of a bare "File". */
+export function fileCount(entry: ClipboardEntry): number {
+  return entry.type === "file" ? filePaths(entry.content).length : 1;
 }
 
 /** Display name for a clipboard image entry, prefixed with its unique ID.

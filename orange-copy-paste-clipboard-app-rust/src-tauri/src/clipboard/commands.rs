@@ -709,6 +709,59 @@ pub fn check_missing_files(paths: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// On-disk facts a multi-file entry shows next to each row: whether the path is
+/// a directory, a file's byte size, a directory's top-level item count, and
+/// whether it is gone. One call for the whole list, so a viewer does not fire an
+/// invoke per row.
+#[derive(serde::Serialize)]
+pub struct FileStat {
+    pub path: String,
+    pub is_dir: bool,
+    /// Byte size for a file; `None` for a directory or a missing path.
+    pub size: Option<u64>,
+    /// Top-level entry count for a directory; `None` for a file or if the
+    /// directory could not be read.
+    pub item_count: Option<u64>,
+    pub missing: bool,
+}
+
+/// Stat a batch of paths. Never errors: an unreadable path comes back as
+/// `missing`, which is what the row already renders for a vanished file.
+#[tauri::command]
+pub fn stat_files(paths: Vec<String>) -> Vec<FileStat> {
+    paths
+        .into_iter()
+        .map(|p| match std::fs::symlink_metadata(Path::new(&p)) {
+            Ok(md) if md.is_dir() => {
+                let item_count = std::fs::read_dir(Path::new(&p))
+                    .map(|rd| rd.count() as u64)
+                    .ok();
+                FileStat {
+                    path: p,
+                    is_dir: true,
+                    size: None,
+                    item_count,
+                    missing: false,
+                }
+            }
+            Ok(md) => FileStat {
+                path: p,
+                is_dir: false,
+                size: Some(md.len()),
+                item_count: None,
+                missing: false,
+            },
+            Err(_) => FileStat {
+                path: p,
+                is_dir: false,
+                size: None,
+                item_count: None,
+                missing: true,
+            },
+        })
+        .collect()
+}
+
 /// Open an arboard clipboard handle, retrying a few times if the clipboard
 /// is temporarily locked by another thread or application.
 fn open_clipboard_with_retry() -> Result<Clipboard, String> {

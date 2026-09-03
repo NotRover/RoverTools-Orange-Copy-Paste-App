@@ -20,6 +20,13 @@
   line-height: 1;
 }
 
+/* A multi-file bundle chip carries a count, so it reads as a set rather than a
+   single item. A hairline ring in the kind's own hue sets it apart from the
+   plain single-item pill without introducing a new colour. */
+.type-pill--bundle {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--type-color) 30%, transparent);
+}
+
 /* ── Kind colors ──
    One hue per kind, published as `--type-color` so anything that has to speak
    the same colour language - the pill, the composition bar on the account

@@ -1,0 +1,269 @@
+/* Multi-file entry body: preview grid (Concept A) + enriched list (Concept B),
+   switched by one per-device toggle. Type hues are fixed values that read on
+   both themes and are deliberately not the app accent. */
+
+.fe {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.fe-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fe-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.fe-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.fe-tg {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.fe-tg:hover {
+  color: var(--text);
+}
+
+.fe-tg.is-on {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+/* ── Type hues (solid, dim fill, border) ──────────────────────────── */
+.fe [data-ft="image"]   { --ft: #a78bfa; --ft-dim: #a78bfa22; --ft-bd: #a78bfa45; }
+.fe [data-ft="video"]   { --ft: #ec4899; --ft-dim: #ec489922; --ft-bd: #ec489945; }
+.fe [data-ft="text"]    { --ft: #94a3b8; --ft-dim: #94a3b822; --ft-bd: #94a3b845; }
+.fe [data-ft="sheet"]   { --ft: #22c55e; --ft-dim: #22c55e22; --ft-bd: #22c55e45; }
+.fe [data-ft="doc"]     { --ft: #6366f1; --ft-dim: #6366f122; --ft-bd: #6366f145; }
+.fe [data-ft="pdf"]     { --ft: #ef4444; --ft-dim: #ef444422; --ft-bd: #ef444445; }
+.fe [data-ft="folder"]  { --ft: #3b82f6; --ft-dim: #3b82f622; --ft-bd: #3b82f645; }
+.fe [data-ft="archive"] { --ft: #f59e0b; --ft-dim: #f59e0b22; --ft-bd: #f59e0b45; }
+.fe [data-ft="audio"]   { --ft: #14b8a6; --ft-dim: #14b8a622; --ft-bd: #14b8a645; }
+.fe [data-ft="file"]    { --ft: var(--text-muted); --ft-dim: var(--surface-hover); --ft-bd: var(--border); }
+
+/* ── Grid (Concept A) ─────────────────────────────────────────────── */
+.fe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 12px;
+}
+
+.fe-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 1 / 0.9;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.12s, transform 0.12s;
+}
+
+.fe-tile:hover {
+  border-color: var(--border-light);
+  transform: translateY(-1px);
+}
+
+.fe-thumb {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.fe-thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fe-glyph {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 13px;
+  color: var(--ft);
+  background: var(--ft-dim);
+  border: 1px solid var(--ft-bd);
+}
+
+.fe-cap {
+  padding: 8px 9px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.fe-tile.has-preview .fe-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding-top: 16px;
+  border-top: none;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+}
+
+.fe-cap .fe-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-tile.has-preview .fe-cap .fe-name {
+  color: #fff;
+}
+
+.fe-cap .fe-type {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ft);
+}
+
+.fe-tile.has-preview .fe-cap .fe-type {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.fe-tile.is-missing {
+  opacity: 0.6;
+}
+
+.fe-tile.is-missing .fe-name {
+  text-decoration: line-through;
+}
+
+/* ── List (Concept B) ─────────────────────────────────────────────── */
+.fe-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fe-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+.fe-badge {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--ft);
+  background: var(--ft-dim);
+  border: 1px solid var(--ft-bd);
+}
+
+.fe-row-thumb {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.fe-mid {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.fe-mid .fe-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The full path, dimmed and ellipsised from the left so the file name stays
+   visible when two files share a name. */
+.fe-mid .fe-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+.fe-meta .fe-type {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ft);
+}
+
+.fe-meta .fe-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fe-meta .fe-gone {
+  font-size: 10px;
+  color: var(--danger);
+}
+
+.fe-row.is-missing .fe-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+@media (max-width: 700px) {
+  .fe-mid .fe-path {
+    display: none;
+  }
+}
