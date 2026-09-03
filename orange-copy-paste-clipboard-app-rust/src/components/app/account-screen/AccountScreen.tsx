@@ -24,6 +24,7 @@ import type {
 import { deriveDisplayKind } from "../../../types";
 import { TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import { showOnlyKinds } from "../clipboard-screen/search-filter/SearchFilter";
+import { showOnlyNotesCloud } from "../notes-screen/notes-filter/NotesFilterDropdown";
 import {
   CaretDown,
   CaretRight,
@@ -930,10 +931,11 @@ Keep this. It is the only way back into your synced items if you forget your pas
       // Navigate even when the sync failed: a filtered screen showing what did
       // arrive beats being held on this one with nothing to look at.
       if (key === "notes") {
+        showOnlyNotesCloud({ cloud: "in", owner: "mine" });
         onNavigate("notes");
         return;
       }
-      showOnlyKinds(CLOUD_KIND_FILTER[key] ?? [], { cloud: "in" });
+      showOnlyKinds(CLOUD_KIND_FILTER[key] ?? [], { cloud: "in", owner: "mine" });
       onNavigate("clipboard");
     },
     // CLOUD_KIND_FILTER is a literal rebuilt each render; it is read inside the
@@ -994,9 +996,25 @@ Keep this. It is the only way back into your synced items if you forget your pas
     return { rows, total: cloudCount.total };
   }, [cloudCount, openCloudRow]);
 
-  // Only the queue is shown now that the per-row subtitles are gone; the split
-  // by kind went with them.
-  const [statsView, setStatsView] = useState<"device" | "cloud">("device");
+  // Which bar the panel opens on, remembered across visits and runs: a user who
+  // lives on the Cloud view should not be dropped back to This device every
+  // time they reopen the screen.
+  const [statsView, setStatsView] = useState<"device" | "cloud">(() => {
+    try {
+      return localStorage.getItem("sc-acct-stats-view") === "cloud"
+        ? "cloud"
+        : "device";
+    } catch {
+      return "device";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("sc-acct-stats-view", statsView);
+    } catch {
+      /* Storage blocked: the tab just resets to the default next time. */
+    }
+  }, [statsView]);
   const shownComp =
     statsView === "cloud"
       ? cloudComposition
