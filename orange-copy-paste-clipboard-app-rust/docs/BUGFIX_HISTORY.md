@@ -1066,3 +1066,38 @@ that drops the copy has to use `forget_received_copy`, never `remove_entry`,
 unless the item is genuinely being deleted for everyone. And an async merge that
 re-adds a row has to re-check that the row was not deleted while it was working -
 the delete that ran meanwhile left a marker for exactly that reason.
+
+## #28 - The "somebody asked to join" notification offered a dead "Join" button that never cleared
+
+**Symptom.** When someone asked to join a space this user could approve for, the
+notification read "Somebody asked to join" with **Join** and **Decline** buttons.
+Pressing Join did nothing, and the row stayed - buttons and all - even after the
+person had been let in from the Spaces screen. The label was also wrong: the user
+is not joining, they are letting someone else in.
+
+**Cause.** A join-request knock and an invite received both use the
+`space_invite` notification kind, so the popout rendered both with the invite's
+buttons and its `answerInvite` handler. But `answerInvite` acts on
+`n.data.invite_id`, and a knock (`note_join_requested`) carried only `space_id` -
+no invite id - so the very first line, `if (!inviteId) return;`, made Join a
+no-op. Nothing ever resolved the knock either: `notifications_refresh` reconciles
+invites received, not join requests, so the row had no path back to "answered"
+and sat in the feed indefinitely.
+
+**Fix.** Three parts. `note_join_requested` now stores `request_id` (and
+`space_name`) on the notification, which is what the buttons act on. The popout
+tells the two shapes apart by that field: a knock (`request_id`) shows **Accept**
+/ **Decline** wired to `space_approve_join` / `space_decline_join`, while an
+invite (`invite_id`) keeps **Join** / **Decline**. Approving from the knock
+passes no requester key - the approval still lands and the space key reaches the
+new member on the reconcile the command already spawns. And both approve/decline
+commands now resolve the knock (`space-join:{request_id}`) to "Let in" /
+"Declined" and commit, so answering from **either** surface - the notification
+buttons or the Invites list - retires the row and shows the outcome.
+
+**Known gap**: a knock answered by a *different* approver still lingers on this
+device until dismissed - there is no per-request "resolved elsewhere" event the
+way invites have one. Resolving at the shared command covers the common case
+(the same user approves); the cross-approver case is left for when the server
+publishes a resolution event, tracked in backend issue
+`RoverTools-Smart-Clipboard-App-Backend#22`.

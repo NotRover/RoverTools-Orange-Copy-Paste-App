@@ -4554,11 +4554,15 @@ impl SyncClient {
                 format!("Somebody asked to join \"{space_name}\""),
             )
             .with_body(if who.is_empty() {
-                "Open Invites to let them in, or turn them down.".to_string()
+                "Let them in, or turn them down.".to_string()
             } else {
-                format!("{who} is waiting. Open Invites to let them in, or turn them down.")
+                format!("{who} is waiting. Let them in, or turn them down.")
             })
-            .with_data("space_id", space_id.to_string()),
+            .with_data("space_id", space_id.to_string())
+            .with_data("space_name", space_name.clone())
+            // request_id is what the Accept/Decline buttons act on, and the key
+            // the same knock is resolved under once it is answered.
+            .with_data("request_id", request_id.to_string()),
         );
     }
 

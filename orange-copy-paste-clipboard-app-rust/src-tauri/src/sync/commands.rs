@@ -1194,6 +1194,7 @@ pub async fn space_join_requests(
 /// space as soon as this returns rather than waiting on the next reconcile.
 #[tauri::command]
 pub async fn space_approve_join(
+    app: tauri::AppHandle,
     space_id: String,
     request_id: String,
     identity_pubkey: Option<String>,
@@ -1202,6 +1203,7 @@ pub async fn space_approve_join(
     let (sync, _http) = sync_http(&state)?;
     sync.approve_join_request(&space_id, &request_id, identity_pubkey.as_deref())
         .await?;
+    resolve_join_knock(&app, &state, &request_id, "Let in");
     let sync2 = Arc::clone(&sync);
     tauri::async_runtime::spawn(async move {
         sync2.reconcile_spaces().await;
@@ -1209,16 +1211,34 @@ pub async fn space_approve_join(
     Ok(())
 }
 
+/// Retire the "asked to join" knock once a request is answered, whichever
+/// surface answered it - the notification's own buttons or the Invites list -
+/// so a resolved request never sits in the feed with live buttons.
+fn resolve_join_knock(
+    app: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    request_id: &str,
+    outcome: &str,
+) {
+    let changed = state
+        .notifications
+        .lock()
+        .resolve(&format!("space-join:{request_id}"), outcome);
+    crate::notifications::commands::commit(app, changed);
+}
+
 /// Turn a request down. The server keeps the row, which is what stops the same
 /// code producing another knock.
 #[tauri::command]
 pub async fn space_decline_join(
+    app: tauri::AppHandle,
     space_id: String,
     request_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, http) = sync_http(&state)?;
     http.decline_join_request(&space_id, &request_id).await?;
+    resolve_join_knock(&app, &state, &request_id, "Declined");
     let sync2 = Arc::clone(&sync);
     tauri::async_runtime::spawn(async move {
         sync2.reconcile_spaces().await;
