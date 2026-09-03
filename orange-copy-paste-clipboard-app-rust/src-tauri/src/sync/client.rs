@@ -435,6 +435,21 @@ pub struct CursorRequest {
     pub last_server_ts: u64,
 }
 
+/// Account-wide live-row counts, split by kind — the cheap form of what
+/// `server_entries` used to derive by paging every row. Same fields as the
+/// `ServerBreakdown` the account screen reads; a server too old to have the
+/// route 404s, and the caller falls back to the sweep.
+#[derive(Debug, Deserialize)]
+pub struct BreakdownResponse {
+    pub clipboard: usize,
+    pub notes: usize,
+    pub total: usize,
+    pub text: usize,
+    pub image: usize,
+    pub file: usize,
+    pub html: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SettingsPushRequest {
     pub encrypted_blob: String,
@@ -1318,6 +1333,24 @@ impl SyncHttpClient {
             Ok(self.authed(Method::POST, "/api/v1/sync/cursor")?.json(&body))
         })
         .await
+    }
+
+    /// Account-wide counts by kind, straight from the server's aggregate.
+    ///
+    /// `Ok(None)` means the server predates the route (404); the caller then
+    /// falls back to counting the paged sweep itself. Keeping the classified
+    /// error is what lets "old server" be told apart from a real failure.
+    pub async fn account_breakdown(&self) -> Result<Option<BreakdownResponse>, ApiError> {
+        match self
+            .get_json_classified::<BreakdownResponse, _>("breakdown", || {
+                self.authed(Method::GET, "/api/v1/sync/breakdown")
+            })
+            .await
+        {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.status == Some(404) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     // Note: there is no dedicated delete route. Deletions are propagated as
