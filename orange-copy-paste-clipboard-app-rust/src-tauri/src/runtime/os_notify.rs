@@ -5,21 +5,33 @@
 //! This is the operating system's, and it is only ever used for something that
 //! already earned a row in the notification centre.
 //!
-//! **Only when the app is not focused.** A toast for something the user is
-//! looking at is the same sentence twice, and that is what makes a notification
-//! feel like spam rather than help. Hidden to the tray, behind another window,
-//! on another workspace - those are the cases worth interrupting for.
+//! **When the user is not already looking at it.** A toast for something on the
+//! screen in front of you is the same sentence twice, and that is what makes a
+//! notification feel like spam. For most rows "looking at it" just means the app
+//! has focus. Space activity is the exception: a comment or invite is about one
+//! space, and a user typing in a different space - or on the clipboard screen -
+//! is not looking at it, so those toast even with the app focused, and fall
+//! silent only while that exact space is open.
 
 use std::sync::atomic::Ordering;
 
 use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
 
+use crate::notifications::NotificationKind;
+
 /// Show `title` / `body` as a desktop notification, if this is a moment for one.
 ///
-/// Silent about failure on purpose: the row is already in the feed, so a toast
-/// that could not be shown has cost the user nothing.
-pub fn show(app: &tauri::AppHandle, title: &str, body: &str) {
+/// `kind` and `space_id` decide what "the user is already looking at this" means
+/// for this row - see the module docs. Silent about failure on purpose: the row
+/// is already in the feed, so a toast that could not be shown has cost nothing.
+pub fn show(
+    app: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+    kind: NotificationKind,
+    space_id: Option<&str>,
+) {
     if !app
         .state::<crate::state::AppState>()
         .os_notifications
@@ -27,7 +39,7 @@ pub fn show(app: &tauri::AppHandle, title: &str, body: &str) {
     {
         return;
     }
-    if main_window_has_focus(app) {
+    if already_seeing_it(app, kind, space_id) {
         return;
     }
     let mut builder = app.notification().builder().title(title);
@@ -37,6 +49,32 @@ pub fn show(app: &tauri::AppHandle, title: &str, body: &str) {
     if let Err(e) = builder.show() {
         eprintln!("[os-notify] {e}");
     }
+}
+
+/// Whether a toast for this row would only repeat what the user is already
+/// looking at.
+///
+/// Space activity (a comment, an invite, a join request) is about one space, so
+/// it is "already seen" only while that exact space is open and focused - not
+/// merely because the app has focus. Every other row falls back to plain focus:
+/// an announcement or a sync warning is not tied to a screen.
+fn already_seeing_it(app: &tauri::AppHandle, kind: NotificationKind, space_id: Option<&str>) -> bool {
+    let focused = main_window_has_focus(app);
+    let about_a_space = matches!(
+        kind,
+        NotificationKind::SpaceInvite | NotificationKind::SpaceActivity
+    );
+    if !about_a_space {
+        return focused;
+    }
+    // Unfocused: not looking at anything, so never suppressed. Focused: suppress
+    // only when the open space is the one this row is about.
+    if !focused {
+        return false;
+    }
+    let state = app.state::<crate::state::AppState>();
+    let view = state.ui_view.lock();
+    view.screen == "spaces" && view.space_id.as_deref() == space_id && space_id.is_some()
 }
 
 /// Whether the user is currently looking at us.

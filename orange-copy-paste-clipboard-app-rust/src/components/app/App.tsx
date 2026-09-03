@@ -220,6 +220,13 @@ const App: React.FC = () => {
   });
   const didRecoverGroupsRef = useRef(false);
 
+  // Tell Rust which screen is showing, so a space notification can skip its
+  // desktop toast only when the user is actually on that space (os_notify reads
+  // this). The Spaces screen reports the selected space separately.
+  useEffect(() => {
+    invoke("ui_screen_changed", { screen }).catch(() => {});
+  }, [screen]);
+
   // ID of the entry currently in the OS clipboard
   const [activeClipboardId, setActiveClipboardId] = useState("");
 
@@ -1366,8 +1373,17 @@ const App: React.FC = () => {
             .then(setNotifications)
             .catch(() => {});
         }}
-        onOpenSpaces={() => {
+        onOpenSpaces={(spaceId?: string) => {
           setNotifOpen(false);
+          // Seed the selection before the screen mounts (a first visit reads it
+          // from storage) and also fire the live event (the screen may already
+          // be mounted on another space).
+          if (spaceId) {
+            localStorage.setItem("spaces-selected", spaceId);
+            document.dispatchEvent(
+              new CustomEvent("spaces:focus", { detail: { spaceId } }),
+            );
+          }
           setScreen("spaces");
           localStorage.setItem("sc-last-screen", "spaces");
         }}

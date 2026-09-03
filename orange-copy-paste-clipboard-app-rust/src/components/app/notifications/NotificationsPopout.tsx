@@ -24,8 +24,9 @@ interface NotificationsPopoutProps {
   onClose: () => void;
   /** Re-read the feed after an action changed it. */
   onRefresh: () => void;
-  /** Take the user to the space this notification is about. */
-  onOpenSpaces: () => void;
+  /** Take the user to the space this notification is about. With an id, open
+   *  that specific space; without one, just show the Spaces screen. */
+  onOpenSpaces: (spaceId?: string) => void;
   /** Answering an invite needs an account. Signed out, say so instead of
       offering buttons whose only outcome is an error. */
   signedIn: boolean;
@@ -387,13 +388,13 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
                   className={`ntf-row${n.read ? "" : " unread"}${linked ? " ntf-row--link" : ""}`}
                   role={linked ? "button" : undefined}
                   tabIndex={linked ? 0 : undefined}
-                  onClick={linked ? onOpenSpaces : undefined}
+                  onClick={linked ? () => onOpenSpaces(n.data.space_id) : undefined}
                   onKeyDown={
                     linked
                       ? (e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            onOpenSpaces();
+                            onOpenSpaces(n.data.space_id);
                           }
                         }
                       : undefined

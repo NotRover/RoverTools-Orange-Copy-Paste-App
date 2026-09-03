@@ -2927,6 +2927,37 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     else localStorage.removeItem(SELECTED_KEY);
   }, [selectedId]);
 
+  // Report the open space to Rust so os_notify can tell "you are reading this
+  // space" from "you are elsewhere in the app". Cleared on unmount, so leaving
+  // the screen stops counting as viewing any space.
+  useEffect(() => {
+    invoke("ui_space_changed", { spaceId: selectedId }).catch(() => {});
+  }, [selectedId]);
+  useEffect(() => {
+    return () => {
+      invoke("ui_space_changed", { spaceId: null }).catch(() => {});
+    };
+  }, []);
+
+  // A notification about a space asks us to open that one. The screen is often
+  // already mounted (the user was on it, or on another space), so reading
+  // localStorage on mount is not enough - this selects it live. Exit any
+  // select mode and close an open detail so the target space is what shows.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const id = (e as CustomEvent<{ spaceId?: string }>).detail?.spaceId;
+      if (!id) return;
+      setSelectedId(id);
+      setDetailItem(null);
+      multiSelect.exitSelectMode();
+    };
+    document.addEventListener("spaces:focus", onFocus);
+    return () => document.removeEventListener("spaces:focus", onFocus);
+    // multiSelect is stable for the life of the screen; exclude to avoid
+    // re-subscribing on every selection change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // The remembered space may have been deleted or left from another device.
   // Only judge that once the list is real, or a restore would drop itself.
   useEffect(() => {
