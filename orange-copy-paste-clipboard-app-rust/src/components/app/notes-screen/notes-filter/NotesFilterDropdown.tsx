@@ -41,6 +41,41 @@ interface NotesCloudContext {
   signedIn: boolean;
 }
 
+/** Every key a notes filter is stored under, so a caller resetting them cannot
+ *  fall behind a filter added later. Mirrors the clipboard screen's list. */
+const NOTES_FILTER_KEYS = [
+  "ns-f-search",
+  "ns-f-pinned",
+  "ns-f-groups",
+  "ns-f-cloud",
+  "ns-f-share",
+  "ns-f-spaces",
+  "ns-f-owner",
+  "ns-f-date",
+  "ns-f-date-after",
+  "ns-f-date-before",
+] as const;
+
+/** Point the notes screen at a cloud slice, for a caller about to navigate
+ *  there. The clipboard screen's `showOnlyKinds` twin: it writes the storage the
+ *  filters mount from (the screen is not mounted yet), clearing everything else
+ *  first so a stale filter cannot narrow the slice the user just clicked. */
+export function showOnlyNotesCloud(
+  opts: { cloud?: CloudFilter; owner?: OwnerFilter } = {},
+): void {
+  try {
+    for (const key of NOTES_FILTER_KEYS) localStorage.removeItem(key);
+    if (opts.cloud && opts.cloud !== "any") {
+      localStorage.setItem("ns-f-cloud", JSON.stringify(opts.cloud));
+    }
+    if (opts.owner && opts.owner !== "any") {
+      localStorage.setItem("ns-f-owner", JSON.stringify(opts.owner));
+    }
+  } catch {
+    /* Storage blocked: the screen opens unfiltered, which is not wrong. */
+  }
+}
+
 type Dimension =
   "pinned" | "cloud" | "share" | "spaces" | "groups" | "owner" | "date";
 

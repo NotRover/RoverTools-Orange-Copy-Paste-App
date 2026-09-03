@@ -203,7 +203,7 @@ const FILTER_KEYS = [
  *  the user just clicked a count of. */
 export function showOnlyKinds(
   kinds: DisplayKind[],
-  opts: { cloud?: CloudFilter } = {},
+  opts: { cloud?: CloudFilter; owner?: OwnerFilter } = {},
 ): void {
   try {
     for (const key of FILTER_KEYS) localStorage.removeItem(key);
@@ -212,6 +212,12 @@ export function showOnlyKinds(
     // that, not to every local entry of the same kind.
     if (opts.cloud && opts.cloud !== "any") {
       localStorage.setItem("sc-f-cloud", JSON.stringify(opts.cloud));
+    }
+    // The cloud tally is "only what you uploaded", so a row opened from it must
+    // land on the same slice - mine, not everything of that kind that also
+    // includes items others shared into the account.
+    if (opts.owner && opts.owner !== "any") {
+      localStorage.setItem("sc-f-owner", JSON.stringify(opts.owner));
     }
   } catch {
     /* Storage blocked: the screen opens unfiltered, which is not wrong. */
