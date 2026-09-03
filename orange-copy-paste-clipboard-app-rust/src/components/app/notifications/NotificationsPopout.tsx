@@ -248,6 +248,36 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
     }
   };
 
+  // A "somebody asked to join" knock, unlike an invite, is the owner/approver
+  // deciding for someone else. It carries a request_id (not an invite_id) and
+  // is answered with the approve/decline commands. Approving without the
+  // requester's key still lets them in - the space key reaches them on the
+  // reconcile the command kicks off. The command also resolves this knock, so
+  // the row loses its buttons here once it is answered.
+  const answerJoinRequest = async (n: AppNotification, accept: boolean) => {
+    const spaceId = n.data.space_id;
+    const requestId = n.data.request_id;
+    if (!spaceId || !requestId || busy.includes(n.id)) return;
+    setBusy((b) => [...b, n.id]);
+    try {
+      if (accept) {
+        await invoke("space_approve_join", {
+          spaceId,
+          requestId,
+          identityPubkey: null,
+        });
+      } else {
+        await invoke("space_decline_join", { spaceId, requestId });
+      }
+    } catch {
+      // A refusal (already answered, request withdrawn) still leaves the feed
+      // to re-read below, which shows the row's real state.
+    } finally {
+      onRefresh();
+      setBusy((b) => b.filter((id) => id !== n.id));
+    }
+  };
+
   const dismiss = (id: string) => {
     seenRef.current = seenRef.current.filter((x) => x !== id);
     invoke("notifications_dismiss", { id })
@@ -343,6 +373,10 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
             {g.rows.map((n) => {
               const glyph = glyphFor(n.kind);
               const actionable = n.kind === "space_invite" && !n.resolved;
+              // Two shapes share the space_invite kind: an invite sent to this
+              // user (invite_id, "Join") and a request from someone else this
+              // user may approve (request_id, "Accept").
+              const isJoinRequest = actionable && !!n.data.request_id;
               // A row about a space opens it, unless it is still asking a
               // question - answering an invite must not be a side effect of
               // trying to read it.
@@ -383,14 +417,22 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
                           <button
                             className="ntf-btn ntf-btn--primary"
                             disabled={busy.includes(n.id)}
-                            onClick={() => answerInvite(n, true)}
+                            onClick={() =>
+                              isJoinRequest
+                                ? answerJoinRequest(n, true)
+                                : answerInvite(n, true)
+                            }
                           >
-                            Join
+                            {isJoinRequest ? "Accept" : "Join"}
                           </button>
                           <button
                             className="ntf-btn"
                             disabled={busy.includes(n.id)}
-                            onClick={() => answerInvite(n, false)}
+                            onClick={() =>
+                              isJoinRequest
+                                ? answerJoinRequest(n, false)
+                                : answerInvite(n, false)
+                            }
                           >
                             Decline
                           </button>
