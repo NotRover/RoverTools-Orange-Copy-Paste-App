@@ -3162,6 +3162,20 @@ impl SyncClient {
             .collect())
     }
 
+    /// Account-wide counts by kind from the server's aggregate route, or `None`
+    /// when the server is too old to have it - the caller then falls back to
+    /// counting [`Self::server_entries`]. This is the fast path: one query on the
+    /// server instead of paging every row down just to tally it here.
+    pub async fn cloud_breakdown(&self) -> Result<Option<client::BreakdownResponse>, String> {
+        let http = self
+            .http
+            .lock()
+            .clone()
+            .filter(|h| h.is_authenticated())
+            .ok_or("not signed in")?;
+        http.account_breakdown().await.map_err(String::from)
+    }
+
     /// The same sweep, keeping each row's `kind` so the account screen can show
     /// what is in the cloud by type the way it does for this device.
     ///

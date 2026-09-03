@@ -848,16 +848,28 @@ pub struct ServerBreakdown {
 
 /// What this account holds on the server, by kind.
 ///
-/// Built on `server_entry_keys` rather than a second sweep: those keys already
-/// carry the kind (`"clipboard:{id}"` / `"note:{id}"`), so the split costs one
-/// pass over a list that had to be fetched anyway. The account screen shows
-/// clipboard and notes on their own rows, and a single total could not say
-/// which of the two an unexpected number came from.
+/// Fast path first: `cloud_breakdown` asks the server to tally its own rows in
+/// one query. Only when the server is too old for that route (`None`) does this
+/// fall back to the sweep - paging every row down and counting the keys here,
+/// which those keys carry the kind for (`"clipboard:{id}"` / `"note:{id}"`). The
+/// account screen shows clipboard and notes on their own rows, and a single
+/// total could not say which of the two an unexpected number came from.
 #[tauri::command]
 pub async fn sync_server_breakdown(
     state: State<'_, AppState>,
 ) -> Result<ServerBreakdown, String> {
     let sync = sync_client(&state)?;
+    if let Some(b) = sync.cloud_breakdown().await? {
+        return Ok(ServerBreakdown {
+            clipboard: b.clipboard,
+            notes: b.notes,
+            text: b.text,
+            image: b.image,
+            file: b.file,
+            html: b.html,
+            total: b.total,
+        });
+    }
     let keys = sync.server_entries().await?;
     let notes = keys.iter().filter(|(k, _)| k.starts_with("note:")).count();
     let count = |want: &str| {
