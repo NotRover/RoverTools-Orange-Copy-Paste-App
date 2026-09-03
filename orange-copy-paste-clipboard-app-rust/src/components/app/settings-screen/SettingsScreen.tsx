@@ -14,10 +14,14 @@ import {
   Bell,
   SpeakerHigh,
   Play,
+  ShieldCheck,
 } from "@phosphor-icons/react";
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
-import { CONFIRM_SYNC_DELETE_KEY } from "../../../confirmDelete";
+import {
+  CONFIRM_SYNC_DELETE_KEY,
+  CONFIRM_SPACE_REMOVE_KEY,
+} from "../../../confirmDelete";
 import {
   CARD_CLICK_SETTING_EVENT,
   CARD_CLICK_SETTING_KEY,
@@ -122,6 +126,7 @@ const SettingsScreen: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
   const [confirmSyncDelete, setConfirmSyncDelete] = useState(true);
+  const [confirmSpaceRemove, setConfirmSpaceRemove] = useState(true);
   // False: click copies, double click views. True: the two swap over.
   const [clickToView, setClickToView] = useState(false);
   const [notifClosing, setNotifClosing] = useState(false);
@@ -160,6 +165,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
     loadBool(CONFIRM_SYNC_DELETE_KEY, setConfirmSyncDelete, true);
+    loadBool(CONFIRM_SPACE_REMOVE_KEY, setConfirmSpaceRemove, true);
     loadBool("sound", setSound, true);
     loadBool("sound_copy", setSoundCopy, false);
     loadBool("sound_paste", setSoundPaste, false);
@@ -344,6 +350,16 @@ const SettingsScreen: React.FC = () => {
                 );
               }}
             />
+          </div>
+        </section>
+
+        {/* ── Confirmations ── */}
+        <section className="set-section">
+          <div className="set-section-head">
+            <span className="set-section-icon"><ShieldCheck size={15} /></span>
+            <h3 className="set-section-title">Confirmations</h3>
+          </div>
+          <div className="set-group">
             <ToggleRow
               label="Confirm before deleting synced items"
               desc="Ask first when deleting an item that has a cloud copy, since the delete also removes it from your other devices."
@@ -353,6 +369,18 @@ const SettingsScreen: React.FC = () => {
                   confirmSyncDelete,
                   setConfirmSyncDelete,
                   CONFIRM_SYNC_DELETE_KEY,
+                )
+              }
+            />
+            <ToggleRow
+              label="Confirm before removing from a space"
+              desc="Ask first when taking an item out of a space, since it is removed for everyone in that space."
+              active={confirmSpaceRemove}
+              onToggle={() =>
+                toggleBoolSetting(
+                  confirmSpaceRemove,
+                  setConfirmSpaceRemove,
+                  CONFIRM_SPACE_REMOVE_KEY,
                 )
               }
             />
