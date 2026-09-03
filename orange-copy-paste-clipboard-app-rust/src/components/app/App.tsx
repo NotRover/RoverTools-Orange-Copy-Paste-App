@@ -1454,6 +1454,8 @@ const App: React.FC = () => {
             syncConnected={syncConnected}
             availableGroups={availableGroups}
             onCopyEntry={handleCopy}
+            onDeleteEntry={handleDelete}
+            onDeleteNote={handleDeleteNote}
             joinCode={joinCode}
             onJoinCodeConsumed={clearJoinCode}
           />

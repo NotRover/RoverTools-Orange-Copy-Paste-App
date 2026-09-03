@@ -33,6 +33,45 @@ export async function disableSyncDeleteConfirm(): Promise<void> {
   }
 }
 
+/** Persisted preference: ask before removing a shared item from a space.
+ *  Absent = ask. Kept separate from the delete confirmation on purpose - one is
+ *  "drop my copy", the other is "take it out of the space for everyone", so
+ *  turning one off must not silently turn the other off. */
+export const CONFIRM_SPACE_REMOVE_KEY = "confirm_space_remove";
+
+/** Whether the remove-from-space confirmation is still on (default true). */
+export async function spaceRemoveConfirmEnabled(): Promise<boolean> {
+  try {
+    const v = await invoke<boolean | null>("get_setting", {
+      key: CONFIRM_SPACE_REMOVE_KEY,
+    });
+    return v !== false;
+  } catch {
+    return true;
+  }
+}
+
+/** Turn the remove-from-space confirmation off (the "Don't ask again" box). */
+export async function disableSpaceRemoveConfirm(): Promise<void> {
+  try {
+    await invoke("set_setting", {
+      key: CONFIRM_SPACE_REMOVE_KEY,
+      value: false,
+    });
+  } catch {
+    /* a failed write just means the prompt shows again next time */
+  }
+}
+
+/**
+ * Whether a remove-from-space should be confirmed first. Unlike a delete, there
+ * is no synced-or-not test: an item in a space is shared by definition, and
+ * removing it takes it out for everyone, so the only gate is the preference.
+ */
+export async function shouldConfirmSpaceRemove(): Promise<boolean> {
+  return spaceRemoveConfirmEnabled();
+}
+
 /**
  * Whether any of these entry keys (`clipboard:{id}` / `note:{id}`) has a cloud
  * copy. Sync state is Rust-owned bookkeeping, not a field on the entry, so it is

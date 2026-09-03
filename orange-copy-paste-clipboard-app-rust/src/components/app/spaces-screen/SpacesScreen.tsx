@@ -107,6 +107,11 @@ import {
   toastError,
 } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
+import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
+import {
+  shouldConfirmSpaceRemove,
+  disableSpaceRemoveConfirm,
+} from "../../../confirmDelete";
 import {
   NETWORK_REFOCUS_MS,
   useWindowRefocus,
@@ -297,11 +302,24 @@ const FeedCardMenu: React.FC<{
   onOpen?: () => void;
   /** Owner-only takedown. Absent for members, who cannot moderate. */
   onRemove?: () => void;
+  /** Drop this device's copy of an item a member shared. Present only on
+   *  received items - deleting your own copy would tombstone it for everyone,
+   *  which is what "Remove from space" is for. */
+  onDeleteForMe?: () => void;
   /** Treat `pos.x` as the menu's right edge, not its left. For a menu hung off
    *  a toolbar button, where opening rightwards would cross into the rules
    *  column instead of staying over the panel the button is on. */
   alignRight?: boolean;
-}> = ({ pos, onClose, copied, onCopy, onOpen, onRemove, alignRight }) => {
+}> = ({
+  pos,
+  onClose,
+  copied,
+  onCopy,
+  onOpen,
+  onRemove,
+  onDeleteForMe,
+  alignRight,
+}) => {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -367,22 +385,103 @@ const FeedCardMenu: React.FC<{
           <span>Open</span>
         </button>
       )}
+      {(onRemove || onDeleteForMe) && <div className="card-menu-separator" />}
       {onRemove && (
-        <>
-          <div className="card-menu-separator" />
-          <button
-            className="card-menu-item card-menu-item--danger-soft"
-            onClick={closeAfter(onRemove)}
-          >
-            <Prohibit size={13} />
-            <span>Remove from space</span>
-          </button>
-        </>
+        <button
+          className="card-menu-item card-menu-item--danger-soft"
+          onClick={closeAfter(onRemove)}
+        >
+          <Prohibit size={13} />
+          <span>Remove from space</span>
+        </button>
+      )}
+      {onDeleteForMe && (
+        <button
+          className="card-menu-item card-menu-item--danger"
+          onClick={closeAfter(onDeleteForMe)}
+        >
+          <TrashIcon size={13} />
+          <span>Delete for me</span>
+        </button>
       )}
     </div>,
     document.body,
   );
 };
+
+// ── Remove-from-space confirmation ────────────────────────────────────
+
+interface RemoveOrigin {
+  spaceName: string;
+  /** How many targets are the user's own items. */
+  mine: number;
+  /** How many are another member's, i.e. an owner takedown. */
+  received: number;
+  /** Sender's name for a single received target, when it can be named. */
+  fromMember: string | null;
+  /** The removal to run once confirmed. */
+  run: () => void;
+}
+
+/**
+ * Body copy for the remove-from-space confirmation, matched to who owns the
+ * targets so it reads true either way: unsharing your own leaves the space but
+ * keeps your copy; an owner takedown of someone else's leaves their copy alone.
+ */
+function removeFromSpaceMessage(o: Omit<RemoveOrigin, "run">): React.ReactNode {
+  const space = <span className="cdd-hi">{o.spaceName}</span>;
+  const count = o.mine + o.received;
+
+  if (count === 1) {
+    if (o.received === 1) {
+      const who = o.fromMember ? (
+        <span className="cdd-hi">{o.fromMember}</span>
+      ) : (
+        "a member"
+      );
+      return (
+        <>
+          This removes it from {space} for everyone. {who} shared it and keeps
+          it in their own clipboard.
+        </>
+      );
+    }
+    return (
+      <>
+        This stops sharing it to {space}. It leaves the space for everyone else,
+        but your own copy stays in your clipboard.
+      </>
+    );
+  }
+
+  if (o.received === 0) {
+    return (
+      <>
+        This stops sharing these <span className="cdd-hi">{count}</span> items to{" "}
+        {space}. They leave the space for everyone else, but your own copies stay
+        in your clipboard.
+      </>
+    );
+  }
+  if (o.mine === 0) {
+    return (
+      <>
+        This removes these <span className="cdd-hi">{count}</span> items from{" "}
+        {space} for everyone. The people who shared them keep them in their own
+        clipboards.
+      </>
+    );
+  }
+  return (
+    <>
+      This removes these <span className="cdd-hi">{count}</span> items from{" "}
+      {space} for everyone. Your own{" "}
+      <span className="cdd-hi">{o.mine}</span> stay in your clipboard, and the{" "}
+      <span className="cdd-hi">{o.received}</span> shared by others stay in
+      theirs.
+    </>
+  );
+}
 
 // ── Feed filter dropdown ──────────────────────────────────────────────
 
@@ -507,7 +606,18 @@ const DetailPanel: React.FC<{
   incoming: boolean;
   /** Takedown, absent for members who cannot remove this item. */
   onRemove?: () => void;
-}> = ({ entry, onClose, onCopy, comments, owner, incoming, onRemove }) => {
+  /** Drop this device's copy, present only on received items. */
+  onDeleteForMe?: () => void;
+}> = ({
+  entry,
+  onClose,
+  onCopy,
+  comments,
+  owner,
+  incoming,
+  onRemove,
+  onDeleteForMe,
+}) => {
   const view = useEntryView(entry);
   const { copied, fire: handleCopy } = useCopyFlash(
     useCallback(() => onCopy(entry.id), [onCopy, entry.id]),
@@ -567,6 +677,7 @@ const DetailPanel: React.FC<{
         copied={copied}
         onCopy={handleCopy}
         onRemove={onRemove}
+        onDeleteForMe={onDeleteForMe}
         alignRight
       />
     </div>
@@ -778,6 +889,8 @@ const ClipFeedCard: React.FC<{
   owner: SpaceMember | null;
   /** Owner-only takedown, absent when we do not own the space. */
   onRemove?: () => void;
+  /** Drop this device's copy, present only on received items. */
+  onDeleteForMe?: () => void;
   /** Bulk selection: on while the feed is in select mode. */
   selecting?: boolean;
   selected?: boolean;
@@ -794,6 +907,7 @@ const ClipFeedCard: React.FC<{
   incoming,
   owner,
   onRemove,
+  onDeleteForMe,
   selecting = false,
   selected = false,
   onSelect,
@@ -894,6 +1008,7 @@ const ClipFeedCard: React.FC<{
           onCopy={markCopied}
           onOpen={() => onView(entry)}
           onRemove={onRemove}
+          onDeleteForMe={onDeleteForMe}
         />
       </>
     );
@@ -1003,6 +1118,7 @@ const ClipFeedCard: React.FC<{
         onCopy={markCopied}
         onOpen={() => onView(entry)}
         onRemove={onRemove}
+        onDeleteForMe={onDeleteForMe}
       />
     </>
   );
@@ -1021,6 +1137,8 @@ const NoteFeedCard: React.FC<{
   owner: SpaceMember | null;
   /** Owner-only takedown, absent when we do not own the space. */
   onRemove?: () => void;
+  /** Drop this device's copy, present only on received items. */
+  onDeleteForMe?: () => void;
   /** Bulk selection: on while the feed is in select mode. */
   selecting?: boolean;
   selected?: boolean;
@@ -1037,6 +1155,7 @@ const NoteFeedCard: React.FC<{
   incoming,
   owner,
   onRemove,
+  onDeleteForMe,
   selecting = false,
   selected = false,
   onSelect,
@@ -1095,6 +1214,7 @@ const NoteFeedCard: React.FC<{
           copied={false}
           onOpen={() => onView(note)}
           onRemove={onRemove}
+          onDeleteForMe={onDeleteForMe}
         />
       </>
     );
@@ -1162,6 +1282,7 @@ const NoteFeedCard: React.FC<{
         copied={false}
         onOpen={() => onView(note)}
         onRemove={onRemove}
+        onDeleteForMe={onDeleteForMe}
       />
     </>
   );
@@ -1188,7 +1309,18 @@ const ReadOnlyNotePanel: React.FC<{
   incoming: boolean;
   /** Takedown, absent for members who cannot remove this note. */
   onRemove?: () => void;
-}> = ({ note, entries, onClose, comments, owner, incoming, onRemove }) => {
+  /** Drop this device's copy, present only on received notes. */
+  onDeleteForMe?: () => void;
+}> = ({
+  note,
+  entries,
+  onClose,
+  comments,
+  owner,
+  incoming,
+  onRemove,
+  onDeleteForMe,
+}) => {
   const menu = useToolbarMenu();
   const popover = useCommentPopover();
   const sharer = owner?.display_name?.trim();
@@ -1270,6 +1402,7 @@ const ReadOnlyNotePanel: React.FC<{
           onClose={menu.close}
           copied={false}
           onRemove={onRemove}
+          onDeleteForMe={onDeleteForMe}
           alignRight
         />
       </div>
@@ -2038,6 +2171,10 @@ interface SpacesScreenProps {
   syncConnected: boolean | null;
   availableGroups: string[];
   onCopyEntry: (id: string) => void;
+  /** Delete a received item's local copy ("Delete for me"). Shares the app's
+   *  guarded, undoable delete, so the feed matches the clipboard screen. */
+  onDeleteEntry: (id: string) => void;
+  onDeleteNote: (id: string) => void;
   /** Code from an invite link the user opened, joined once and then cleared. */
   joinCode?: string | null;
   onJoinCodeConsumed?: () => void;
@@ -2051,6 +2188,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   syncConnected,
   availableGroups,
   onCopyEntry,
+  onDeleteEntry,
+  onDeleteNote,
   joinCode,
   onJoinCodeConsumed,
 }) => {
@@ -2449,6 +2588,25 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [],
   );
 
+  // Removing from a space is confirmed the same way a delete is, with its own
+  // "Don't ask again". Holds what the copy needs - the space, and how many of
+  // the targets are the user's own vs another member's (an owner takedown) so
+  // the wording is right for each - and the removal to run once confirmed.
+  const [removeConfirm, setRemoveConfirm] = useState<RemoveOrigin | null>(null);
+
+  // Gate a removal behind the confirmation when the preference is on; otherwise
+  // run it straight away. Mirrors the delete path's `guardDelete`.
+  const guardRemove = useCallback(
+    async (origin: Omit<RemoveOrigin, "run">, proceed: () => void) => {
+      if (await shouldConfirmSpaceRemove()) {
+        setRemoveConfirm({ ...origin, run: proceed });
+      } else {
+        proceed();
+      }
+    },
+    [],
+  );
+
   // Take an item out of a space. Two callers: the space owner moderating
   // anything here, and a member unsharing something they posted. Neither is a
   // deletion - whoever shared it keeps their own copy, the space stops carrying
@@ -2461,32 +2619,47 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     (clientId: string, entryType: "clipboard" | "note") => {
       if (!selected) return;
       const spaceId = selected.id;
-      deferDestructive(
-        "Removed from the space",
-        async () => {
-          try {
-            await invoke("space_remove_entry", {
-              spaceId,
-              clientId,
-              entryType,
-            });
-          } catch (e) {
-            setSpaceError(String(e));
-            throw e;
-          } finally {
-            // Re-read before returning: the hint is released the moment this
-            // resolves, and the feed goes back to reading the share map.
-            await refreshShares();
-          }
-        },
+      const proceed = () => {
+        deferDestructive(
+          "Removed from the space",
+          async () => {
+            try {
+              await invoke("space_remove_entry", {
+                spaceId,
+                clientId,
+                entryType,
+              });
+            } catch (e) {
+              setSpaceError(String(e));
+              throw e;
+            } finally {
+              // Re-read before returning: the hint is released the moment this
+              // resolves, and the feed goes back to reading the share map.
+              await refreshShares();
+            }
+          },
+          {
+            key: "space-remove-entry",
+            hides: [`share:${entryType}:${clientId}:${spaceId}`],
+            errorPrefix: "Could not remove from the space",
+          },
+        );
+      };
+      const key = `${entryType}:${clientId}`;
+      const received = remoteKeys.has(key);
+      void guardRemove(
         {
-          key: "space-remove-entry",
-          hides: [`share:${entryType}:${clientId}:${spaceId}`],
-          errorPrefix: "Could not remove from the space",
+          spaceName: selected.name,
+          mine: received ? 0 : 1,
+          received: received ? 1 : 0,
+          fromMember: received
+            ? (ownerFor(key)?.display_name?.trim() ?? null)
+            : null,
         },
+        proceed,
       );
     },
-    [selected, refreshShares],
+    [selected, refreshShares, guardRemove, remoteKeys, ownerFor],
   );
 
   const refreshInvites = useCallback(() => {
@@ -2895,36 +3068,61 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     const keys = [...multiSelect.selectedIds].filter(canRemoveKey);
     if (keys.length === 0) return;
     multiSelect.exitSelectMode();
-    deferDestructive(
-      keys.length === 1
-        ? "Removed from the space"
-        : `Removed ${keys.length} items from the space`,
-      async () => {
-        try {
-          for (const key of keys) {
-            const [entryType, clientId] = splitFeedKey(key);
-            await invoke("space_remove_entry", {
-              spaceId,
-              clientId,
-              entryType,
-            });
+    const proceed = () => {
+      deferDestructive(
+        keys.length === 1
+          ? "Removed from the space"
+          : `Removed ${keys.length} items from the space`,
+        async () => {
+          try {
+            for (const key of keys) {
+              const [entryType, clientId] = splitFeedKey(key);
+              await invoke("space_remove_entry", {
+                spaceId,
+                clientId,
+                entryType,
+              });
+            }
+          } catch (e) {
+            setSpaceError(String(e));
+            throw e;
+          } finally {
+            // Re-read before returning: the hints are released the moment this
+            // resolves, and the feed goes back to reading the share map.
+            await refreshShares();
           }
-        } catch (e) {
-          setSpaceError(String(e));
-          throw e;
-        } finally {
-          // Re-read before returning: the hints are released the moment this
-          // resolves, and the feed goes back to reading the share map.
-          await refreshShares();
-        }
-      },
-      {
-        key: "space-remove-entry",
-        hides: keys.map((k) => `share:${k}:${spaceId}`),
-        errorPrefix: "Could not remove from the space",
-      },
+        },
+        {
+          key: "space-remove-entry",
+          hides: keys.map((k) => `share:${k}:${spaceId}`),
+          errorPrefix: "Could not remove from the space",
+        },
+      );
+    };
+    let mine = 0;
+    let received = 0;
+    for (const key of keys) {
+      if (remoteKeys.has(key)) received += 1;
+      else mine += 1;
+    }
+    // Only name a sender when a single received item is the whole selection.
+    const fromMember =
+      keys.length === 1 && received === 1
+        ? (ownerFor(keys[0])?.display_name?.trim() ?? null)
+        : null;
+    void guardRemove(
+      { spaceName: selected.name, mine, received, fromMember },
+      proceed,
     );
-  }, [selected, multiSelect, canRemoveKey, refreshShares]);
+  }, [
+    selected,
+    multiSelect,
+    canRemoveKey,
+    refreshShares,
+    guardRemove,
+    remoteKeys,
+    ownerFor,
+  ]);
 
   useEffect(() => {
     if (!multiSelect.isSelecting) return;
@@ -3567,6 +3765,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                         }
                       : undefined
                   }
+                  onDeleteForMe={
+                    remoteKeys.has(`note:${detailItem.note.id}`)
+                      ? () => {
+                          const id = detailItem.note.id;
+                          setDetailItem(null);
+                          onDeleteNote(id);
+                        }
+                      : undefined
+                  }
                 />
               ) : (
                 <DetailPanel
@@ -3587,6 +3794,15 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                           const id = detailItem.entry.id;
                           setDetailItem(null);
                           handleRemoveFromSpace(id, "clipboard");
+                        }
+                      : undefined
+                  }
+                  onDeleteForMe={
+                    remoteKeys.has(`clipboard:${detailItem.entry.id}`)
+                      ? () => {
+                          const id = detailItem.entry.id;
+                          setDetailItem(null);
+                          onDeleteEntry(id);
                         }
                       : undefined
                   }
@@ -3701,6 +3917,13 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                               )
                                           : undefined
                                       }
+                                      onDeleteForMe={
+                                        remoteKeys.has(
+                                          `clipboard:${item.entry.id}`,
+                                        )
+                                          ? () => onDeleteEntry(item.entry.id)
+                                          : undefined
+                                      }
                                       selecting={
                                         multiSelect.isSelecting &&
                                         canRemoveKey(
@@ -3748,6 +3971,11 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                                 item.note.id,
                                                 "note",
                                               )
+                                          : undefined
+                                      }
+                                      onDeleteForMe={
+                                        remoteKeys.has(`note:${item.note.id}`)
+                                          ? () => onDeleteNote(item.note.id)
                                           : undefined
                                       }
                                       selecting={
@@ -4139,6 +4367,27 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         onRevoke={handleRevokeInvite}
         onApprove={handleApproveJoin}
         onTurnDown={handleTurnDownJoin}
+      />
+
+      {/* Same confirmation as a delete, with its own "Don't ask again", so
+          taking an item out of a space is not a one-click accident. */}
+      <ConfirmDeleteDialog
+        open={!!removeConfirm}
+        count={removeConfirm ? removeConfirm.mine + removeConfirm.received : 1}
+        title={
+          removeConfirm && removeConfirm.mine + removeConfirm.received > 1
+            ? `Remove ${removeConfirm.mine + removeConfirm.received} items from space?`
+            : "Remove from space?"
+        }
+        confirmLabel="Remove"
+        message={removeConfirm ? removeFromSpaceMessage(removeConfirm) : null}
+        onCancel={() => setRemoveConfirm(null)}
+        onConfirm={(dontAsk) => {
+          const pending = removeConfirm;
+          setRemoveConfirm(null);
+          if (dontAsk) void disableSpaceRemoveConfirm();
+          pending?.run();
+        }}
       />
     </div>
   );

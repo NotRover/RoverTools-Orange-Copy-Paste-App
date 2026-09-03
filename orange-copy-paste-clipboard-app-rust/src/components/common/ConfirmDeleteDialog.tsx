@@ -15,6 +15,12 @@ interface Props {
   onCancel: () => void;
   /** Confirm the delete; `dontAskAgain` is the checkbox state. */
   onConfirm: (dontAskAgain: boolean) => void;
+  /** Override the delete-specific chrome so the same dialog can confirm a
+   *  different destructive action (e.g. removing from a space). When `message`
+   *  is set, the entry-origin lookup is skipped and this body is shown as-is. */
+  title?: string;
+  message?: React.ReactNode;
+  confirmLabel?: string;
 }
 
 /** Origin used until the real lookup resolves, and when no keys are passed. */
@@ -40,6 +46,9 @@ export const ConfirmDeleteDialog: React.FC<Props> = ({
   entryKeys,
   onCancel,
   onConfirm,
+  title,
+  message,
+  confirmLabel = "Delete",
 }) => {
   const [dontAsk, setDontAsk] = useState(false);
   const [origin, setOrigin] = useState<DeleteOrigin>(OWN_ONLY);
@@ -59,7 +68,8 @@ export const ConfirmDeleteDialog: React.FC<Props> = ({
   // that floods the Rust bridge. Entry keys never contain a newline.
   const keyStr = (entryKeys ?? []).join("\n");
   useEffect(() => {
-    if (!open) return;
+    // A custom message supplies its own body, so the origin lookup is moot.
+    if (!open || message) return;
     setOrigin(OWN_ONLY);
     const keys = keyStr ? keyStr.split("\n") : [];
     if (!keys.length) return;
@@ -70,7 +80,7 @@ export const ConfirmDeleteDialog: React.FC<Props> = ({
     return () => {
       live = false;
     };
-  }, [open, keyStr]);
+  }, [open, keyStr, message]);
 
   // Escape cancels. Captured and stopped so a popup's own Escape-to-close does
   // not fire underneath and yank the window away mid-decision.
@@ -105,19 +115,20 @@ export const ConfirmDeleteDialog: React.FC<Props> = ({
             <WarningIcon size={17} />
           </span>
           <div className="cdd-title">
-            {plural ? `Delete ${count} items?` : "Delete this item?"}
+            {title ?? (plural ? `Delete ${count} items?` : "Delete this item?")}
           </div>
         </div>
         <div className="cdd-body">
-          {deleteMessage(origin, count).map((part, i) =>
-            part.hi ? (
-              <span key={i} className="cdd-hi">
-                {part.t}
-              </span>
-            ) : (
-              <React.Fragment key={i}>{part.t}</React.Fragment>
-            ),
-          )}
+          {message ??
+            deleteMessage(origin, count).map((part, i) =>
+              part.hi ? (
+                <span key={i} className="cdd-hi">
+                  {part.t}
+                </span>
+              ) : (
+                <React.Fragment key={i}>{part.t}</React.Fragment>
+              ),
+            )}
         </div>
         <div className="cdd-footer">
           <label className="cdd-check">
@@ -137,7 +148,7 @@ export const ConfirmDeleteDialog: React.FC<Props> = ({
               onClick={() => onConfirm(dontAsk)}
               autoFocus
             >
-              Delete
+              {confirmLabel}
             </button>
           </div>
         </div>
