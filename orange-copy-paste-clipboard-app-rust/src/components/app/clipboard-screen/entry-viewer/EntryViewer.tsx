@@ -275,6 +275,11 @@ const EntryViewer: React.FC<{
   // multiple of the file's own pixels and starts at "fit the window"; a text
   // zoom is a reading size and starts at 100%.
   const [imageZoom, setImageZoom] = useState<number | null>(null);
+  // Whether the current image zoom was reached with the +/- magnifier rather
+  // than the Fit/Original mode button. It decides only what the level reads:
+  // the magnifier shows a percentage, the mode button reads "Fit" or
+  // "Original". Both can land on 1x, which is then "Original" or "100%".
+  const [imageStepped, setImageStepped] = useState(false);
   const [textZoom, setTextZoom] = useState(1);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relTime = useRelativeTime(entry.timestamp, `clipboard:${entry.id}`);
@@ -398,11 +403,24 @@ const EntryViewer: React.FC<{
     zoomKind === "image"
       ? imageZoom === null
         ? "Fit"
-        : `${Math.round(imageZoom * 100)}%`
+        : !imageStepped && imageZoom === 1
+          ? "Original"
+          : `${Math.round(imageZoom * 100)}%`
       : `${Math.round(textZoom * 100)}%`;
 
-  const stepImage = (dir: 1 | -1) =>
-    setImageZoom((z) => (z === null ? (dir === 1 ? 1 : 0.5) : stepZoom(ZOOM_STEPS, z, dir)));
+  // The magnifier owns the percentage readout, so every step marks the zoom as
+  // stepped - even one that lands on 1x, which then reads "100%", not
+  // "Original". Leaving Fit lands on a concrete stop: in at 100%, out at 50%.
+  const stepImage = (dir: 1 | -1) => {
+    setImageStepped(true);
+    setImageZoom((z) =>
+      z === null
+        ? dir === 1
+          ? 1
+          : 0.5
+        : stepZoom(ZOOM_STEPS, z, dir),
+    );
+  };
   const zoomIn = () =>
     zoomKind === "image"
       ? stepImage(1)
@@ -411,10 +429,35 @@ const EntryViewer: React.FC<{
     zoomKind === "image"
       ? stepImage(-1)
       : setTextZoom((z) => stepZoom(TEXT_ZOOM_STEPS, z, -1));
-  const zoomReset = () =>
-    zoomKind === "image" ? setImageZoom(null) : setTextZoom(1);
+  // Ctrl+0 goes to Fit for an image, 100% for text.
+  const zoomReset = () => {
+    if (zoomKind === "image") {
+      setImageStepped(false);
+      setImageZoom(null);
+    } else {
+      setTextZoom(1);
+    }
+  };
+  // The center button is the mode switch: Fit (the window) and Original (the
+  // file's own pixels) are the two named stops beside the magnifier's
+  // percentages. From any stepped zoom it returns to Fit. Clearing
+  // `imageStepped` is what makes the level read the mode word, not a percentage.
+  const zoomToggle = () => {
+    if (zoomKind === "image") {
+      setImageStepped(false);
+      setImageZoom((z) => (z === null ? 1 : null));
+    } else {
+      setTextZoom(1);
+    }
+  };
   const atDefault =
     zoomKind === "image" ? imageZoom === null : textZoom === 1;
+  const zoomLevelTip =
+    zoomKind === "image"
+      ? imageZoom === null
+        ? "Show at original size"
+        : "Fit to window"
+      : "Reset to 100%";
 
   zoomRef.current = zoomKind
     ? { in: zoomIn, out: zoomOut, reset: zoomReset }
@@ -479,11 +522,9 @@ const EntryViewer: React.FC<{
               </button>
               <button
                 className={`cv-btn cv-zoom-level${atDefault ? "" : " cv-btn--on"}`}
-                onClick={zoomReset}
-                aria-label={`Zoom ${zoomLabel}. Click to reset.`}
-                data-tooltip={
-                  zoomKind === "image" ? "Reset to fit" : "Reset to 100%"
-                }
+                onClick={zoomToggle}
+                aria-label={`Zoom ${zoomLabel}. ${zoomLevelTip}.`}
+                data-tooltip={zoomLevelTip}
                 data-tooltip-pos="below"
               >
                 {zoomLabel}
