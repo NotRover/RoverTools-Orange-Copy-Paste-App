@@ -654,6 +654,105 @@ export const FileIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
   </svg>
 );
 
+/* ── Spreadsheet (grid) ── */
+
+export const SheetIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 9,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <line x1="3" y1="9" x2="21" y2="9" />
+    <line x1="3" y1="15" x2="21" y2="15" />
+    <line x1="9" y1="3" x2="9" y2="21" />
+    <line x1="15" y1="3" x2="15" y2="21" />
+  </svg>
+);
+
+/* ── Archive (zipped box) ── */
+
+export const ArchiveIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 9,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <path d="M3 9h18" />
+    <path d="M11 3v6M13 3v6" />
+    <rect x="10" y="12" width="4" height="4.5" rx="1" />
+  </svg>
+);
+
+/* ── Audio (music note) ── */
+
+export const AudioIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 9,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+  </svg>
+);
+
+/* ── Stacked files (multi-file bundle) ── */
+
+export const FilesStackIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 9,
+  strokeWidth = 2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M15 3H8a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7z" />
+    <polyline points="15 3 15 7 19 7" />
+    <path d="M3 8v11a2 2 0 0 0 2 2h9" />
+  </svg>
+);
+
 /* ── Text lines ── */
 
 export const TextLinesIcon: React.FC<IconProps & { strokeWidth?: number }> = ({

@@ -484,81 +484,10 @@
   word-break: break-all;
 }
 
-/* ── File list ──────────────────────────────────────────────────── */
-
-.cv-files {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.cv-file-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 11px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  min-width: 0;
-}
-
-.cv-file-thumb {
-  width: 26px;
-  height: 26px;
-  object-fit: cover;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.cv-file-icon {
-  display: flex;
-  width: 26px;
-  justify-content: center;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.cv-file-name {
-  font-size: 12px;
-  color: var(--text);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-/* The full path, dimmed and ellipsised: useful when two files share a name,
-   never important enough to crowd out the name itself. */
-.cv-file-path {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  direction: rtl;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1;
-}
-
-.cv-file-row--missing .cv-file-name {
-  color: var(--text-muted);
-  text-decoration: line-through;
-}
-
-.cv-file-gone {
-  font-size: 10px;
-  color: var(--danger);
-  flex-shrink: 0;
-}
+/* The multi-file body (grid/list) lives in FileEntryList / fileEntryList.css. */
 
 @media (max-width: 700px) {
   .cv-toolbar {
     flex-wrap: wrap;
-  }
-
-  .cv-file-path {
-    display: none;
   }
 }

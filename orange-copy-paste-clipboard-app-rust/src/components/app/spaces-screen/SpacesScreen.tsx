@@ -30,6 +30,7 @@ import {
   filePaths,
   fileNameFromPath,
   deriveDisplayKind,
+  fileCount,
   groupColor,
 } from "../../../types";
 import { UserAvatar } from "../../UserAvatar";
@@ -544,7 +545,7 @@ const DetailPanel: React.FC<{
       {/* Everything the card's chip row has to drop for want of room. Same
           chips, same colours - nothing is hidden here. */}
       <div className="cv-meta">
-        <EntryTypePill kind={deriveDisplayKind(entry)} />
+        <EntryTypePill kind={deriveDisplayKind(entry)} count={fileCount(entry)} />
         <DirectionBadge incoming={incoming} />
         <OwnerBadge owner={owner} incoming={incoming} />
         <CommentChip
@@ -865,7 +866,7 @@ const ClipFeedCard: React.FC<{
             </span>
           )}
           <span className="sp-list-type-wrap">
-            <EntryTypePill kind={dk} />
+            <EntryTypePill kind={dk} count={fileCount(entry)} />
           </span>
           <OwnerBadge owner={owner} incoming={incoming} />
           <span className="sp-list-text">{truncateText(text, 100)}</span>
@@ -964,7 +965,7 @@ const ClipFeedCard: React.FC<{
                   <span className="card-type-label">Clipboard</span>
                 </span>
               )}
-              <EntryTypePill kind={dk} />
+              <EntryTypePill kind={dk} count={fileCount(entry)} />
               <OwnerBadge owner={owner} incoming={incoming} />
               <CommentChip
                 mark={comments}

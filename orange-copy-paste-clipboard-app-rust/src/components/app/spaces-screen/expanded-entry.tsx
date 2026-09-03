@@ -28,7 +28,7 @@ import {
   resolveImageSrc,
 } from "../../../types";
 import { sanitizeHtml } from "../clipboard-screen/sanitize-html";
-import { ImageIcon, FileIcon } from "../../entry-types/EntryTypePill";
+import { FileEntryList } from "../../entry-types/FileEntryList";
 import VideoPlayer from "../clipboard-screen/entry-card/VideoPlayer";
 import {
   TEXT_ZOOM_STEPS,
@@ -185,31 +185,7 @@ const FileBody: React.FC<{ paths: string[]; zoom: number | null }> = ({
     );
   }
 
-  return (
-    <div className="cv-files">
-      {paths.map((p) => {
-        const gone = missing.has(p);
-        const preview = previews[p];
-        return (
-          <div
-            key={p}
-            className={`cv-file-row${gone ? " cv-file-row--missing" : ""}`}
-          >
-            {preview && !gone ? (
-              <img src={preview} alt="" className="cv-file-thumb" />
-            ) : (
-              <span className="cv-file-icon">
-                {isImageFile(p) ? ImageIcon : FileIcon}
-              </span>
-            )}
-            <span className="cv-file-name">{fileNameFromPath(p)}</span>
-            <span className="cv-file-path">{p}</span>
-            {gone && <span className="cv-file-gone">missing</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
+  return <FileEntryList paths={paths} />;
 };
 
 // -- How the entry is being looked at ---------------------------------

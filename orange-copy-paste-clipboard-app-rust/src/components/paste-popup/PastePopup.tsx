@@ -13,6 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ClipboardEntry, AppTheme } from "../../types";
 import {
   deriveDisplayKind,
+  fileCount,
   fileNameFromPath,
   groupColor,
   htmlPlainText,
@@ -496,7 +497,10 @@ const PastePopup: React.FC = () => {
                     draggable={false}
                   />
                 ) : (
-                  <EntryTypePill kind={deriveDisplayKind(entry)} />
+                  <EntryTypePill
+                    kind={deriveDisplayKind(entry)}
+                    count={fileCount(entry)}
+                  />
                 )}
 
                 <span className="paste-row-preview">{rowPreview(entry)}</span>
