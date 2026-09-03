@@ -3009,7 +3009,12 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           name,
           shareHistory,
         });
-        setSpaces((prev) => [...prev, space]);
+        // Insert by id, not a blind append: creating a space also lands a
+        // `space:membership-changed` over the socket, whose reloadSpaces can
+        // replace the list with one that already holds the new space before this
+        // runs. A plain append then showed it twice until the next reconcile
+        // collapsed it. Replace-or-append keeps the optimistic insert idempotent.
+        setSpaces((prev) => [...prev.filter((s) => s.id !== space.id), space]);
         setSelectedId(space.id);
         setShowCreate(false);
       } catch (e) {
