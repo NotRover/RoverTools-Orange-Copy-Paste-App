@@ -26,6 +26,7 @@ import {
 } from "../../types";
 import { EntryTypePill, SaveIcon } from "../entry-types/EntryTypePill";
 import { DegradedPill } from "../DegradedPill";
+import { DotsSixVertical } from "@phosphor-icons/react";
 import {
   CloseIcon,
   PinIcon,
@@ -40,6 +41,7 @@ import {
 } from "../../confirmDelete";
 import "./pastePopup.css";
 import { installWebviewGuards } from "../../webview-guards";
+import { usePopupDrag } from "../../hooks/usePopupDrag";
 
 type Tab = "recent" | "pinned";
 
@@ -90,6 +92,7 @@ function rowPreview(entry: ClipboardEntry, max = 64): string {
 }
 
 const PastePopup: React.FC = () => {
+  const { onMouseDown: onHeaderDrag, isDragging } = usePopupDrag("paste-popup");
   const [recentAll, setRecentAll] = useState<ClipboardEntry[]>([]);
   const [pinnedAll, setPinnedAll] = useState<ClipboardEntry[]>([]);
   const [visible, setVisible] = useState(false);
@@ -208,6 +211,9 @@ const PastePopup: React.FC = () => {
     win
       .listen("tauri://blur", () => {
         if (cancelled) return;
+        // A header drag is an OS move loop that blurs this window; ignore that
+        // blur so the drag does not dismiss the popup. Real click-aways close.
+        if (isDragging()) return;
         setVisible(false);
         invoke("close_paste_popup").catch(console.error);
       })
@@ -219,7 +225,7 @@ const PastePopup: React.FC = () => {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [isDragging]);
 
   const handleClose = useCallback(() => {
     setVisible(false);
@@ -390,7 +396,13 @@ const PastePopup: React.FC = () => {
       data-theme={theme}
     >
       {/* Header */}
-      <div className="paste-header">
+      <div className="paste-header" onMouseDown={onHeaderDrag}>
+        <DotsSixVertical
+          className="paste-grip"
+          size={14}
+          weight="bold"
+          aria-hidden="true"
+        />
         <div className="paste-header-left">
           <span className="paste-title">Quick Paste</span>
           <span className="paste-count">{entries.length}</span>

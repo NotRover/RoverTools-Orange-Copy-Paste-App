@@ -126,6 +126,20 @@ body {
   padding: 2px 2px 6px;
   gap: 6px;
   flex-shrink: 0;
+  /* The header is the drag handle (see usePopupDrag); its tabs and buttons opt
+     back out with their own cursor. */
+  cursor: grab;
+  user-select: none;
+}
+
+.paste-header:active {
+  cursor: grabbing;
+}
+
+.paste-grip {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.55;
 }
 
 .paste-header-left {

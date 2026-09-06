@@ -80,6 +80,18 @@ pub fn resize_copy_popup(app: tauri::AppHandle, height: f64) {
     crate::runtime::popup_windows::clamp_popup_into_monitor(&app, "copy-popup");
 }
 
+/// Nudge a popup back onto its monitor after the user has dragged it by the
+/// header. The drag itself is an OS move loop we do not control; the frontend
+/// calls this once the moves settle, so a popup pulled past an edge snaps back
+/// while one left on-screen stays exactly where it was placed. Restricted to the
+/// two draggable popups so it can never be pointed at another window.
+#[tauri::command]
+pub fn clamp_popup(app: tauri::AppHandle, label: String) {
+    if label == "copy-popup" || label == "paste-popup" {
+        crate::runtime::popup_windows::clamp_popup_into_monitor(&app, &label);
+    }
+}
+
 #[tauri::command]
 pub fn open_data_folder(app: tauri::AppHandle) -> bool {
     let Some(dir) = app.path().app_data_dir().ok() else {

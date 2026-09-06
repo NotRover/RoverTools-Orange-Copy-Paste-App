@@ -25,7 +25,7 @@ import {
 import { loadImagePreview } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import { DegradedPill } from "../DegradedPill";
-import { ShareNetwork } from "@phosphor-icons/react";
+import { ShareNetwork, DotsSixVertical } from "@phosphor-icons/react";
 import {
   TrashIcon,
   CloseIcon,
@@ -42,6 +42,7 @@ import {
 } from "../../confirmDelete";
 import "./copyPopup.css";
 import { installWebviewGuards } from "../../webview-guards";
+import { usePopupDrag } from "../../hooks/usePopupDrag";
 
 // Window-height budget (logical px), width fixed at Rust COPY_POPUP_W. The
 // preview is flex:1, so these only need to give it enough room — a little slack
@@ -124,6 +125,7 @@ const CopyPopup: React.FC = () => {
   // (above the size effect that reads it) so it is in scope for the reveal sizing.
   const [confirmDelete, setConfirmDelete] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { onMouseDown: onHeaderDrag, isDragging } = usePopupDrag("copy-popup");
   const newGroupRef = useRef<HTMLInputElement>(null);
   // The window is shown by React (not Rust) once it has rendered and sized the
   // new entry, so it never visibly updates on screen. `needPresent` is armed on
@@ -234,6 +236,10 @@ const CopyPopup: React.FC = () => {
     win
       .listen("tauri://blur", () => {
         if (cancelled) return;
+        // A header drag is an OS move loop that blurs this window; that blur is
+        // not the user leaving, so it must not dismiss. Every real click-away
+        // still closes.
+        if (isDragging()) return;
         // Delay so button clicks inside the popup can process first;
         // transparent frameless windows on Windows can fire blur on click.
         blurTimer.current = setTimeout(() => {
@@ -249,7 +255,7 @@ const CopyPopup: React.FC = () => {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [isDragging]);
 
   // Image file preview
   const files =
@@ -629,7 +635,19 @@ const CopyPopup: React.FC = () => {
               same line: the type pill, then state chips (pin, Saved star, custom
               group, shared space). Extra chips collapse into a "+N" that names
               them on hover. */}
-          <div className="popup-header">
+          <div
+            className="popup-header"
+            onMouseDown={(e) => {
+              cancelBlur();
+              onHeaderDrag(e);
+            }}
+          >
+            <DotsSixVertical
+              className="popup-grip"
+              size={14}
+              weight="bold"
+              aria-hidden="true"
+            />
             <div className="popup-header-left">
               <span className="popup-title">Copied</span>
               {kind === "file" && files.length > 1 && (
