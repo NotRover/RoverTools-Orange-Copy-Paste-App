@@ -751,6 +751,7 @@ pub fn run() {
             crate::updater::updater_install,
             crate::updater::updater_skip_version,
             crate::runtime::commands::close_notification,
+            crate::runtime::commands::close_splash,
             crate::runtime::commands::ui_screen_changed,
             crate::runtime::commands::ui_space_changed,
             crate::notes::commands::get_notes,
@@ -888,22 +889,42 @@ pub fn run() {
                     }
                 });
             }
-            // Close the splash window from Rust — JS close() is unreliable for
-            // conf.json windows on Windows (handle can persist as a click-blocker).
-            let state     = app.state::<AppState>();
-            let show      = state.show_splash.load(Ordering::Relaxed);
-            let minimized = state.start_minimized.load(Ordering::Relaxed);
-            // Only hold the splash open when the main window is hidden.
-            // If the main window is visible, dismiss immediately so the two
-            // windows don't overlap.
-            let delay_ms: u64 = if show && minimized { 3_200 } else { 100 };
+            // The startup splash is a compact toast docked at the bottom-right
+            // corner, by the tray. It is created hidden (tauri.conf.json) so it
+            // can be positioned before it appears - otherwise it would flash at
+            // the default location first. Reuses the same corner math and margin
+            // as the app's notification toast.
+            //
+            // Keep 340x76 in sync with the splash window size in tauri.conf.json.
+            let state = app.state::<AppState>();
+            let show  = state.show_splash.load(Ordering::Relaxed);
             let ah = app.handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            if show {
                 if let Some(w) = ah.get_webview_window("splash") {
-                    let _ = w.close();
+                    let (px, py) = crate::runtime::platform::notification_position(340, 76);
+                    let _ = w.set_position(tauri::PhysicalPosition::new(px, py));
+                    let _ = w.show();
+                    // Non-interactive: never blocks a click in the corner it
+                    // covers. Must run after show() (see notifications.rs).
+                    let _ = w.set_ignore_cursor_events(true);
                 }
-            });
+                // Hard-cap fallback close. The splash normally closes itself via
+                // the `close_splash` command once its sequence finishes - it owns
+                // the timing because it holds longer when it has an update to
+                // announce. This timer only fires if that never arrives (a stalled
+                // webview), so it sits well above every JS-driven close time in
+                // SplashScreen.tsx. Routed through Rust because a JS close() on
+                // this conf.json window can leave a click-blocking handle behind.
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(11_000));
+                    if let Some(w) = ah.get_webview_window("splash") {
+                        let _ = w.close();
+                    }
+                });
+            } else if let Some(w) = ah.get_webview_window("splash") {
+                // Splash disabled in settings: it was never shown, just discard it.
+                let _ = w.close();
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
