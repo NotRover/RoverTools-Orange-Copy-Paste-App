@@ -44,6 +44,20 @@ pub fn close_notification(app: tauri::AppHandle) {
     hide_popup(&app, "notification");
 }
 
+/// Close the startup splash from its own webview when its sequence finishes.
+///
+/// The splash drives its own timing (it holds longer when it has an update to
+/// announce), so it asks to be closed rather than waiting out the fixed fallback
+/// timer in lib.rs. Routed through Rust because a plain JS `close()` on this
+/// conf.json window can leave a click-blocking handle behind on Windows; the
+/// same `w.close()` the fallback timer uses does not.
+#[tauri::command]
+pub fn close_splash(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("splash") {
+        let _ = w.close();
+    }
+}
+
 /// The frontend reporting which screen is now showing. Split from the space
 /// report below so the two writers - the app shell (screen) and the Spaces
 /// screen (selected space) - never overwrite each other's field, whatever order
