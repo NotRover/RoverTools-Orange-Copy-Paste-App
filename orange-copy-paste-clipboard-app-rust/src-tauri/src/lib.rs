@@ -665,6 +665,7 @@ pub fn run() {
         notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(false)),
         show_splash: Arc::new(AtomicBool::new(true)),
+        splash_updating: Arc::new(AtomicBool::new(false)),
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
         notes: Arc::new(parking_lot::Mutex::new(crate::notes::NoteStore::new())),
         notes_dirty: Arc::new(AtomicBool::new(false)),
@@ -752,6 +753,7 @@ pub fn run() {
             crate::updater::updater_skip_version,
             crate::runtime::commands::close_notification,
             crate::runtime::commands::close_splash,
+            crate::runtime::commands::splash_set_updating,
             crate::runtime::commands::ui_screen_changed,
             crate::runtime::commands::ui_space_changed,
             crate::notes::commands::get_notes,
@@ -915,8 +917,17 @@ pub fn run() {
                 // webview), so it sits well above every JS-driven close time in
                 // SplashScreen.tsx. Routed through Rust because a JS close() on
                 // this conf.json window can leave a click-blocking handle behind.
+                //
+                // While the splash is auto-installing an update, hold off: a
+                // download can take far longer than any normal splash, and the
+                // install restarts the process anyway. If it fails, the splash
+                // clears the flag and closes itself.
+                let updating = Arc::clone(&state.splash_updating);
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(11_000));
+                    while updating.load(Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_millis(2_000));
+                    }
                     if let Some(w) = ah.get_webview_window("splash") {
                         let _ = w.close();
                     }

@@ -128,7 +128,9 @@ body {
   color: var(--text-primary);
 }
 
-.splash-status[data-state="update"] {
+.splash-status[data-state="update"],
+.splash-status[data-state="updating"],
+.splash-status[data-state="installing"] {
   color: var(--accent);
   font-weight: 600;
 }
