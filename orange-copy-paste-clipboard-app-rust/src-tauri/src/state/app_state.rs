@@ -58,6 +58,10 @@ pub struct AppState {
     pub autosave: Arc<AtomicBool>,
     /// When `true`, show the startup splash screen on launch.
     pub show_splash: Arc<AtomicBool>,
+    /// Raised by the splash while it is auto-installing an update on startup, so
+    /// the fallback close timer holds off instead of tearing the toast down
+    /// mid-download. Cleared when the auto-update finishes or fails.
+    pub splash_updating: Arc<AtomicBool>,
     /// ID of the entry currently in the OS clipboard.
     pub active_clipboard_id: Arc<Mutex<String>>,
     /// Thread-safe notes store.

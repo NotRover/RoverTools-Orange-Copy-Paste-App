@@ -141,6 +141,7 @@ const SettingsScreen: React.FC = () => {
 
   // ── Updates ────────────────────────────────────────────────────
   const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
+  const [autoInstallUpdates, setAutoInstallUpdates] = useState(false);
   const [betaChannel, setBetaChannel] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   // Its own instance, independent of App's: this one drives the manual check and
@@ -171,6 +172,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("sound_paste", setSoundPaste, false);
     loadBool("os_notifications", setOsNotifications, true);
     loadBool("auto_check_updates", setAutoCheckUpdates, true);
+    loadBool("auto_install_updates", setAutoInstallUpdates, false);
     invoke<string | null>("get_setting", { key: CARD_CLICK_SETTING_KEY })
       .then((v) => setClickToView(v === "view"))
       .catch(() => setClickToView(false));
@@ -258,6 +260,19 @@ const SettingsScreen: React.FC = () => {
   const handleCheckUpdates = async () => {
     setCheckedOnce(true);
     await updater.check();
+  };
+
+  // Auto-install rides on auto-check - there is nothing to install if nothing is
+  // looking - so turning checks off also turns auto-install off, keeping the two
+  // settings from disagreeing.
+  const handleAutoCheckToggle = () => {
+    const next = !autoCheckUpdates;
+    setAutoCheckUpdates(next);
+    invoke("set_setting", { key: "auto_check_updates", value: next });
+    if (!next && autoInstallUpdates) {
+      setAutoInstallUpdates(false);
+      invoke("set_setting", { key: "auto_install_updates", value: false });
+    }
   };
 
   // Switching channel changes which feed is asked, so the previous answer is
@@ -697,10 +712,17 @@ const SettingsScreen: React.FC = () => {
             </div>
             <ToggleRow
               label="Check for updates automatically"
-              desc="Look for a newer version shortly after the app starts. Updates are never installed without asking."
+              desc="Look for a newer version shortly after the app starts."
               active={autoCheckUpdates}
+              onToggle={handleAutoCheckToggle}
+            />
+            <ToggleRow
+              label="Install updates automatically"
+              desc="When a newer version is found at startup, download and install it on the spot, then reopen. Nothing installs while you are working. Needs automatic checks on."
+              active={autoInstallUpdates}
+              disabled={!autoCheckUpdates}
               onToggle={() =>
-                toggleBoolSetting(autoCheckUpdates, setAutoCheckUpdates, "auto_check_updates")
+                toggleBoolSetting(autoInstallUpdates, setAutoInstallUpdates, "auto_install_updates")
               }
             />
             <ToggleRow

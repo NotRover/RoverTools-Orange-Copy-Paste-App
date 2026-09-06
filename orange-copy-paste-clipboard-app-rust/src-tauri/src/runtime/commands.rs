@@ -44,6 +44,15 @@ pub fn close_notification(app: tauri::AppHandle) {
     hide_popup(&app, "notification");
 }
 
+/// The splash reporting whether it is mid auto-update. While set, the fallback
+/// close timer in lib.rs holds off so a download is not torn down early.
+#[tauri::command]
+pub fn splash_set_updating(updating: bool, state: tauri::State<'_, crate::state::AppState>) {
+    state
+        .splash_updating
+        .store(updating, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Close the startup splash from its own webview when its sequence finishes.
 ///
 /// The splash drives its own timing (it holds longer when it has an update to
