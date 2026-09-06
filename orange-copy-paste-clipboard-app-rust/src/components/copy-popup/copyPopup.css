@@ -125,6 +125,20 @@ body {
   align-items: center;
   gap: 8px;
   padding: 2px 2px;
+  /* The header is the drag handle (see usePopupDrag); its controls opt back out
+     with their own cursor. */
+  cursor: grab;
+  user-select: none;
+}
+
+.popup-header:active {
+  cursor: grabbing;
+}
+
+.popup-grip {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.55;
 }
 
 .popup-header-left {
