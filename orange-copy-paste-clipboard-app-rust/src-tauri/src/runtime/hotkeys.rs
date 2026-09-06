@@ -128,13 +128,19 @@ fn handle_copy_shortcut(
             hist.push_if_distinct_with_flag(entry)
         };
 
+        // The active-clipboard pointer tracks what the OS clipboard now holds,
+        // which is true whether or not this was a new entry, so it is set either
+        // way. The popup is confirmation of a *capture*, so it only appears when
+        // something new was actually captured: pressing Ctrl+Shift+C on content
+        // that already tops the history deduped (inserted == false) and must not
+        // flash a popup for a copy that added nothing.
+        crate::clipboard::commands::set_active_clipboard_id(&app, &entry.id);
         if inserted {
             // Ctrl+Shift+C entries bypass the watcher (suppress flag is set),
             // so run the shared post-capture bookkeeping here directly.
             crate::runtime::clipboard_watcher::after_new_entry(&app, &history, &entry);
+            show_copy_popup(&app, &entry);
         }
-        crate::clipboard::commands::set_active_clipboard_id(&app, &entry.id);
-        show_copy_popup(&app, &entry);
     });
 }
 
