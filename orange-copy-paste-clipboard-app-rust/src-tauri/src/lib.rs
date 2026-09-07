@@ -694,11 +694,10 @@ pub fn run() {
             if let Some(url) = argv.iter().find(|a| a.starts_with("orange://")) {
                 dispatch_deep_link(app, url);
             }
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                crate::runtime::window_state::apply_deferred_zoom(app);
-                let _ = w.set_focus();
-            }
+            // Surface the already-running window the same way the tray does -
+            // show, unminimize, and force to the foreground past the Windows
+            // background-process focus block.
+            crate::runtime::tray::show_main_window(app);
         }))
         .manage(app_state)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

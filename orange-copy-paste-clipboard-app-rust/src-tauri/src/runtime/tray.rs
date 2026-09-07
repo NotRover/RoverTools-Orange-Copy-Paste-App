@@ -5,12 +5,26 @@ use tauri::{
 };
 
 /// Show, unminimize, and focus the main window.
-fn show_main_window(app_handle: &tauri::AppHandle) {
+///
+/// Shared by the tray ("Show" / left-click) and the single-instance relaunch
+/// path, so launching the app while it is already running surfaces the window
+/// exactly like the tray does.
+pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
     if let Some(win) = app_handle.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
         crate::runtime::window_state::apply_deferred_zoom(app_handle);
         let _ = win.set_focus();
+        // A relaunch is triggered by a second process, and Windows denies a
+        // background process the foreground - so set_focus() above shows the
+        // window but leaves it behind. A brief always-on-top bounce forces it to
+        // the front, the same trick the notification toast uses for Z-order. A
+        // tray click already has the foreground, so this is a no-op there.
+        #[cfg(windows)]
+        {
+            let _ = win.set_always_on_top(true);
+            let _ = win.set_always_on_top(false);
+        }
     }
 }
 
