@@ -24,10 +24,8 @@
   set fails a real release on purpose.
 -->
 
-### New
-
-### Improved
+Launching the app while it is already running now reliably brings the window you already have to the front.
 
 ### Fixed
 
-### Internal
+Starting the app while it was already running in the background could open a fresh copy behind the startup toast instead of showing the window you already had. It now brings the running app to the front, the same as clicking the tray icon or the taskbar.
