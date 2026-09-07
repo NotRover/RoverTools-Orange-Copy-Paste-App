@@ -24,8 +24,10 @@
   set fails a real release on purpose.
 -->
 
-Starting the app while it is already running now brings it back into focus.
+### New
+
+### Improved
 
 ### Fixed
 
-Launching the app while it is already running in the background now brings its window to the front, the same way clicking the tray icon or taskbar entry does. Before, a second launch just flashed the startup toast and left the app in the background.
+### Internal
