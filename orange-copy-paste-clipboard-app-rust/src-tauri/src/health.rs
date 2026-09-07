@@ -805,6 +805,9 @@ pub fn health_restart_app(app: tauri::AppHandle) {
     // runtime, and nothing in the sync module ever waits on this thread.
     crate::flush_dirty_stores(&app);
     crate::drain_token_rotation(crate::EXIT_DRAIN_MS);
+    // A relaunch surfaces a running copy by default; this is a self-restart that
+    // must instead take over, so mark it before the replacement launches.
+    crate::mark_self_restart();
     app.restart()
 }
 

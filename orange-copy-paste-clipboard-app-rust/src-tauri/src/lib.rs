@@ -178,6 +178,59 @@ fn kill_previous_instance() {
     std::thread::sleep(std::time::Duration::from_millis(ms));
 }
 
+/// Path of the marker a self-initiated restart drops so the replacement launch
+/// knows to take over the running copy instead of deferring to it.
+///
+/// Temp dir for the same reason as the rotation marker: `run()` executes before
+/// Tauri is built, so there is no `AppHandle` to resolve an app-data path from,
+/// and `%TEMP%` / `$TMPDIR` is the one place both processes agree on.
+fn restart_takeover_marker_path() -> std::path::PathBuf {
+    // `%TEMP%` is already per-user; `/tmp` is not.
+    #[cfg(windows)]
+    let scope = String::new();
+    #[cfg(not(windows))]
+    let scope = std::env::var("USER")
+        .map(|u| format!("-{u}"))
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!("orange-copy-paste-restart-takeover{scope}.lock"))
+}
+
+/// Announce that this process is about to restart itself (update install or
+/// health recovery), so its replacement replaces the running copy rather than
+/// surfacing it. Best-effort: if the write fails the worst case is the
+/// replacement surfacing the dying process instead of taking over, which
+/// resolves on the next launch.
+pub(crate) fn mark_self_restart() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let _ = std::fs::write(restart_takeover_marker_path(), now.to_string());
+}
+
+/// Consume the self-restart marker, returning `true` when a fresh one was
+/// present. The marker is removed either way. A stale marker - left by a crash
+/// between the mark and a relaunch that never happened - is ignored, so it can
+/// never force a user's later relaunch to replace the running app instead of
+/// focusing it.
+fn consume_self_restart_marker() -> bool {
+    let path = restart_takeover_marker_path();
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let _ = std::fs::remove_file(&path);
+    let Ok(stamped) = contents.trim().parse::<u128>() else {
+        return false;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    // A restart takes seconds; two minutes is a wide margin that still rejects a
+    // marker orphaned by a crash.
+    now.saturating_sub(stamped) < 120_000
+}
+
 /// Hold off the kill while the instance being replaced is spending a refresh
 /// token.
 ///
@@ -643,9 +696,19 @@ pub fn run() {
 
     // A `--trigger` launch must reach the ALREADY-RUNNING instance (via the
     // single-instance plugin) and fire the popup there, so it must NOT kill the
-    // primary. Normal launches keep the "new instance replaces old" behavior
-    // that releases the old process's global hotkeys on restart.
-    if !is_trigger {
+    // primary.
+    //
+    // A plain relaunch must not kill it either: killing the running copy before
+    // the single-instance plugin can hand off is exactly what made every
+    // relaunch cold-start behind a splash instead of surfacing the window the
+    // user already had. So a normal launch now defers to the plugin (below),
+    // which forwards to the running instance and raises it.
+    //
+    // Two launches genuinely need to REPLACE a running copy: a dev rebuild
+    // (`tauri dev`), and the app restarting itself for an update or health
+    // recovery. The self-restart leaves a marker so this launch can tell it
+    // apart from a user relaunch; dev is gated on the debug build.
+    if !is_trigger && (cfg!(debug_assertions) || consume_self_restart_marker()) {
         kill_previous_instance();
     }
 
