@@ -1101,3 +1101,63 @@ way invites have one. Resolving at the shared command covers the common case
 (the same user approves); the cross-approver case is left for when the server
 publishes a resolution event, tracked in backend issue
 `RoverTools-Smart-Clipboard-App-Backend#22`.
+
+---
+
+## #29 - Relaunching the running app replaced it with a fresh copy instead of surfacing it
+
+**Date**: 2026-09-07
+**Severity**: Medium (every relaunch of an app already running in the background;
+the window never came forward, and the reported fix in 0.3.3 changed nothing)
+
+**Symptom.** Launching the app while it was already running in the background -
+from the taskbar, a second click of the icon - flashed the startup toast and left
+the app in the background instead of bringing its window forward. Task Manager
+showed one process throughout, which is what made it look like a focus bug rather
+than a relaunch bug: the running copy was never surfaced. A first fix (0.3.3),
+which routed the single-instance callback through the tray's `show_main_window`,
+did nothing, and looked from the outside like the focus call simply failing.
+
+**Cause.** Two startup mechanisms that cancel each other, and the order decides
+which wins. `run()` calls `kill_previous_instance` before the Tauri builder
+exists, so any non-`--trigger` launch force-kills the running copy and takes over
+(the same call behind #18). The `tauri-plugin-single-instance` plugin, registered
+first inside the builder, is meant to do the opposite: detect the running copy,
+forward this launch's argv to it over `WM_COPYDATA`, and exit - leaving the
+original alive to raise its window in the callback.
+
+The kill runs first, so the plugin never gets the chance. By the time the new
+instance's plugin setup looks for a primary, `kill_previous_instance` has already
+terminated it, so the new instance finds nothing, becomes primary itself, and
+runs the full `.setup()` closure - which is the only place the splash is shown.
+The focus callback added in 0.3.3 was therefore dead code on a normal launch:
+the instance that would have received the `WM_COPYDATA` and run
+`show_main_window` was killed a moment earlier. A PID trace made it plain -
+launch a second copy and the *old* pid dies while the *new* one survives, the
+inverse of a single-instance handoff.
+
+The trap in the evidence: "one process" was true at every glance but it was a
+*different* process after each relaunch, so watching the count never revealed the
+replacement. Only polling the pids across the launch showed the old dying and a
+new one taking its place.
+
+**Fix.** A plain relaunch no longer kills - it defers to the single-instance
+plugin, which forwards to the running instance and raises it. Killing is kept
+only for the two launches that genuinely must replace a running copy: a dev
+rebuild (`cfg!(debug_assertions)`), and the app restarting *itself* for an update
+or health recovery. The self-restart announces itself with a short-lived temp-dir
+marker (`mark_self_restart` / `consume_self_restart_marker`, mirroring the
+rotation marker of #18 and freshness-capped so a crashed mark cannot force a
+later user relaunch to replace instead of focus); `updater_install` marks before
+the installer hand-off / `app.restart`, and `health_restart_app` before its
+`app.restart`. On Windows the updater's installer closes the old process before
+relaunching, so the replacement finds nothing to kill and boots cleanly; the
+marker exists for the Linux/`app.restart` path, where the old process is still
+dying as the new one starts and must be taken over rather than deferred to.
+
+**Invariant to keep**: **kill-and-replace and single-instance handoff are
+mutually exclusive, and a plain relaunch must forward, never replace.** Only a
+self-initiated restart may take over a running copy, and it has to say so - a
+launch that unconditionally kills the previous instance makes every focus/forward
+mechanism downstream of it unreachable, no matter how correct that mechanism is
+in isolation. Shipped in 0.3.4.
