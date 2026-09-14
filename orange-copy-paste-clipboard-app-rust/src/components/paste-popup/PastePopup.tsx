@@ -26,7 +26,7 @@ import {
 } from "../../types";
 import { EntryTypePill, SaveIcon } from "../entry-types/EntryTypePill";
 import { DegradedPill } from "../DegradedPill";
-import { DotsSixVertical } from "@phosphor-icons/react";
+import { DotsSixVertical, Question } from "@phosphor-icons/react";
 import {
   CloseIcon,
   PinIcon,
@@ -46,7 +46,7 @@ import { usePopupDrag } from "../../hooks/usePopupDrag";
 type Tab = "recent" | "pinned";
 
 // Window widths — must match Rust PASTE_POPUP_W / PASTE_POPUP_W_WIDE.
-const BASE_W = 360;
+const BASE_W = 388;
 const WIDE_W = 540;
 
 // Height budget (logical px). The body flexes between the search bar and the
@@ -54,7 +54,7 @@ const WIDE_W = 540;
 // list shows as many rows as it has (up to a cap) without leaving dead space.
 const CHROME_H = 138; // header + search + hints + container/body padding
 const ITEM_H = 44; // row min-height (40) + gap (3) + border
-const LIST_MAX_H = 8 * ITEM_H; // cap; the list scrolls past this
+const LIST_MAX_H = 10 * ITEM_H; // cap; fits all ten number-keyed rows, scrolls past
 const MIN_LIST_H = 84;
 const PREVIEW_MIN_H = 286; // keep the panel tall enough for the boxy media + actions
 
@@ -102,6 +102,9 @@ const PastePopup: React.FC = () => {
   const [slots, setSlots] = useState(readSlots);
   const [query, setQuery] = useState("");
   const [previewOpen, setPreviewOpen] = useState(true);
+  // When true (default), copying an entry from the popup leaves it open so you
+  // can copy or act on another; a plain paste still closes it.
+  const [keepOpenAfterCopy, setKeepOpenAfterCopy] = useState(true);
   // Bumped on every show so the resize below re-applies the current width even
   // when the popup was closed via the global shortcut (which hides the window
   // without changing any React state, so no other dep would change).
@@ -175,6 +178,13 @@ const PastePopup: React.FC = () => {
     if (visible) {
       setTheme(readTheme());
       setSlots(readSlots());
+      // Re-read on each show so a change made in Settings takes effect on the
+      // next open (the popup window stays mounted between shows).
+      invoke<boolean | null>("get_setting", { key: "paste_keep_open_after_copy" })
+        .then((v) => {
+          if (v !== null) setKeepOpenAfterCopy(v === true);
+        })
+        .catch(() => {});
       // Focus the search field so typing filters immediately.
       requestAnimationFrame(() => searchRef.current?.focus());
     }
@@ -245,10 +255,13 @@ const PastePopup: React.FC = () => {
     setVisible(false);
   }, []);
 
-  const handleCopyOnly = useCallback((id: string) => {
-    invoke("copy_entry", { id }).catch(console.error);
-    setVisible(false);
-  }, []);
+  const handleCopyOnly = useCallback(
+    (id: string) => {
+      invoke("copy_entry", { id }).catch(console.error);
+      if (!keepOpenAfterCopy) setVisible(false);
+    },
+    [keepOpenAfterCopy],
+  );
 
   const applyPinLocally = useCallback((entry: ClipboardEntry, pinned: boolean) => {
     setRecentAll((list) => list.map((e) => (e.id === entry.id ? { ...e, pinned } : e)));
@@ -408,6 +421,35 @@ const PastePopup: React.FC = () => {
           <span className="paste-count">{entries.length}</span>
           <DegradedPill />
         </div>
+        <div
+          className="paste-help"
+          tabIndex={0}
+          role="button"
+          aria-label="How to use quick paste"
+          onMouseDown={stop}
+        >
+          <Question size={13} weight="bold" aria-hidden="true" />
+          <div className="paste-help-pop" role="tooltip">
+            <span className="paste-help-title">How to use</span>
+            <ul className="paste-help-list">
+              <li>
+                <b>Click</b> any entry to paste it
+              </li>
+              <li>
+                <b>1-9, 0</b> paste the numbered rows
+              </li>
+              <li>
+                <b>Hover</b> a row to pin, copy, or delete
+              </li>
+              <li>
+                <b>Space</b> shows or hides the preview
+              </li>
+              <li>
+                <b>Esc</b> closes this window
+              </li>
+            </ul>
+          </div>
+        </div>
         <div className="paste-tabs">
           <button
             className={`paste-tab${tab === "recent" ? " paste-tab--active" : ""}`}
@@ -432,13 +474,18 @@ const PastePopup: React.FC = () => {
         </div>
         <button
           className={`paste-preview-toggle${previewOpen ? " is-open" : ""}`}
-          title={previewOpen ? "Hide preview (Space)" : "Show preview (Space)"}
+          data-tip={previewOpen ? "Hide preview (Space)" : "Show preview (Space)"}
           onMouseDown={stop}
           onClick={togglePreview}
         >
           <PreviewPanelIcon open={previewOpen} />
         </button>
-        <button className="paste-close" onMouseDown={stop} onClick={handleClose}>
+        <button
+          className="paste-close"
+          data-tip="Close (Esc)"
+          onMouseDown={stop}
+          onClick={handleClose}
+        >
           <CloseIcon size={10} />
         </button>
       </div>
@@ -630,6 +677,13 @@ const PreviewPanel: React.FC<PreviewProps> = ({ entry, onPaste, onPin, onCopy, o
   const isImg = entry.type === "image";
   const isFileImg = entry.type === "file" && files.length === 1 && isImagePath(firstFile);
   const showsImage = isImg || isFileImg;
+  // Full name shown under an image preview. Captured images are file-backed on
+  // disk (content is a path); legacy inline data-URL images have no filename.
+  const imageFileName = isFileImg
+    ? fileNameFromPath(firstFile)
+    : isImg && !entry.content.startsWith("data:")
+      ? fileNameFromPath(entry.content)
+      : null;
 
   // Natural image size, filled in on load. Shown in the corner badge, so it is
   // reset per entry to avoid flashing the previous image's size.
@@ -720,6 +774,10 @@ const PreviewPanel: React.FC<PreviewProps> = ({ entry, onPaste, onPin, onCopy, o
         )}
         {measure && <span className="paste-preview-measure">{measure}</span>}
       </div>
+
+      {imageFileName && (
+        <div className="paste-preview-filename">{imageFileName}</div>
+      )}
 
       <div className="paste-preview-meta">
         {shownChips.map((c) => (
