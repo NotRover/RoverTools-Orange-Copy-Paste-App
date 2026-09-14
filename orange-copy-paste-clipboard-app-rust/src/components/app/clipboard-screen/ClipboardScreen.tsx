@@ -154,6 +154,7 @@ interface ClipboardScreenProps {
   onSetGroups: (id: string, groups: string[]) => void;
   /** Bulk operations */
   onBulkDelete?: (ids: string[]) => void;
+  onBulkCopy?: (ids: string[]) => void;
   onBulkPin?: (ids: string[]) => void;
   onBulkUnpin?: (ids: string[]) => void;
   onBulkSave?: (ids: string[]) => void;
@@ -176,6 +177,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onRenameGroup,
   onSetGroups,
   onBulkDelete,
+  onBulkCopy,
   onBulkPin,
   onBulkUnpin,
   onBulkSave,
@@ -391,6 +393,24 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     [multiSelect.selectedIds, remoteKeys],
   );
 
+  // Bulk copy is context-aware: an all-text selection joins into one block, an
+  // all file/image selection becomes one multi-file copy. The two cannot share
+  // the clipboard cleanly, so a mixed selection disables the Copy chip and says
+  // which kinds clash. `undefined` means the chip is enabled.
+  const copyDisabledReason = useMemo<string | undefined>(() => {
+    const sel = entries.filter((e) => multiSelect.selectedIds.has(e.id));
+    if (sel.length === 0) return "Select entries to copy";
+    const hasText = sel.some((e) => e.type === "text" || e.type === "html");
+    const hasImage = sel.some((e) => e.type === "image");
+    const hasFile = sel.some((e) => e.type === "file");
+    if (hasText && (hasImage || hasFile)) {
+      const other =
+        hasImage && hasFile ? "files and images" : hasImage ? "images" : "files";
+      return `Text can't be copied together with ${other}. Select one kind.`;
+    }
+    return undefined;
+  }, [entries, multiSelect.selectedIds]);
+
   // The entry being read in full, if any. Held as an id rather than the entry
   // so a live update (a group change, a sync badge) reaches the open panel.
   const [viewingId, setViewingId] = useState<string | null>(null);
@@ -531,6 +551,10 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                   onSelectAll={() => multiSelect.selectAll(allVisibleIds)}
                   onDeselectAll={multiSelect.deselectAll}
                   onExitSelectMode={multiSelect.exitSelectMode}
+                  onBulkCopy={() => {
+                    if (onBulkCopy) onBulkCopy([...multiSelect.selectedIds]);
+                  }}
+                  copyDisabledReason={copyDisabledReason}
                   onBulkDelete={() => {
                     if (onBulkDelete) {
                       onBulkDelete([...multiSelect.selectedIds]);

@@ -536,6 +536,93 @@ pub fn copy_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle)
     ok
 }
 
+/// Copy several selected entries at once as a single clipboard payload.
+///
+/// The OS clipboard holds one item, so a bulk copy has to collapse to one thing:
+/// an all-text selection is joined into a single block, and an all file/image
+/// selection becomes one multi-file drop (CF_HDROP). A selection mixing the two
+/// is refused - the UI disables the action for that case, and this is the safety
+/// net. Entries are taken in history order, not the order they were ticked, so
+/// the paste is stable; the single write is suppressed so the merged result is
+/// not re-captured as a new history entry.
+#[tauri::command]
+pub fn copy_entries(ids: Vec<String>, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
+    use crate::clipboard::history::EntryKind;
+
+    if ids.is_empty() {
+        return false;
+    }
+    let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+
+    // History order (newest first), independent of the order items were selected.
+    let selected: Vec<ClipboardEntry> = {
+        let hist = state.history.lock();
+        hist.all()
+            .iter()
+            .filter(|e| wanted.contains(e.id.as_str()))
+            .cloned()
+            .collect()
+    };
+    if selected.is_empty() {
+        return false;
+    }
+
+    let is_text = |k: &EntryKind| matches!(k, EntryKind::Text | EntryKind::Html);
+    let all_text = selected.iter().all(|e| is_text(&e.kind));
+    let all_files = selected.iter().all(|e| !is_text(&e.kind));
+    if !all_text && !all_files {
+        // Mixed text + files: the clipboard cannot carry both cleanly here.
+        return false;
+    }
+
+    // One write for the whole batch, so suppress the watcher once and revert the
+    // flag if the write fails, so the next real copy is not swallowed.
+    state.suppress_next_capture.store(true, Ordering::Relaxed);
+    let written = if all_text {
+        let joined = selected
+            .iter()
+            .map(|e| match e.kind {
+                EntryKind::Html => e.html_parts().1.to_string(),
+                _ => e.content.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        open_clipboard_with_retry().and_then(|mut cb| cb.set_text(joined).map_err(|e| e.to_string()))
+    } else {
+        // Every file-backed path in the selection becomes one drop. A legacy
+        // inline data-URL image carries no path and cannot join a multi-file
+        // copy; images are file-backed on capture, so this is rare.
+        let mut paths: Vec<String> = Vec::new();
+        for e in &selected {
+            match e.kind {
+                EntryKind::File => paths.extend(content_to_files(&e.content)),
+                EntryKind::Image if !e.content.starts_with("data:") => paths.push(e.content.clone()),
+                _ => {}
+            }
+        }
+        if paths.is_empty() {
+            // e.g. a single legacy inline image - fall back to the normal write.
+            write_entry_to_clipboard(&selected[0])
+        } else {
+            write_files_to_clipboard(&paths)
+        }
+    };
+
+    match written {
+        Ok(()) => {
+            // Point the active id at the newest of the batch, like a manual copy.
+            set_active_clipboard_id(&app, &selected[0].id);
+            crate::notifications::cue(&app, crate::notifications::Cue::Copy);
+            true
+        }
+        Err(e) => {
+            eprintln!("[clipboard] bulk copy failed: {e}");
+            state.suppress_next_capture.store(false, Ordering::Relaxed);
+            false
+        }
+    }
+}
+
 #[tauri::command]
 pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
     // Hide the OS window immediately before any heavy image decoding blocks the thread.
