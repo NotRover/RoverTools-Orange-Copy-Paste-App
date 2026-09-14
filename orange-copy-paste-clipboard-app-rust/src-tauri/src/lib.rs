@@ -783,6 +783,7 @@ pub fn run() {
             crate::clipboard::commands::pin_entry,
             crate::clipboard::commands::unpin_entry,
             crate::clipboard::commands::copy_entry,
+            crate::clipboard::commands::copy_entries,
             crate::clipboard::commands::paste_entry,
             crate::clipboard::commands::get_image_file_preview,
             crate::clipboard::commands::check_missing_files,

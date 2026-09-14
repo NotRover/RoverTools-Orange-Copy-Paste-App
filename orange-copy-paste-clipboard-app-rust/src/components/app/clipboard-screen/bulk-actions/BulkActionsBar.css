@@ -107,6 +107,24 @@
   color: var(--text-secondary);
 }
 
+/* Shown, dimmed, with the reason on hover. Uses aria-disabled rather than the
+   native attribute so the tooltip still fires; the hover override keeps it from
+   looking clickable. */
+.bulk-popup-chip--disabled,
+.bulk-popup-chip--disabled:hover {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* Copy — the primary bulk action; accent tint on hover, but not when it is
+   disabled for a mixed selection (the guard keeps the greyed chip inert). */
+.bulk-popup-chip--copy:not(.bulk-popup-chip--disabled):hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
 /* Pin — always hoverable with accent tint (matches card-menu-item--pin:hover) */
 .bulk-popup-chip--pin:hover {
   background: var(--accent-dim);

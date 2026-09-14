@@ -8,6 +8,7 @@ import {
   CloudArrowUp,
   CloudSlash,
   Prohibit,
+  Copy,
 } from "@phosphor-icons/react";
 import {
   TrashIcon,
@@ -25,6 +26,11 @@ interface BulkActionsBarProps {
   onSelectAll: () => void;
   onDeselectAll: () => void;
   onExitSelectMode: () => void;
+  /** Copy the whole selection as one clipboard payload. */
+  onBulkCopy?: () => void;
+  /** When set, the Copy chip is shown disabled and explains why (a mixed
+      text + file selection the clipboard cannot carry as one item). */
+  copyDisabledReason?: string;
   /* Every action below is optional: a chip is rendered only when its handler
      is passed, so a screen where an action is not allowed shows nothing rather
      than something disabled. */
@@ -57,6 +63,8 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   onSelectAll,
   onDeselectAll,
   onExitSelectMode,
+  onBulkCopy,
+  copyDisabledReason,
   onBulkDelete,
   allPinned,
   onBulkTogglePin,
@@ -160,6 +168,25 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
 
       {/* Thin rule */}
       <div className="bulk-popup-vsep" />
+
+      {/* Copy chip: one clipboard payload for the whole selection. Disabled,
+          with a reason, when the selection mixes text and files. Uses
+          aria-disabled (not the native attribute) so the reason tooltip still
+          shows on hover. */}
+      {onBulkCopy && (
+        <button
+          className={`bulk-popup-chip bulk-popup-chip--copy${copyDisabledReason ? " bulk-popup-chip--disabled" : ""}`}
+          onClick={() => {
+            if (!copyDisabledReason) onBulkCopy();
+          }}
+          aria-disabled={!!copyDisabledReason}
+          data-tooltip={copyDisabledReason ?? "Copy selected"}
+          data-tooltip-pos="below"
+        >
+          <Copy size={11} />
+          <span>Copy</span>
+        </button>
+      )}
 
       {/* Pin chip */}
       {onBulkTogglePin && (

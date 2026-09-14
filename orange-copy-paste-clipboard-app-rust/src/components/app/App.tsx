@@ -1060,6 +1060,14 @@ const App: React.FC = () => {
     [entries, guardDelete],
   );
 
+  // Bulk copy is one clipboard write for the whole selection; Rust decides
+  // text-join vs multi-file and suppresses the re-capture. The UI already
+  // disables the chip for a mixed selection, so this just forwards the ids.
+  const handleBulkCopy = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    await invoke("copy_entries", { ids });
+  }, []);
+
   const handleBulkPin = useCallback(async (ids: string[]) => {
     const changed = await invoke<number>("bulk_pin_entries", {
       ids,
@@ -1508,6 +1516,7 @@ const App: React.FC = () => {
             onRenameGroup={handleRenameGroup}
             onSetGroups={handleSetGroups}
             onBulkDelete={handleBulkDelete}
+            onBulkCopy={handleBulkCopy}
             onBulkPin={handleBulkPin}
             onBulkUnpin={handleBulkUnpin}
             onBulkSave={handleBulkSave}
