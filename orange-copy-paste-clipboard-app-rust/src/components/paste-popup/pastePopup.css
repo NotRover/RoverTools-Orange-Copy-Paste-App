@@ -172,7 +172,6 @@ body {
 .paste-tabs {
   display: flex;
   gap: 1px;
-  margin-left: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -251,6 +250,138 @@ body {
   background: var(--danger);
   border-color: var(--danger);
   color: #fff;
+}
+
+/* Header icon-button tooltips. In-DOM rather than the native title, which is
+   unreliable in the always-on-top popup. Anchored right so they never clip the
+   window edge, and dropped below the header so they sit over the search row. */
+.paste-header [data-tip] {
+  position: relative;
+}
+
+.paste-header [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 400;
+  padding: 4px 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    visibility 0.12s;
+}
+
+.paste-header [data-tip]:hover::after,
+.paste-header [data-tip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/* ── Help hint (? in the header) ── */
+
+.paste-help {
+  position: relative;
+  /* First item of the right-hand cluster (?, tabs, expand, close): the auto
+     margin lives here so the whole group sticks to the right. */
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  border-radius: 6px;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+}
+
+.paste-help:hover,
+.paste-help:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  outline: none;
+}
+
+.paste-help-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  /* Centered under the ?, so it stays inside the window whether the ? is on the
+     left or (as now) grouped at the right. Y-drop animates via margin-top so the
+     centering transform can stay constant. */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 400;
+  width: 234px;
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  /* Hidden until the ? is hovered or focused. */
+  opacity: 0;
+  visibility: hidden;
+  margin-top: -3px;
+  transition:
+    opacity 0.12s ease,
+    margin-top 0.12s ease,
+    visibility 0.12s;
+  cursor: default;
+}
+
+.paste-help:hover .paste-help-pop,
+.paste-help:focus-within .paste-help-pop {
+  opacity: 1;
+  visibility: visible;
+  margin-top: 0;
+}
+
+.paste-help-title {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.paste-help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.paste-help-list li {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text);
+  white-space: normal;
+}
+
+.paste-help-list b {
+  font-weight: 700;
+  color: var(--accent);
 }
 
 /* ── Search ── */
@@ -530,6 +661,19 @@ body {
   border-radius: var(--radius-xs);
   background: var(--surface);
   overflow: hidden;
+  /* Slide + fade in when the panel opens (it mounts fresh on toggle). */
+  animation: pastePreviewIn 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pastePreviewIn {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .paste-preview-kind {
@@ -617,9 +761,22 @@ body {
 .paste-preview-file {
   font-size: 11px;
   color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Show the full name; wrap rather than clip with an ellipsis. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+/* Full filename under an image-file preview, where the image fills the box and
+   the name would otherwise be hidden. */
+.paste-preview-filename {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  user-select: text;
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
 }
 

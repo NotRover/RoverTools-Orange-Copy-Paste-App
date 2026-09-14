@@ -129,6 +129,7 @@ const SettingsScreen: React.FC = () => {
   const [confirmSpaceRemove, setConfirmSpaceRemove] = useState(true);
   // False: click copies, double click views. True: the two swap over.
   const [clickToView, setClickToView] = useState(false);
+  const [pasteKeepOpenAfterCopy, setPasteKeepOpenAfterCopy] = useState(true);
   const [notifClosing, setNotifClosing] = useState(false);
 
   // ── Sound and OS notifications ─────────────────────────────────
@@ -163,6 +164,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("notif_copy", setNotifCopy, true);
     loadBool("notif_paste", setNotifPaste, true);
     loadBool("autosave", setAutosave, false);
+    loadBool("paste_keep_open_after_copy", setPasteKeepOpenAfterCopy, true);
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
     loadBool(CONFIRM_SYNC_DELETE_KEY, setConfirmSyncDelete, true);
@@ -601,6 +603,18 @@ const SettingsScreen: React.FC = () => {
               desc="Automatically add every new clipboard entry to the Saved group."
               active={autosave}
               onToggle={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
+            />
+            <ToggleRow
+              label="Keep paste popup open after copying"
+              desc="Copying an entry from the paste popup leaves it open. Pasting still closes it."
+              active={pasteKeepOpenAfterCopy}
+              onToggle={() =>
+                toggleBoolSetting(
+                  pasteKeepOpenAfterCopy,
+                  setPasteKeepOpenAfterCopy,
+                  "paste_keep_open_after_copy",
+                )
+              }
             />
           </div>
         </section>
