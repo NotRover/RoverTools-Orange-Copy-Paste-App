@@ -76,7 +76,7 @@ replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`, and commit it.
 ### 2. Public releases repo
 
 ```bash
-gh repo create Spectrewolf8/RoverTools-Releases --public --add-readme
+gh repo create NotRover/RoverTools-Releases --public --add-readme
 ```
 
 `--add-readme` matters: a release needs a commit to tag, and an empty repo has none.
@@ -200,7 +200,7 @@ pruning by hand.
 Promoting a beta to everyone, once you are happy with it:
 
 ```bash
-gh release edit v0.3.0 --repo Spectrewolf8/RoverTools-Releases --prerelease=false --latest
+gh release edit v0.3.0 --repo NotRover/RoverTools-Releases --prerelease=false --latest
 ```
 
 An edit of the same bundles, not another build — so stable users receive exactly what

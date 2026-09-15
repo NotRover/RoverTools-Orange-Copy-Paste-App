@@ -56,7 +56,7 @@ on:
 env:
   # Public, releases-only repo. Source stays private; this holds binaries and
   # `latest.json`, and is what tauri.conf.json's updater endpoint points at.
-  RELEASES_REPO: Spectrewolf8/RoverTools-Releases
+  RELEASES_REPO: NotRover/RoverTools-Releases
   APP_DIR: orange-copy-paste-clipboard-app-rust
   # Space-free bundle prefix. GitHub rewrites spaces in uploaded asset names to
   # dots, which would silently break every URL in latest.json — so the bundles are

@@ -214,7 +214,7 @@ Pick the smallest valid check set for what you touched.
 ## Releases (client only)
 
 Shipping is one dispatch of `.github/workflows/release.yml`: it bumps the version, builds
-signed bundles and publishes them to the **public** `Spectrewolf8/RoverTools-Releases` repo
+signed bundles and publishes them to the **public** `NotRover/RoverTools-Releases` repo
 the in-app updater reads. The backend has no release pipeline. Reference:
 [`docs/RELEASING.md`](docs/RELEASING.md).
 
