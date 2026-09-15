@@ -36,6 +36,7 @@ import {
   APP_TOAST_EVENT,
   deferDestructive,
   showToast,
+  toastError,
   type ToastGlyph,
   type ToastRequest,
 } from "./toast/toastBus";
@@ -1063,9 +1064,26 @@ const App: React.FC = () => {
   // Bulk copy is one clipboard write for the whole selection; Rust decides
   // text-join vs multi-file and suppresses the re-capture. The UI already
   // disables the chip for a mixed selection, so this just forwards the ids.
+  // The clipboard cue (sound/notification) can be off, so the copy has to say
+  // so itself: a success toast confirms it landed, and a false return - a mixed
+  // selection, a busy clipboard, entries that vanished - no longer looks like
+  // nothing happened.
   const handleBulkCopy = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
-    await invoke("copy_entries", { ids });
+    try {
+      const ok = await invoke<boolean>("copy_entries", { ids });
+      if (ok) {
+        showToast(
+          ids.length === 1 ? "Copied 1 item" : `Copied ${ids.length} items`,
+          "success",
+          { key: "bulk-copy" },
+        );
+      } else {
+        showToast("Could not copy the selection", "error", { key: "bulk-copy" });
+      }
+    } catch (e) {
+      toastError("Could not copy the selection", e);
+    }
   }, []);
 
   const handleBulkPin = useCallback(async (ids: string[]) => {

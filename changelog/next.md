@@ -30,4 +30,6 @@
 
 ### Fixed
 
+- Copying several history entries at once now confirms it worked with a short message, and tells you when a selection could not be copied instead of looking like nothing happened.
+
 ### Internal
