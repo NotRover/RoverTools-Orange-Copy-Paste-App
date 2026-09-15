@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.3.5",
   "description": "Cross-device smart clipboard with history, notes and end-to-end encrypted sync",
-  "author": "Spectrewolf8",
+  "author": "NotRover",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {

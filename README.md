@@ -75,7 +75,7 @@ RoverTools/
 Clone with the submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/Spectrewolf8/RoverTools-Smart-Clipboard-App-RUST.git
+git clone --recurse-submodules https://github.com/NotRover/RoverTools-Smart-Clipboard-App-RUST.git
 ```
 
 If you already cloned without it:
@@ -148,7 +148,7 @@ A bump zeroes everything to its right, so no dispatch reaches `2.1.1` from `1.1.
 Three things, before the first release. The workflow checks all of them in its first step and names whichever is missing, so a misconfigured release fails in seconds rather than after a build.
 
 1. **Signing keypair** — `cd orange-copy-paste-clipboard-app-rust && bun tauri signer generate -w ~/.tauri/rovertools-updater.key`. Put the public half in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey` and commit it. **Back the private key and its password up outside CI** — every installed copy trusts only bundles signed by it, so losing it kills the update channel: a new public key means a new build, which users can only get by installing by hand.
-2. **Public releases repo** — `gh repo create Spectrewolf8/RoverTools-Releases --public --add-readme`. It holds no source, only assets and the update manifests. Public because the updater fetches over plain HTTPS with no credentials; `--add-readme` because a release needs a commit to tag.
+2. **Public releases repo** — `gh repo create NotRover/RoverTools-Releases --public --add-readme`. It holds no source, only assets and the update manifests. Public because the updater fetches over plain HTTPS with no credentials; `--add-readme` because a release needs a commit to tag.
 3. **Three Actions secrets** on the source repo — `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and `RELEASES_REPO_TOKEN` (a fine-grained PAT with **Contents: read and write** on the releases repo — the workflow's own token cannot write to another repo).
 
 No baseline tag is needed; the first release's notes are just "First release." Versioning rules, the two-channel design, and the pre-trust smoke test are in [`docs/RELEASING.md`](docs/RELEASING.md).

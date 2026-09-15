@@ -1,6 +1,6 @@
 [submodule "orange-copy-paste-clipboard-backend"]
 	path = orange-copy-paste-clipboard-backend
-	url = https://github.com/Spectrewolf8/RoverTools-Smart-Clipboard-App-Backend.git
+	url = https://github.com/NotRover/RoverTools-Smart-Clipboard-App-Backend.git
 [submodule "orange-copy-paste-clipboard-website"]
 	path = orange-copy-paste-clipboard-website
-	url = https://github.com/Spectrewolf8/RoverTools-OrangeCP-Website.git
+	url = https://github.com/NotRover/RoverTools-OrangeCP-Website.git

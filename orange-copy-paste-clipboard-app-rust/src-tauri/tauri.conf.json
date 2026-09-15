@@ -57,7 +57,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/Spectrewolf8/RoverTools-Releases/releases/latest/download/latest.json"
+        "https://github.com/NotRover/RoverTools-Releases/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwNThCN0U4QTg3MzY0RUEKUldUcVpIT282TGRZTUgrKzA1QWtOWUNuWE9IOXNkdHVFS05Gc1JaQ3JnQVlHbmhMeXphY2hoWWMK",
       "windows": {
@@ -67,9 +67,9 @@
   },
   "bundle": {
     "active": true,
-    "publisher": "Spectrewolf8",
-    "homepage": "https://github.com/Spectrewolf8/RoverTools-Releases",
-    "copyright": "Copyright © Spectrewolf8",
+    "publisher": "NotRover",
+    "homepage": "https://github.com/NotRover/RoverTools-Releases",
+    "copyright": "Copyright © NotRover",
     "category": "Productivity",
     "shortDescription": "Cross-device smart clipboard with history, notes and end-to-end encrypted sync.",
     "longDescription": "Orange Copy Paste captures the text, images and files you copy, keeps a searchable history alongside your notes, and syncs them across your devices. Sync is end-to-end encrypted: every key stays on your machines and the server only ever stores ciphertext. Cloud sync is optional — the app is fully usable offline.",
