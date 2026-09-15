@@ -1,6 +1,6 @@
 [package]
 name = "notrover-smart-clipboard-app-rust"
-version = "0.3.5"
+version = "0.3.6"
 description = "Cross-device smart clipboard with history, notes and end-to-end encrypted sync"
 authors = ["NotRover"]
 edition = "2021"
