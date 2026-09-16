@@ -28,10 +28,6 @@
 
 ### Improved
 
-- Account sync now runs on its own dedicated address. Existing sign-ins keep working; just update the app.
-
 ### Fixed
 
 ### Internal
-
-- Move the sync API to `api.orangecp.rovertools.ctx.cl` (app-scoped) in the client and backend, with the status dashboard on `status.rovertools.ctx.cl`. The site and password-reset page stay on the current pages.dev host; `rovertools.ctx.cl` is held for a future site. Clean cutover, no alias.
