@@ -37,7 +37,7 @@ const KEY_RESET_PAGE_URL: &str = "reset_page_url";
 // access to the project, and anyone can read strings out of a shipped binary.
 //
 // Leave a value empty to build an app that reports itself as unconfigured.
-const DEFAULT_SERVER_URL: &str = "https://rovertools-temp.ctx.cl";
+const DEFAULT_SERVER_URL: &str = "https://api.orangecp.rovertools.ctx.cl";
 const DEFAULT_SUPABASE_URL: &str = "https://dmtdusebizngdjtuhzzm.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_ZNs6Q9HfOdUBe8bEBEdPEg_z__qKE8e";
 
