@@ -13,7 +13,7 @@ import {
 import React from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
-import { Extension, mergeAttributes } from "@tiptap/core";
+import { mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { invoke } from "@tauri-apps/api/core";
 import { Underline } from "@tiptap/extension-underline";
@@ -74,7 +74,6 @@ export interface NotionEditorHandle {
   insertClipEmbed: (id: string) => void;
   insertGroupEmbed: (name: string) => void;
   insertLink: (url: string, text?: string) => void;
-  saveRange: () => void;
   getContent: () => string;
   getActiveState: () => ActiveState;
   getBlockKind: () => BlockKind;
@@ -146,31 +145,6 @@ const ResolvedLink = Link.extend({
   },
 });
 
-// Tab/Shift-Tab — sink/lift list items, otherwise insert/remove indent.
-const IndentExtension = Extension.create({
-  name: "indent",
-  addKeyboardShortcuts() {
-    return {
-      Tab: () => {
-        const { editor } = this;
-        if (editor.can().sinkListItem("listItem"))
-          return editor.commands.sinkListItem("listItem");
-        if (editor.can().sinkListItem("taskItem"))
-          return editor.commands.sinkListItem("taskItem");
-        return false;
-      },
-      "Shift-Tab": () => {
-        const { editor } = this;
-        if (editor.can().liftListItem("listItem"))
-          return editor.commands.liftListItem("listItem");
-        if (editor.can().liftListItem("taskItem"))
-          return editor.commands.liftListItem("taskItem");
-        return false;
-      },
-    };
-  },
-});
-
 // ── Component ────────────────────────────────────────────────────────────
 
 const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
@@ -232,6 +206,10 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
       extensions: [
         StarterKit.configure({
           codeBlock: false, // replaced by CodeBlockLowlight
+          // v3 bundles both. Left on, each was registered twice: the schema
+          // took ours, but the kit's click handler still opened links on click.
+          link: false,
+          underline: false,
         }),
         Underline,
         ResolvedLink.configure({ openOnClick: false, autolink: true }),
@@ -265,8 +243,10 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         Callout,
         ClipEmbed,
         GroupRef,
-        IndentExtension,
-        ResolvedImage.configure({ inline: false, allowBase64: true }),
+        // Inline, so the caret can sit beside an image and a drag selection can
+        // sweep across it. As a block atom the only way next to one was the
+        // gap cursor. parseStoredContent wraps older block images in paragraphs.
+        ResolvedImage.configure({ inline: true, allowBase64: true }),
       ],
       content: parseStoredContent(initialContent),
       editable: !readOnly,
@@ -278,7 +258,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           if (!imageItem) return false;
           event.preventDefault();
           const file = imageItem.getAsFile();
-          if (!file) return true;
+          if (!file) return false;
           insertImageFromFile(view, file);
           return true;
         },
@@ -400,11 +380,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
               if (cmd.value == null) c.unsetHighlight().run();
               else c.setHighlight({ color: cmd.value }).run();
               break;
-            case "cellBackground": {
-              const nodeType = editor.isActive("tableHeader") ? "tableHeader" : "tableCell";
-              c.updateAttributes(nodeType, { backgroundColor: cmd.value ?? null }).run();
-              break;
-            }
             case "image":
               c.insertContent({
                 type: "image",
@@ -471,9 +446,6 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           } else {
             c.extendMarkRange("link").setLink({ href: url }).run();
           }
-        },
-        saveRange: () => {
-          // No-op: Tiptap restores its own selection on focus.
         },
         getContent: () => {
           if (!editor) return initialContent ?? "";
@@ -650,12 +622,6 @@ function activeStateFor(editor: Editor | null): ActiveState {
   const colorAttr = editor.getAttributes("textStyle")?.color;
   const highlightAttr = editor.getAttributes("highlight")?.color;
   const inTable = editor.isActive("table");
-  let cellBackground: string | undefined;
-  if (inTable) {
-    const cellType = editor.isActive("tableHeader") ? "tableHeader" : "tableCell";
-    const bg = editor.getAttributes(cellType)?.backgroundColor;
-    if (typeof bg === "string") cellBackground = bg;
-  }
   return {
     bold: editor.isActive("bold"),
     italic: editor.isActive("italic"),
@@ -667,7 +633,6 @@ function activeStateFor(editor: Editor | null): ActiveState {
     align,
     textColor: typeof colorAttr === "string" ? colorAttr : undefined,
     highlight: typeof highlightAttr === "string" ? highlightAttr : undefined,
-    cellBackground,
   };
 }
 
@@ -683,12 +648,9 @@ function computeStats(editor: Editor): EditorStats {
     const $pos = doc.resolve(Math.min(head, doc.content.size));
     if ($pos.depth >= 1) {
       const topPos = $pos.before(1);
-      let acc = 0;
-      doc.forEach((child, offset, index) => {
+      doc.forEach((_child, offset, index) => {
         if (offset <= topPos) line = index + 1;
-        acc = offset + child.nodeSize;
       });
-      void acc;
     }
   }
   return { blocks, line, chars, words };

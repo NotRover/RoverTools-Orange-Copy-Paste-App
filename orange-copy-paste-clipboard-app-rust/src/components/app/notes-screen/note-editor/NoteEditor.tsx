@@ -15,8 +15,6 @@ import {
   TextHOneIcon,
   TextHTwoIcon,
   TextHThreeIcon,
-  TextHFourIcon,
-  TextHFiveIcon,
   QuotesIcon,
   CodeBlockIcon,
   CheckSquareOffsetIcon,
@@ -32,10 +30,8 @@ import {
   TextAlignLeftIcon,
   TextAlignCenterIcon,
   TextAlignRightIcon,
-  TextAlignJustifyIcon,
   PaletteIcon,
   HighlighterIcon,
-  PaintBucketIcon,
   DownloadSimpleIcon,
   CopyIcon,
   LockSimpleIcon,
@@ -67,6 +63,7 @@ import {
   type NotionEditorHandle,
   type EditorCommand,
   type ActiveState,
+  type AlignValue,
   type CalloutTone,
   type EditorStats,
   imageAttachmentUrl,
@@ -87,6 +84,7 @@ import {
 // than at a cursor - the same thing the clipboard and Spaces reading panels
 // do with theirs.
 import CardMenu from "../../card-menu/CardMenu";
+import ToolbarPopover from "./ToolbarPopover";
 import "./note-editor.css";
 
 /** Persisted reading size for the editor. A plain UI preference, so it goes in
@@ -95,7 +93,12 @@ const NOTES_ZOOM_KEY = "notes_editor_zoom";
 
 const EMPTY_ACTIVE: ActiveState = { blockKind: "p" };
 
-const TEXT_COLORS: { label: string; value: string | null }[] = [
+interface Swatch {
+  label: string;
+  value: string | null;
+}
+
+const TEXT_COLORS: Swatch[] = [
   { label: "Default", value: null },
   { label: "Red", value: "#e5484d" },
   { label: "Orange", value: "#f76808" },
@@ -108,7 +111,7 @@ const TEXT_COLORS: { label: string; value: string | null }[] = [
   { label: "Gray", value: "#8d8d8d" },
 ];
 
-const HIGHLIGHT_COLORS: { label: string; value: string | null }[] = [
+const HIGHLIGHT_COLORS: Swatch[] = [
   { label: "None", value: null },
   { label: "Yellow", value: "#fff3a8" },
   { label: "Lime", value: "#d6f5b8" },
@@ -120,7 +123,39 @@ const HIGHLIGHT_COLORS: { label: string; value: string | null }[] = [
   { label: "Gray", value: "#e2e2e2" },
 ];
 
-type HeadingLevel = 1 | 2 | 3 | 4 | 5;
+type HeadingLevel = 1 | 2 | 3;
+
+const HEADINGS: { level: HeadingLevel; label: string; Icon: typeof TextHOneIcon }[] = [
+  { level: 1, label: "Heading 1", Icon: TextHOneIcon },
+  { level: 2, label: "Heading 2", Icon: TextHTwoIcon },
+  { level: 3, label: "Heading 3", Icon: TextHThreeIcon },
+];
+
+const CALLOUT_TONES: { tone: CalloutTone; label: string }[] = [
+  { tone: "info", label: "Info" },
+  { tone: "success", label: "Success" },
+  { tone: "warning", label: "Warning" },
+  { tone: "danger", label: "Danger" },
+  { tone: "neutral", label: "Neutral" },
+];
+
+const ALIGNMENTS: { value: AlignValue; label: string; Icon: typeof TextAlignLeftIcon }[] = [
+  { value: "left", label: "Align left", Icon: TextAlignLeftIcon },
+  { value: "center", label: "Align center", Icon: TextAlignCenterIcon },
+  { value: "right", label: "Align right", Icon: TextAlignRightIcon },
+];
+
+/** Every panel the toolbar can have open. One at a time, by construction. */
+type MenuId =
+  | "export"
+  | "color"
+  | "highlight"
+  | "heading"
+  | "callout"
+  | "lists"
+  | "align"
+  | "link"
+  | "embed";
 
 interface NoteEditorProps {
   note: Note;
@@ -142,6 +177,42 @@ interface NoteEditorProps {
   ownerName?: string;
 }
 
+// ── Small pieces ──────────────────────────────────────────────────────────
+
+const SwatchGrid: React.FC<{
+  colors: Swatch[];
+  onPick: (value: string | null) => void;
+}> = ({ colors, onPick }) => (
+  <div className="ns-color-grid">
+    {colors.map((c) => (
+      <button
+        key={c.value ?? "none"}
+        className={`ns-color-swatch${c.value ? "" : " ns-color-swatch--none"}`}
+        style={c.value ? { background: c.value } : undefined}
+        title={c.label}
+        onClick={() => onPick(c.value)}
+      >
+        {c.value == null && <span>x</span>}
+      </button>
+    ))}
+  </div>
+);
+
+const MenuItem: React.FC<{
+  active?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}> = ({ active, onClick, children }) => (
+  <button
+    className={`ns-popover-item${active ? " ns-popover-item--active" : ""}`}
+    onClick={onClick}
+  >
+    {children}
+  </button>
+);
+
+// ── Component ─────────────────────────────────────────────────────────────
+
 const NoteEditor: React.FC<NoteEditorProps> = ({
   note,
   entries,
@@ -159,6 +230,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const titleRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<NotionEditorHandle>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The newest content the editor reported. The unmount flush below cannot
+  // ask the editor: React clears imperative refs before passive cleanups run,
+  // so reading `editorRef` there returned nothing and the last 400ms of
+  // typing before switching notes was lost.
+  const latestContentRef = useRef<string>(note.content ?? "");
 
   const [active, setActive] = useState<ActiveState>(EMPTY_ACTIVE);
   const [stats, setStats] = useState<EditorStats>({
@@ -167,41 +243,30 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     chars: 0,
     words: 0,
   });
-  const [showCalloutPicker, setShowCalloutPicker] = useState(false);
-  const calloutPickerRef = useRef<HTMLDivElement>(null);
 
+  const [openMenu, setOpenMenu] = useState<MenuId | null>(null);
+  const closeMenu = useCallback(() => setOpenMenu(null), []);
+  const toggleMenu = useCallback(
+    (id: MenuId) => setOpenMenu((prev) => (prev === id ? null : id)),
+    [],
+  );
 
-  const [showHeadingDropdown, setShowHeadingDropdown] = useState(false);
-  const headingDropdownRef = useRef<HTMLDivElement>(null);
   const [preferredHeadingLevel, setPreferredHeadingLevel] =
     useState<HeadingLevel>(1);
-
-  const [showStructureDropdown, setShowStructureDropdown] = useState(false);
-  const structureDropdownRef = useRef<HTMLDivElement>(null);
-
-  const [showAlignDropdown, setShowAlignDropdown] = useState(false);
-  const alignDropdownRef = useRef<HTMLDivElement>(null);
-
-  const [showEmbedPicker, setShowEmbedPicker] = useState(false);
   const [embedSearch, setEmbedSearch] = useState("");
   const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
-  const embedPickerRef = useRef<HTMLDivElement>(null);
-
-  const [showLinkPicker, setShowLinkPicker] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkText, setLinkText] = useState("");
-  const linkPickerRef = useRef<HTMLDivElement>(null);
-
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
   const [exportToast, setExportToast] = useState<string | null>(null);
 
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const colorPickerRef = useRef<HTMLDivElement>(null);
-  const [showHighlightPicker, setShowHighlightPicker] = useState(false);
-  const highlightPickerRef = useRef<HTMLDivElement>(null);
-  const [showCellBgPicker, setShowCellBgPicker] = useState(false);
-  const cellBgPickerRef = useRef<HTMLDivElement>(null);
+  // Pickers with their own inputs start clean each time they open.
+  useEffect(() => {
+    if (openMenu !== "link") {
+      setLinkUrl("");
+      setLinkText("");
+    }
+    if (openMenu !== "embed") setEmbedSearch("");
+  }, [openMenu]);
 
   const initialContent = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
   // The note's own title, not a derived one. Seeding the box with the title
@@ -225,24 +290,39 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     [note.id, onUpdate, readOnly],
   );
 
-  const handleEditorChange = useCallback(
-    (content: string) => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => save(content), 400);
-    },
-    [save],
+  const currentContent = useCallback(
+    () => editorRef.current?.getContent() ?? latestContentRef.current,
+    [],
   );
 
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-        const c = editorRef.current?.getContent();
-        if (c != null) save(c);
-      }
-    };
-  }, [note.id, save]);
+  const clearSaveTimer = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleSave = useCallback(() => {
+    clearSaveTimer();
+    saveTimerRef.current = setTimeout(() => save(currentContent()), 400);
+  }, [clearSaveTimer, save, currentContent]);
+
+  const flushSave = useCallback(() => {
+    if (!saveTimerRef.current) return;
+    clearSaveTimer();
+    save(currentContent());
+  }, [clearSaveTimer, save, currentContent]);
+
+  const handleEditorChange = useCallback(
+    (content: string) => {
+      latestContentRef.current = content;
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  // Flush whatever is still on the timer when the editor goes away.
+  useEffect(() => flushSave, [note.id, flushSave]);
 
   useEffect(() => {
     if (!note.title && !note.content)
@@ -255,39 +335,31 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, []);
 
   useEffect(() => {
-    const handler = () => refreshActive();
-    document.addEventListener("selectionchange", handler);
-    return () => document.removeEventListener("selectionchange", handler);
+    document.addEventListener("selectionchange", refreshActive);
+    return () => document.removeEventListener("selectionchange", refreshActive);
   }, [refreshActive]);
 
-  // ── Ctrl+S — flush debounced save immediately ─────────────────────────
-
+  // Ctrl+S saves now rather than in 400ms.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        if (saveTimerRef.current) {
-          clearTimeout(saveTimerRef.current);
-          saveTimerRef.current = null;
-        }
-        const c = editorRef.current?.getContent();
-        if (c != null) save(c);
+        clearSaveTimer();
+        save(currentContent());
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [save]);
+  }, [clearSaveTimer, save, currentContent]);
 
   // ── Close ─────────────────────────────────────────────────────────────
 
   const handleClose = useCallback(() => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    const c = editorRef.current?.getContent() ?? note.content;
-    // A title on its own is a note. Only the body used to count, so writing a
-    // heading and closing to come back to it threw the note away.
+    clearSaveTimer();
+    const c = currentContent();
+    // A title on its own is a note, and so is a note that is only an image
+    // or a table. Only body text used to count, so writing a heading and
+    // closing to come back to it threw the note away.
     const t = (titleRef.current?.value ?? "").trim();
     if (!t && !hasMeaningfulContent(c)) {
       onDelete(note.id);
@@ -296,7 +368,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     }
     save(c);
     onBack();
-  }, [note.id, note.content, onDelete, onBack, save]);
+  }, [note.id, onDelete, onBack, save, clearSaveTimer, currentContent]);
 
   // ── Toolbar dispatch ──────────────────────────────────────────────────
 
@@ -306,6 +378,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       setTimeout(refreshActive, 0);
     },
     [refreshActive],
+  );
+
+  /** Dispatch from inside a popover and close it. */
+  const pick = useCallback(
+    (cmd: EditorCommand) => {
+      dispatch(cmd);
+      closeMenu();
+    },
+    [dispatch, closeMenu],
   );
 
   // ── Group toggle ──────────────────────────────────────────────────────
@@ -319,9 +400,6 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     },
     [note.id, note.groups, onSetGroups],
   );
-
-  // CardMenu dismisses itself on any outside mousedown, so the group dropdown's
-  // own close handler went with it.
 
   const menu = useToolbarMenu();
 
@@ -358,138 +436,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     menu.isOpen,
   );
 
-  useEffect(() => {
-    if (!showHeadingDropdown) return;
-    const h = (e: MouseEvent) => {
-      if (
-        headingDropdownRef.current &&
-        !headingDropdownRef.current.contains(e.target as Node)
-      )
-        setShowHeadingDropdown(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showHeadingDropdown]);
-
-  useEffect(() => {
-    if (!showStructureDropdown) return;
-    const h = (e: MouseEvent) => {
-      if (
-        structureDropdownRef.current &&
-        !structureDropdownRef.current.contains(e.target as Node)
-      )
-        setShowStructureDropdown(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showStructureDropdown]);
-
-  useEffect(() => {
-    if (!showAlignDropdown) return;
-    const h = (e: MouseEvent) => {
-      if (
-        alignDropdownRef.current &&
-        !alignDropdownRef.current.contains(e.target as Node)
-      )
-        setShowAlignDropdown(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showAlignDropdown]);
-
-  useEffect(() => {
-    if (!showEmbedPicker) return;
-    const h = (e: MouseEvent) => {
-      if (
-        embedPickerRef.current &&
-        !embedPickerRef.current.contains(e.target as Node)
-      )
-        setShowEmbedPicker(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showEmbedPicker]);
-
-  useEffect(() => {
-    if (!showColorPicker) return;
-    const h = (e: MouseEvent) => {
-      if (
-        colorPickerRef.current &&
-        !colorPickerRef.current.contains(e.target as Node)
-      )
-        setShowColorPicker(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showColorPicker]);
-
-  useEffect(() => {
-    if (!showHighlightPicker) return;
-    const h = (e: MouseEvent) => {
-      if (
-        highlightPickerRef.current &&
-        !highlightPickerRef.current.contains(e.target as Node)
-      )
-        setShowHighlightPicker(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showHighlightPicker]);
-
-  useEffect(() => {
-    if (!showCellBgPicker) return;
-    const h = (e: MouseEvent) => {
-      if (
-        cellBgPickerRef.current &&
-        !cellBgPickerRef.current.contains(e.target as Node)
-      )
-        setShowCellBgPicker(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showCellBgPicker]);
-
-  useEffect(() => {
-    if (!showCalloutPicker) return;
-    const h = (e: MouseEvent) => {
-      if (
-        calloutPickerRef.current &&
-        !calloutPickerRef.current.contains(e.target as Node)
-      )
-        setShowCalloutPicker(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showCalloutPicker]);
-
-  useEffect(() => {
-    if (!showLinkPicker) return;
-    const h = (e: MouseEvent) => {
-      if (
-        linkPickerRef.current &&
-        !linkPickerRef.current.contains(e.target as Node)
-      ) {
-        setShowLinkPicker(false);
-        setLinkUrl("");
-        setLinkText("");
-      }
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showLinkPicker]);
-
-  useEffect(() => {
-    if (!showExportMenu) return;
-    const h = (e: MouseEvent) => {
-      if (
-        exportMenuRef.current &&
-        !exportMenuRef.current.contains(e.target as Node)
-      )
-        setShowExportMenu(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [showExportMenu]);
+  // ── Export ────────────────────────────────────────────────────────────
 
   const showToast = useCallback((msg: string) => {
     setExportToast(msg);
@@ -497,8 +444,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   }, []);
 
   const handleExportMarkdown = useCallback(async () => {
-    setShowExportMenu(false);
-    const content = editorRef.current?.getContent() ?? note.content;
+    closeMenu();
+    const content = currentContent();
     const markdown = noteToMarkdown(content);
     const title = deriveNoteTitle(titleRef.current?.value ?? "", content);
     const safeTitle =
@@ -513,45 +460,50 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       console.error("[notes] export failed", err);
       showToast("Export failed");
     }
-  }, [note.id, note.content, showToast]);
+  }, [closeMenu, currentContent, showToast]);
 
   const handleCopyMarkdown = useCallback(async () => {
-    setShowExportMenu(false);
-    const content = editorRef.current?.getContent() ?? note.content;
-    const markdown = noteToMarkdown(content);
+    closeMenu();
+    const markdown = noteToMarkdown(currentContent());
     try {
       await navigator.clipboard.writeText(markdown);
       showToast("Copied as Markdown");
     } catch {
       showToast("Copy failed");
     }
-  }, [note.id, note.content, showToast]);
+  }, [closeMenu, currentContent, showToast]);
 
   // ── Embed / link insert ───────────────────────────────────────────────
 
-  const insertClipEmbed = useCallback((id: string) => {
-    editorRef.current?.insertClipEmbed(id);
-    setShowEmbedPicker(false);
-  }, []);
+  const insertClipEmbed = useCallback(
+    (id: string) => {
+      editorRef.current?.insertClipEmbed(id);
+      closeMenu();
+    },
+    [closeMenu],
+  );
 
-  const insertGroupEmbed = useCallback((name: string) => {
-    editorRef.current?.insertGroupEmbed(name);
-    setShowEmbedPicker(false);
-  }, []);
+  const insertGroupEmbed = useCallback(
+    (name: string) => {
+      editorRef.current?.insertGroupEmbed(name);
+      closeMenu();
+    },
+    [closeMenu],
+  );
 
-  const insertLink = useCallback((url: string, text?: string) => {
-    if (!url.trim()) return;
-    editorRef.current?.insertLink(url.trim(), text?.trim() || undefined);
-    setShowLinkPicker(false);
-    setLinkUrl("");
-    setLinkText("");
-  }, []);
+  const insertLink = useCallback(
+    (url: string, text?: string) => {
+      if (!url.trim()) return;
+      editorRef.current?.insertLink(url.trim(), text?.trim() || undefined);
+      closeMenu();
+    },
+    [closeMenu],
+  );
 
   // ── Attachment uploads ──────────────────────────────────────────────────
   // Hidden <input type="file"> elements; one for images, one for any document.
-  // Files are persisted under app_data/note-attachments/{images,files}/ via the
-  // backend, then referenced as tauri-asset URLs so the markdown stays small
-  // and round-trips cleanly between rich and markdown modes.
+  // Files are persisted under app_data/note-attachments/{images,files}/ by
+  // Rust and referenced by a short custom-scheme URL that resolves at render.
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -631,65 +583,78 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   // ── Render ────────────────────────────────────────────────────────────
 
   const bk = active.blockKind;
-  const structureActive = bk === "ul" || bk === "ol";
+  const isHeading = bk.startsWith("h");
+  const listActive = bk === "ul" || bk === "ol";
   const alignValue = active.align ?? "left";
+  const HeadingIcon = HEADINGS.find((h) => h.level === preferredHeadingLevel)!.Icon;
+  const AlignIcon = (ALIGNMENTS.find((a) => a.value === alignValue) ?? ALIGNMENTS[0]).Icon;
 
   const applyHeadingLevel = useCallback(
     (level: HeadingLevel) => {
       setPreferredHeadingLevel(level);
-      dispatch({ kind: "heading", level });
-      setShowHeadingDropdown(false);
+      pick({ kind: "heading", level });
     },
-    [dispatch],
+    [pick],
   );
+
+  const caret = (id: MenuId) => (
+    <CaretDownIcon
+      size={11}
+      weight="bold"
+      className={`ns-fmt-btn-caret${openMenu === id ? " ns-fmt-btn-caret--open" : ""}`}
+    />
+  );
+
+  const linkKeys = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") insertLink(linkUrl, linkText);
+  };
 
   return (
     <div className="ns-editor-shell">
       <div className="ns-editor">
         {/* The bar. Same shape as an opened clipboard entry and an opened item
             in a space: the way out, then what you are looking at, then what you
-            can do with it. The title used to sit in here and set the bar's
-            height by itself; it has its own row below now. */}
+            can do with it. */}
         <ViewToolbar
           onBack={handleClose}
           backLabel="Close"
           actions={
             <>
-              {/* Export */}
-              <div className="ns-export-wrap" ref={exportMenuRef}>
-                <button
-                  className={`vt-btn${showExportMenu ? " vt-btn--on" : ""}`}
-                  onClick={() => setShowExportMenu((p) => !p)}
-                  aria-haspopup="menu"
-                  aria-expanded={showExportMenu}
-                  data-tooltip="Save the note out, or copy it as Markdown"
-                  data-tooltip-pos="below"
-                >
-                  <DownloadSimpleIcon size={13} weight="bold" />
-                  Export
-                </button>
-                {showExportMenu && (
-                  <div className="ns-export-menu">
-                    <button
-                      className="ns-export-item"
-                      onClick={handleExportMarkdown}
-                    >
-                      <DownloadSimpleIcon size={12} weight="bold" />
-                      Save as .md
-                    </button>
-                    <div className="ns-export-sep" />
-                    <button
-                      className="ns-export-item"
-                      onClick={handleCopyMarkdown}
-                    >
-                      <CopyIcon size={12} weight="bold" />
-                      Copy as Markdown
-                    </button>
-                  </div>
-                )}
-                {exportToast && (
-                  <div className="ns-export-toast">{exportToast}</div>
-                )}
+              {/* Relative wrapper so the toast hangs under the button; the bar
+                  itself is not a positioning context. */}
+              <div className="ns-export-anchor">
+              <ToolbarPopover
+                open={openMenu === "export"}
+                onClose={closeMenu}
+                align="right"
+                panelClassName="ns-popover--menu ns-export-menu"
+                trigger={
+                  <button
+                    className={`vt-btn${openMenu === "export" ? " vt-btn--on" : ""}`}
+                    onClick={() => toggleMenu("export")}
+                    aria-haspopup="menu"
+                    aria-expanded={openMenu === "export"}
+                    data-tooltip="Save the note out, or copy it as Markdown"
+                    data-tooltip-pos="below"
+                  >
+                    <DownloadSimpleIcon size={13} weight="bold" />
+                    Export
+                  </button>
+                }
+              >
+                <MenuItem onClick={handleExportMarkdown}>
+                  <DownloadSimpleIcon size={12} weight="bold" />
+                  Save as .md
+                </MenuItem>
+                <div className="ns-popover-sep" />
+                <MenuItem onClick={handleCopyMarkdown}>
+                  <CopyIcon size={12} weight="bold" />
+                  Copy as Markdown
+                </MenuItem>
+              </ToolbarPopover>
+              {exportToast && (
+                <div className="ns-export-toast">{exportToast}</div>
+              )}
               </div>
 
               {/* How big the note reads. Ctrl and plus or minus do the same,
@@ -727,16 +692,10 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                 </button>
               )}
 
-              {/* The rule separates how you are looking at the note from what
-                  you can do to it - the same break the other reading bars
-                  make. */}
               <span className="vt-sep" aria-hidden="true" />
 
-              {/* Pin, groups and delete live in here. On the bar they were
-                  three more icons to learn for no reach they do not already
-                  have, and this is the note's own right-click menu rather than
-                  a rebuilt copy of it, so the two cannot offer different
-                  things. */}
+              {/* Pin, groups and delete live in here: the note's own
+                  right-click menu rather than a rebuilt copy of it. */}
               <ToolbarMoreButton menu={menu} />
             </>
           }
@@ -751,8 +710,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         </ViewToolbar>
 
         {/* Title, and the groups it is in. The chips only report: the menu
-            above is where they are changed, so this run never has to be both a
-            summary and a control. */}
+            above is where they are changed. */}
         <div className="ns-title-row">
           <input
             ref={titleRef}
@@ -761,13 +719,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             defaultValue={initialTitle}
             key={note.id}
             readOnly={readOnly}
-            onChange={() => {
-              if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-              saveTimerRef.current = setTimeout(() => {
-                const c = editorRef.current?.getContent();
-                if (c != null) save(c);
-              }, 400);
-            }}
+            onChange={scheduleSave}
           />
           {note.groups.length > 0 && (
             <div className="ns-title-groups">
@@ -809,770 +761,467 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
         >
           {/* Inline marks */}
           <div className="ns-fmt-group">
-          <button
-            className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "bold" })}
-            data-tooltip="Bold (Ctrl+B)"
-            data-tooltip-pos="below"
-          >
-            <TextBolderIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "italic" })}
-            data-tooltip="Italic (Ctrl+I)"
-            data-tooltip-pos="below"
-          >
-            <TextItalicIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.underline ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "underline" })}
-            data-tooltip="Underline (Ctrl+U)"
-            data-tooltip-pos="below"
-          >
-            <TextUnderlineIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "strike" })}
-            data-tooltip="Strikethrough"
-            data-tooltip-pos="below"
-          >
-            <TextStrikethroughIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.code ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "code" })}
-            data-tooltip="Inline code (Ctrl+E)"
-            data-tooltip-pos="below"
-          >
-            <CodeIcon size={13} weight="bold" />
-          </button>
-          </div>
-
-          {/* Color & highlight */}
-          <div className="ns-fmt-group">
-          <div className="ns-toolbar-wrap" ref={colorPickerRef}>
             <button
-              className={`ns-fmt-btn${active.textColor ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowColorPicker((p) => !p);
-                setShowHighlightPicker(false);
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-              }}
-              data-tooltip="Text color"
+              className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "bold" })}
+              data-tooltip="Bold (Ctrl+B)"
               data-tooltip-pos="below"
-              style={active.textColor ? { color: active.textColor } : undefined}
             >
-              <PaletteIcon size={13} weight="bold" />
+              <TextBolderIcon size={13} weight="bold" />
             </button>
-            {showColorPicker && (
-              <div className="ns-embed-picker ns-color-picker">
-                <div className="ns-color-grid">
-                  {TEXT_COLORS.map((c) => (
-                    <button
-                      key={c.value ?? "none"}
-                      className="ns-color-swatch"
-                      style={{
-                        background: c.value ?? "transparent",
-                        border: c.value
-                          ? "1px solid var(--border)"
-                          : "1px dashed var(--border)",
-                      }}
-                      title={c.label}
-                      onClick={() => {
-                        dispatch({ kind: "textColor", value: c.value });
-                        setShowColorPicker(false);
-                      }}
-                    >
-                      {c.value == null && (
-                        <span className="ns-color-swatch-none">x</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <button
+              className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "italic" })}
+              data-tooltip="Italic (Ctrl+I)"
+              data-tooltip-pos="below"
+            >
+              <TextItalicIcon size={13} weight="bold" />
+            </button>
+            <button
+              className={`ns-fmt-btn${active.underline ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "underline" })}
+              data-tooltip="Underline (Ctrl+U)"
+              data-tooltip-pos="below"
+            >
+              <TextUnderlineIcon size={13} weight="bold" />
+            </button>
+            <button
+              className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "strike" })}
+              data-tooltip="Strikethrough"
+              data-tooltip-pos="below"
+            >
+              <TextStrikethroughIcon size={13} weight="bold" />
+            </button>
+            <button
+              className={`ns-fmt-btn${active.code ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "code" })}
+              data-tooltip="Inline code (Ctrl+E)"
+              data-tooltip-pos="below"
+            >
+              <CodeIcon size={13} weight="bold" />
+            </button>
           </div>
 
-          {/* Highlight color */}
-          <div className="ns-toolbar-wrap" ref={highlightPickerRef}>
-            <button
-              className={`ns-fmt-btn${active.highlight ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowHighlightPicker((p) => !p);
-                setShowColorPicker(false);
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-              }}
-              data-tooltip="Highlight"
-              data-tooltip-pos="below"
-              style={
-                active.highlight ? { background: active.highlight } : undefined
+          {/* Color and highlight */}
+          <div className="ns-fmt-group">
+            <ToolbarPopover
+              open={openMenu === "color"}
+              onClose={closeMenu}
+              panelClassName="ns-popover--panel ns-color-picker"
+              trigger={
+                <button
+                  className={`ns-fmt-btn${active.textColor ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("color")}
+                  data-tooltip="Text color"
+                  data-tooltip-pos="below"
+                  style={active.textColor ? { color: active.textColor } : undefined}
+                >
+                  <PaletteIcon size={13} weight="bold" />
+                </button>
               }
             >
-              <HighlighterIcon size={13} weight="bold" />
-            </button>
-            {showHighlightPicker && (
-              <div className="ns-embed-picker ns-color-picker">
-                <div className="ns-color-grid">
-                  {HIGHLIGHT_COLORS.map((c) => (
-                    <button
-                      key={c.value ?? "none"}
-                      className="ns-color-swatch"
-                      style={{
-                        background: c.value ?? "transparent",
-                        border: c.value
-                          ? "1px solid var(--border)"
-                          : "1px dashed var(--border)",
-                      }}
-                      title={c.label}
-                      onClick={() => {
-                        dispatch({ kind: "highlight", value: c.value });
-                        setShowHighlightPicker(false);
-                      }}
-                    >
-                      {c.value == null && (
-                        <span className="ns-color-swatch-none">x</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+              <SwatchGrid
+                colors={TEXT_COLORS}
+                onPick={(value) => pick({ kind: "textColor", value })}
+              />
+            </ToolbarPopover>
 
-          {/* Cell background color — only visible when cursor is in a table */}
-          {active.inTable && (
-          <div className="ns-toolbar-wrap" ref={cellBgPickerRef}>
-            <button
-              className={`ns-fmt-btn${active.cellBackground ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowCellBgPicker((p) => !p);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-              }}
-              data-tooltip="Cell background"
-              data-tooltip-pos="below"
-              style={active.cellBackground ? { background: active.cellBackground } : undefined}
+            <ToolbarPopover
+              open={openMenu === "highlight"}
+              onClose={closeMenu}
+              panelClassName="ns-popover--panel ns-color-picker"
+              trigger={
+                <button
+                  className={`ns-fmt-btn${active.highlight ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("highlight")}
+                  data-tooltip="Highlight"
+                  data-tooltip-pos="below"
+                  style={
+                    active.highlight ? { background: active.highlight } : undefined
+                  }
+                >
+                  <HighlighterIcon size={13} weight="bold" />
+                </button>
+              }
             >
-              <PaintBucketIcon size={13} weight="bold" />
-            </button>
-            {showCellBgPicker && (
-              <div className="ns-embed-picker ns-color-picker">
-                <div className="ns-color-section-label">Pastel</div>
-                <div className="ns-color-grid">
-                  {HIGHLIGHT_COLORS.map((c) => (
-                    <button
-                      key={c.value ?? "none"}
-                      className="ns-color-swatch"
-                      style={{
-                        background: c.value ?? "transparent",
-                        border: c.value
-                          ? "1px solid var(--border)"
-                          : "1px dashed var(--border)",
-                      }}
-                      title={c.label}
-                      onClick={() => {
-                        dispatch({ kind: "cellBackground", value: c.value });
-                        setShowCellBgPicker(false);
-                      }}
-                    >
-                      {c.value == null && (
-                        <span className="ns-color-swatch-none">x</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-                <div className="ns-color-section-label">Vivid</div>
-                <div className="ns-color-grid">
-                  {TEXT_COLORS.filter((c) => c.value !== null).map((c) => (
-                    <button
-                      key={c.value!}
-                      className="ns-color-swatch"
-                      style={{
-                        background: c.value!,
-                        border: "1px solid var(--border)",
-                      }}
-                      title={c.label}
-                      onClick={() => {
-                        dispatch({ kind: "cellBackground", value: c.value });
-                        setShowCellBgPicker(false);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          )}
+              <SwatchGrid
+                colors={HIGHLIGHT_COLORS}
+                onPick={(value) => pick({ kind: "highlight", value })}
+              />
+            </ToolbarPopover>
           </div>
 
           {/* Block types */}
           <div className="ns-fmt-group">
-          <div className="ns-heading-wrap" ref={headingDropdownRef}>
+            <ToolbarPopover
+              open={openMenu === "heading"}
+              onClose={closeMenu}
+              panelClassName="ns-popover--menu"
+              trigger={
+                <button
+                  className={`ns-fmt-btn ns-fmt-btn--dropdown${isHeading ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("heading")}
+                  data-tooltip="Heading size"
+                  data-tooltip-pos="below"
+                >
+                  <HeadingIcon size={14} weight="bold" />
+                  {caret("heading")}
+                </button>
+              }
+            >
+              {HEADINGS.map(({ level, label, Icon }) => (
+                <MenuItem
+                  key={level}
+                  active={preferredHeadingLevel === level}
+                  onClick={() => applyHeadingLevel(level)}
+                >
+                  <Icon size={13} weight="bold" />
+                  <span className={`ns-heading-size-text ns-heading-size-text--h${level}`}>
+                    {label}
+                  </span>
+                </MenuItem>
+              ))}
+            </ToolbarPopover>
+
             <button
-              className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "h1" || bk === "h2" || bk === "h3" || bk === "h4" || bk === "h5" ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowHeadingDropdown((p) => !p);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-                setShowEmbedPicker(false);
-                setShowLinkPicker(false);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-              }}
-              data-tooltip="Heading size"
+              className={`ns-fmt-btn${bk === "bq" ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "blockquote" })}
+              data-tooltip="Quote"
               data-tooltip-pos="below"
             >
-              {preferredHeadingLevel === 2 ? (
-                <TextHTwoIcon size={14} weight="bold" />
-              ) : preferredHeadingLevel === 3 ? (
-                <TextHThreeIcon size={14} weight="bold" />
-              ) : preferredHeadingLevel === 4 ? (
-                <TextHFourIcon size={14} weight="bold" />
-              ) : preferredHeadingLevel === 5 ? (
-                <TextHFiveIcon size={14} weight="bold" />
-              ) : (
-                <TextHOneIcon size={14} weight="bold" />
-              )}
-              <CaretDownIcon
-                size={11}
-                weight="bold"
-                className={`ns-fmt-btn-caret${showHeadingDropdown ? " ns-fmt-btn-caret--open" : ""}`}
-              />
+              <QuotesIcon size={13} weight="bold" />
             </button>
-            {showHeadingDropdown && (
-              <div className="ns-heading-dropdown">
-                <button
-                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 1 ? " ns-heading-dropdown-item--active" : ""}`}
-                  onClick={() => applyHeadingLevel(1)}
-                >
-                  <TextHOneIcon size={15} weight="bold" />
-                  <span className="ns-heading-size-text ns-heading-size-text--h1">
-                    Heading 1
-                  </span>
-                </button>
-                <button
-                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 2 ? " ns-heading-dropdown-item--active" : ""}`}
-                  onClick={() => applyHeadingLevel(2)}
-                >
-                  <TextHTwoIcon size={13} weight="bold" />
-                  <span className="ns-heading-size-text ns-heading-size-text--h2">
-                    Heading 2
-                  </span>
-                </button>
-                <button
-                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 3 ? " ns-heading-dropdown-item--active" : ""}`}
-                  onClick={() => applyHeadingLevel(3)}
-                >
-                  <TextHThreeIcon size={13} weight="bold" />
-                  <span className="ns-heading-size-text ns-heading-size-text--h3">
-                    Heading 3
-                  </span>
-                </button>
-                <button
-                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 4 ? " ns-heading-dropdown-item--active" : ""}`}
-                  onClick={() => applyHeadingLevel(4)}
-                >
-                  <TextHFourIcon size={12} weight="bold" />
-                  <span className="ns-heading-size-text ns-heading-size-text--h4">
-                    Heading 4
-                  </span>
-                </button>
-                <button
-                  className={`ns-heading-dropdown-item${preferredHeadingLevel === 5 ? " ns-heading-dropdown-item--active" : ""}`}
-                  onClick={() => applyHeadingLevel(5)}
-                >
-                  <TextHFiveIcon size={11} weight="bold" />
-                  <span className="ns-heading-size-text ns-heading-size-text--h5">
-                    Heading 5
-                  </span>
-                </button>
-              </div>
-            )}
-          </div>
 
-          <button
-            className={`ns-fmt-btn${bk === "bq" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "blockquote" })}
-            data-tooltip="Quote"
-            data-tooltip-pos="below"
-          >
-            <QuotesIcon size={13} weight="bold" />
-          </button>
-          <div className="ns-toolbar-wrap" ref={calloutPickerRef}>
+            <ToolbarPopover
+              open={openMenu === "callout"}
+              onClose={closeMenu}
+              panelClassName="ns-popover--menu"
+              trigger={
+                <button
+                  className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "callout" ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("callout")}
+                  data-tooltip="Callout"
+                  data-tooltip-pos="below"
+                >
+                  <LightbulbIcon size={13} weight="bold" />
+                  {caret("callout")}
+                </button>
+              }
+            >
+              {CALLOUT_TONES.map((opt) => (
+                <MenuItem
+                  key={opt.tone}
+                  onClick={() => pick({ kind: "callout", tone: opt.tone })}
+                >
+                  <span className={`ns-callout-swatch ns-callout-swatch--${opt.tone}`} />
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </ToolbarPopover>
+
             <button
-              className={`ns-fmt-btn ns-fmt-btn--dropdown${bk === "callout" ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowCalloutPicker((p) => !p);
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-                setShowEmbedPicker(false);
-                setShowLinkPicker(false);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-              }}
-              data-tooltip="Callout"
+              className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "codeBlock" })}
+              data-tooltip="Code block"
               data-tooltip-pos="below"
             >
-              <LightbulbIcon size={13} weight="bold" />
-              <CaretDownIcon
-                size={11}
-                weight="bold"
-                className={`ns-fmt-btn-caret${showCalloutPicker ? " ns-fmt-btn-caret--open" : ""}`}
-              />
+              <CodeBlockIcon size={13} weight="bold" />
             </button>
-            {showCalloutPicker && (
-              <div className="ns-toolbar-dropdown">
-                {(
-                  [
-                    { tone: "info", label: "Info" },
-                    { tone: "success", label: "Success" },
-                    { tone: "warning", label: "Warning" },
-                    { tone: "danger", label: "Danger" },
-                    { tone: "neutral", label: "Neutral" },
-                  ] as { tone: CalloutTone; label: string }[]
-                ).map((opt) => (
-                  <button
-                    key={opt.tone}
-                    className="ns-toolbar-dropdown-item"
-                    onClick={() => {
-                      dispatch({ kind: "callout", tone: opt.tone });
-                      setShowCalloutPicker(false);
-                    }}
-                  >
-                    <span
-                      className={`ns-callout-swatch ns-callout-swatch--${opt.tone}`}
-                    />
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <button
-            className={`ns-fmt-btn${bk === "code" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "codeBlock" })}
-            data-tooltip="Code block"
-            data-tooltip-pos="below"
-          >
-            <CodeBlockIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${bk === "todo" || bk === "todoChecked" ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "taskList" })}
-            data-tooltip="Checklist"
-            data-tooltip-pos="below"
-          >
-            <CheckSquareOffsetIcon size={13} weight="bold" />
-          </button>
-          <button
-            className={`ns-fmt-btn${active.inTable ? " ns-fmt-btn--active" : ""}`}
-            onClick={() => dispatch({ kind: "insertTable" })}
-            data-tooltip="Insert table"
-            data-tooltip-pos="below"
-          >
-            <TableIcon size={13} weight="bold" />
-          </button>
-          <button
-            className="ns-fmt-btn"
-            onClick={() => dispatch({ kind: "hr" })}
-            data-tooltip="Horizontal rule"
-            data-tooltip-pos="below"
-          >
-            <MinusIcon size={13} weight="bold" />
-          </button>
+            <button
+              className={`ns-fmt-btn${bk === "todo" || bk === "todoChecked" ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "taskList" })}
+              data-tooltip="Checklist"
+              data-tooltip-pos="below"
+            >
+              <CheckSquareOffsetIcon size={13} weight="bold" />
+            </button>
+            <button
+              className={`ns-fmt-btn${active.inTable ? " ns-fmt-btn--active" : ""}`}
+              onClick={() => dispatch({ kind: "insertTable" })}
+              data-tooltip="Insert table"
+              data-tooltip-pos="below"
+            >
+              <TableIcon size={13} weight="bold" />
+            </button>
+            <button
+              className="ns-fmt-btn"
+              onClick={() => dispatch({ kind: "hr" })}
+              data-tooltip="Horizontal rule"
+              data-tooltip-pos="below"
+            >
+              <MinusIcon size={13} weight="bold" />
+            </button>
           </div>
 
-          {/* Lists */}
+          {/* Lists and alignment */}
           <div className="ns-fmt-group">
-          <div className="ns-toolbar-wrap" ref={structureDropdownRef}>
-            <button
-              className={`ns-fmt-btn ns-fmt-btn--dropdown${structureActive ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowStructureDropdown((p) => !p);
-                setShowHeadingDropdown(false);
-                setShowAlignDropdown(false);
-                setShowEmbedPicker(false);
-                setShowLinkPicker(false);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-              }}
-              data-tooltip="Lists"
-              data-tooltip-pos="below"
-            >
-              <ListBulletsIcon size={13} weight="bold" />
-              <CaretDownIcon
-                size={11}
-                weight="bold"
-                className={`ns-fmt-btn-caret${showStructureDropdown ? " ns-fmt-btn-caret--open" : ""}`}
-              />
-            </button>
-            {showStructureDropdown && (
-              <div className="ns-toolbar-dropdown">
+            <ToolbarPopover
+              open={openMenu === "lists"}
+              onClose={closeMenu}
+              panelClassName="ns-popover--menu"
+              trigger={
                 <button
-                  className={`ns-toolbar-dropdown-item${bk === "ul" ? " ns-toolbar-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    dispatch({ kind: "bulletList" });
-                    setShowStructureDropdown(false);
-                  }}
+                  className={`ns-fmt-btn ns-fmt-btn--dropdown${listActive ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("lists")}
+                  data-tooltip="Lists"
+                  data-tooltip-pos="below"
                 >
                   <ListBulletsIcon size={13} weight="bold" />
-                  Bullet list
+                  {caret("lists")}
                 </button>
-                <button
-                  className={`ns-toolbar-dropdown-item${bk === "ol" ? " ns-toolbar-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    dispatch({ kind: "orderedList" });
-                    setShowStructureDropdown(false);
-                  }}
-                >
-                  <ListNumbersIcon size={13} weight="bold" />
-                  Numbered list
-                </button>
-              </div>
-            )}
-          </div>
-          </div>
-
-          {/* Text alignment */}
-          <div className="ns-fmt-group">
-          <div className="ns-toolbar-wrap" ref={alignDropdownRef}>
-            <button
-              className={`ns-fmt-btn ns-fmt-btn--dropdown${active.align ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                setShowAlignDropdown((p) => !p);
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowEmbedPicker(false);
-                setShowLinkPicker(false);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-              }}
-              data-tooltip="Alignment"
-              data-tooltip-pos="below"
+              }
             >
-              {alignValue === "center" ? (
-                <TextAlignCenterIcon size={13} weight="bold" />
-              ) : alignValue === "right" ? (
-                <TextAlignRightIcon size={13} weight="bold" />
-              ) : alignValue === "justify" ? (
-                <TextAlignJustifyIcon size={13} weight="bold" />
-              ) : (
-                <TextAlignLeftIcon size={13} weight="bold" />
-              )}
-              <CaretDownIcon
-                size={11}
-                weight="bold"
-                className={`ns-fmt-btn-caret${showAlignDropdown ? " ns-fmt-btn-caret--open" : ""}`}
-              />
-            </button>
-            {showAlignDropdown && (
-              <div className="ns-toolbar-dropdown ns-toolbar-dropdown--left">
+              <MenuItem active={bk === "ul"} onClick={() => pick({ kind: "bulletList" })}>
+                <ListBulletsIcon size={13} weight="bold" />
+                Bullet list
+              </MenuItem>
+              <MenuItem active={bk === "ol"} onClick={() => pick({ kind: "orderedList" })}>
+                <ListNumbersIcon size={13} weight="bold" />
+                Numbered list
+              </MenuItem>
+            </ToolbarPopover>
+
+            <ToolbarPopover
+              open={openMenu === "align"}
+              onClose={closeMenu}
+              panelClassName="ns-popover--menu"
+              trigger={
                 <button
-                  className={`ns-toolbar-dropdown-item${alignValue === "left" ? " ns-toolbar-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    dispatch({ kind: "align", value: "left" });
-                    setShowAlignDropdown(false);
-                  }}
+                  className={`ns-fmt-btn ns-fmt-btn--dropdown${active.align && active.align !== "left" ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("align")}
+                  data-tooltip="Alignment"
+                  data-tooltip-pos="below"
                 >
-                  <TextAlignLeftIcon size={13} weight="bold" />
-                  Align left
+                  <AlignIcon size={13} weight="bold" />
+                  {caret("align")}
                 </button>
-                <button
-                  className={`ns-toolbar-dropdown-item${alignValue === "center" ? " ns-toolbar-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    dispatch({ kind: "align", value: "center" });
-                    setShowAlignDropdown(false);
-                  }}
+              }
+            >
+              {ALIGNMENTS.map(({ value, label, Icon }) => (
+                <MenuItem
+                  key={value}
+                  active={alignValue === value}
+                  onClick={() => pick({ kind: "align", value })}
                 >
-                  <TextAlignCenterIcon size={13} weight="bold" />
-                  Align center
-                </button>
-                <button
-                  className={`ns-toolbar-dropdown-item${alignValue === "right" ? " ns-toolbar-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    dispatch({ kind: "align", value: "right" });
-                    setShowAlignDropdown(false);
-                  }}
-                >
-                  <TextAlignRightIcon size={13} weight="bold" />
-                  Align right
-                </button>
-                <button
-                  className={`ns-toolbar-dropdown-item${alignValue === "justify" ? " ns-toolbar-dropdown-item--active" : ""}`}
-                  onClick={() => {
-                    dispatch({ kind: "align", value: "justify" });
-                    setShowAlignDropdown(false);
-                  }}
-                >
-                  <TextAlignJustifyIcon size={13} weight="bold" />
-                  Justify
-                </button>
-              </div>
-            )}
-          </div>
+                  <Icon size={13} weight="bold" />
+                  {label}
+                </MenuItem>
+              ))}
+            </ToolbarPopover>
           </div>
 
           {/* Insert */}
           <div className="ns-fmt-group">
-          <div className="ns-embed-wrap" ref={linkPickerRef}>
-            <button
-              className={`ns-fmt-btn${showLinkPicker ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                editorRef.current?.saveRange();
-                setShowLinkPicker((p) => !p);
-                setShowEmbedPicker(false);
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-              }}
-              data-tooltip="Insert link"
-              data-tooltip-pos="below"
+            <ToolbarPopover
+              open={openMenu === "link"}
+              onClose={closeMenu}
+              align="right"
+              panelClassName="ns-popover--panel ns-link-picker"
+              trigger={
+                <button
+                  className={`ns-fmt-btn${openMenu === "link" ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("link")}
+                  data-tooltip="Insert link"
+                  data-tooltip-pos="below"
+                >
+                  <LinkSimpleIcon size={12} weight="bold" />
+                </button>
+              }
             >
-              <LinkSimpleIcon size={12} weight="bold" />
-            </button>
-            {showLinkPicker && (
-              <div className="ns-embed-picker ns-link-picker">
-                <div className="ns-link-picker-row">
-                  <input
-                    className="ns-embed-search ns-link-input"
-                    placeholder="Display text (optional)"
-                    value={linkText}
-                    onChange={(e) => setLinkText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") insertLink(linkUrl, linkText);
-                      if (e.key === "Escape") {
-                        setShowLinkPicker(false);
-                        setLinkUrl("");
-                        setLinkText("");
-                      }
-                    }}
-                  />
-                </div>
-                <div className="ns-link-picker-row">
-                  <input
-                    className="ns-embed-search ns-link-input"
-                    placeholder="https://..."
-                    value={linkUrl}
-                    onChange={(e) => setLinkUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") insertLink(linkUrl, linkText);
-                      if (e.key === "Escape") {
-                        setShowLinkPicker(false);
-                        setLinkUrl("");
-                        setLinkText("");
-                      }
-                    }}
-                    autoFocus
-                  />
-                  <button
-                    className="ns-link-insert-btn"
-                    onClick={() => insertLink(linkUrl, linkText)}
-                    disabled={!linkUrl.trim()}
-                  >
-                    Insert
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Image / file attachment buttons (sit next to Insert link). Both
-              use a hidden <input type="file"> trigger and route through the
-              backend save_note_{image,file} commands. */}
-          <button
-            className="ns-fmt-btn"
-            onClick={() => imageInputRef.current?.click()}
-            data-tooltip="Insert image"
-            data-tooltip-pos="below"
-          >
-            <ImageIcon size={12} />
-          </button>
-          <button
-            className="ns-fmt-btn"
-            onClick={() => fileInputRef.current?.click()}
-            data-tooltip="Attach document"
-            data-tooltip-pos="below"
-          >
-            <FileIcon size={12} />
-          </button>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={handleImagePick}
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            style={{ display: "none" }}
-            onChange={handleDocumentPick}
-          />
-
-          {/* Embed picker */}
-          <div className="ns-embed-wrap" ref={embedPickerRef}>
-            <button
-              className={`ns-fmt-btn${showEmbedPicker ? " ns-fmt-btn--active" : ""}`}
-              onClick={() => {
-                editorRef.current?.saveRange();
-                setShowEmbedPicker((p) => !p);
-                setShowLinkPicker(false);
-                setEmbedSearch("");
-                setShowHeadingDropdown(false);
-                setShowStructureDropdown(false);
-                setShowAlignDropdown(false);
-                setShowColorPicker(false);
-                setShowHighlightPicker(false);
-              }}
-              data-tooltip="Embed clipboard entry"
-              data-tooltip-pos="below"
-            >
-              <ClipboardTextIcon size={13} weight="bold" />
-            </button>
-            {showEmbedPicker && (
-              <div className="ns-embed-picker">
-                <div className="ns-embed-picker-tabs">
-                  <button
-                    className={`ns-embed-tab${embedTab === "entries" ? " ns-embed-tab--active" : ""}`}
-                    onClick={() => setEmbedTab("entries")}
-                  >
-                    Clipboard
-                  </button>
-                  <button
-                    className={`ns-embed-tab${embedTab === "groups" ? " ns-embed-tab--active" : ""}`}
-                    onClick={() => setEmbedTab("groups")}
-                  >
-                    Groups
-                  </button>
-                </div>
+              <input
+                className="ns-picker-input"
+                placeholder="Display text (optional)"
+                value={linkText}
+                onChange={(e) => setLinkText(e.target.value)}
+                onKeyDown={linkKeys}
+              />
+              <div className="ns-link-picker-row">
                 <input
-                  className="ns-embed-search"
-                  placeholder={
-                    embedTab === "entries"
-                      ? "Search entries..."
-                      : "Search groups..."
-                  }
-                  value={embedSearch}
-                  onChange={(e) => setEmbedSearch(e.target.value)}
+                  className="ns-picker-input"
+                  placeholder="https://..."
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  onKeyDown={linkKeys}
                   autoFocus
                 />
-                <div className="ns-embed-list">
-                  {embedTab === "entries" ? (
-                    filteredEntries.length === 0 ? (
-                      <div className="ns-embed-empty">No entries found</div>
+                <button
+                  className="ns-link-insert-btn"
+                  onClick={() => insertLink(linkUrl, linkText)}
+                  disabled={!linkUrl.trim()}
+                >
+                  Insert
+                </button>
+              </div>
+            </ToolbarPopover>
+
+            {/* Image and file attachments. Both use a hidden <input type="file">
+                and route through the Rust save_note_{image,file} commands. */}
+            <button
+              className="ns-fmt-btn"
+              onClick={() => imageInputRef.current?.click()}
+              data-tooltip="Insert image"
+              data-tooltip-pos="below"
+            >
+              <ImageIcon size={12} />
+            </button>
+            <button
+              className="ns-fmt-btn"
+              onClick={() => fileInputRef.current?.click()}
+              data-tooltip="Attach document"
+              data-tooltip-pos="below"
+            >
+              <FileIcon size={12} />
+            </button>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handleImagePick}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              style={{ display: "none" }}
+              onChange={handleDocumentPick}
+            />
+
+            <ToolbarPopover
+              open={openMenu === "embed"}
+              onClose={closeMenu}
+              align="right"
+              panelClassName="ns-popover--panel ns-embed-picker"
+              trigger={
+                <button
+                  className={`ns-fmt-btn${openMenu === "embed" ? " ns-fmt-btn--active" : ""}`}
+                  onClick={() => toggleMenu("embed")}
+                  data-tooltip="Embed clipboard entry"
+                  data-tooltip-pos="below"
+                >
+                  <ClipboardTextIcon size={13} weight="bold" />
+                </button>
+              }
+            >
+              <div className="ns-embed-picker-tabs">
+                <button
+                  className={`ns-embed-tab${embedTab === "entries" ? " ns-embed-tab--active" : ""}`}
+                  onClick={() => setEmbedTab("entries")}
+                >
+                  Clipboard
+                </button>
+                <button
+                  className={`ns-embed-tab${embedTab === "groups" ? " ns-embed-tab--active" : ""}`}
+                  onClick={() => setEmbedTab("groups")}
+                >
+                  Groups
+                </button>
+              </div>
+              <input
+                className="ns-picker-input ns-embed-search"
+                placeholder={
+                  embedTab === "entries" ? "Search entries..." : "Search groups..."
+                }
+                value={embedSearch}
+                onChange={(e) => setEmbedSearch(e.target.value)}
+                autoFocus
+              />
+              <div className="ns-embed-list">
+                {embedTab === "entries" ? (
+                  filteredEntries.length === 0 ? (
+                    <div className="ns-embed-empty">No entries found</div>
+                  ) : (
+                    filteredEntries.map((entry) => {
+                      const text =
+                        entry.type === "image"
+                          ? (entry.label ?? "Image")
+                          : truncateText(
+                              entry.type === "html"
+                                ? stripHtml(entry.content)
+                                : entry.content,
+                              72,
+                            );
+                      return (
+                        <button
+                          key={entry.id}
+                          className="ns-embed-item"
+                          onClick={() => insertClipEmbed(entry.id)}
+                        >
+                          <span className="ns-embed-item-icon">
+                            {entry.type === "image" ? (
+                              <ImageIcon size={10} />
+                            ) : entry.type === "file" ? (
+                              <FileIcon size={10} />
+                            ) : (
+                              <ClipboardIcon size={10} />
+                            )}
+                          </span>
+                          <span className="ns-embed-item-text">{text}</span>
+                          <span className="ns-embed-item-time">
+                            {timeAgoFor(entry.timestamp, `clipboard:${entry.id}`)}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )
+                ) : (
+                  <>
+                    <button
+                      className="ns-embed-item"
+                      onClick={() => insertGroupEmbed("pinned")}
+                    >
+                      <span className="ns-embed-item-group ns-embed-item-group--pinned">
+                        <PinIcon size={10} />
+                        Pinned
+                      </span>
+                    </button>
+                    <button
+                      className="ns-embed-item"
+                      onClick={() => insertGroupEmbed("Saved")}
+                    >
+                      <span className="ns-embed-item-group ns-embed-item-group--saved">
+                        <SaveStarIcon size={10} />
+                        Saved
+                      </span>
+                    </button>
+                    {filteredGroups.length === 0 && embedSearch.trim() !== "" ? (
+                      <div className="ns-embed-empty">No groups found</div>
                     ) : (
-                      filteredEntries.map((entry) => {
-                        const text =
-                          entry.type === "image"
-                            ? (entry.label ?? "Image")
-                            : truncateText(
-                                entry.type === "html"
-                                  ? stripHtml(entry.content)
-                                  : entry.content,
-                                72,
-                              );
+                      filteredGroups.map((group) => {
+                        const c = groupColor(group);
                         return (
                           <button
-                            key={entry.id}
+                            key={group}
                             className="ns-embed-item"
-                            onClick={() => insertClipEmbed(entry.id)}
+                            onClick={() => insertGroupEmbed(group)}
                           >
-                            <span className="ns-embed-item-icon">
-                              {entry.type === "image" ? (
-                                <ImageIcon size={10} />
-                              ) : entry.type === "file" ? (
-                                <FileIcon size={10} />
-                              ) : (
-                                <ClipboardIcon size={10} />
-                              )}
-                            </span>
-                            <span className="ns-embed-item-text">{text}</span>
-                            <span className="ns-embed-item-time">
-                              {timeAgoFor(entry.timestamp, `clipboard:${entry.id}`)}
+                            <span
+                              className="ns-embed-item-group"
+                              style={{ background: c.bg, color: c.fg }}
+                            >
+                              <span
+                                className="ns-embed-group-dot"
+                                style={{ background: c.fg }}
+                              />
+                              {group}
                             </span>
                           </button>
                         );
                       })
-                    )
-                  ) : (
-                    <>
-                      {/* System groups */}
-                      <button
-                        className="ns-embed-item"
-                        onClick={() => insertGroupEmbed("pinned")}
-                      >
-                        <span className="ns-embed-item-group ns-embed-item-group--system ns-embed-item-group--pinned">
-                          <PinIcon size={10} />
-                          Pinned
-                        </span>
-                      </button>
-                      <button
-                        className="ns-embed-item"
-                        onClick={() => insertGroupEmbed("Saved")}
-                      >
-                        <span className="ns-embed-item-group ns-embed-item-group--system ns-embed-item-group--saved">
-                          <SaveStarIcon size={10} />
-                          Saved
-                        </span>
-                      </button>
-                      {/* User groups */}
-                      {filteredGroups.length === 0 && embedSearch.trim() !== "" ? (
-                        <div className="ns-embed-empty">No groups found</div>
-                      ) : (
-                        filteredGroups.map((group) => {
-                          const c = groupColor(group);
-                          return (
-                            <button
-                              key={group}
-                              className="ns-embed-item"
-                              onClick={() => insertGroupEmbed(group)}
-                            >
-                              <span
-                                className="ns-embed-item-group"
-                                style={{ background: c.bg, color: c.fg }}
-                              >
-                                <span
-                                  className="ns-embed-group-dot"
-                                  style={{ background: c.fg }}
-                                />
-                                {group}
-                              </span>
-                            </button>
-                          );
-                        })
-                      )}
-                    </>
-                  )}
-                </div>
+                    )}
+                  </>
+                )}
               </div>
-            )}
-          </div>
+            </ToolbarPopover>
           </div>
         </div>
 
-        {/* Editor content area */}
-        {/* `zoom` rather than a font-size: the editor is a contenteditable full
+        {/* Editor content area.
+            `zoom` rather than a font-size: the editor is a contenteditable full
             of blocks with their own sizes, and zoom scales the caret and the
-            click targets with them. A font-size on the wrapper would only reach
-            the blocks that happened to inherit it.
-
-            The scrollbar is on this element too, so zoom scaled that as well
-            and the bar grew fatter the further you zoomed in. Dividing the two
-            sizes App.css exposes by the same factor cancels it, and the bar
-            stays the 12px every other screen shows. */}
+            click targets with them. The scrollbar is on this element too, so
+            zoom scaled that as well; dividing the two sizes App.css exposes by
+            the same factor cancels it. */}
         <div
           className="ns-editor-content"
           style={
@@ -1597,11 +1246,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           />
         </div>
 
-        {/* Footer */}
-        {/* The word and character counts and the last-saved time moved up to
-            the bar, where every other reading screen carries them. What is left
-            is the one thing that is about where the caret is rather than what
-            the note is, and belongs at the bottom for that reason. */}
+        {/* Footer: the one thing that is about where the caret is rather than
+            what the note is. Word and character counts sit in the bar. */}
         <div className="ns-editor-footer">
           <span className="ns-editor-footer-stats">
             Ln {stats.line} / {stats.blocks}{" "}

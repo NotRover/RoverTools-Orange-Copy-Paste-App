@@ -14,19 +14,14 @@
   flex-direction: column;
   min-height: 0;
   background: var(--bg);
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
   overflow: hidden;
-  animation: none;
 }
 
 /* ── Title row ───────────────────────────────────────────────────── */
 
 /* The title sits under the bar rather than in it. In the bar it competed with
    the controls for one row and set the bar's height by itself; here it has the
-   width to be a title, and the note's groups can sit beside it instead of
-   taking a third row of their own. */
+   width to be a title, and the note's groups can sit beside it. */
 .ns-title-row {
   display: flex;
   align-items: center;
@@ -75,10 +70,7 @@
   font-weight: 500;
 }
 
-/* ── Groups on the note ──────────────────────────────────────────── */
-
-/* Read-only here. Adding and removing is the popout card off the bar, so this
-   run cannot both wrap to three lines and be the place you edit from. */
+/* Read-only here. Adding and removing is the popout card off the bar. */
 .ns-title-groups {
   display: flex;
   align-items: center;
@@ -108,18 +100,18 @@
   white-space: nowrap;
 }
 
-/* Shared by every popout in the editor - the groups card, the export menu, the
-   heading and embed pickers. It lived beside the group dropdown that this card
-   replaced, which is why it is here rather than there. */
-@keyframes nsDropIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* ── Read-only notice ────────────────────────────────────────────── */
+
+.ns-readonly-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.08));
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 /* ── Formatting toolbar ──────────────────────────────────────────── */
@@ -141,18 +133,6 @@
 .ns-format-bar--locked {
   opacity: 0.4;
   pointer-events: none;
-}
-
-.ns-readonly-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-subtle, rgba(127, 127, 127, 0.08));
-  color: var(--text-muted);
-  font-size: 11px;
-  flex-shrink: 0;
 }
 
 .ns-fmt-group {
@@ -199,21 +179,6 @@
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }
 
-.ns-fmt-btn--disabled,
-.ns-fmt-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.ns-heading-wrap {
-  position: relative;
-}
-
-.ns-toolbar-wrap {
-  position: relative;
-}
-
 .ns-fmt-btn--dropdown {
   width: auto;
   padding: 0 7px;
@@ -234,104 +199,61 @@
   opacity: 1;
 }
 
-.ns-heading-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 210;
-  min-width: 132px;
-  padding: 4px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* ── Popover ─────────────────────────────────────────────────────── */
+
+/* One anchored panel for everything the toolbar opens. `--menu` is a column
+   of rows; `--panel` is a card that lays itself out. The specific pickers
+   below only set width and internals. */
+
+@keyframes nsDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.ns-heading-dropdown-item {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: 6px;
-  padding: 5px 8px;
+.ns-popover-wrap {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 600;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 
-.ns-heading-dropdown-item > svg {
-  flex-shrink: 0;
-}
-
-.ns-heading-size-text {
-  line-height: 1.1;
-}
-
-.ns-heading-size-text--h1 {
-  font-size: 13.5px;
-  font-weight: 700;
-}
-
-.ns-heading-size-text--h2 {
-  font-size: 12.5px;
-  font-weight: 650;
-}
-
-.ns-heading-size-text--h3 {
-  font-size: 11.75px;
-  font-weight: 600;
-}
-
-.ns-heading-size-text--h4 {
-  font-size: 11.25px;
-  font-weight: 600;
-}
-
-.ns-heading-size-text--h5 {
-  font-size: 10.75px;
-  font-weight: 550;
-}
-
-.ns-heading-dropdown-item:hover {
-  background: var(--accent-dim);
-  color: var(--text);
-}
-
-.ns-heading-dropdown-item--active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
-.ns-toolbar-dropdown {
+.ns-popover {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
-  z-index: 210;
-  min-width: 150px;
-  padding: 4px;
-  border-radius: 8px;
+  z-index: 350;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  animation: nsDropIn 0.14s ease-out;
 }
 
-.ns-toolbar-dropdown--right {
-  left: auto;
+.ns-popover--left {
+  left: 0;
+}
+
+.ns-popover--right {
   right: 0;
 }
 
-.ns-toolbar-dropdown-item {
+.ns-popover--menu {
+  min-width: 150px;
+  padding: 4px;
+  border-radius: 8px;
+  gap: 2px;
+}
+
+.ns-popover--panel {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ns-popover-item {
   width: 100%;
   border: none;
   background: transparent;
@@ -346,49 +268,182 @@
   font-family: inherit;
   text-align: left;
   cursor: pointer;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 
-.ns-toolbar-dropdown-item > svg {
+.ns-popover-item > svg {
   flex-shrink: 0;
 }
 
-.ns-toolbar-dropdown-item:hover {
+.ns-popover-item:hover {
   background: var(--accent-dim);
   color: var(--text);
 }
 
-.ns-toolbar-dropdown-item--active {
+.ns-popover-item--active {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.ns-toolbar-dropdown-sep {
+.ns-popover-sep {
   height: 1px;
   background: var(--border);
   margin: 2px 4px;
 }
 
-/* ── Embed picker ────────────────────────────────────────────────── */
-
-.ns-embed-wrap {
-  position: relative;
+/* Heading rows preview their size. */
+.ns-heading-size-text {
+  line-height: 1.1;
+}
+.ns-heading-size-text--h1 {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.ns-heading-size-text--h2 {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.ns-heading-size-text--h3 {
+  font-size: 11.75px;
+  font-weight: 600;
 }
 
+/* Callout-tone rows */
+.ns-callout-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  flex: none;
+  border: 1px solid var(--border);
+}
+.ns-callout-swatch--info {
+  background: #3b82f6;
+}
+.ns-callout-swatch--success {
+  background: #46a758;
+}
+.ns-callout-swatch--warning {
+  background: #d97706;
+}
+.ns-callout-swatch--danger {
+  background: #e5484d;
+}
+.ns-callout-swatch--neutral {
+  background: var(--text-muted);
+}
+
+/* ── Color picker ────────────────────────────────────────────────── */
+
+.ns-color-picker {
+  padding: 6px;
+}
+
+.ns-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.ns-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease;
+}
+
+.ns-color-swatch:hover {
+  transform: scale(1.12);
+}
+
+/* The "no color" cell */
+.ns-color-swatch--none {
+  background: transparent;
+  border-style: dashed;
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+/* ── Text inputs inside pickers ──────────────────────────────────── */
+
+.ns-picker-input {
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11.5px;
+  font-family: inherit;
+  outline: none;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.ns-picker-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.ns-picker-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── Link picker ─────────────────────────────────────────────────── */
+
+.ns-link-picker {
+  width: 340px;
+  padding: 8px;
+  gap: 6px;
+}
+
+.ns-link-picker-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ns-link-picker-row .ns-picker-input {
+  flex: 1;
+}
+
+.ns-link-insert-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.ns-link-insert-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ns-link-insert-btn:not(:disabled):hover {
+  opacity: 0.88;
+}
+
+/* ── Embed picker ────────────────────────────────────────────────── */
+
 .ns-embed-picker {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 350;
   width: 300px;
   max-height: 320px;
-  display: flex;
-  flex-direction: column;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  animation: nsDropIn 0.14s ease-out;
 }
 
 .ns-embed-picker-tabs {
@@ -429,24 +484,6 @@
 
 .ns-embed-search {
   margin: 6px 8px 4px;
-  padding: 6px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  font-size: 11.5px;
-  font-family: inherit;
-  outline: none;
-  flex-shrink: 0;
-}
-
-.ns-embed-search:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
-}
-
-.ns-embed-search::placeholder {
-  color: var(--text-muted);
 }
 
 .ns-embed-list {
@@ -518,10 +555,6 @@
   opacity: 0.8;
 }
 
-.ns-embed-item-group--system {
-  gap: 5px;
-}
-
 .ns-embed-item-group--pinned {
   background: var(--accent-dim);
   color: var(--accent);
@@ -540,46 +573,45 @@
   font-style: italic;
 }
 
-/* ── Link picker ─────────────────────────────────────────────────── */
+/* ── Export ──────────────────────────────────────────────────────── */
 
-.ns-link-picker {
-  width: 340px;
-  max-height: none;
-  padding: 8px;
+.ns-export-menu {
+  min-width: 190px;
+  border-radius: 10px;
 }
 
-.ns-link-picker-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.ns-link-input {
-  flex: 1;
-  margin: 0;
-}
-
-.ns-link-insert-btn {
-  flex-shrink: 0;
-  padding: 6px 12px;
+.ns-export-menu .ns-popover-item {
+  padding: 7px 11px;
   border-radius: 7px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
   font-size: 11.5px;
+}
+
+.ns-export-menu .ns-popover-item svg {
+  opacity: 0.8;
+}
+
+.ns-export-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Brief confirmation under the Export button. */
+.ns-export-toast {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 5px 11px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  font-size: 11px;
   font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: opacity 0.12s ease;
-}
-
-.ns-link-insert-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.ns-link-insert-btn:not(:disabled):hover {
-  opacity: 0.88;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  animation: nsDropIn 0.15s ease-out;
+  z-index: 250;
 }
 
 /* ── Editor content area ─────────────────────────────────────────── */
@@ -594,7 +626,8 @@
 
 /* Editor surface and embed styles live in editor-engine/markdown.css. */
 
-/* Footer */
+/* ── Footer ──────────────────────────────────────────────────────── */
+
 .ns-editor-footer {
   display: flex;
   align-items: center;
@@ -609,150 +642,5 @@
   font-size: 10.5px;
   color: var(--text-muted);
   letter-spacing: 0.2px;
-}
-
-.ns-editor-footer-stats {
   font-variant-numeric: tabular-nums;
-}
-
-.ns-color-picker {
-  padding: 6px;
-  width: auto;
-  min-width: 0;
-}
-.ns-color-section-label {
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 4px 2px 2px;
-}
-.ns-color-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
-}
-.ns-color-swatch {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.1s ease;
-}
-.ns-color-swatch:hover {
-  transform: scale(1.12);
-}
-.ns-color-swatch-none {
-  font-size: 14px;
-  color: var(--text-muted);
-  line-height: 1;
-}
-
-/* Callout-tone dropdown swatches */
-.ns-callout-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 4px;
-  flex: none;
-  border: 1px solid var(--border);
-}
-.ns-callout-swatch--info {
-  background: #3b82f6;
-}
-.ns-callout-swatch--success {
-  background: #46a758;
-}
-.ns-callout-swatch--warning {
-  background: #d97706;
-}
-.ns-callout-swatch--danger {
-  background: #e5484d;
-}
-.ns-callout-swatch--neutral {
-  background: var(--text-muted);
-}
-
-/* ── Export menu ─────────────────────────────────────────────────── */
-
-.ns-export-wrap {
-  position: relative;
-}
-
-.ns-export-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 220;
-  min-width: 190px;
-  padding: 4px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: nsDropIn 0.12s ease-out;
-}
-
-.ns-export-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 11px;
-  border-radius: 7px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 600;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background 0.1s ease,
-    color 0.1s ease;
-}
-
-.ns-export-item:hover {
-  background: var(--accent-dim);
-  color: var(--text);
-}
-
-.ns-export-item svg {
-  flex-shrink: 0;
-  opacity: 0.8;
-}
-
-.ns-export-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 2px 4px;
-}
-
-/* Success toast that appears briefly at the bottom of the editor header */
-.ns-export-toast {
-  position: absolute;
-  bottom: -32px;
-  right: 0;
-  padding: 5px 11px;
-  border-radius: 7px;
-  background: var(--surface);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-  box-shadow: var(--shadow);
-  pointer-events: none;
-  animation: nsDropIn 0.15s ease-out;
-  z-index: 250;
 }

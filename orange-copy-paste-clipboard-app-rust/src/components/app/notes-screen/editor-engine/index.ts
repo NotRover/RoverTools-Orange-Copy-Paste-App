@@ -9,7 +9,11 @@ export type {
   EditorContent,
 } from "./types";
 
-export { extractPlainText, noteToMarkdown } from "./content-codec";
+export {
+  extractPlainText,
+  hasRenderableContent,
+  noteToMarkdown,
+} from "./content-codec";
 
 export { default as NotionEditor } from "./NotionEditor";
 export type {
