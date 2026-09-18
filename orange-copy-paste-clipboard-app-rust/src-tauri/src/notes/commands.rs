@@ -64,6 +64,54 @@ pub fn save_note_file(
     Ok(filename)
 }
 
+/// Open an attachment with its default app, or reveal it in its folder.
+/// `sub` names the store (`images` or `files`) and `filename` a bare name
+/// inside it; anything with a path separator is refused so a note cannot
+/// point this at an arbitrary file.
+#[tauri::command]
+pub fn open_note_attachment(
+    app: tauri::AppHandle,
+    sub: String,
+    filename: String,
+    reveal: bool,
+) -> Result<(), String> {
+    if sub != "images" && sub != "files" {
+        return Err("unknown attachment store".into());
+    }
+    if filename.is_empty()
+        || filename.contains(['/', '\\'])
+        || filename == "."
+        || filename == ".."
+    {
+        return Err("invalid attachment name".into());
+    }
+    let path = note_attachments_dir(&app, &sub)?.join(&filename);
+    if !path.is_file() {
+        return Err("attachment is missing".into());
+    }
+    if reveal {
+        reveal_in_folder(&path)
+    } else {
+        open::that_detached(&path).map_err(|e| e.to_string())
+    }
+}
+
+fn reveal_in_folder(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let dir = path.parent().ok_or("attachment has no folder")?;
+        open::that_detached(dir).map_err(|e| e.to_string())
+    }
+}
+
 /// Returns the absolute paths of the note-attachment directories so the
 /// frontend can build `tauri-asset:` URLs for files referenced in markdown
 /// via the `note-attachment://` and `note-file://` schemes.

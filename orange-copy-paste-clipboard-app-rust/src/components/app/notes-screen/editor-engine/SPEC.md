@@ -62,10 +62,36 @@ backgrounds so notes written before the trim render unchanged.
 
 ## Custom Tiptap nodes
 
-- `extensions/ClipEmbed.ts` - inline atom for clipboard-entry chips.
-  Renders via React node view; entries come from `embed-context.tsx`.
-- `extensions/GroupRef.tsx` - inline atom for group-name chips.
 - `extensions/Callout.ts` - block container with a `tone` attribute.
+- `extensions/ImageView.tsx` - the stock inline Image plus a `width` attribute
+  (percent of the column) and a node view with selection-only controls.
+
+### Attachments
+
+A reference to a clipboard entry or a group is a **chip** (compact) or a
+**card** (with its content). Both are inline: they flow in the text, sit
+next to each other, and are selected by click and drag like an image. No open/closed state is stored; "Show all" in a card
+is local React state. Entries come from `embed-context.tsx`.
+
+| node        | form         | file                        |
+| ----------- | ------------ | --------------------------- |
+| `clipEmbed` | inline chip  | `extensions/ClipEmbed.tsx`  |
+| `groupRef`  | inline chip  | `extensions/GroupRef.tsx`   |
+| `clipCard`  | inline card  | `extensions/ClipCard.tsx`   |
+| `groupCard` | inline card  | `extensions/GroupCard.tsx`  |
+| `fileCard`  | compact card | `extensions/FileCard.tsx`   |
+
+All of them render through `extensions/AttachmentCard.tsx`: one header (kind
+tile, title, meta, hover-only actions with Remove last) and a body that is the
+entry text, the group's newest rows, or nothing. Chips show the same card as
+a hover preview via `extensions/HoverCard.tsx`, in a body portal. Colours come
+from the `.ee-kind--*` classes in `markdown.css`; a chip, a tile and a row of
+the same kind share them. The Card / Chip choice is a switch in the toolbar's
+embed picker, remembered for the session.
+
+`fileCard` holds `href` (`note-file://...`), `name` and `size`. Open and Show
+in folder go through the Rust `open_note_attachment` command, which only
+accepts a bare filename inside the attachment stores.
 
 `CodeBlockLowlight` comes from the official Tiptap extension. Tiptap v3's
 StarterKit already bundles Link and Underline; they are switched off there and
@@ -83,10 +109,17 @@ shows is a regression.
 
 1. `note.content` is a string holding Tiptap JSON. Empty / unparseable
    strings render as an empty doc.
-2. Embed nodes (`clipEmbed`, `groupRef`) survive every round-trip and degrade
-   to "Missing entry" / blank chip when the referenced entry is gone.
+2. Attachment nodes survive every round-trip. A clip whose entry is gone
+   renders as a dashed "Removed from clipboard" chip or card that still offers
+   Remove.
 3. Images are inline nodes. `parseStoredContent` wraps a block-level image from
    an older note in a paragraph, so both surfaces always see a valid doc.
+3a. Cards are inline atoms, so `parseStoredContent` wraps any card sitting at
+   block level (older notes, or JSON a block-era build wrote) in a paragraph,
+   the same way it wraps a block image. It also lifts what older notes stored:
+   a chip with `expanded: true` becomes the matching inline card, in place, and
+   a `note-file://` link becomes an inline `fileCard`. Stray `expanded` attrs
+   are dropped. Idempotent.
 4. Image and link `src`/`href` keep their `note-attachment://` /
    `note-file://` schemes in the persisted JSON; resolution to displayable
    asset URLs happens at DOM render time only.
@@ -100,8 +133,13 @@ From `orange-copy-paste-clipboard-app-rust/`:
 1. `bun run build`
 2. Manual smoke checks:
    - Toolbar: bold/italic/underline/strike/code, headings 1-3, quote, callout
-     (each tone), lists, task list, code block, table, link, image, clip
-     embed, group embed, alignment, color, highlight.
+     (each tone), lists, task list, code block, table, link, image, clip and
+     group as chip and as card, attach document, alignment, color, highlight.
+   - Chip hover shows the card; it closes on leave, keystroke and scroll.
+   - Card actions appear on hover; Copy turns into a check; Remove deletes.
+   - Selected image shows Open / Remove and the S M L Full strip.
+   - A note saved before this change opens with its expanded chips as cards
+     and its file links as file cards.
    - Opening one popover closes any other; outside click and Escape close it.
    - Closing an untitled note that holds only an image keeps the note.
    - Cards in the list render previews that match the editor.

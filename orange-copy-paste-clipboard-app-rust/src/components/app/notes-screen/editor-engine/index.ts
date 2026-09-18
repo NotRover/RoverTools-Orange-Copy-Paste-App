@@ -7,6 +7,7 @@ export type {
   AlignValue,
   CalloutTone,
   EditorContent,
+  EmbedForm,
 } from "./types";
 
 export {

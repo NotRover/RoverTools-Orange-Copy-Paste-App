@@ -66,6 +66,7 @@ import {
   type AlignValue,
   type CalloutTone,
   type EditorStats,
+  type EmbedForm,
   imageAttachmentUrl,
   fileAttachmentUrl,
   noteToMarkdown,
@@ -156,6 +157,13 @@ type MenuId =
   | "align"
   | "link"
   | "embed";
+
+let lastEmbedForm: EmbedForm = "card";
+
+const EMBED_FORMS: { value: EmbedForm; label: string; hint: string }[] = [
+  { value: "card", label: "Card", hint: "Own row, shows the content" },
+  { value: "chip", label: "Chip", hint: "In the sentence, preview on hover" },
+];
 
 interface NoteEditorProps {
   note: Note;
@@ -255,6 +263,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
     useState<HeadingLevel>(1);
   const [embedSearch, setEmbedSearch] = useState("");
   const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
+  // Chip or card. Remembered for the session, not per note.
+  const [embedForm, setEmbedFormState] = useState<EmbedForm>(() => lastEmbedForm);
+  const setEmbedForm = useCallback((form: EmbedForm) => {
+    lastEmbedForm = form;
+    setEmbedFormState(form);
+  }, []);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkText, setLinkText] = useState("");
   const [exportToast, setExportToast] = useState<string | null>(null);
@@ -477,18 +491,18 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const insertClipEmbed = useCallback(
     (id: string) => {
-      editorRef.current?.insertClipEmbed(id);
+      editorRef.current?.insertClipEmbed(id, embedForm);
       closeMenu();
     },
-    [closeMenu],
+    [closeMenu, embedForm],
   );
 
   const insertGroupEmbed = useCallback(
     (name: string) => {
-      editorRef.current?.insertGroupEmbed(name);
+      editorRef.current?.insertGroupEmbed(name, embedForm);
       closeMenu();
     },
-    [closeMenu],
+    [closeMenu, embedForm],
   );
 
   const insertLink = useCallback(
@@ -549,7 +563,12 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           bytes,
           name: file.name,
         });
-        editorRef.current?.insertLink(fileAttachmentUrl(filename), file.name);
+        editorRef.current?.applyCommand({
+          kind: "fileCard",
+          href: fileAttachmentUrl(filename),
+          name: file.name,
+          size: file.size,
+        });
       } catch (err) {
         console.error("[notes] document upload failed", err);
       }
@@ -1117,15 +1136,33 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   Groups
                 </button>
               </div>
-              <input
-                className="ns-picker-input ns-embed-search"
-                placeholder={
-                  embedTab === "entries" ? "Search entries..." : "Search groups..."
-                }
-                value={embedSearch}
-                onChange={(e) => setEmbedSearch(e.target.value)}
-                autoFocus
-              />
+              <div className="ns-embed-controls">
+                <input
+                  className="ns-picker-input ns-embed-search"
+                  placeholder={
+                    embedTab === "entries" ? "Search entries..." : "Search groups..."
+                  }
+                  value={embedSearch}
+                  onChange={(e) => setEmbedSearch(e.target.value)}
+                  autoFocus
+                />
+                <div className="ns-embed-form" role="radiogroup" aria-label="Insert as">
+                  {EMBED_FORMS.map((f) => (
+                    <button
+                      key={f.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={embedForm === f.value}
+                      className={`ns-embed-form-btn${embedForm === f.value ? " ns-embed-form-btn--on" : ""}`}
+                      onClick={() => setEmbedForm(f.value)}
+                      data-tooltip={f.hint}
+                      data-tooltip-pos="below"
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="ns-embed-list">
                 {embedTab === "entries" ? (
                   filteredEntries.length === 0 ? (
