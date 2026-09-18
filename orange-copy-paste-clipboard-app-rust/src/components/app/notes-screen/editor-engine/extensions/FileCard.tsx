@@ -1,5 +1,5 @@
 // ── Tiptap node — File card ─────────────────────────────────────────────
-// Block atom for a document attached to the note: a compact card with the
+// Inline atom for a document attached to the note: a compact card with the
 // filename, kind and size, and Open / Show in folder actions. Replaces the
 // bare `note-file://` link older notes used; the codec lifts those into
 // this node on parse.
@@ -60,7 +60,10 @@ export const FileCard = Node.create({
   inline: true,
   atom: true,
   selectable: true,
-  draggable: true,
+  // Not draggable: a draggable node turns a press-and-drag that starts on a
+  // card into a native drag, so a range could never begin on one. ProseMirror
+  // still drags a card that is already selected, so click-then-drag moves it.
+  draggable: false,
 
   addAttributes() {
     return {
