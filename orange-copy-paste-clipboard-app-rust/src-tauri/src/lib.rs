@@ -830,6 +830,7 @@ pub fn run() {
             crate::notes::commands::rename_group_in_notes,
             crate::notes::commands::save_note_image,
             crate::notes::commands::save_note_file,
+            crate::notes::commands::open_note_attachment,
             crate::notes::commands::get_note_attachments_dirs,
             crate::notes::commands::export_note_text,
             crate::notifications::commands::notifications_list,

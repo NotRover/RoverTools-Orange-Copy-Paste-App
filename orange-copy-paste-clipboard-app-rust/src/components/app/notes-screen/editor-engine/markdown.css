@@ -7,7 +7,8 @@
    something the editor also shows - that is how the two drifted apart. */
 
 .ee-shell,
-.ee-preview {
+.ee-preview,
+.ee-hovercard {
   --ee-editor-font:
     "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
     "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -78,17 +79,10 @@
   padding: var(--ee-editor-pad);
 }
 
-/* Read-only: checkboxes and chips look the same but do nothing. */
+/* Read-only: checkboxes look the same but do nothing. Cards render compact
+   with no actions, so nothing else needs switching off. */
 .ee-preview input[type="checkbox"] {
   pointer-events: none;
-}
-.ee-preview .ee-clip-embed-inner,
-.ee-preview .ee-group-chip-inner {
-  cursor: default;
-}
-.ee-preview .ee-clip-embed-inner::after,
-.ee-preview .ee-group-chip-inner::after {
-  display: none;
 }
 
 /* ── Blocks ─────────────────────────────────────────────────────────── */
@@ -300,19 +294,8 @@
   margin: 1em 0;
 }
 
-.ee-rich img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-  vertical-align: middle;
-}
-
-/* A clicked image is a node selection; Tiptap's injected outline is a
-   light blue that fights the theme. */
-.ee-rich img.ProseMirror-selectednode {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
+/* Images render through the ee-image wrapper (extensions/ImageView.tsx); see
+   the Attachments section below. */
 
 .ee-rich ::selection {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
@@ -408,161 +391,347 @@
   color: #ef4444;
 }
 
-/* ── Clip embed chip ────────────────────────────────────────────────── */
+/* ── Attachments ────────────────────────────────────────────────────── */
+/* One system for everything a note holds besides text. A reference is a
+   chip in a sentence or a card on its own row; both take their colour from
+   the kind classes below, so a chip, a card tile and a list row of the same
+   kind always match. Values follow the clipboard screen's entry types. */
 
-.ee-clip-embed {
-  display: inline-flex;
-  position: relative;
+.ee-kind--text     { --k-bg: var(--accent-dim);          --k-fg: var(--accent); }
+.ee-kind--url      { --k-bg: rgba(16, 185, 129, 0.12);   --k-fg: #10b981; }
+.ee-kind--html     { --k-bg: rgba(168, 85, 247, 0.12);   --k-fg: #a855f7; }
+.ee-kind--image    { --k-bg: rgba(59, 130, 246, 0.12);   --k-fg: #3b82f6; }
+.ee-kind--video    { --k-bg: rgba(239, 68, 68, 0.12);    --k-fg: #ef4444; }
+.ee-kind--file     { --k-bg: rgba(139, 92, 246, 0.12);   --k-fg: #8b5cf6; }
+.ee-kind--document { --k-bg: rgba(249, 115, 22, 0.12);   --k-fg: #f97316; }
+.ee-kind--folder   { --k-bg: rgba(14, 165, 233, 0.12);   --k-fg: #0ea5e9; }
+.ee-kind--group    { --k-bg: rgba(14, 165, 233, 0.12);   --k-fg: #0ea5e9; }
+.ee-kind--pinned   { --k-bg: var(--accent-dim);          --k-fg: var(--accent); }
+.ee-kind--saved    { --k-bg: rgba(34, 197, 94, 0.12);    --k-fg: #22c55e; }
+.ee-kind--missing  { --k-bg: rgba(127, 127, 127, 0.10);  --k-fg: var(--text-muted); }
+[data-theme="light"] .ee-kind--url      { --k-fg: #059669; }
+[data-theme="light"] .ee-kind--html     { --k-fg: #7c3aed; }
+[data-theme="light"] .ee-kind--image    { --k-fg: #2563eb; }
+[data-theme="light"] .ee-kind--video    { --k-fg: #dc2626; }
+[data-theme="light"] .ee-kind--file     { --k-fg: #7c3aed; }
+[data-theme="light"] .ee-kind--document { --k-fg: #ea6a0a; }
+[data-theme="light"] .ee-kind--folder,
+[data-theme="light"] .ee-kind--group    { --k-fg: #0284c7; }
+[data-theme="light"] .ee-kind--saved    { --k-fg: #16a34a; }
+
+/* Chip: 22px, kind colour as tint and text, never grows. */
+.ee-chip-wrap {
+  display: inline;
   vertical-align: middle;
-  margin: 0 2px;
 }
-
-.ee-clip-embed-inner {
-  display: flex;
+.ee-chip {
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 5px 3px 7px;
+  height: 22px;
+  margin: 0 2px;
+  padding: 0 7px 0 6px;
   border-radius: 7px;
-  font-size: 0.82em;
+  font-size: 0.84em;
   font-weight: 600;
-  color: var(--accent);
-  line-height: 1.4;
+  line-height: 1;
+  vertical-align: middle;
   white-space: nowrap;
-  cursor: pointer;
-  transition:
-    filter 0.12s,
-    box-shadow 0.12s;
+  max-width: 260px;
+  background: var(--k-bg);
+  color: var(--k-fg);
+  cursor: default;
+  transition: box-shadow 0.12s;
 }
-.ee-clip-embed:hover .ee-clip-embed-inner {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-  filter: brightness(1.08);
+.ee-chip svg {
+  flex: none;
 }
-/* Open, the chip becomes the header of a full-width card and the line breaks
-   around it, so the caret lands above or below rather than under it. */
-.ee-clip-embed--open,
-.ee-group-chip--open {
+.ee-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ee-chip-count {
+  opacity: 0.75;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ee-chip.ee-kind--missing {
+  background: transparent;
+  border: 1px dashed var(--border-light);
+  color: var(--text-muted);
+}
+.ee-rich.ProseMirror .ee-chip:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--k-fg) 30%, transparent);
+}
+/* Selection feedback, one rule for a single pick and a multi-select drag.
+   `ee-selected` is set by the SelectionHighlight plugin on every atom inside
+   the selection; the native selectednode class is kept as a fallback. */
+.ee-selected .ee-chip,
+.ProseMirror-selectednode .ee-chip {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+/* Card: an inline block, so cards sit next to text and each other and wrap
+   like big chips, and a click selects one. Sized to its content, capped well
+   short of the column, so a short clip is a short card. */
+/* The wrapper carries the width cap, not the card. An inline-flex box sizes
+   to its content's max-content width (a group card's longest untruncated row),
+   so a cap on the card alone left the wrapper wider than the card: an
+   invisible gap beside every card, with the caret parked at its far end. */
+.ee-embed {
+  display: inline-flex;
+  vertical-align: top;
+  max-width: min(100%, 460px);
+  margin: 2px 3px;
+}
+.ee-card {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  margin: 6px 0;
+  text-align: left;
+  width: fit-content;
+  min-width: min(240px, 100%);
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--ee-editor-font);
+  line-height: 1.3;
 }
-.ee-clip-embed--open .ee-clip-embed-inner,
-.ee-group-chip--open .ee-group-chip-inner {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
+.ee-card--missing {
+  border-style: dashed;
 }
-.ee-clip-embed--missing .ee-clip-embed-inner {
-  background: rgba(220, 80, 80, 0.08);
-  color: rgba(220, 80, 80, 0.85);
+.ee-selected .ee-card,
+.ProseMirror-selectednode .ee-card {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-dim);
 }
-
-/* Type-specific chip colors, mirroring entryTypes.css */
-.ee-clip-embed-inner--text {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-.ee-clip-embed-inner--url {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-}
-.ee-clip-embed-inner--html {
-  background: rgba(168, 85, 247, 0.12);
-  color: #a855f7;
-}
-.ee-clip-embed-inner--image {
-  background: rgba(59, 130, 246, 0.12);
-  color: #3b82f6;
-}
-.ee-clip-embed-inner--video {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-}
-.ee-clip-embed-inner--file {
-  background: rgba(139, 92, 246, 0.12);
-  color: #8b5cf6;
-}
-.ee-clip-embed-inner--document {
-  background: rgba(249, 115, 22, 0.12);
-  color: #f97316;
-}
-.ee-clip-embed-inner--folder {
-  background: rgba(14, 165, 233, 0.12);
-  color: #0ea5e9;
-}
-[data-theme="light"] .ee-clip-embed-inner--url {
-  color: #059669;
-}
-[data-theme="light"] .ee-clip-embed-inner--html {
-  color: #7c3aed;
-}
-[data-theme="light"] .ee-clip-embed-inner--image {
-  color: #2563eb;
-}
-[data-theme="light"] .ee-clip-embed-inner--video {
-  color: #dc2626;
-}
-[data-theme="light"] .ee-clip-embed-inner--file {
-  color: #7c3aed;
-}
-[data-theme="light"] .ee-clip-embed-inner--document {
-  color: #ea6a0a;
-}
-[data-theme="light"] .ee-clip-embed-inner--folder {
-  color: #0284c7;
+/* Actions stay visible while selected, like hover. */
+.ee-selected .ee-card-acts {
+  opacity: 1;
 }
 
-.ee-clip-embed-icon {
+.ee-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 6px 0 10px;
+  min-width: 0;
+}
+.ee-card:not(.ee-card--compact) .ee-card-head {
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+}
+.ee-card-tile {
   display: inline-flex;
   align-items: center;
-  flex-shrink: 0;
-  color: currentColor;
-  opacity: 0.85;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  flex: none;
+  background: var(--k-bg);
+  color: var(--k-fg);
 }
-.ee-clip-embed-label {
-  max-width: 220px;
+.ee-card-tile--sm {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+/* Title and meta read as one line ("Pinned 4 entries"); the title shrinks
+   and truncates first. Actions sit at the right edge, and they stay in the
+   layout while hidden so hovering shifts nothing. */
+.ee-card-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12.75px;
+  font-weight: 650;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: 0.01em;
+}
+.ee-card--missing .ee-card-title {
+  color: var(--text-muted);
+}
+.ee-card-meta {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ee-card-meta--done {
+  color: #22c55e;
+  display: inline-flex;
 }
 
-/* Three-dot hint: the chip expands; fades once open. */
-.ee-clip-embed-inner::after,
-.ee-group-chip-inner::after {
-  content: "···";
-  margin-left: 2px;
-  font-size: 1em;
-  font-weight: 700;
-  letter-spacing: 1px;
-  opacity: 0.7;
-  flex-shrink: 0;
-  line-height: 1;
-  transition: opacity 0.14s;
-}
-.ee-clip-embed--open .ee-clip-embed-inner::after,
-.ee-group-chip--open .ee-group-chip-inner::after {
+/* Actions fade in on hover or selection; a missing card shows them always,
+   because Remove is the only thing left to do. */
+.ee-card-acts {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
   opacity: 0;
+  transition: opacity 0.12s;
+}
+.ee-card:hover .ee-card-acts,
+.ee-card--missing .ee-card-acts,
+.ProseMirror-selectednode .ee-card-acts,
+.ee-hovercard .ee-card-acts {
+  opacity: 1;
+}
+.ee-card-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+}
+.ee-card-act:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.ee-card-act--done,
+.ee-card-act--done:hover {
+  color: #22c55e;
 }
 
-/* ── Expand panel (shared by clip and group chips) ──────────────────── */
-
-.ee-embed-panel,
-.ee-group-panel {
+.ee-card-body {
   display: flex;
   flex-direction: column;
-  width: 100%;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 12.75px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.ee-card-text {
+  font-family: var(--ee-editor-mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ee-card-more {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ee-card-more:hover {
+  color: var(--accent);
+}
+.ee-card-img {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.ee-card-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ee-card-path {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
   border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-  background: var(--surface);
+  border-radius: 5px;
+  font-family: var(--ee-editor-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-all;
+  line-height: 1.4;
+}
+.ee-card-path svg {
+  flex: none;
+  opacity: 0.6;
+}
+.ee-card-empty {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* Group rows: 30px each, click copies. The body tightens around them. */
+.ee-card-body:has(> .ee-card-rows) {
+  padding: 4px 6px 6px;
+  gap: 2px;
+}
+.ee-card-body:has(> .ee-card-rows) .ee-card-more {
+  padding: 0 6px 2px;
+}
+.ee-card-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ee-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.ee-card-row:disabled {
+  cursor: default;
+}
+.ee-card-row:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.ee-card-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover card: the card with a shadow, in a body portal. */
+.ee-hovercard {
+  position: fixed;
+  z-index: 400;
+  animation: eeEmbedSlide 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ee-hovercard .ee-card {
   box-shadow:
     0 6px 20px rgba(0, 0, 0, 0.16),
     0 1px 4px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-  z-index: 300;
-  animation: eeEmbedSlide 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
-
+.ee-hovercard .ee-card-body {
+  max-height: 240px;
+  overflow: hidden auto;
+}
 @keyframes eeEmbedSlide {
   from {
     opacity: 0;
@@ -574,202 +743,72 @@
   }
 }
 
-.ee-embed-panel-meta,
-.ee-group-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px 4px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-.ee-group-panel-header {
-  color: var(--text-muted);
-}
-.ee-embed-panel-type {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--accent);
-}
-.ee-embed-panel-type svg {
-  opacity: 0.85;
-}
-.ee-embed-panel-time,
-.ee-group-panel-count {
-  margin-left: auto;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.ee-embed-panel-body {
-  max-height: 220px;
-  overflow: hidden auto;
-  padding: 9px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ee-embed-panel-img {
-  width: 100%;
-  max-height: 180px;
-  object-fit: contain;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--surface) 60%, var(--bg));
-  display: block;
-}
-.ee-embed-panel-img-caption {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  text-align: center;
-  margin-top: 2px;
-}
-.ee-embed-panel-text {
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.ee-embed-panel-files {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.ee-embed-panel-path {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.07));
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  font-size: 11px;
-  font-family: var(--ee-editor-mono, monospace);
-  color: var(--text-secondary);
-  word-break: break-all;
-  line-height: 1.4;
-}
-.ee-embed-panel-path svg {
-  flex-shrink: 0;
-  opacity: 0.6;
-}
-
-/* ── Group chip ─────────────────────────────────────────────────────── */
-
-.ee-group-chip {
-  display: inline-flex;
+/* Image: no chrome at rest. Selected, the card's rules apply: accent
+   outline, 24px actions, Remove last, plus a size strip. */
+.ee-image {
+  display: inline-block;
   position: relative;
+  max-width: 100%;
   vertical-align: middle;
-  margin: 0 2px;
+  line-height: 0;
 }
-.ee-group-chip-inner {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 5px 3px 7px;
-  border-radius: var(--radius-xs, 7px);
-  font-size: 0.82em;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    filter 0.12s,
-    box-shadow 0.12s;
+.ee-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
 }
-.ee-group-chip:hover .ee-group-chip-inner {
-  filter: brightness(1.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+.ee-image--sized img {
+  width: 100%;
 }
-.ee-group-chip-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
+.ee-selected .ee-image img,
+.ProseMirror-selectednode .ee-image img {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-dim);
 }
-.ee-group-chip-sys-icon {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  opacity: 0.85;
+.ee-image-tools,
+.ee-image-sizes {
+  position: absolute;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  line-height: normal;
 }
-.ee-group-chip-count {
-  margin-left: auto;
-  padding-left: 4px;
-  font-size: 0.95em;
-  font-weight: 600;
-  line-height: 1;
-  flex-shrink: 0;
+.ee-image-tools {
+  top: 8px;
+  right: 8px;
 }
-
-.ee-group-panel-body {
-  max-height: 200px;
-  overflow: hidden auto;
-  padding: 4px 6px;
-  display: flex;
-  flex-direction: column;
+.ee-image-sizes {
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
   gap: 1px;
 }
-.ee-group-panel-empty {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 10px 6px;
-  font-style: italic;
-  text-align: center;
-}
-.ee-group-panel-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 6px;
-  border-radius: 6px;
-  font-size: 11px;
-  cursor: default;
-  transition: background 0.1s;
-}
-.ee-group-panel-row:hover {
-  background: var(--accent-dim);
-}
-.ee-group-panel-row-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
+.ee-image-size {
+  padding: 3px 8px;
+  border: none;
   border-radius: 5px;
-  flex-shrink: 0;
+  background: transparent;
+  font-family: var(--ee-editor-font);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ee-image-size:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.ee-image-size--on,
+.ee-image-size--on:hover {
   background: var(--accent-dim);
   color: var(--accent);
-}
-.ee-group-panel-row-icon--url    { background: rgba(16, 185, 129, 0.12); color: #10b981; }
-.ee-group-panel-row-icon--html   { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
-.ee-group-panel-row-icon--image  { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
-.ee-group-panel-row-icon--video  { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
-.ee-group-panel-row-icon--file   { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
-.ee-group-panel-row-icon--document { background: rgba(249, 115, 22, 0.12); color: #f97316; }
-.ee-group-panel-row-icon--folder { background: rgba(14, 165, 233, 0.12); color: #0ea5e9; }
-.ee-group-panel-row-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-secondary);
-  line-height: 1.35;
-}
-.ee-group-panel-more {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  padding: 2px 4px;
-  font-style: italic;
 }
 
 /* ── Callout ────────────────────────────────────────────────────────── */

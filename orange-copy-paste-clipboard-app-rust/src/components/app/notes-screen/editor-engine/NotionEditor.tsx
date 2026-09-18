@@ -45,7 +45,6 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
-import { Image } from "@tiptap/extension-image";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { createLowlight, common } from "lowlight";
 import {
@@ -55,7 +54,12 @@ import {
 } from "./attachment-url";
 import { ClipEmbed } from "./extensions/ClipEmbed";
 import { GroupRef } from "./extensions/GroupRef";
+import { ClipCard } from "./extensions/ClipCard";
+import { GroupCard } from "./extensions/GroupCard";
+import { FileCard } from "./extensions/FileCard";
+import { ResolvedImage } from "./extensions/ImageView";
 import { Callout } from "./extensions/Callout";
+import { SelectionHighlight } from "./extensions/SelectionHighlight";
 import { parseStoredContent, serializeDoc } from "./content-codec";
 import type { ClipboardEntry } from "../../../../types";
 import { EmbedContextProvider } from "./embed-context";
@@ -64,6 +68,7 @@ import type {
   ActiveState,
   BlockKind,
   AlignValue,
+  EmbedForm,
 } from "./types";
 
 const lowlight = createLowlight(common);
@@ -71,8 +76,8 @@ const lowlight = createLowlight(common);
 export interface NotionEditorHandle {
   applyCommand: (cmd: EditorCommand) => void;
   insertText: (text: string) => void;
-  insertClipEmbed: (id: string) => void;
-  insertGroupEmbed: (name: string) => void;
+  insertClipEmbed: (id: string, as: EmbedForm) => void;
+  insertGroupEmbed: (name: string, as: EmbedForm) => void;
   insertLink: (url: string, text?: string) => void;
   getContent: () => string;
   getActiveState: () => ActiveState;
@@ -126,15 +131,8 @@ class EditorBoundary extends Component<
   }
 }
 
-// ── DOM-only attachment URL resolution for images / links ────────────────
-
-const ResolvedImage = Image.extend({
-  renderHTML({ HTMLAttributes }) {
-    const attrs = { ...HTMLAttributes };
-    if (typeof attrs.src === "string") attrs.src = resolveAttachmentUrl(attrs.src);
-    return ["img", mergeAttributes(attrs)];
-  },
-});
+// ── DOM-only attachment URL resolution for links ─────────────────────────
+// Images do the same in extensions/ImageView.tsx.
 
 const ResolvedLink = Link.extend({
   renderHTML({ HTMLAttributes }) {
@@ -241,8 +239,12 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
           HTMLAttributes: { class: "ee-codeblock" },
         }),
         Callout,
+        SelectionHighlight,
         ClipEmbed,
         GroupRef,
+        ClipCard,
+        GroupCard,
+        FileCard,
         // Inline, so the caret can sit beside an image and a drag selection can
         // sweep across it. As a block atom the only way next to one was the
         // gap cursor. parseStoredContent wraps older block images in paragraphs.
@@ -405,27 +407,25 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
               c.insertContent(cmd.text).run();
               break;
             case "clipEmbed":
-              c.insertContent({ type: "clipEmbed", attrs: { id: cmd.id } }).run();
+              c.insertContent(clipNode(cmd.id, cmd.as)).run();
               break;
             case "groupEmbed":
-              c.insertContent({ type: "groupRef", attrs: { name: cmd.name } }).run();
+              c.insertContent(groupNode(cmd.name, cmd.as)).run();
+              break;
+            case "fileCard":
+              c.insertContent({
+                type: "fileCard",
+                attrs: { href: cmd.href, name: cmd.name, size: cmd.size },
+              }).run();
               break;
           }
         },
         insertText: (text) =>
           editor?.chain().focus().insertContent(text).run(),
-        insertClipEmbed: (id) =>
-          editor
-            ?.chain()
-            .focus()
-            .insertContent({ type: "clipEmbed", attrs: { id } })
-            .run(),
-        insertGroupEmbed: (name) =>
-          editor
-            ?.chain()
-            .focus()
-            .insertContent({ type: "groupRef", attrs: { name } })
-            .run(),
+        insertClipEmbed: (id, as) =>
+          editor?.chain().focus().insertContent(clipNode(id, as)).run(),
+        insertGroupEmbed: (name, as) =>
+          editor?.chain().focus().insertContent(groupNode(name, as)).run(),
         insertLink: (url, text) => {
           if (!editor) return;
           const { empty } = editor.state.selection;
@@ -597,6 +597,19 @@ NotionEditor.displayName = "NotionEditor";
 export default NotionEditor;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+// A card dropped mid-sentence splits the paragraph; ProseMirror does that on
+// its own when a block node is inserted into a textblock.
+function clipNode(id: string, as: EmbedForm) {
+  return as === "card"
+    ? { type: "clipCard", attrs: { id } }
+    : { type: "clipEmbed", attrs: { id } };
+}
+function groupNode(name: string, as: EmbedForm) {
+  return as === "card"
+    ? { type: "groupCard", attrs: { name } }
+    : { type: "groupRef", attrs: { name } };
+}
 
 function activeStateFor(editor: Editor | null): ActiveState {
   if (!editor) return { blockKind: "p" };

@@ -15,7 +15,7 @@ export function parseStoredContent(raw: string): JSONContent {
   try {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && parsed.type === "doc") {
-      return inlineImages(parsed as JSONContent);
+      return migrate(parsed as JSONContent);
     }
   } catch {
     // fall through
@@ -27,19 +27,66 @@ export function parseStoredContent(raw: string): JSONContent {
 // directly in a block container is wrapped in a paragraph. Idempotent, and
 // cheap enough to run on every parse.
 const INLINE_PARENTS = new Set(["paragraph", "heading"]);
+const LIST_ITEMS = new Set(["listItem", "taskItem"]);
+// Inline atoms that may only live inside a textblock; a stored doc that has
+// one directly under a block container gets it wrapped in a paragraph.
+const INLINE_ATOMS = new Set(["image", "clipCard", "groupCard", "fileCard"]);
+const FILE_SCHEME = "note-file://";
 
-function inlineImages(node: JSONContent): JSONContent {
+// Normalise a stored doc into what the current schema expects, in one pass.
+// Cards and images are inline, so:
+//   - a card or image sitting at block level (older notes, or the JSON a
+//     block-era build wrote) is wrapped in a paragraph;
+//   - inside a textblock, an older `expanded` chip becomes the matching inline
+//     card, a `note-file://` link becomes an inline file card, and any leftover
+//     `expanded` attr is dropped.
+// Idempotent: a current doc comes back unchanged in shape.
+function migrate(node: JSONContent): JSONContent {
   if (!Array.isArray(node.content)) return node;
-  const wrap = !INLINE_PARENTS.has(node.type ?? "");
-  return {
-    ...node,
-    content: node.content.map((child) => {
-      if (wrap && child.type === "image") {
-        return { type: "paragraph", content: [child] };
-      }
-      return inlineImages(child);
-    }),
-  };
+  if (INLINE_PARENTS.has(node.type ?? "")) {
+    return { ...node, content: node.content.map(inlineNode) };
+  }
+  const out: JSONContent[] = [];
+  for (const child of node.content) {
+    if (INLINE_ATOMS.has(child.type ?? "")) {
+      out.push({ type: "paragraph", content: [inlineNode(child)] });
+    } else {
+      out.push(migrate(child));
+    }
+  }
+  if (LIST_ITEMS.has(node.type ?? "") && out[0]?.type !== "paragraph") {
+    out.unshift({ type: "paragraph" });
+  }
+  return { ...node, content: out };
+}
+
+// Transform one inline child: lift an older reference to its card form, drop a
+// stray `expanded` attr, leave everything else alone.
+function inlineNode(inline: JSONContent): JSONContent {
+  if (inline.type === "clipEmbed" && inline.attrs?.expanded === true) {
+    return { type: "clipCard", attrs: { id: inline.attrs.id ?? "" } };
+  }
+  if (inline.type === "groupRef" && inline.attrs?.expanded === true) {
+    return { type: "groupCard", attrs: { name: inline.attrs.name ?? "" } };
+  }
+  if (inline.type === "clipEmbed" || inline.type === "groupRef") {
+    if (inline.attrs && "expanded" in inline.attrs) {
+      const { expanded: _drop, ...attrs } = inline.attrs;
+      return { ...inline, attrs };
+    }
+    return inline;
+  }
+  if (inline.type === "text") {
+    const href = (inline.marks ?? []).find((m) => m.type === "link")?.attrs?.href;
+    if (typeof href === "string" && href.startsWith(FILE_SCHEME)) {
+      const text = ((inline as { text?: string }).text ?? "").trim();
+      return {
+        type: "fileCard",
+        attrs: { href, name: text || href.slice(FILE_SCHEME.length), size: null },
+      };
+    }
+  }
+  return inline;
 }
 
 /** Serialize a Tiptap JSON doc as a stable string for persistence. */
@@ -78,6 +125,9 @@ const CONTENT_NODES = new Set([
   "horizontalRule",
   "clipEmbed",
   "groupRef",
+  "clipCard",
+  "groupCard",
+  "fileCard",
 ]);
 
 function nodeHasContent(node: JSONContent | undefined): boolean {
@@ -93,12 +143,15 @@ function walk(node: JSONContent | undefined, out: string[]): void {
   if (typeof (node as any).text === "string") {
     out.push((node as any).text);
   }
-  if (node.type === "clipEmbed") {
+  if (node.type === "clipEmbed" || node.type === "clipCard") {
     const id = (node.attrs?.id as string) ?? "";
     if (id) out.push(`[clip:${id}]`);
-  } else if (node.type === "groupRef") {
+  } else if (node.type === "groupRef" || node.type === "groupCard") {
     const name = (node.attrs?.name as string) ?? "";
     if (name) out.push(`[group:${name}]`);
+  } else if (node.type === "fileCard") {
+    const name = (node.attrs?.name as string) ?? "";
+    if (name) out.push(name);
   }
   const children = (node as any).content as JSONContent[] | undefined;
   if (Array.isArray(children)) for (const c of children) walk(c, out);
@@ -197,15 +250,25 @@ function mdNode(node: JSONContent, out: string[], indent: string): void {
       mdTable(node, out);
       out.push("");
       break;
-    case "clipEmbed": {
+    case "clipEmbed":
+    case "clipCard": {
       const id = (node.attrs?.id as string) ?? "";
       out.push(`[clip: ${id}]`);
       out.push("");
       break;
     }
-    case "groupRef": {
+    case "groupRef":
+    case "groupCard": {
       const name = (node.attrs?.name as string) ?? "";
       out.push(`[group: ${name}]`);
+      out.push("");
+      break;
+    }
+    case "fileCard": {
+      const name = (node.attrs?.name as string) ?? "";
+      const href = (node.attrs?.href as string) ?? "";
+      out.push(`[${name}](${href})`);
+      out.push("");
       break;
     }
     default:

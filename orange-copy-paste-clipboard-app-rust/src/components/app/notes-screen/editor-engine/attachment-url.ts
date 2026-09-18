@@ -59,6 +59,24 @@ export function resolveAttachmentUrl(url: string): string {
   return url;
 }
 
+/** Split an attachment URL into its store and filename; null for any other URL. */
+export function attachmentFilename(
+  url: string,
+): { sub: "images" | "files"; filename: string } | null {
+  if (url.startsWith(IMAGE_SCHEME)) {
+    return { sub: "images", filename: decodeName(url, IMAGE_SCHEME) };
+  }
+  if (url.startsWith(FILE_SCHEME)) {
+    return { sub: "files", filename: decodeName(url, FILE_SCHEME) };
+  }
+  return null;
+}
+
+/** True for a `note-file://` URL, the scheme documents attach under. */
+export function isFileAttachmentUrl(url: string): boolean {
+  return url.startsWith(FILE_SCHEME);
+}
+
 /** Build a `note-attachment://<filename>` URL for an image filename. */
 export function imageAttachmentUrl(filename: string): string {
   return IMAGE_SCHEME + filename;

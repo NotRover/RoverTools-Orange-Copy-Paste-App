@@ -7,33 +7,24 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
 import type { ClipboardEntry } from "../../../../types";
 import {
-  classifyFileEntry,
-  deriveDisplayKind,
-  fileNameFromPath,
-  filePaths,
-  groupColor,
-  truncateText,
-} from "../../../../types";
-import {
-  ImageIcon,
-  FileIcon,
-  TextLinesIcon,
-  HtmlCodeIcon,
-  VideoIcon,
-  PinIcon,
-  SaveStarIcon,
-} from "../../../icons";
-
-const SYSTEM_GROUP_META: Record<string, { label: string; bg: string; fg: string; Icon: React.FC<{ size?: number }> }> = {
-  pinned: { label: "Pinned", bg: "var(--accent-dim)", fg: "var(--accent)", Icon: PinIcon },
-  Saved: { label: "Saved", bg: "rgba(34, 197, 94, 0.12)", fg: "#22c55e", Icon: SaveStarIcon },
-};
-import { stripHtml } from "../notes-utils";
-import {
   resolveAttachmentUrl,
   subscribeAttachmentResolver,
 } from "./attachment-url";
 import { parseStoredContent } from "./content-codec";
+import {
+  AttachmentCard,
+  entryKind,
+  entryMeta,
+  entryTitle,
+  fileKindFromName,
+  fileMeta,
+  groupInfo,
+  kindLabel,
+} from "./extensions/AttachmentCard";
+import { ClipChip } from "./extensions/ClipEmbed";
+import { GroupChip } from "./extensions/GroupRef";
+import { groupMeta } from "./extensions/GroupCard";
+import { imageWrapperStyle } from "./extensions/ImageView";
 import "./markdown.css";
 
 interface Props {
@@ -148,7 +139,13 @@ function renderNode(
     case "image": {
       const src = (node.attrs?.src as string) || "";
       const alt = (node.attrs?.alt as string) || "";
-      return <img key={key} src={resolveAttachmentUrl(src)} alt={alt} />;
+      const width = (node.attrs?.width as number | null) ?? null;
+      return (
+        // Same wrapper the ImageView node view renders.
+        <span key={key} className={`ee-image${width ? " ee-image--sized" : ""}`} style={imageWrapperStyle(width)}>
+          <img src={resolveAttachmentUrl(src)} alt={alt} />
+        </span>
+      );
     }
     case "table":
       return (
@@ -168,22 +165,58 @@ function renderNode(
     }
     case "hardBreak":
       return <br key={key} />;
-    case "clipEmbed":
+    case "clipEmbed": {
+      const id = (node.attrs?.id as string) ?? "";
       return (
-        <ClipChip
-          key={key}
-          id={(node.attrs?.id as string) ?? ""}
-          entries={entries}
-        />
+        <span key={key} className="ee-chip-wrap">
+          <ClipChip entry={entries.find((e) => e.id === id)} />
+        </span>
       );
+    }
     case "groupRef":
       return (
-        <GroupChip
-          key={key}
-          name={(node.attrs?.name as string) ?? ""}
-          entries={entries}
-        />
+        <span key={key} className="ee-chip-wrap">
+          <GroupChip name={(node.attrs?.name as string) ?? ""} entries={entries} />
+        </span>
       );
+    // Cards collapse to their compact form in a preview: header, no actions.
+    case "clipCard": {
+      const id = (node.attrs?.id as string) ?? "";
+      const entry = entries.find((e) => e.id === id);
+      return (
+        <span key={key} className="ee-embed">
+          {entry ? (
+            <AttachmentCard kind={entryKind(entry)} title={entryTitle(entry)} meta={entryMeta(entry)} compact />
+          ) : (
+            <AttachmentCard kind="missing" title={entryTitle(undefined)} meta={`was ${kindLabel("text")}`} compact missing />
+          )}
+        </span>
+      );
+    }
+    case "groupCard": {
+      const info = groupInfo((node.attrs?.name as string) ?? "", entries);
+      return (
+        <span key={key} className="ee-embed">
+          <AttachmentCard
+            kind="group"
+            icon={<info.Icon size={12} />}
+            kindClassName={info.className}
+            kindStyle={info.style}
+            title={info.label}
+            meta={groupMeta(info.entries.length)}
+            compact
+          />
+        </span>
+      );
+    }
+    case "fileCard": {
+      const name = (node.attrs?.name as string) || "File";
+      return (
+        <span key={key} className="ee-embed">
+          <AttachmentCard kind={fileKindFromName(name)} title={name} meta={fileMeta(name, node.attrs?.size as number | null)} compact />
+        </span>
+      );
+    }
     case "text":
       return renderText(node, key);
     default:
@@ -252,84 +285,3 @@ function plainText(nodes: JSONContent[] | undefined): string {
   }
   return out;
 }
-
-// ── Clip chip (preview — chip only, no expansion) ────────────────────────
-
-function getLabel(id: string, entry: ClipboardEntry | undefined): string {
-  if (!entry) return id ? "Missing entry" : "Clip";
-  if (entry.type === "image") return entry.label ?? "Image";
-  if (entry.type === "file") {
-    const paths = filePaths(entry.content);
-    const kind = classifyFileEntry(entry.content);
-    return kind === "image" ? "Image file" : paths[0] ? fileNameFromPath(paths[0]) : "File";
-  }
-  const raw =
-    entry.type === "html" ? stripHtml(entry.content) : entry.content;
-  return truncateText(raw.replace(/\s+/g, " ").trim(), 38) || "Clip";
-}
-
-const ClipChip: React.FC<{ id: string; entries: ClipboardEntry[] }> = ({
-  id,
-  entries,
-}) => {
-  const entry = entries.find((e) => e.id === id);
-  const missing = !entry && !!id;
-  const label = getLabel(id, entry);
-  const kind = entry ? deriveDisplayKind(entry) : "text";
-
-  return (
-    <span className={`ee-clip-embed${missing ? " ee-clip-embed--missing" : ""}`}>
-      <span className={`ee-clip-embed-inner ee-clip-embed-inner--${kind}`}>
-        <span className="ee-clip-embed-icon">
-          <ClipIcon entry={entry} />
-        </span>
-        <span className="ee-clip-embed-label">{label}</span>
-      </span>
-    </span>
-  );
-};
-
-function ClipIcon({ entry }: { entry: ClipboardEntry | undefined }) {
-  const sz = 11;
-  if (!entry) return <TextLinesIcon size={sz} />;
-  if (entry.type === "image") return <ImageIcon size={sz} />;
-  if (entry.type === "html") return <HtmlCodeIcon size={sz} />;
-  if (entry.type === "file") {
-    const k = classifyFileEntry(entry.content);
-    if (k === "image") return <ImageIcon size={sz} />;
-    if (k === "video") return <VideoIcon size={sz} />;
-    return <FileIcon size={sz} />;
-  }
-  return <TextLinesIcon size={sz} />;
-}
-
-// ── Group chip (preview — chip only, no expansion) ───────────────────────
-
-const GroupChip: React.FC<{ name: string; entries: ClipboardEntry[] }> = ({
-  name,
-  entries,
-}) => {
-  const sysMeta = SYSTEM_GROUP_META[name];
-  const c = sysMeta ?? groupColor(name);
-  const count = name === "pinned"
-    ? entries.filter((e) => e.pinned).length
-    : name === "Saved"
-    ? entries.filter((e) => e.groups.includes("Saved")).length
-    : entries.filter((e) => e.groups.includes(name)).length;
-  const SysIcon = sysMeta?.Icon;
-  const displayName = sysMeta?.label ?? name;
-
-  return (
-    <span className={`ee-group-chip${sysMeta ? " ee-group-chip--system" : ""}`}>
-      <span className="ee-group-chip-inner" style={{ background: c.bg, color: c.fg }}>
-        {SysIcon ? (
-          <span className="ee-group-chip-sys-icon"><SysIcon size={10} /></span>
-        ) : (
-          <span className="ee-group-chip-dot" style={{ background: c.fg }} />
-        )}
-        {displayName}
-        {count > 0 && <span className="ee-group-chip-count">{count}</span>}
-      </span>
-    </span>
-  );
-};

@@ -6,6 +6,10 @@ import type { JSONContent } from "@tiptap/react";
 
 export type AlignValue = "left" | "center" | "right" | "justify";
 
+/** How a clip or group reference enters the note: a chip in the sentence or
+ *  a card on its own row. */
+export type EmbedForm = "chip" | "card";
+
 /** Command dispatched by the toolbar. The schema still accepts heading levels
  *  4-6, justified text and cell backgrounds from older notes; the toolbar just
  *  no longer offers them. */
@@ -32,8 +36,9 @@ export type EditorCommand =
   | { kind: "tableDeleteRow" }
   | { kind: "tableDeleteColumn" }
   | { kind: "insertText"; text: string }
-  | { kind: "clipEmbed"; id: string }
-  | { kind: "groupEmbed"; name: string }
+  | { kind: "clipEmbed"; id: string; as: EmbedForm }
+  | { kind: "groupEmbed"; name: string; as: EmbedForm }
+  | { kind: "fileCard"; href: string; name: string; size: number | null }
   | { kind: "align"; value: AlignValue }
   | { kind: "textColor"; value: string | null }
   | { kind: "highlight"; value: string | null };
