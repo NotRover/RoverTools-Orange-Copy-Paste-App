@@ -60,6 +60,7 @@ import { FileCard } from "./extensions/FileCard";
 import { ResolvedImage } from "./extensions/ImageView";
 import { Callout } from "./extensions/Callout";
 import { SelectionHighlight } from "./extensions/SelectionHighlight";
+import { MultiSelect } from "./extensions/MultiSelect";
 import { parseStoredContent, serializeDoc } from "./content-codec";
 import type { ClipboardEntry } from "../../../../types";
 import { EmbedContextProvider } from "./embed-context";
@@ -240,6 +241,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
         }),
         Callout,
         SelectionHighlight,
+        MultiSelect,
         ClipEmbed,
         GroupRef,
         ClipCard,

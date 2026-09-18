@@ -1,5 +1,5 @@
 // ── Tiptap node — Clip card ─────────────────────────────────────────────
-// Block atom embedding a clipboard entry as a full card: header plus the
+// Inline atom embedding a clipboard entry as a full card: header plus the
 // entry's content. The inline counterpart is the `clipEmbed` chip. Nothing
 // about the card's display state is stored; "Show all" is local.
 
@@ -56,7 +56,10 @@ export const ClipCard = Node.create({
   inline: true,
   atom: true,
   selectable: true,
-  draggable: true,
+  // Not draggable: a draggable node turns a press-and-drag that starts on a
+  // card into a native drag, so a range could never begin on one. ProseMirror
+  // still drags a card that is already selected, so click-then-drag moves it.
+  draggable: false,
 
   addAttributes() {
     return {

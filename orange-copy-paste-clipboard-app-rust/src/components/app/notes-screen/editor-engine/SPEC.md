@@ -70,7 +70,10 @@ backgrounds so notes written before the trim render unchanged.
 
 A reference to a clipboard entry or a group is a **chip** (compact) or a
 **card** (with its content). Both are inline: they flow in the text, sit
-next to each other, and are selected by click and drag like an image. No open/closed state is stored; "Show all" in a card
+next to each other, and are selected like an image: click selects one, click and drag selects a range, Shift+click extends
+the selection to a card, and Ctrl+click (Cmd on mac) toggles a card in a pick that need not be contiguous. A pick is drawn like a
+range, and Backspace/Delete, copy and cut act on it; any plain selection change drops it (`extensions/MultiSelect.ts`). Cards are
+not draggable while unselected, since a drag that starts on one must begin a range; a selected card drags to move. No open/closed state is stored; "Show all" in a card
 is local React state. Entries come from `embed-context.tsx`.
 
 | node        | form         | file                        |
