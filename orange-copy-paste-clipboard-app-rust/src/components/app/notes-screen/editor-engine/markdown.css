@@ -1,9 +1,11 @@
 /* ── Editor Engine — Styles ──────────────────────────────────────────── */
 
-/* One font stack shared by rich / textarea / preview so spacing, line-height
-   and metrics don't drift across modes. Defined on both .ee-shell (editor)
-   and .ee-preview (used standalone in note cards) so previews keep the same
-   typography. */
+/* One rule set for both surfaces. The editor root is `.ee-rich.ProseMirror`
+   and the card preview root is `.ee-rich.ee-preview`. The preview walker emits
+   the same DOM Tiptap renders, so everything under `.ee-rich` applies to both
+   and only the two root blocks differ. Do not add a `.ee-preview X` rule for
+   something the editor also shows - that is how the two drifted apart. */
+
 .ee-shell,
 .ee-preview {
   --ee-editor-font:
@@ -16,7 +18,6 @@
   --ee-editor-pad-edit: 14px 19px 35vh;
   --ee-editor-size: 14.25px;
   --ee-editor-line: 1.6;
-  --ee-caret-thickness: 2px;
 }
 
 .ee-shell {
@@ -26,8 +27,6 @@
   min-height: 0;
 }
 
-/* ── Normal mode (Tiptap / ProseMirror) ─────────────────────────────── */
-
 .ee-rich-shell {
   flex: 1 1 auto;
   overflow: hidden auto;
@@ -35,20 +34,33 @@
   position: relative;
 }
 
-.ee-rich.ProseMirror {
-  outline: none;
-  padding: var(--ee-editor-pad-edit);
+/* ── Roots ──────────────────────────────────────────────────────────── */
+
+.ee-rich {
   font-size: var(--ee-editor-size);
   line-height: var(--ee-editor-line);
   color: var(--text);
-  min-height: 100%;
-  caret-color: var(--accent);
   font-family: var(--ee-editor-font);
   font-feature-settings:
     "ss01" 1,
     "kern" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+.ee-rich.ProseMirror {
+  outline: none;
+  padding: var(--ee-editor-pad-edit);
+  min-height: 100%;
+  caret-color: var(--accent);
+}
+
+/* App.css puts user-select: none on every element. Editable text ignores
+   that, but images and other atoms inside the editor do not: a drag skipped
+   them and a click could not add one to a range. */
+.ee-rich.ProseMirror,
+.ee-rich.ProseMirror * {
+  user-select: text;
 }
 
 .ee-rich.ProseMirror p.is-editor-empty:first-child::before {
@@ -60,61 +72,89 @@
   height: 0;
 }
 
-.ee-rich.ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+.ee-preview {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: var(--ee-editor-pad);
+}
+
+/* Read-only: checkboxes and chips look the same but do nothing. */
+.ee-preview input[type="checkbox"] {
+  pointer-events: none;
+}
+.ee-preview .ee-clip-embed-inner,
+.ee-preview .ee-group-chip-inner {
+  cursor: default;
+}
+.ee-preview .ee-clip-embed-inner::after,
+.ee-preview .ee-group-chip-inner::after {
+  display: none;
+}
+
+/* ── Blocks ─────────────────────────────────────────────────────────── */
+
+.ee-rich :is(h1, h2, h3, h4, h5, h6) {
   margin: 1em 0 0.4em;
   font-weight: 600;
   line-height: 1.3;
+  color: var(--text);
 }
-.ee-rich.ProseMirror h1 {
+.ee-rich h1 {
   font-size: 2.25em;
   font-weight: 800;
 }
-.ee-rich.ProseMirror h2 {
+.ee-rich h2 {
   font-size: 1.8em;
   font-weight: 760;
 }
-.ee-rich.ProseMirror h3 {
+.ee-rich h3 {
   font-size: 1.45em;
   font-weight: 720;
 }
-.ee-rich.ProseMirror h4 {
+.ee-rich h4 {
   font-size: 1.25em;
   font-weight: 680;
 }
-.ee-rich.ProseMirror h5 {
+.ee-rich h5 {
   font-size: 1.08em;
   font-weight: 640;
 }
-.ee-rich.ProseMirror h6 {
+.ee-rich h6 {
   font-size: 0.9em;
   font-weight: 600;
 }
 
-.ee-rich.ProseMirror p {
+.ee-rich p {
   margin: 0.55em 0;
 }
 
-.ee-rich.ProseMirror a {
+.ee-rich a {
   color: var(--accent);
   text-decoration: none;
   border-bottom: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent);
 }
+.ee-rich a:hover {
+  border-bottom-style: solid;
+}
 
-.ee-rich.ProseMirror :is(ul, ol) {
+.ee-rich :is(ul, ol) {
   margin: 0.4em 0;
   padding-left: 1.4em;
 }
-.ee-rich.ProseMirror li {
+.ee-rich li {
   margin: 0.15em 0;
 }
-.ee-rich.ProseMirror ul:not([data-type="taskList"]) {
+.ee-rich li > p {
+  margin: 0.15em 0;
+}
+.ee-rich ul:not([data-type="taskList"]) {
   list-style: none;
   padding-left: 1.4em;
 }
-.ee-rich.ProseMirror ul:not([data-type="taskList"]) > li {
+.ee-rich ul:not([data-type="taskList"]) > li {
   position: relative;
 }
-.ee-rich.ProseMirror ul:not([data-type="taskList"]) > li::before {
+.ee-rich ul:not([data-type="taskList"]) > li::before {
   content: "";
   position: absolute;
   left: -0.95em;
@@ -124,16 +164,16 @@
   border-radius: 50%;
   background: var(--accent);
 }
-.ee-rich.ProseMirror ol {
+.ee-rich ol {
   list-style: none;
   counter-reset: ee-ol;
   padding-left: 1.6em;
 }
-.ee-rich.ProseMirror ol > li {
+.ee-rich ol > li {
   counter-increment: ee-ol;
   position: relative;
 }
-.ee-rich.ProseMirror ol > li::before {
+.ee-rich ol > li::before {
   content: counter(ee-ol) ".";
   position: absolute;
   left: -1.5em;
@@ -145,27 +185,31 @@
   text-align: right;
 }
 
-.ee-rich.ProseMirror ul[data-type="taskList"] {
+/* Task list. Tiptap renders
+   <li data-type="taskItem"><label><input><span/></label><div>…</div></li>
+   and the preview emits the same shape. */
+.ee-rich ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0.2em;
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] li {
+.ee-rich ul[data-type="taskList"] li {
   display: flex;
   align-items: center;
   gap: 0.55em;
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] li > label {
+.ee-rich ul[data-type="taskList"] li > label {
   display: inline-flex;
   align-items: center;
   user-select: none;
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] li > div {
+.ee-rich ul[data-type="taskList"] li > div {
   flex: 1 1 auto;
+  min-width: 0;
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] li > div > p {
+.ee-rich ul[data-type="taskList"] li > div > p {
   margin: 0;
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+.ee-rich ul[data-type="taskList"] input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   margin: 0;
@@ -180,17 +224,15 @@
     background 0.12s ease,
     border-color 0.12s ease;
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"]:hover {
+.ee-rich ul[data-type="taskList"] input[type="checkbox"]:hover {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked {
+.ee-rich ul[data-type="taskList"] input[type="checkbox"]:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
-.ee-rich.ProseMirror
-  ul[data-type="taskList"]
-  input[type="checkbox"]:checked::after {
+.ee-rich ul[data-type="taskList"] input[type="checkbox"]:checked::after {
   content: "";
   position: absolute;
   left: 3px;
@@ -201,12 +243,12 @@
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
-.ee-rich.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+.ee-rich ul[data-type="taskList"] li[data-checked="true"] > div {
   color: var(--text-muted);
   text-decoration: line-through;
 }
 
-.ee-rich.ProseMirror blockquote {
+.ee-rich blockquote {
   margin: 0.6em 0;
   padding: 0.2em 0.85em;
   border-left: 3px solid color-mix(in srgb, var(--accent) 65%, transparent);
@@ -215,7 +257,7 @@
   border-radius: 0 4px 4px 0;
 }
 
-.ee-rich.ProseMirror code {
+.ee-rich code {
   font-family: var(--ee-editor-mono);
   font-size: 0.92em;
   padding: 1px 5px;
@@ -223,15 +265,17 @@
   border: 1px solid var(--border);
   border-radius: 4px;
 }
-/* Highlights get a soft squircle pill; box-decoration-break keeps the rounded
-   corners + padding intact when a highlight wraps across lines. */
-.ee-rich.ProseMirror mark {
+
+/* Highlights get a soft pill; box-decoration-break keeps the rounded corners
+   and padding intact when a highlight wraps across lines. */
+.ee-rich mark {
   padding: 0.05em 0.3em;
   border-radius: 0.45em;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
-.ee-rich.ProseMirror pre {
+
+.ee-rich pre {
   margin: 0.6em 0;
   padding: 10px 12px;
   background: var(--surface-2, rgba(255, 255, 255, 0.04));
@@ -242,26 +286,47 @@
   line-height: 1.55;
   font-family: var(--ee-editor-mono);
 }
-.ee-rich.ProseMirror pre code {
+.ee-rich pre code {
   padding: 0;
   background: transparent;
   border: none;
   border-radius: 0;
+  font-size: inherit;
 }
 
-.ee-rich.ProseMirror hr {
+.ee-rich hr {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 1em 0;
 }
 
-.ee-rich.ProseMirror table {
+.ee-rich img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+/* A clicked image is a node selection; Tiptap's injected outline is a
+   light blue that fights the theme. */
+.ee-rich img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ee-rich ::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+
+.ee-rich table {
   border-collapse: collapse;
   margin: 0.6em 0;
   width: 100%;
   table-layout: fixed;
 }
-.ee-rich.ProseMirror :is(th, td) {
+.ee-rich :is(th, td) {
   border: 1px solid var(--border);
   padding: 3px 7px;
   text-align: left;
@@ -269,14 +334,14 @@
   line-height: 1.35;
   position: relative;
 }
-.ee-rich.ProseMirror :is(th, td) > p {
+.ee-rich :is(th, td) > p {
   margin: 0;
 }
-.ee-rich.ProseMirror th {
+.ee-rich th {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
   font-weight: 600;
 }
-.ee-rich.ProseMirror .selectedCell {
+.ee-rich .selectedCell {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
@@ -292,21 +357,17 @@
   background: var(--surface);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
-
 .ee-table-controls--row {
   flex-direction: row;
   transform: translate(-50%, 0);
 }
-
 .ee-table-controls--col {
   flex-direction: column;
   transform: translate(0, -50%);
 }
-
 .ee-table-controls--col-flip {
   transform: translate(-100%, -50%);
 }
-
 .ee-table-controls-sep {
   display: block;
   background: var(--border);
@@ -322,7 +383,6 @@
   width: 12px;
   margin: 1px 0;
 }
-
 .ee-table-handle-btn {
   height: 20px;
   padding: 0 6px;
@@ -339,331 +399,24 @@
   white-space: nowrap;
   transition: background 0.1s, color 0.1s;
 }
-
 .ee-table-handle-btn:hover {
   background: var(--accent-dim);
   color: var(--accent);
 }
-
 .ee-table-handle-btn--del:hover {
   background: color-mix(in srgb, #ef4444 10%, var(--surface));
   color: #ef4444;
 }
 
-/* Text alignment */
-.ee-rich.ProseMirror :is(p, h1, h2, h3, h4, h5)[style*="text-align"] {
-  /* honor the inline text-align attribute set by the extension */
-}
-
-.ee-rich.ProseMirror img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-}
-
-.ee-rich.ProseMirror ::selection {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-/* ── Source mode (textarea) ─────────────────────────────────────────── */
-
-.ee-textarea {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--text);
-  font-family: var(--ee-editor-font);
-  font-size: var(--ee-editor-size);
-  line-height: var(--ee-editor-line);
-  padding: var(--ee-editor-pad-edit);
-  tab-size: 2;
-  caret-color: var(--accent);
-  font-feature-settings:
-    "ss01" 1,
-    "kern" 1;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-.ee-textarea::placeholder {
-  color: var(--text-muted);
-  opacity: 0.65;
-}
-.ee-textarea::selection {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-/* ── Preview mode (rendered markdown) ───────────────────────────────── */
-
-.ee-preview {
-  flex: 1 1 auto;
-  overflow: auto;
-  padding: var(--ee-editor-pad);
-  color: var(--text);
-  font-family: var(--ee-editor-font);
-  font-size: var(--ee-editor-size);
-  line-height: var(--ee-editor-line);
-  font-feature-settings:
-    "ss01" 1,
-    "kern" 1;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-.ee-preview h1,
-.ee-preview h2,
-.ee-preview h3,
-.ee-preview h4,
-.ee-preview h5,
-.ee-preview h6 {
-  margin: 1em 0 0.4em;
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--text);
-}
-.ee-preview h1 {
-  font-size: 2.25em;
-  font-weight: 800;
-}
-.ee-preview h2 {
-  font-size: 1.8em;
-  font-weight: 760;
-}
-.ee-preview h3 {
-  font-size: 1.45em;
-  font-weight: 720;
-}
-.ee-preview h4 {
-  font-size: 1.25em;
-  font-weight: 680;
-}
-.ee-preview h5 {
-  font-size: 1.08em;
-  font-weight: 640;
-}
-.ee-preview h6 {
-  font-size: 0.9em;
-  font-weight: 600;
-}
-
-.ee-preview p {
-  margin: 0.55em 0;
-}
-
-.ee-preview a {
-  color: var(--accent);
-  text-decoration: none;
-  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent);
-}
-.ee-preview a:hover {
-  border-bottom-style: solid;
-}
-
-.ee-preview ul,
-.ee-preview ol {
-  margin: 0.4em 0;
-  padding-left: 1.4em;
-}
-.ee-preview li {
-  margin: 0.15em 0;
-}
-.ee-preview li > p {
-  margin: 0.15em 0;
-}
-
-/* Match rich-editor bullets: accent dot for ul, accent number for ol. */
-.ee-preview ul {
-  list-style: none;
-  padding-left: 1.4em;
-}
-.ee-preview ul > li {
-  position: relative;
-}
-.ee-preview ul > li::before {
-  content: "";
-  position: absolute;
-  left: -0.95em;
-  top: 0.62em;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.ee-preview ol {
-  list-style: none;
-  counter-reset: ee-ol;
-  padding-left: 1.6em;
-}
-.ee-preview ol > li {
-  counter-increment: ee-ol;
-  position: relative;
-}
-.ee-preview ol > li::before {
-  content: counter(ee-ol) ".";
-  position: absolute;
-  left: -1.5em;
-  top: 0;
-  color: var(--accent);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  min-width: 1.2em;
-  text-align: right;
-}
-
-/* Task list items already render an <input type=checkbox>, suppress the
-   bullet dot for those rows so the checkbox alone marks the line. */
-/* Task lists render as <li><label><input><span>…</span></label></li>, so the
-   checkbox is not a direct child of the <li>; target the data-type markup
-   (plus the legacy shapes) to lay the checkbox and text out on one row. */
-.ee-preview ul[data-type="taskList"] {
-  padding-left: 0.2em;
-}
-.ee-preview ul[data-type="taskList"] > li,
-.ee-preview ul li.task-list-item,
-.ee-preview ul li:has(> input[type="checkbox"]) {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-}
-.ee-preview ul[data-type="taskList"] > li::before,
-.ee-preview ul li.task-list-item::before,
-.ee-preview ul li:has(> input[type="checkbox"])::before {
-  display: none;
-}
-.ee-preview ul[data-type="taskList"] > li > label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5em;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.ee-preview ul[data-type="taskList"] > li > label > span p,
-.ee-preview ul li.task-list-item > p,
-.ee-preview ul li:has(> input[type="checkbox"]) > p {
-  margin: 0;
-}
-.ee-preview ul[data-type="taskList"] > li[data-checked="true"] > label > span {
-  color: var(--text-muted);
-  text-decoration: line-through;
-}
-.ee-preview input[type="checkbox"] {
-  margin: 0;
-  accent-color: var(--accent);
-  flex: 0 0 auto;
-}
-
-.ee-preview blockquote {
-  margin: 0.6em 0;
-  padding: 0.2em 0.85em;
-  border-left: 3px solid color-mix(in srgb, var(--accent) 65%, transparent);
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--accent) 4%, transparent);
-  border-radius: 0 4px 4px 0;
-}
-
-.ee-preview code {
-  font-family: var(--ee-editor-mono);
-  font-size: 0.92em;
-  padding: 1px 5px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.05));
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-.ee-preview mark {
-  padding: 0.05em 0.3em;
-  border-radius: 0.45em;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
-}
-.ee-preview pre {
-  margin: 0.6em 0;
-  padding: 10px 12px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow-x: auto;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-.ee-preview pre code {
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  font-size: inherit;
-}
-
-.ee-preview hr {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 1em 0;
-}
-
-.ee-preview table {
-  border-collapse: collapse;
-  margin: 0.6em 0;
-  width: 100%;
-}
-.ee-preview th,
-.ee-preview td {
-  border: 1px solid var(--border);
-  padding: 3px 7px;
-  text-align: left;
-  vertical-align: top;
-  line-height: 1.35;
-}
-.ee-preview :is(th, td) > p {
-  margin: 0;
-}
-.ee-preview th {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-  font-weight: 600;
-}
-
-.ee-preview img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-  margin: 6px 0;
-}
-
-.ee-preview details {
-  margin: 0.5em 0;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.ee-preview summary {
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.ee-preview kbd {
-  font-family: var(--ee-editor-mono);
-  font-size: 0.85em;
-  padding: 1px 5px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.06));
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 3px;
-}
-
-/* ── Expandable clip embeds ─────────────────────────────────────────── */
+/* ── Clip embed chip ────────────────────────────────────────────────── */
 
 .ee-clip-embed {
   display: inline-flex;
-  flex-direction: column;
-  align-items: stretch;
   position: relative;
   vertical-align: middle;
   margin: 0 2px;
 }
 
-/* The visible pill */
 .ee-clip-embed-inner {
   display: flex;
   align-items: center;
@@ -679,26 +432,31 @@
   transition:
     filter 0.12s,
     box-shadow 0.12s;
-  user-select: none;
 }
-
 .ee-clip-embed:hover .ee-clip-embed-inner {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
   filter: brightness(1.08);
 }
-
-.ee-clip-embed--open .ee-clip-embed-inner {
+/* Open, the chip becomes the header of a full-width card and the line breaks
+   around it, so the caret lands above or below rather than under it. */
+.ee-clip-embed--open,
+.ee-group-chip--open {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 6px 0;
+}
+.ee-clip-embed--open .ee-clip-embed-inner,
+.ee-group-chip--open .ee-group-chip-inner {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.06);
 }
-
 .ee-clip-embed--missing .ee-clip-embed-inner {
   background: rgba(220, 80, 80, 0.08);
   color: rgba(220, 80, 80, 0.85);
 }
 
-/* Type-specific chip colors — mirror entryTypes.css */
+/* Type-specific chip colors, mirroring entryTypes.css */
 .ee-clip-embed-inner--text {
   background: var(--accent-dim);
   color: var(--accent);
@@ -731,7 +489,6 @@
   background: rgba(14, 165, 233, 0.12);
   color: #0ea5e9;
 }
-
 [data-theme="light"] .ee-clip-embed-inner--url {
   color: #059669;
 }
@@ -761,11 +518,6 @@
   color: currentColor;
   opacity: 0.85;
 }
-
-.ee-clip-embed--missing .ee-clip-embed-icon {
-  color: inherit;
-}
-
 .ee-clip-embed-label {
   max-width: 220px;
   overflow: hidden;
@@ -774,7 +526,7 @@
   letter-spacing: 0.01em;
 }
 
-/* Three-dot hint: shows chip is expandable, fades when open */
+/* Three-dot hint: the chip expands; fades once open. */
 .ee-clip-embed-inner::after,
 .ee-group-chip-inner::after {
   content: "···";
@@ -787,30 +539,18 @@
   line-height: 1;
   transition: opacity 0.14s;
 }
-
 .ee-clip-embed--open .ee-clip-embed-inner::after,
 .ee-group-chip--open .ee-group-chip-inner::after {
   opacity: 0;
 }
 
-/* No dots or pointer in read-only preview */
-.ee-preview .ee-clip-embed-inner,
-.ee-preview .ee-group-chip-inner {
-  cursor: default;
-}
-.ee-preview .ee-clip-embed-inner::after,
-.ee-preview .ee-group-chip-inner::after {
-  display: none;
-}
+/* ── Expand panel (shared by clip and group chips) ──────────────────── */
 
-/* ── Shared expand panel ────────────────────────────────────────────── */
-
-.ee-embed-panel {
+.ee-embed-panel,
+.ee-group-panel {
   display: flex;
   flex-direction: column;
   width: 100%;
-  min-width: 240px;
-  max-width: 360px;
   border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 8px 8px;
@@ -819,7 +559,6 @@
     0 6px 20px rgba(0, 0, 0, 0.16),
     0 1px 4px rgba(0, 0, 0, 0.08);
   overflow: hidden;
-  position: relative;
   z-index: 300;
   animation: eeEmbedSlide 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -835,40 +574,41 @@
   }
 }
 
-/* Panel meta row (type label + timestamp) */
-.ee-embed-panel-meta {
+.ee-embed-panel-meta,
+.ee-group-panel-header {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 5px 10px 4px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
-
+.ee-group-panel-header {
+  color: var(--text-muted);
+}
 .ee-embed-panel-type {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
-  font-weight: 650;
   color: var(--accent);
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
 }
-
 .ee-embed-panel-type svg {
   opacity: 0.85;
 }
-
-.ee-embed-panel-time {
+.ee-embed-panel-time,
+.ee-group-panel-count {
   margin-left: auto;
-  font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-/* Panel content area */
 .ee-embed-panel-body {
   max-height: 220px;
   overflow: hidden auto;
@@ -877,8 +617,6 @@
   flex-direction: column;
   gap: 6px;
 }
-
-/* Image preview */
 .ee-embed-panel-img {
   width: 100%;
   max-height: 180px;
@@ -887,15 +625,12 @@
   background: color-mix(in srgb, var(--surface) 60%, var(--bg));
   display: block;
 }
-
 .ee-embed-panel-img-caption {
   font-size: 10.5px;
   color: var(--text-muted);
   text-align: center;
   margin-top: 2px;
 }
-
-/* Text content */
 .ee-embed-panel-text {
   font-size: 11.5px;
   line-height: 1.55;
@@ -903,14 +638,11 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-
-/* File paths */
 .ee-embed-panel-files {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
-
 .ee-embed-panel-path {
   display: flex;
   align-items: center;
@@ -925,23 +657,19 @@
   word-break: break-all;
   line-height: 1.4;
 }
-
 .ee-embed-panel-path svg {
   flex-shrink: 0;
   opacity: 0.6;
 }
 
-/* ── Expandable group chips ─────────────────────────────────────────── */
+/* ── Group chip ─────────────────────────────────────────────────────── */
 
 .ee-group-chip {
   display: inline-flex;
-  flex-direction: column;
-  align-items: stretch;
   position: relative;
   vertical-align: middle;
   margin: 0 2px;
 }
-
 .ee-group-chip-inner {
   display: flex;
   align-items: center;
@@ -953,84 +681,33 @@
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
-  user-select: none;
   transition:
     filter 0.12s,
     box-shadow 0.12s;
 }
-
 .ee-group-chip:hover .ee-group-chip-inner {
   filter: brightness(1.08);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
-
-.ee-group-chip--open .ee-group-chip-inner {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
 .ee-group-chip-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex: none;
-  flex-shrink: 0;
 }
-
 .ee-group-chip-sys-icon {
   display: flex;
   align-items: center;
   flex-shrink: 0;
   opacity: 0.85;
 }
-
 .ee-group-chip-count {
   margin-left: auto;
   padding-left: 4px;
   font-size: 0.95em;
   font-weight: 600;
-  opacity: 1;
   line-height: 1;
   flex-shrink: 0;
-}
-
-/* Group panel */
-.ee-group-panel {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  min-width: 220px;
-  max-width: 340px;
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-  background: var(--surface);
-  box-shadow:
-    0 6px 20px rgba(0, 0, 0, 0.16),
-    0 1px 4px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-  position: relative;
-  z-index: 300;
-  animation: eeEmbedSlide 0.14s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.ee-group-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px 4px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
-  font-size: 10px;
-  font-weight: 650;
-  color: var(--text-muted);
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-
-.ee-group-panel-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
 }
 
 .ee-group-panel-body {
@@ -1041,7 +718,6 @@
   flex-direction: column;
   gap: 1px;
 }
-
 .ee-group-panel-empty {
   font-size: 11px;
   color: var(--text-muted);
@@ -1049,7 +725,6 @@
   font-style: italic;
   text-align: center;
 }
-
 .ee-group-panel-row {
   display: flex;
   align-items: center;
@@ -1060,11 +735,9 @@
   cursor: default;
   transition: background 0.1s;
 }
-
 .ee-group-panel-row:hover {
   background: var(--accent-dim);
 }
-
 .ee-group-panel-row-icon {
   display: inline-flex;
   align-items: center;
@@ -1073,12 +746,9 @@
   height: 20px;
   border-radius: 5px;
   flex-shrink: 0;
-  /* default fallback */
   background: var(--accent-dim);
   color: var(--accent);
 }
-
-.ee-group-panel-row-icon--text   { background: var(--accent-dim); color: var(--accent); }
 .ee-group-panel-row-icon--url    { background: rgba(16, 185, 129, 0.12); color: #10b981; }
 .ee-group-panel-row-icon--html   { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
 .ee-group-panel-row-icon--image  { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
@@ -1086,7 +756,6 @@
 .ee-group-panel-row-icon--file   { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
 .ee-group-panel-row-icon--document { background: rgba(249, 115, 22, 0.12); color: #f97316; }
 .ee-group-panel-row-icon--folder { background: rgba(14, 165, 233, 0.12); color: #0ea5e9; }
-
 .ee-group-panel-row-label {
   flex: 1;
   min-width: 0;
@@ -1096,14 +765,6 @@
   color: var(--text-secondary);
   line-height: 1.35;
 }
-
-.ee-group-panel-more {
-  font-size: 10.5px;
-  color: var(--text-muted);
-  padding: 5px 6px;
-  font-style: italic;
-}
-
 .ee-group-panel-more {
   font-size: 10.5px;
   color: var(--text-muted);
@@ -1138,7 +799,6 @@
 .ee-callout > :last-child {
   margin-bottom: 0;
 }
-
 .ee-callout[data-callout="info"] {
   color: #3b82f6;
   background: rgba(59, 130, 246, 0.07);
@@ -1175,19 +835,17 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ee-editor-mono);
   font-size: 12.5px;
   overflow-x: auto;
   margin: 8px 0;
 }
-
 .ee-codeblock code {
   background: transparent;
   padding: 0;
   font-size: inherit;
 }
 
-/* lowlight syntax highlight tokens */
 .hljs-comment,
 .hljs-quote {
   color: #8d8d8d;

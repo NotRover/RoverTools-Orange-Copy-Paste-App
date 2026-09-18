@@ -1,19 +1,21 @@
 // ── Editor Engine — Types ─────────────────────────────────────────────────
 // Notion-like Tiptap editor. Storage is ProseMirror JSON serialized as a
-// string. Legacy markdown content is auto-migrated on first edit.
+// string. Anything that does not parse renders as an empty document.
 
 import type { JSONContent } from "@tiptap/react";
 
 export type AlignValue = "left" | "center" | "right" | "justify";
 
-/** Mode-agnostic command dispatched by the toolbar. */
+/** Command dispatched by the toolbar. The schema still accepts heading levels
+ *  4-6, justified text and cell backgrounds from older notes; the toolbar just
+ *  no longer offers them. */
 export type EditorCommand =
   | { kind: "bold" }
   | { kind: "italic" }
   | { kind: "underline" }
   | { kind: "strike" }
   | { kind: "code" }
-  | { kind: "heading"; level: 1 | 2 | 3 | 4 | 5 }
+  | { kind: "heading"; level: 1 | 2 | 3 }
   | { kind: "paragraph" }
   | { kind: "blockquote" }
   | { kind: "callout"; tone?: CalloutTone }
@@ -34,8 +36,7 @@ export type EditorCommand =
   | { kind: "groupEmbed"; name: string }
   | { kind: "align"; value: AlignValue }
   | { kind: "textColor"; value: string | null }
-  | { kind: "highlight"; value: string | null }
-  | { kind: "cellBackground"; value: string | null };
+  | { kind: "highlight"; value: string | null };
 
 export type CalloutTone =
   | "info"
@@ -71,7 +72,6 @@ export interface ActiveState {
   align?: AlignValue;
   textColor?: string;
   highlight?: string;
-  cellBackground?: string;
 }
 
 export type EditorContent = JSONContent;

@@ -15,12 +15,31 @@ export function parseStoredContent(raw: string): JSONContent {
   try {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && parsed.type === "doc") {
-      return parsed as JSONContent;
+      return inlineImages(parsed as JSONContent);
     }
   } catch {
     // fall through
   }
   return emptyDoc();
+}
+
+// Images used to be block nodes. They are inline now, so an image sitting
+// directly in a block container is wrapped in a paragraph. Idempotent, and
+// cheap enough to run on every parse.
+const INLINE_PARENTS = new Set(["paragraph", "heading"]);
+
+function inlineImages(node: JSONContent): JSONContent {
+  if (!Array.isArray(node.content)) return node;
+  const wrap = !INLINE_PARENTS.has(node.type ?? "");
+  return {
+    ...node,
+    content: node.content.map((child) => {
+      if (wrap && child.type === "image") {
+        return { type: "paragraph", content: [child] };
+      }
+      return inlineImages(child);
+    }),
+  };
 }
 
 /** Serialize a Tiptap JSON doc as a stable string for persistence. */
@@ -42,6 +61,31 @@ export function extractPlainText(raw: string): string {
   const out: string[] = [];
   walk(doc, out);
   return out.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/** True when the note holds anything a reader would miss: text, an embed, an
+ *  image, a table or a rule. Decides whether closing an untitled note deletes
+ *  it. A text-only check threw away notes that were nothing but a pasted
+ *  screenshot. */
+export function hasRenderableContent(raw: string): boolean {
+  if (!raw) return false;
+  return nodeHasContent(parseStoredContent(raw));
+}
+
+const CONTENT_NODES = new Set([
+  "image",
+  "table",
+  "horizontalRule",
+  "clipEmbed",
+  "groupRef",
+]);
+
+function nodeHasContent(node: JSONContent | undefined): boolean {
+  if (!node) return false;
+  const text = (node as any).text;
+  if (typeof text === "string" && text.trim()) return true;
+  if (node.type && CONTENT_NODES.has(node.type)) return true;
+  return (node.content ?? []).some(nodeHasContent);
 }
 
 function walk(node: JSONContent | undefined, out: string[]): void {
@@ -153,27 +197,15 @@ function mdNode(node: JSONContent, out: string[], indent: string): void {
       mdTable(node, out);
       out.push("");
       break;
-    case "details":
-      mdNodes(node.content, out, indent);
-      break;
-    case "detailsSummary":
-      out.push("▸ " + mdInline(node.content));
-      break;
-    case "detailsContent": {
-      const inner: string[] = [];
-      mdNodes(node.content, inner, "  ");
-      out.push(...inner);
-      break;
-    }
     case "clipEmbed": {
       const id = (node.attrs?.id as string) ?? "";
-      out.push(`[📎 Clip: ${id}]`);
+      out.push(`[clip: ${id}]`);
       out.push("");
       break;
     }
     case "groupRef": {
       const name = (node.attrs?.name as string) ?? "";
-      out.push(`[🏷 Group: ${name}]`);
+      out.push(`[group: ${name}]`);
       break;
     }
     default:
@@ -208,9 +240,9 @@ function mdInline(nodes: JSONContent[] | undefined): string {
 function mdInlineNode(node: JSONContent): string {
   if (node.type === "hardBreak") return "  \n";
   if (node.type === "clipEmbed")
-    return `[📎 ${(node.attrs?.id as string) ?? "clip"}]`;
+    return `[clip: ${(node.attrs?.id as string) ?? ""}]`;
   if (node.type === "groupRef")
-    return `[🏷 ${(node.attrs?.name as string) ?? ""}]`;
+    return `[group: ${(node.attrs?.name as string) ?? ""}]`;
   if (node.type !== "text") return mdInline(node.content);
 
   let text = ((node as any).text as string) ?? "";

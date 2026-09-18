@@ -1,5 +1,7 @@
 // ── Editor Engine — Read-only preview for note cards ─────────────────────
 // Walks Tiptap JSON and renders React elements directly. No editor instance.
+// It must emit the same DOM Tiptap does for each node so markdown.css can
+// style both surfaces with one rule set.
 
 import React, { useEffect, useMemo, useState } from "react";
 import type { JSONContent } from "@tiptap/react";
@@ -48,7 +50,7 @@ const NotionPreview: React.FC<Props> = ({ content, entries, className }) => {
   );
   const doc = useMemo(() => parseStoredContent(content), [content]);
   return (
-    <div className={`ee-preview${className ? " " + className : ""}`}>
+    <div className={`ee-rich ee-preview${className ? " " + className : ""}`}>
       {renderChildren(doc.content, entries, "r")}
     </div>
   );
@@ -121,11 +123,13 @@ function renderNode(
     case "taskItem": {
       const checked = !!node.attrs?.checked;
       return (
+        // Same shape Tiptap renders, so one task-list rule set fits both.
         <li key={key} data-type="taskItem" data-checked={checked}>
           <label>
             <input type="checkbox" checked={checked} readOnly />
-            <span>{renderChildren(node.content, entries, key)}</span>
+            <span />
           </label>
+          <div>{renderChildren(node.content, entries, key)}</div>
         </li>
       );
     }
