@@ -12,7 +12,7 @@ import { CloseIcon, ExpandIcon } from "../../../../icons";
 import { attachmentFilename, resolveAttachmentUrl } from "../attachment-url";
 import { openAttachment } from "./FileCard";
 
-export const IMAGE_SIZES: { label: string; width: number | null }[] = [
+const IMAGE_SIZES: { label: string; width: number | null }[] = [
   { label: "S", width: 25 },
   { label: "M", width: 50 },
   { label: "L", width: 75 },

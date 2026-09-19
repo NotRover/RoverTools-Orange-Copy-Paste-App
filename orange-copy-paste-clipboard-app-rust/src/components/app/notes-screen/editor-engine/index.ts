@@ -3,10 +3,8 @@
 export type {
   EditorCommand,
   ActiveState,
-  BlockKind,
   AlignValue,
   CalloutTone,
-  EditorContent,
   EmbedForm,
 } from "./types";
 
@@ -19,7 +17,6 @@ export {
 export { default as NotionEditor } from "./NotionEditor";
 export type {
   NotionEditorHandle,
-  NotionEditorProps,
   EditorStats,
 } from "./NotionEditor";
 
@@ -43,7 +40,6 @@ export {
   entryMeta,
   entryTitle,
   groupInfo,
-  kindLabel,
   type GroupInfo,
 } from "./extensions/AttachmentCard";
 export { ClipChip } from "./extensions/ClipEmbed";

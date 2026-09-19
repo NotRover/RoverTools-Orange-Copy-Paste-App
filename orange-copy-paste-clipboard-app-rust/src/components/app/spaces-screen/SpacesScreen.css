@@ -645,8 +645,7 @@
 
 /* ── Feed card overlays ── */
 
-.sp-feed-entry-card,
-.sp-feed-note-card {
+.sp-feed-entry-card {
   cursor: pointer;
 }
 
@@ -934,10 +933,6 @@
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--accent);
-}
-
-.sp-space-card-wrap .sp-space-card {
-  margin-bottom: 0;
 }
 
 /* Member picture — a person, so a circle, against the squircle group avatars.
@@ -1683,18 +1678,6 @@
 .sp-btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.sp-btn--primary {
-  border-color: transparent;
-  background: var(--cta, var(--accent));
-  color: #fff;
-}
-
-.sp-btn--primary:hover:not(:disabled) {
-  border-color: transparent;
-  background: var(--cta-hover, var(--accent-hover));
-  color: #fff;
 }
 
 .sp-btn--danger {

@@ -69,7 +69,6 @@ interface NotesScreenProps {
   onDelete: (id: string) => void;
   onPin: (id: string, pin: boolean) => void;
   onSetGroups: (id: string, groups: string[]) => void;
-  onCopyEntry?: (id: string) => void;
   onBulkDelete?: (ids: string[]) => void;
   onBulkPin?: (ids: string[]) => void;
   onBulkUnpin?: (ids: string[]) => void;
@@ -92,7 +91,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   onDelete,
   onPin,
   onSetGroups,
-  onCopyEntry,
   onBulkDelete,
   onBulkPin,
   onBulkUnpin,
@@ -444,8 +442,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
                     }
                   }}
-                  allSaved={false}
-                  onBulkToggleSave={() => {}}
                   onBulkAddGroup={(group) => {
                     if (onBulkAddGroup)
                       onBulkAddGroup([...multiSelect.selectedIds], group);
@@ -641,7 +637,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 onDelete={handleDelete}
                 onPin={onPin}
                 onSetGroups={onSetGroups}
-                onCopyEntry={onCopyEntry}
                 onBack={() => setEditingId(null)}
                 fullscreen={editorFullscreen}
                 onToggleFullscreen={toggleEditorFullscreen}

@@ -13,7 +13,7 @@ import "./DegradedPill.css";
  *
  * Renders nothing while the process is healthy.
  */
-export const DegradedPill: React.FC<{ className?: string }> = ({ className }) => {
+export const DegradedPill: React.FC = () => {
   const health = useHealthWarning();
   if (!health) return null;
 
@@ -28,7 +28,7 @@ export const DegradedPill: React.FC<{ className?: string }> = ({ className }) =>
 
   return (
     <span
-      className={`degraded-pill${className ? ` ${className}` : ""}`}
+      className="degraded-pill"
       role="status"
       title={`${health.reason}. ${detail}`}
     >
@@ -37,5 +37,3 @@ export const DegradedPill: React.FC<{ className?: string }> = ({ className }) =>
     </span>
   );
 };
-
-export default DegradedPill;

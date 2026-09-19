@@ -40,13 +40,6 @@ pub struct Note {
     /// User-defined group tags (shared with clipboard groups).
     #[serde(default)]
     pub groups: Vec<String>,
-    // ── Transient sync fields — excluded from MessagePack serialization ──
-    /// Server-assigned UUID after a successful push.
-    #[serde(skip)]
-    pub server_id: Option<String>,
-    /// Whether this note has been synced to the server.
-    #[serde(skip, default)]
-    pub sync_status: crate::sync::types::SyncStatus,
 }
 
 impl Default for Note {
@@ -67,8 +60,6 @@ impl Note {
             updated_at: now,
             pinned: false,
             groups: Vec::new(),
-            server_id: None,
-            sync_status: crate::sync::types::SyncStatus::LocalOnly,
         }
     }
 }

@@ -1514,7 +1514,6 @@ const App: React.FC = () => {
             onDelete={handleDeleteNote}
             onPin={handlePinNote}
             onSetGroups={handleSetNoteGroups}
-            onCopyEntry={handleCopy}
             onBulkDelete={handleBulkDeleteNotes}
             onBulkPin={handleBulkPinNotes}
             onBulkUnpin={handleBulkUnpinNotes}

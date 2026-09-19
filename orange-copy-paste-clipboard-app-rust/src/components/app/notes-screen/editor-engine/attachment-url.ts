@@ -72,11 +72,6 @@ export function attachmentFilename(
   return null;
 }
 
-/** True for a `note-file://` URL, the scheme documents attach under. */
-export function isFileAttachmentUrl(url: string): boolean {
-  return url.startsWith(FILE_SCHEME);
-}
-
 /** Build a `note-attachment://<filename>` URL for an image filename. */
 export function imageAttachmentUrl(filename: string): string {
   return IMAGE_SCHEME + filename;

@@ -246,15 +246,6 @@ pub struct ClipboardEntry {
     /// a file path.  Not persisted — only relevant within a single session.
     #[serde(skip)]
     pub content_hash: Option<u64>,
-    // ── Transient sync fields — excluded from MessagePack serialization ──
-    // These are populated at runtime by the SyncClient from id_map.json.
-    // They drive the cloud-sync icon shown on entry cards in the UI.
-    /// Server-assigned UUID for this entry after a successful push.
-    #[serde(skip)]
-    pub server_id: Option<String>,
-    /// Whether this entry has been synced to the server.
-    #[serde(skip, default)]
-    pub sync_status: crate::sync::types::SyncStatus,
 }
 
 /// Whether an entry's content is within [`MAX_TEXT_BYTES`], and so small
@@ -299,8 +290,6 @@ impl ClipboardEntry {
             groups: Vec::new(),
             label,
             content_hash,
-            server_id: None,
-            sync_status: crate::sync::types::SyncStatus::LocalOnly,
         }
     }
 
@@ -409,12 +398,8 @@ impl ClipboardHistory {
     }
 
     /// Prepend an entry only when it differs from the current top entry.
-    /// Returns the existing top entry when duplicate, or the inserted entry.
-    pub fn push_if_distinct(&mut self, entry: ClipboardEntry) -> ClipboardEntry {
-        self.push_if_distinct_with_flag(entry).0
-    }
-
-    /// Same as [`Self::push_if_distinct`], but also returns whether insertion happened.
+    /// Returns the existing top entry when duplicate, or the inserted entry,
+    /// plus whether insertion actually happened.
     pub fn push_if_distinct_with_flag(&mut self, entry: ClipboardEntry) -> (ClipboardEntry, bool) {
         if let Some(existing) = self.entries.first() {
             if content_matches(existing, &entry) {

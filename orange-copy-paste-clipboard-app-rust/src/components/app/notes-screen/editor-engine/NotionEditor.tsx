@@ -97,7 +97,7 @@ export interface EditorStats {
   words: number;
 }
 
-export interface NotionEditorProps {
+interface NotionEditorProps {
   noteId: string;
   /** Stored content string — Tiptap JSON. */
   initialContent: string;
