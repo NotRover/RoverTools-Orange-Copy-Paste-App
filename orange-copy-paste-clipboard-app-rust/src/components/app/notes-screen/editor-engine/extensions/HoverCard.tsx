@@ -1,6 +1,7 @@
 // ── Hover card — preview popover for inline chips ───────────────────────
 // Appears after a short hover, in a portal so the editor's overflow cannot
-// clip it, and goes away on pointer leave, any keystroke, or scroll. Display
+// clip it, and goes away on pointer leave, any keystroke, or a scroll outside
+// the card itself (scrolling its own body reads a long clip). Display
 // only: nothing in the document changes, so the caret and the text around
 // the chip never move.
 
@@ -40,11 +41,25 @@ export function useHoverCard() {
   useEffect(() => {
     if (!open) return;
     const close = () => { clear(); setOpen(false); };
+    // The card is placed from the anchor's rect once, so any scroll that moves
+    // the anchor has to dismiss it. A scroll *inside* the card is the user
+    // reading a long clip, and must not.
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      const el =
+        t instanceof Element
+          ? t
+          : t instanceof Node
+            ? t.parentElement
+            : null;
+      if (el?.closest(".ee-hovercard")) return;
+      close();
+    };
     document.addEventListener("keydown", close, true);
-    document.addEventListener("scroll", close, true);
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("keydown", close, true);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [open]);
 

@@ -38,19 +38,10 @@ import {
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
-import {
-  fileNameFromPath,
-  groupColor,
-  truncateText,
-} from "../../../../types";
+import { fileNameFromPath, groupColor } from "../../../../types";
 import { timeAgoFor } from "../../../../hooks/useRelativeTime";
 import {
-  PinIcon,
-  SaveStarIcon,
-  ImageIcon,
-  FileIcon,
   PaperclipIcon,
-  ClipboardIcon,
   ExpandIcon,
   CollapseIcon,
 } from "../../../icons";
@@ -68,6 +59,18 @@ import {
   type CalloutTone,
   type EditorStats,
   type EmbedForm,
+  AttachmentCard,
+  ClipChip,
+  EntryBody,
+  GroupBody,
+  GroupChip,
+  KindIcon,
+  type GroupInfo,
+  entryKind,
+  entryMeta,
+  entryTitle,
+  groupInfo,
+  groupMeta,
   imageAttachmentUrl,
   fileAttachmentUrl,
   noteToMarkdown,
@@ -162,9 +165,30 @@ type MenuId =
 let lastEmbedForm: EmbedForm = "card";
 
 const EMBED_FORMS: { value: EmbedForm; label: string; hint: string }[] = [
-  { value: "card", label: "Card", hint: "Own row, shows the content" },
-  { value: "chip", label: "Chip", hint: "In the sentence, preview on hover" },
+  { value: "card", label: "Card", hint: "A box with the content in it" },
+  { value: "chip", label: "Chip", hint: "Inline, opens on hover" },
 ];
+
+const otherForm = (form: EmbedForm): EmbedForm =>
+  form === "card" ? "chip" : "card";
+
+/** Clipboard rows built on open, and how many more each time the list runs
+ *  out. Every match is reachable - this is only how fast they arrive.
+ *  Mounting a full 1,600-row history at once blocked the thread for 300ms. */
+const EMBED_PAGE_FIRST = 60;
+const EMBED_PAGE_MORE = 80;
+
+/** Groups the app always has, above whatever the user made. */
+const SYSTEM_GROUPS: { name: string; label: string }[] = [
+  { name: "pinned", label: "Pinned" },
+  { name: "Saved", label: "Saved" },
+];
+
+/** One row of the picker list. Groups and clips share the list so a single
+ *  search covers both; the old tabs hid whichever half you were not on. */
+type PickerRow =
+  | { kind: "entry"; key: string; entry: ClipboardEntry }
+  | { kind: "group"; key: string; name: string; label: string };
 
 interface NoteEditorProps {
   note: Note;
@@ -206,6 +230,60 @@ const SwatchGrid: React.FC<{
     ))}
   </div>
 );
+
+/** What the highlighted row will look like once it is in the note. Renders
+ *  the same components the node views and the read-only preview render, so
+ *  it cannot drift from the thing that actually gets inserted. */
+const EmbedPreview: React.FC<{
+  row: PickerRow | undefined;
+  form: EmbedForm;
+  entries: ClipboardEntry[];
+}> = ({ row, form, entries }) => {
+  if (!row)
+    return <div className="ns-ip-stage-empty">Pick something on the left</div>;
+
+  if (form === "chip")
+    return (
+      <span className="ee-chip-wrap">
+        {row.kind === "entry" ? (
+          <ClipChip entry={row.entry} />
+        ) : (
+          <GroupChip name={row.name} entries={entries} />
+        )}
+      </span>
+    );
+
+  if (row.kind === "entry")
+    return (
+      // The same wrapper the editor puts around a card, so the preview is
+      // the right width as well as the right shape.
+      <span className="ee-embed">
+        <AttachmentCard
+          kind={entryKind(row.entry)}
+          title={entryTitle(row.entry)}
+          meta={entryMeta(row.entry)}
+        >
+          <EntryBody entry={row.entry} />
+        </AttachmentCard>
+      </span>
+    );
+
+  const info = groupInfo(row.name, entries);
+  return (
+    <span className="ee-embed">
+      <AttachmentCard
+        kind="group"
+        icon={<info.Icon size={12} />}
+        kindClassName={info.className}
+        kindStyle={info.style}
+        title={info.label}
+        meta={groupMeta(info.entries.length)}
+      >
+        <GroupBody info={info} />
+      </AttachmentCard>
+    </span>
+  );
+};
 
 const MenuItem: React.FC<{
   active?: boolean;
@@ -263,7 +341,16 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   const [preferredHeadingLevel, setPreferredHeadingLevel] =
     useState<HeadingLevel>(1);
   const [embedSearch, setEmbedSearch] = useState("");
-  const [embedTab, setEmbedTab] = useState<"entries" | "groups">("entries");
+  // Which row the preview is showing. `null` means "the sensible default for
+  // this query", resolved at render so the list changing under it cannot
+  // leave it pointing at nothing.
+  const [embedIndex, setEmbedIndex] = useState<number | null>(null);
+  /** How many clipboard rows are in the DOM so far. */
+  const [embedShown, setEmbedShown] = useState(EMBED_PAGE_FIRST);
+  const embedListRef = useRef<HTMLDivElement>(null);
+  /** Whether the last highlight move came from the keyboard; only then may
+   *  the list scroll itself to follow. */
+  const keyboardNavRef = useRef(false);
   // Chip or card. Remembered for the session, not per note.
   const [embedForm, setEmbedFormState] = useState<EmbedForm>(() => lastEmbedForm);
   const setEmbedForm = useCallback((form: EmbedForm) => {
@@ -280,7 +367,11 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       setLinkUrl("");
       setLinkText("");
     }
-    if (openMenu !== "embed") setEmbedSearch("");
+    if (openMenu !== "embed") {
+      setEmbedSearch("");
+      setEmbedIndex(null);
+      setEmbedShown(EMBED_PAGE_FIRST);
+    }
   }, [openMenu]);
 
   const initialContent = useMemo(() => note.content ?? "", [note.id]); // eslint-disable-line
@@ -490,20 +581,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // ── Embed / link insert ───────────────────────────────────────────────
 
-  const insertClipEmbed = useCallback(
-    (id: string) => {
-      editorRef.current?.insertClipEmbed(id, embedForm);
+  const insertRow = useCallback(
+    (row: PickerRow | undefined, form: EmbedForm) => {
+      if (!row) return;
+      if (row.kind === "entry")
+        editorRef.current?.insertClipEmbed(row.entry.id, form);
+      else editorRef.current?.insertGroupEmbed(row.name, form);
       closeMenu();
     },
-    [closeMenu, embedForm],
-  );
-
-  const insertGroupEmbed = useCallback(
-    (name: string) => {
-      editorRef.current?.insertGroupEmbed(name, embedForm);
-      closeMenu();
-    },
-    [closeMenu, embedForm],
+    [closeMenu],
   );
 
   const insertLink = useCallback(
@@ -568,26 +654,144 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // ── Picker entry lists ────────────────────────────────────────────────
 
-  const filteredEntries = useMemo(() => {
-    const q = embedSearch.trim().toLowerCase();
-    const list = q
+  const embedQuery = embedSearch.trim().toLowerCase();
+
+  const groupRows = useMemo<PickerRow[]>(() => {
+    const all = [
+      ...SYSTEM_GROUPS,
+      ...availableGroups.map((name) => ({ name, label: name })),
+    ];
+    return all
+      .filter((g) => !embedQuery || g.label.toLowerCase().includes(embedQuery))
+      .map((g) => ({ kind: "group", key: `g:${g.name}`, ...g }));
+  }, [availableGroups, embedQuery]);
+
+  /** Resolved once per list, not per row: each one scans every entry. */
+  const groupInfos = useMemo(() => {
+    const map = new Map<string, GroupInfo>();
+    for (const row of groupRows)
+      if (row.kind === "group") map.set(row.name, groupInfo(row.name, entries));
+    return map;
+  }, [groupRows, entries]);
+
+  // Every match, not a slice of them: the old picker cut the list at 50
+  // without saying so, which made entries look lost. The rows are cheap and
+  // the list scrolls.
+  const entryRows = useMemo<PickerRow[]>(() => {
+    const list = embedQuery
       ? entries.filter((e) => {
           const text = e.type === "html" ? stripHtml(e.content) : e.content;
           return (
-            text.toLowerCase().includes(q) ||
-            (e.label ?? "").toLowerCase().includes(q)
+            text.toLowerCase().includes(embedQuery) ||
+            (e.label ?? "").toLowerCase().includes(embedQuery)
           );
         })
       : entries;
-    return list.slice(0, 50);
-  }, [entries, embedSearch]);
+    return list.map((entry) => ({ kind: "entry", key: `e:${entry.id}`, entry }));
+  }, [entries, embedQuery]);
 
-  const filteredGroups = useMemo(() => {
-    const q = embedSearch.trim().toLowerCase();
-    return q
-      ? availableGroups.filter((g) => g.toLowerCase().includes(q))
-      : availableGroups;
-  }, [availableGroups, embedSearch]);
+  // Groups first: there are a handful of them and hundreds of clips, so the
+  // other order buries them under a scroll nobody makes. `pickerRows` is
+  // every match - it is what the index maths and the preview run on -
+  // while only `shownEntryRows` of it is in the DOM.
+  const pickerRows = useMemo(
+    () => [...groupRows, ...entryRows],
+    [groupRows, entryRows],
+  );
+
+  const shownEntryRows = useMemo(
+    () => entryRows.slice(0, embedShown),
+    [entryRows, embedShown],
+  );
+
+  const growEmbedList = useCallback(
+    () => setEmbedShown((n) => Math.min(n + EMBED_PAGE_MORE, entryRows.length)),
+    [entryRows.length],
+  );
+
+  /** More rows once the scroll gets near the end of what is rendered. */
+  const onEmbedListScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 160)
+        growEmbedList();
+    },
+    [growEmbedList],
+  );
+
+  // With no query the newest clip is what you almost always want, so the
+  // default skips past the groups; a query means the best match is on top.
+  const activeIndex = useMemo(() => {
+    if (pickerRows.length === 0) return -1;
+    const fallback = embedQuery
+      ? 0
+      : Math.min(groupRows.length, pickerRows.length - 1);
+    return Math.min(embedIndex ?? fallback, pickerRows.length - 1);
+  }, [embedIndex, embedQuery, groupRows.length, pickerRows.length]);
+
+  const activeRow = activeIndex < 0 ? undefined : pickerRows[activeIndex];
+
+  // Arrowing past the rendered rows pulls the next page in rather than
+  // stopping at an edge the list does not really have.
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const needed = activeIndex - groupRows.length + 1;
+    if (needed > embedShown)
+      setEmbedShown(Math.min(needed + EMBED_PAGE_MORE, entryRows.length));
+  }, [activeIndex, groupRows.length, embedShown, entryRows.length]);
+
+  // Keyboard navigation has to keep the highlighted row on screen - and only
+  // keyboard navigation, the way the paste popup does it: a hovered row has
+  // to stay put under the pointer. The effect also has to re-run on
+  // `embedShown`, because arrowing past the rendered window lands on a row
+  // that does not exist yet; `scrolledToRef` keeps that re-run from dragging
+  // the view back when the list instead grew because you scrolled to the end.
+  const scrolledToRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (openMenu !== "embed") {
+      scrolledToRef.current = null;
+      return;
+    }
+    if (!keyboardNavRef.current) return;
+    if (activeIndex < 0 || scrolledToRef.current === activeIndex) return;
+    const el = embedListRef.current?.querySelector(
+      `[data-row-index="${activeIndex}"]`,
+    );
+    if (!el) return;
+    scrolledToRef.current = activeIndex;
+    el.scrollIntoView({ block: "nearest" });
+  }, [openMenu, activeIndex, embedShown]);
+
+  const moveEmbedIndex = useCallback(
+    (delta: number) => {
+      if (pickerRows.length === 0) return;
+      keyboardNavRef.current = true;
+      setEmbedIndex((prev) => {
+        const from = prev ?? activeIndex;
+        const next = from + delta;
+        if (next < 0) return 0;
+        if (next > pickerRows.length - 1) return pickerRows.length - 1;
+        return next;
+      });
+    },
+    [activeIndex, pickerRows.length],
+  );
+
+  const onEmbedSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveEmbedIndex(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveEmbedIndex(-1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        insertRow(activeRow, e.shiftKey ? otherForm(embedForm) : embedForm);
+      }
+    },
+    [activeRow, embedForm, insertRow, moveEmbedIndex],
+  );
 
   // ── Render ────────────────────────────────────────────────────────────
 
@@ -1080,7 +1284,13 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               style={{ display: "none" }}
               onChange={handleAttachmentPick}
             />
+          </div>
 
+          {/* Clipboard insert. Its own group, so the shared divider rule sets
+              it apart, and a labelled pill rather than a nineteenth icon:
+              this is the feature the app is built around and it was reading
+              as one more formatting control. */}
+          <div className="ns-fmt-group ns-fmt-group--clip">
             <ToolbarPopover
               open={openMenu === "embed"}
               onClose={closeMenu}
@@ -1088,141 +1298,230 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               panelClassName="ns-popover--panel ns-embed-picker"
               trigger={
                 <button
-                  className={`ns-fmt-btn${openMenu === "embed" ? " ns-fmt-btn--active" : ""}`}
+                  className={`ns-clip-btn${openMenu === "embed" ? " ns-clip-btn--on" : ""}`}
                   onClick={() => toggleMenu("embed")}
-                  data-tooltip="Embed clipboard entry"
+                  data-tooltip="Insert a clipboard entry or a group"
                   data-tooltip-pos="below"
                 >
                   <ClipboardTextIcon size={13} weight="bold" />
+                  <span>Clipboard</span>
+                  <CaretDownIcon size={9} weight="bold" />
                 </button>
               }
             >
-              <div className="ns-embed-picker-tabs">
-                <button
-                  className={`ns-embed-tab${embedTab === "entries" ? " ns-embed-tab--active" : ""}`}
-                  onClick={() => setEmbedTab("entries")}
-                >
-                  Clipboard
-                </button>
-                <button
-                  className={`ns-embed-tab${embedTab === "groups" ? " ns-embed-tab--active" : ""}`}
-                  onClick={() => setEmbedTab("groups")}
-                >
-                  Groups
-                </button>
-              </div>
-              <div className="ns-embed-controls">
-                <input
-                  className="ns-picker-input ns-embed-search"
-                  placeholder={
-                    embedTab === "entries" ? "Search entries..." : "Search groups..."
-                  }
-                  value={embedSearch}
-                  onChange={(e) => setEmbedSearch(e.target.value)}
-                  autoFocus
-                />
-                <div className="ns-embed-form" role="radiogroup" aria-label="Insert as">
-                  {EMBED_FORMS.map((f) => (
-                    <button
-                      key={f.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={embedForm === f.value}
-                      className={`ns-embed-form-btn${embedForm === f.value ? " ns-embed-form-btn--on" : ""}`}
-                      onClick={() => setEmbedForm(f.value)}
-                      data-tooltip={f.hint}
-                      data-tooltip-pos="below"
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="ns-embed-list">
-                {embedTab === "entries" ? (
-                  filteredEntries.length === 0 ? (
-                    <div className="ns-embed-empty">No entries found</div>
-                  ) : (
-                    filteredEntries.map((entry) => {
-                      const text =
-                        entry.type === "image"
-                          ? (entry.label ?? "Image")
-                          : truncateText(
-                              entry.type === "html"
-                                ? stripHtml(entry.content)
-                                : entry.content,
-                              72,
-                            );
-                      return (
-                        <button
-                          key={entry.id}
-                          className="ns-embed-item"
-                          onClick={() => insertClipEmbed(entry.id)}
-                        >
-                          <span className="ns-embed-item-icon">
-                            {entry.type === "image" ? (
-                              <ImageIcon size={10} />
-                            ) : entry.type === "file" ? (
-                              <FileIcon size={10} />
-                            ) : (
-                              <ClipboardIcon size={10} />
-                            )}
-                          </span>
-                          <span className="ns-embed-item-text">{text}</span>
-                          <span className="ns-embed-item-time">
-                            {timeAgoFor(entry.timestamp, `clipboard:${entry.id}`)}
-                          </span>
-                        </button>
-                      );
-                    })
-                  )
-                ) : (
-                  <>
-                    <button
-                      className="ns-embed-item"
-                      onClick={() => insertGroupEmbed("pinned")}
-                    >
-                      <span className="ns-embed-item-group ns-embed-item-group--pinned">
-                        <PinIcon size={10} />
-                        Pinned
-                      </span>
-                    </button>
-                    <button
-                      className="ns-embed-item"
-                      onClick={() => insertGroupEmbed("Saved")}
-                    >
-                      <span className="ns-embed-item-group ns-embed-item-group--saved">
-                        <SaveStarIcon size={10} />
-                        Saved
-                      </span>
-                    </button>
-                    {filteredGroups.length === 0 && embedSearch.trim() !== "" ? (
-                      <div className="ns-embed-empty">No groups found</div>
+              <div className="ns-ip">
+                <div className="ns-ip-list-pane">
+                  <div className="ns-ip-search-row">
+                    <input
+                      className="ns-picker-input ns-ip-search"
+                      placeholder="Search clipboard and groups"
+                      value={embedSearch}
+                      onChange={(e) => {
+                        setEmbedSearch(e.target.value);
+                        setEmbedIndex(null);
+                        setEmbedShown(EMBED_PAGE_FIRST);
+                      }}
+                      onKeyDown={onEmbedSearchKeyDown}
+                      role="combobox"
+                      aria-expanded
+                      aria-controls="ns-ip-list"
+                      aria-autocomplete="list"
+                      aria-activedescendant={
+                        activeIndex < 0 ? undefined : `ns-ip-row-${activeIndex}`
+                      }
+                      autoFocus
+                    />
+                  </div>
+                  <div
+                    className="ns-ip-list"
+                    id="ns-ip-list"
+                    role="listbox"
+                    aria-label="Clipboard entries and groups"
+                    ref={embedListRef}
+                    onScroll={onEmbedListScroll}
+                  >
+                    {pickerRows.length === 0 ? (
+                      <div className="ns-ip-empty">
+                        {embedQuery
+                          ? `No match for "${embedSearch.trim()}"`
+                          : "Nothing to insert yet. Copy something first."}
+                      </div>
                     ) : (
-                      filteredGroups.map((group) => {
-                        const c = groupColor(group);
-                        return (
-                          <button
-                            key={group}
-                            className="ns-embed-item"
-                            onClick={() => insertGroupEmbed(group)}
-                          >
-                            <span
-                              className="ns-embed-item-group"
-                              style={{ background: c.bg, color: c.fg }}
-                            >
-                              <span
-                                className="ns-embed-group-dot"
-                                style={{ background: c.fg }}
-                              />
-                              {group}
-                            </span>
-                          </button>
-                        );
-                      })
+                      <>
+                        {groupRows.length > 0 && (
+                          <div role="group" aria-label="Groups">
+                            <div className="ns-ip-section">Groups</div>
+                            {groupRows.map((row, i) => {
+                              if (row.kind !== "group") return null;
+                              const info = groupInfos.get(row.name);
+                              const idx = i;
+                              return (
+                                <button
+                                  key={row.key}
+                                  type="button"
+                                  role="option"
+                                  id={`ns-ip-row-${idx}`}
+                                  data-row-index={idx}
+                                  tabIndex={-1}
+                                  aria-selected={idx === activeIndex}
+                                  className={`ns-ip-row${idx === activeIndex ? " ns-ip-row--on" : ""}`}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onMouseEnter={() => {
+                                    keyboardNavRef.current = false;
+                                    setEmbedIndex(idx);
+                                  }}
+                                  onClick={() => setEmbedIndex(idx)}
+                                  onDoubleClick={() => insertRow(row, embedForm)}
+                                >
+                                  {info && info.className ? (
+                                    // Pinned and Saved keep their own icon,
+                                    // the way the group manager lists them.
+                                    <>
+                                      <span
+                                        className={`ns-ip-tile ${info.className}`}
+                                      >
+                                        <info.Icon size={11} />
+                                      </span>
+                                      <span className="ns-ip-row-text">
+                                        {row.label}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    // A user group reads as the same dot chip
+                                    // it has on the clipboard screen.
+                                    <span className="ns-ip-chip-wrap">
+                                      <span
+                                        className="ns-ip-chip"
+                                        style={{ color: groupColor(row.name).fg }}
+                                      >
+                                        <span
+                                          className="ns-ip-chip-dot"
+                                          style={{
+                                            background: groupColor(row.name).fg,
+                                          }}
+                                        />
+                                        <span className="ns-ip-chip-name">
+                                          {row.label}
+                                        </span>
+                                      </span>
+                                    </span>
+                                  )}
+                                  <span className="ns-ip-row-meta">
+                                    {info?.entries.length ?? 0}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {entryRows.length > 0 && (
+                          <div role="group" aria-label="Clipboard">
+                            <div className="ns-ip-section">
+                              <span>Clipboard</span>
+                              <span className="ns-ip-section-count">
+                                {entryRows.length.toLocaleString()}
+                              </span>
+                            </div>
+                            {shownEntryRows.map((row, i) => {
+                              if (row.kind !== "entry") return null;
+                              const idx = groupRows.length + i;
+                              const kind = entryKind(row.entry);
+                              return (
+                                <button
+                                  key={row.key}
+                                  type="button"
+                                  role="option"
+                                  id={`ns-ip-row-${idx}`}
+                                  data-row-index={idx}
+                                  tabIndex={-1}
+                                  aria-selected={idx === activeIndex}
+                                  className={`ns-ip-row${idx === activeIndex ? " ns-ip-row--on" : ""}`}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onMouseEnter={() => {
+                                    keyboardNavRef.current = false;
+                                    setEmbedIndex(idx);
+                                  }}
+                                  onClick={() => setEmbedIndex(idx)}
+                                  onDoubleClick={() => insertRow(row, embedForm)}
+                                >
+                                  <span className={`ns-ip-tile ee-kind--${kind}`}>
+                                    <KindIcon kind={kind} size={11} />
+                                  </span>
+                                  <span className="ns-ip-row-text">
+                                    {entryTitle(row.entry, 64)}
+                                  </span>
+                                  <span className="ns-ip-row-meta">
+                                    {timeAgoFor(
+                                      row.entry.timestamp,
+                                      `clipboard:${row.entry.id}`,
+                                    )}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
                     )}
-                  </>
-                )}
+                  </div>
+                </div>
+
+                <div className="ns-ip-preview-pane">
+                  <div className="ns-ip-head">
+                    <div
+                      className="ns-ip-form"
+                      role="radiogroup"
+                      aria-label="Insert as"
+                    >
+                      {EMBED_FORMS.map((f) => (
+                        <button
+                          key={f.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={embedForm === f.value}
+                          className={`ns-ip-form-btn${embedForm === f.value ? " ns-ip-form-btn--on" : ""}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setEmbedForm(f.value)}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="ns-ip-form-hint">
+                      {
+                        (
+                          EMBED_FORMS.find((f) => f.value === embedForm) ??
+                          EMBED_FORMS[0]
+                        ).hint
+                      }
+                    </span>
+                  </div>
+
+                  <div className="ns-ip-stage">
+                    <div className="ee-rich ee-preview ns-ip-stage-inner">
+                      <EmbedPreview
+                        row={activeRow}
+                        form={embedForm}
+                        entries={entries}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="ns-ip-actions">
+                    <span className="ns-ip-kbd-hint">
+                      Enter inserts at the caret
+                    </span>
+                    <button
+                      type="button"
+                      className="ns-ip-insert"
+                      disabled={!activeRow}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => insertRow(activeRow, embedForm)}
+                    >
+                      Insert {embedForm}
+                    </button>
+                  </div>
+                </div>
               </div>
             </ToolbarPopover>
           </div>
