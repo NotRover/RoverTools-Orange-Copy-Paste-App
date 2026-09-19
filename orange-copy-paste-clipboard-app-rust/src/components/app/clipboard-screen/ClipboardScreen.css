@@ -335,21 +335,4 @@
   column-gap: 10px;
 }
 
-/* Expanded image cards (tiles, grid & single) grow larger, but stay bounded so
-   a tall image can't blow the card up — capped to a generous, window-relative
-   height and scaled to fit (contain). */
-.entry-grid .entry-card.entry-card--expanded .card-media,
-.entry-list .entry-card.entry-card--expanded .card-media,
-.entry-single .entry-card.entry-card--expanded .card-media {
-  height: auto;
-}
-
-.entry-grid .entry-card.entry-card--expanded .card-media-img,
-.entry-list .entry-card.entry-card--expanded .card-media-img,
-.entry-single .entry-card.entry-card--expanded .card-media-img {
-  width: 100%;
-  height: auto;
-  max-height: min(520px, 60vh);
-  object-fit: contain;
-}
 

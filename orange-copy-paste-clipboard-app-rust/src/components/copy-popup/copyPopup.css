@@ -178,14 +178,6 @@ body {
   color: #fff;
 }
 
-/* ── Divider ── */
-
-.popup-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 0 2px;
-}
-
 /* ── Preview ── */
 
 .popup-preview {

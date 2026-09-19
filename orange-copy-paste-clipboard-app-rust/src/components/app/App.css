@@ -308,13 +308,6 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
-/*  Search bar  */
-
-.search-bar {
-  position: relative;
-  flex: 1;
-}
-
 .search-icon {
   position: absolute;
   left: 11px;

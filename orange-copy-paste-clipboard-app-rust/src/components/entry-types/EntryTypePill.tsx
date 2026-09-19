@@ -74,18 +74,16 @@ interface EntryTypePillProps {
   /** Files in the entry. When >1 the pill becomes a bundle chip: a stacked
    *  glyph and "N <plural>" instead of the single-kind icon and label. */
   count?: number;
-  className?: string;
 }
 
 export const EntryTypePill: React.FC<EntryTypePillProps> = ({
   kind,
   count,
-  className,
 }) => {
   const bundle = count != null && count > 1;
   return (
     <span
-      className={`type-pill type-pill--${kind}${bundle ? " type-pill--bundle" : ""}${className ? ` ${className}` : ""}`}
+      className={`type-pill type-pill--${kind}${bundle ? " type-pill--bundle" : ""}`}
     >
       {bundle ? FilesStack : TYPE_ICONS[kind]}
       <span className="type-pill-label">

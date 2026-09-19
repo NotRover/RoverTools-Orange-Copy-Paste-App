@@ -194,19 +194,6 @@
   color: var(--accent);
 }
 
-/* Delete. The same two steps as everything else on the row, in red instead of
-   the accent: quiet at rest, filled tint on hover. */
-.vt-btn--danger {
-  color: color-mix(in srgb, var(--danger) 72%, var(--text-muted));
-  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
-}
-
-.vt-btn--danger:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: var(--danger-dim);
-}
-
 /* ── Zoom ───────────────────────────────────────────────────────── */
 
 /* One control, three parts: minus, the current level, plus. Tighter than the

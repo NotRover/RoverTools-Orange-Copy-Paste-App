@@ -1,22 +1,3 @@
-/* Filter badge */
-
-.cs-filter-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  font-size: 8px;
-  font-weight: 700;
-  border-radius: 99px;
-  background: rgba(255,255,255,.25);
-  color: inherit;
-  line-height: 1;
-  margin-left: -2px;
-  margin-right: -2px;
-}
-
 /* Filter card (overlay dropdown) */
 
 .cs-filter-card {

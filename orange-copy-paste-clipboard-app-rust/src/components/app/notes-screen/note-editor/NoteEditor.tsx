@@ -198,7 +198,6 @@ interface NoteEditorProps {
   onDelete: (id: string) => void;
   onPin: (id: string, pin: boolean) => void;
   onSetGroups: (id: string, groups: string[]) => void;
-  onCopyEntry?: (id: string) => void;
   onBack: () => void;
   /** Whether the editor is filling the screen rather than sharing it with the
    *  list. Owned by the screen, which persists the choice. */

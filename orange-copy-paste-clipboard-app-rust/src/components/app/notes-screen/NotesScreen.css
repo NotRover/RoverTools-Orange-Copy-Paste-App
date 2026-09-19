@@ -435,20 +435,6 @@
 
 /* ── Editor panel (right-side flyout) ────────────────────────────── */
 
-.ns-editor-overlay {
-  position: static;
-  inset: auto;
-  z-index: auto;
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  padding: 0;
-  animation: none;
-}
-
 /* Full-screen editor: the list and the splitter step aside and the dock takes
    the window. Same shape as the narrow-window rules below, reached by choice
    rather than by width, so the editor also drops the seam it wears when it is

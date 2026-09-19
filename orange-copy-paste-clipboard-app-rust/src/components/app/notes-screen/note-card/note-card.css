@@ -177,74 +177,10 @@
   border-radius: 3px;
 }
 
-/* Compact embed chips inside note cards */
-.ns-card-preview-md .ee-clip-embed-inner,
-.ns-card-preview-md .ee-group-chip-inner {
-  font-size: 0.75em;
-  padding: 2px 4px 2px 5px;
-}
-
-/* Panels need elevated z-index to escape the card's overflow:hidden */
-.ns-card-preview-md .ee-embed-panel,
-.ns-card-preview-md .ee-group-panel {
-  max-width: 280px;
-  z-index: 20;
-  position: absolute;
-}
-
-.ns-card-preview--rich {
-  display: block;
-  max-height: 220px;
-  line-height: 1.4;
-  -webkit-line-clamp: unset;
-  line-clamp: unset;
-  -webkit-box-orient: initial;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    #000 84%,
-    transparent 100%
-  );
-  mask-image: linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%);
-}
-
-.ns-card-preview--rich p,
-.ns-card-preview--rich div,
-.ns-card-preview--rich blockquote,
-.ns-card-preview--rich pre {
-  margin: 0 0 0.25em;
-}
-
-.ns-card-preview--rich ul,
-.ns-card-preview--rich ol {
-  margin: 0.2em 0 0.25em 1.1em;
-  padding: 0;
-}
-
-.ns-card-preview--rich img {
-  max-width: 100%;
-  max-height: 118px;
-  object-fit: cover;
-  border-radius: 6px;
-  display: block;
-}
-
-.ns-card-preview--rich table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-
 .ns-card-preview--expanded {
   max-height: none;
   -webkit-mask-image: none;
   mask-image: none;
-}
-
-.ns-card-preview--rich th,
-.ns-card-preview--rich td {
-  border: 1px solid var(--border);
-  padding: 2px 4px;
 }
 
 /* Card footer */
