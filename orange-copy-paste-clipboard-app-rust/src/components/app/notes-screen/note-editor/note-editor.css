@@ -148,6 +148,52 @@
   border-left: 1px solid var(--border);
 }
 
+/* Toolbar icon colours.
+   One colour per group, so the bar's five groups are legible at a glance
+   without counting divider lines:
+
+     red     marks: bold, italic, underline, strikethrough, inline code
+     purple  colour: text colour, highlight
+     blue    blocks: heading, quote, callout, code block, checklist, table,
+             horizontal rule
+     green   layout: lists, alignment
+     amber   insert: link, attachment, clipboard embed
+
+   Accent red-orange stays reserved for the active state, so the red below
+   is a cooler crimson that cannot be mistaken for "this format is on". */
+.ns-format-bar {
+  --tone-marks: #ef4444;
+  --tone-colour: #a855f7;
+  --tone-blocks: #3b82f6;
+  --tone-layout: #22c55e;
+  --tone-insert: #f59e0b;
+}
+
+/* Deeper on light, where the set above washes out on white. */
+[data-theme="light"] .ns-format-bar {
+  --tone-marks: #dc2626;
+  --tone-colour: #9333ea;
+  --tone-blocks: #2563eb;
+  --tone-layout: #16a34a;
+  --tone-insert: #d97706;
+}
+
+.ns-fmt-group--marks {
+  --fmt-hue: var(--tone-marks);
+}
+.ns-fmt-group--color {
+  --fmt-hue: var(--tone-colour);
+}
+.ns-fmt-group--blocks {
+  --fmt-hue: var(--tone-blocks);
+}
+.ns-fmt-group--layout {
+  --fmt-hue: var(--tone-layout);
+}
+.ns-fmt-group--insert {
+  --fmt-hue: var(--tone-insert);
+}
+
 .ns-fmt-btn {
   display: inline-flex;
   align-items: center;
@@ -157,7 +203,7 @@
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--fmt-hue, var(--text-muted));
   cursor: pointer;
   flex-shrink: 0;
   transition:
@@ -166,8 +212,12 @@
 }
 
 .ns-fmt-btn:hover {
-  color: var(--text);
-  background: var(--surface-hover);
+  color: var(--fmt-hue, var(--text));
+  background: color-mix(
+    in srgb,
+    var(--fmt-hue, transparent) 16%,
+    var(--surface-hover)
+  );
 }
 
 .ns-fmt-btn--active {
@@ -175,7 +225,11 @@
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
+/* Keeps the accent while hovered: `.ns-fmt-btn:hover` is two classes and
+   would otherwise outrank the one-class active rule and repaint the icon in
+   its group hue. */
 .ns-fmt-btn--active:hover {
+  color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }
 

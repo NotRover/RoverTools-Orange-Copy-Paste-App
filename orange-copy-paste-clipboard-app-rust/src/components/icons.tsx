@@ -654,6 +654,28 @@ export const FileIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
   </svg>
 );
 
+/* ── Paperclip (attach anything) ── */
+
+export const PaperclipIcon: React.FC<IconProps & { strokeWidth?: number }> = ({
+  size = 9,
+  strokeWidth = 2.2,
+  className,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.67 3.67 0 0 1 5.19 5.19l-8.49 8.49a1.83 1.83 0 0 1-2.6-2.6l7.78-7.78" />
+  </svg>
+);
+
 /* ── Spreadsheet (grid) ── */
 
 export const SheetIcon: React.FC<IconProps & { strokeWidth?: number }> = ({

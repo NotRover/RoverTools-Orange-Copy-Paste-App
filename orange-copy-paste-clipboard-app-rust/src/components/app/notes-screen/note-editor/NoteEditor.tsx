@@ -49,6 +49,7 @@ import {
   SaveStarIcon,
   ImageIcon,
   FileIcon,
+  PaperclipIcon,
   ClipboardIcon,
   ExpandIcon,
   CollapseIcon,
@@ -515,14 +516,15 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   );
 
   // ── Attachment uploads ──────────────────────────────────────────────────
-  // Hidden <input type="file"> elements; one for images, one for any document.
-  // Files are persisted under app_data/note-attachments/{images,files}/ by
-  // Rust and referenced by a short custom-scheme URL that resolves at render.
+  // One hidden <input type="file"> for everything. An image becomes an inline
+  // image node, anything else a file card; both persist under
+  // app_data/note-attachments/{images,files}/ through the Rust
+  // save_note_{image,file} commands and are referenced by a short
+  // custom-scheme URL that resolves at render.
 
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImagePick = useCallback(
+  const handleAttachmentPick = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       e.target.value = ""; // allow re-selecting the same file
@@ -530,35 +532,23 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       try {
         const buf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(buf));
-        const ext = (
-          file.name.includes(".")
-            ? (file.name.split(".").pop() ?? "png")
-            : (file.type.split("/")[1] ?? "png")
-        ).toLowerCase();
-        const filename = await invoke<string>("save_note_image", {
-          bytes,
-          ext,
-        });
-        editorRef.current?.applyCommand({
-          kind: "image",
-          src: imageAttachmentUrl(filename),
-          alt: file.name,
-        });
-      } catch (err) {
-        console.error("[notes] image upload failed", err);
-      }
-    },
-    [],
-  );
-
-  const handleDocumentPick = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (!file) return;
-      try {
-        const buf = await file.arrayBuffer();
-        const bytes = Array.from(new Uint8Array(buf));
+        if (file.type.startsWith("image/")) {
+          const ext = (
+            file.name.includes(".")
+              ? (file.name.split(".").pop() ?? "png")
+              : (file.type.split("/")[1] ?? "png")
+          ).toLowerCase();
+          const filename = await invoke<string>("save_note_image", {
+            bytes,
+            ext,
+          });
+          editorRef.current?.applyCommand({
+            kind: "image",
+            src: imageAttachmentUrl(filename),
+            alt: file.name,
+          });
+          return;
+        }
         const filename = await invoke<string>("save_note_file", {
           bytes,
           name: file.name,
@@ -570,7 +560,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           size: file.size,
         });
       } catch (err) {
-        console.error("[notes] document upload failed", err);
+        console.error("[notes] attachment upload failed", err);
       }
     },
     [],
@@ -779,7 +769,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           className={`ns-format-bar${readOnly ? " ns-format-bar--locked" : ""}`}
         >
           {/* Inline marks */}
-          <div className="ns-fmt-group">
+          <div className="ns-fmt-group ns-fmt-group--marks">
             <button
               className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
               onClick={() => dispatch({ kind: "bold" })}
@@ -823,7 +813,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Color and highlight */}
-          <div className="ns-fmt-group">
+          <div className="ns-fmt-group ns-fmt-group--color">
             <ToolbarPopover
               open={openMenu === "color"}
               onClose={closeMenu}
@@ -872,7 +862,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Block types */}
-          <div className="ns-fmt-group">
+          <div className="ns-fmt-group ns-fmt-group--blocks">
             <ToolbarPopover
               open={openMenu === "heading"}
               onClose={closeMenu}
@@ -974,7 +964,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Lists and alignment */}
-          <div className="ns-fmt-group">
+          <div className="ns-fmt-group ns-fmt-group--layout">
             <ToolbarPopover
               open={openMenu === "lists"}
               onClose={closeMenu}
@@ -1031,7 +1021,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Insert */}
-          <div className="ns-fmt-group">
+          <div className="ns-fmt-group ns-fmt-group--insert">
             <ToolbarPopover
               open={openMenu === "link"}
               onClose={closeMenu}
@@ -1074,36 +1064,21 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               </div>
             </ToolbarPopover>
 
-            {/* Image and file attachments. Both use a hidden <input type="file">
-                and route through the Rust save_note_{image,file} commands. */}
+            {/* One attach button for images and documents alike; the picked
+                file's type decides which node it becomes. */}
             <button
               className="ns-fmt-btn"
-              onClick={() => imageInputRef.current?.click()}
-              data-tooltip="Insert image"
+              onClick={() => attachInputRef.current?.click()}
+              data-tooltip="Attach image or file"
               data-tooltip-pos="below"
             >
-              <ImageIcon size={12} />
-            </button>
-            <button
-              className="ns-fmt-btn"
-              onClick={() => fileInputRef.current?.click()}
-              data-tooltip="Attach document"
-              data-tooltip-pos="below"
-            >
-              <FileIcon size={12} />
+              <PaperclipIcon size={12} />
             </button>
             <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleImagePick}
-            />
-            <input
-              ref={fileInputRef}
+              ref={attachInputRef}
               type="file"
               style={{ display: "none" }}
-              onChange={handleDocumentPick}
+              onChange={handleAttachmentPick}
             />
 
             <ToolbarPopover
