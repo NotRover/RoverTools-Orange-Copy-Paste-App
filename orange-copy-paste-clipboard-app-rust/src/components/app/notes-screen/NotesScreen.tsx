@@ -442,8 +442,6 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                       if (onBulkPin) onBulkPin([...multiSelect.selectedIds]);
                     }
                   }}
-                  allSaved={false}
-                  onBulkToggleSave={() => {}}
                   onBulkAddGroup={(group) => {
                     if (onBulkAddGroup)
                       onBulkAddGroup([...multiSelect.selectedIds], group);
