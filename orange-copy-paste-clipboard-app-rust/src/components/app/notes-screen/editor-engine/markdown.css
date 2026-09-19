@@ -420,9 +420,16 @@
 [data-theme="light"] .ee-kind--saved    { --k-fg: #16a34a; }
 
 /* Chip: 22px, kind colour as tint and text, never grows. */
+/* The chip is a fixed 22px inside a line that is not: `vertical-align:
+   middle` sits it on the parent's baseline plus half an x-height, which
+   drops it low in a heading. Giving the wrapper the line's own height and
+   centring the chip in it puts the chip on the middle of the line at any
+   block size. */
 .ee-chip-wrap {
-  display: inline;
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  height: 1lh;
+  vertical-align: top;
 }
 .ee-chip {
   display: inline-flex;
@@ -432,7 +439,9 @@
   margin: 0 2px;
   padding: 0 7px 0 6px;
   border-radius: 7px;
-  font-size: 0.84em;
+  /* Tied to the note's reading size, not the block it sits in: `em` inside
+     a heading blew the label up to 2.25x inside a pill still 22px tall. */
+  font-size: calc(var(--ee-editor-size) * 0.84);
   font-weight: 600;
   line-height: 1;
   vertical-align: middle;

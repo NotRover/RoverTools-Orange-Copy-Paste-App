@@ -4,7 +4,7 @@
 // toolbar keeps a single `openMenu` id and this component only knows whether
 // it is the open one.
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface ToolbarPopoverProps {
   open: boolean;
@@ -29,6 +29,35 @@ const ToolbarPopover: React.FC<ToolbarPopoverProps> = ({
   children,
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // A wide panel hangs off a button near the right end of the bar, so at the
+  // window's 640px minimum it can start left of the window. Measure once the
+  // panel is laid out and nudge it back inside.
+  const [shift, setShift] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setShift(0);
+      return;
+    }
+    const clamp = () => {
+      const el = panelRef.current;
+      if (!el) return;
+      // Measure the unshifted position: the current rect already includes
+      // whatever nudge is applied, so subtract it before deciding.
+      setShift((prev) => {
+        const left = el.getBoundingClientRect().left - prev;
+        const right = left + el.offsetWidth;
+        if (left < 8) return 8 - left;
+        if (right > window.innerWidth - 8)
+          return Math.min(0, window.innerWidth - 8 - right);
+        return 0;
+      });
+    };
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +81,15 @@ const ToolbarPopover: React.FC<ToolbarPopoverProps> = ({
       {trigger}
       {open && (
         <div
+          ref={panelRef}
+          // A margin, not a transform: the open animation owns `transform`.
+          style={
+            shift
+              ? align === "right"
+                ? { marginRight: -shift }
+                : { marginLeft: shift }
+              : undefined
+          }
           className={`ns-popover ns-popover--${align}${
             panelClassName ? " " + panelClassName : ""
           }`}

@@ -90,7 +90,8 @@ entry text, the group's newest rows, or nothing. Chips show the same card as
 a hover preview via `extensions/HoverCard.tsx`, in a body portal. Colours come
 from the `.ee-kind--*` classes in `markdown.css`; a chip, a tile and a row of
 the same kind share them. The Card / Chip choice is a switch in the toolbar's
-embed picker, remembered for the session.
+insert picker, remembered for the session; that picker previews the pick by
+rendering these same components, so what it shows is what gets inserted.
 
 `fileCard` holds `href` (`note-file://...`), `name` and `size`. Open and Show
 in folder go through the Rust `open_note_attachment` command, which only

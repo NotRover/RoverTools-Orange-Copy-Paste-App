@@ -493,127 +493,168 @@
   opacity: 0.88;
 }
 
-/* ── Embed picker ────────────────────────────────────────────────── */
+/* ── Clipboard insert button ─────────────────────────────────────── */
+
+/* The one labelled control in the bar. It was a nineteenth icon in the same
+   box as Bold, last in the scan order and sharing the insert group's amber,
+   so it read as a third formatting control rather than the way into the
+   clipboard. Outlined in the accent with its name on it, it is the only
+   thing in the bar that looks like a door. */
+
+.ns-clip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.ns-clip-btn > svg {
+  flex: none;
+}
+
+.ns-clip-btn > svg:last-child {
+  opacity: 0.75;
+  margin-left: -2px;
+}
+
+.ns-clip-btn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* Open: filled, so the bar says which panel is down. */
+.ns-clip-btn--on,
+.ns-clip-btn--on:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ── Insert picker ───────────────────────────────────────────────── */
+
+/* Two panes: one list covering clips and groups, and a live render of the
+   thing that will land in the note. The old picker had tabs, so a search
+   only ever saw half the account, and card-or-chip was a setting with
+   nothing on screen showing which one was on. */
 
 .ns-embed-picker {
-  width: 300px;
-  max-height: 320px;
+  /* The panel hangs off a button near the right end of the bar and the
+     window can be 640px wide; ToolbarPopover nudges it back inside. */
+  width: min(580px, calc(100vw - 24px));
+  height: 344px;
 }
 
-.ns-embed-picker-tabs {
+.ns-ip {
   display: flex;
-  gap: 2px;
-  padding: 6px 6px 0;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1px;
-}
-
-.ns-embed-tab {
   flex: 1;
-  padding: 5px 8px 7px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition:
-    color 0.12s ease,
-    border-color 0.12s ease;
-  letter-spacing: 0.2px;
-  margin-bottom: -1px;
+  min-height: 0;
 }
 
-.ns-embed-tab:hover {
-  color: var(--text-secondary);
-}
+/* ── Left: the list ──────────────────────────────────────────────── */
 
-.ns-embed-tab--active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.ns-embed-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px 4px;
+.ns-ip-list-pane {
+  width: 232px;
   flex-shrink: 0;
-}
-.ns-embed-search {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Card or chip. The same 26px pill the image size strip uses. */
-.ns-embed-form {
-  display: inline-flex;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  flex-shrink: 0;
-}
-.ns-embed-form-btn {
-  padding: 3px 8px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  font-family: inherit;
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.ns-embed-form-btn:hover {
-  color: var(--text);
-}
-.ns-embed-form-btn--on,
-.ns-embed-form-btn--on:hover {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
-.ns-embed-list {
-  flex: 1;
-  overflow: hidden auto;
-  padding: 2px 6px 6px;
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  min-height: 0;
 }
 
-.ns-embed-item {
+.ns-ip-search-row {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ns-ip-search {
+  width: 100%;
+}
+
+.ns-ip-list {
+  flex: 1;
+  overflow: hidden auto;
+  padding: 4px 5px 6px;
+  min-height: 0;
+}
+
+.ns-ip-section {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 8px 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ns-ip-section-count {
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ns-ip-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 5px 7px;
   border: none;
+  border-radius: 7px;
   background: transparent;
+  font-family: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background 0.1s ease;
   min-width: 0;
+  transition: background 0.1s ease;
 }
 
-.ns-embed-item:hover {
-  background: var(--accent-dim);
+.ns-ip-row:hover {
+  background: var(--surface-hover);
 }
 
-.ns-embed-item-icon {
-  font-size: 12px;
+/* The highlighted row is what the preview is showing, so it needs to read
+   as chosen rather than merely hovered: a stronger fill and full-strength
+   text, no rail down the edge. */
+.ns-ip-row--on,
+.ns-ip-row--on:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+.ns-ip-tile {
+  width: 19px;
+  height: 19px;
+  border-radius: 5px;
   flex-shrink: 0;
-  opacity: 0.75;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--k-bg);
+  color: var(--k-fg);
 }
 
-.ns-embed-item-text {
+.ns-ip-row-text {
   flex: 1;
   min-width: 0;
   font-size: 11px;
@@ -623,49 +664,193 @@
   white-space: nowrap;
 }
 
-.ns-embed-item-time {
+.ns-ip-row--on .ns-ip-row-text {
+  color: var(--text);
+}
+
+/* A user group wears the same dot chip as on the clipboard screen, so the
+   two lists name the same thing the same way. Pinned and Saved keep the
+   icon tile: they are the two groups with an icon of their own. */
+.ns-ip-chip-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.ns-ip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 7px 3px 5px;
+  border-radius: 5px;
+  background: var(--surface-hover);
   font-size: 10px;
-  color: var(--text-muted);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ns-ip-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ns-ip-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ns-embed-item-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 9px 2px 6px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.ns-embed-group-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.ns-ip-row-meta {
   flex-shrink: 0;
-  opacity: 0.8;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.ns-embed-item-group--pinned {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
-.ns-embed-item-group--saved {
-  background: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
-}
-
-.ns-embed-empty {
-  padding: 20px 16px;
+.ns-ip-empty {
+  padding: 28px 16px;
   text-align: center;
   font-size: 11px;
   color: var(--text-muted);
-  font-style: italic;
 }
 
+/* ── Right: the preview ──────────────────────────────────────────── */
+
+.ns-ip-preview-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ns-ip-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ns-ip-form {
+  display: inline-flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.ns-ip-form-btn {
+  padding: 3px 11px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+}
+
+.ns-ip-form-btn:hover {
+  color: var(--text);
+}
+
+.ns-ip-form-btn--on,
+.ns-ip-form-btn--on:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ns-ip-form-hint {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  min-width: 0;
+}
+
+/* The stage keeps its own scroll: a long clip makes a tall card, and the
+   panel must not grow with it. */
+.ns-ip-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* `.ee-rich` carries the note's own page padding; the stage supplies its
+   own, so drop it rather than pay for it twice and overflow. Flex rather
+   than block: the card is an inline-flex box and would otherwise sit
+   against the left edge of a full-width block. */
+.ns-ip-stage-inner {
+  margin: auto;
+  padding: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ns-ip-stage-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ns-ip-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.ns-ip-kbd-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.ns-ip-insert {
+  flex-shrink: 0;
+  padding: 6px 15px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.ns-ip-insert:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ns-ip-insert:not(:disabled):hover {
+  opacity: 0.88;
+}
 /* ── Export ──────────────────────────────────────────────────────── */
 
 .ns-export-menu {
