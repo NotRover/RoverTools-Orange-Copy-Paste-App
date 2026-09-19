@@ -120,9 +120,10 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  row-gap: 4px;
+  row-gap: 3px;
   column-gap: 0;
-  padding: 6px 12px;
+  /* A touch more above than below: the group labels need the air. */
+  padding: 6px 12px 4px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   position: relative;
@@ -140,12 +141,56 @@
   align-items: center;
   flex-wrap: nowrap;
   gap: 1px;
+  /* Room for the group label, which is taken out of flow so the buttons keep
+     their own row. The clip group carries no label and pads to match. */
+  position: relative;
+  padding-top: 11px;
+}
+
+/* The label names the group in the muted grey, and takes the group's colour
+   while the pointer is inside it - which is what teaches the colour code, so
+   after a while the colour carries the grouping on its own. */
+.ns-fmt-group::before {
+  content: attr(data-label);
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: color 0.12s ease;
+}
+
+.ns-fmt-group:hover::before {
+  color: var(--fmt-hue, var(--text-muted));
 }
 
 .ns-fmt-group + .ns-fmt-group {
   margin-left: 6px;
   padding-left: 7px;
-  border-left: 1px solid var(--border);
+}
+
+/* A short rule beside the buttons rather than a border down the whole group,
+   which since the labels arrived runs past them top and bottom. */
+.ns-fmt-group + .ns-fmt-group::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 2px;
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+/* The label is centred over the buttons, not over the divider gutter. */
+.ns-fmt-group + .ns-fmt-group::before {
+  left: 7px;
 }
 
 /* Toolbar icon colours.
@@ -193,13 +238,18 @@
 .ns-fmt-group--insert {
   --fmt-hue: var(--tone-insert);
 }
+/* The clipboard group takes the app accent rather than one of the five tones:
+   it is the group that reaches outside the note. */
+.ns-fmt-group--clip {
+  --fmt-hue: var(--accent);
+}
 
 .ns-fmt-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 28px;
+  height: 24px;
   border-radius: 6px;
   border: none;
   background: transparent;
@@ -500,58 +550,6 @@
    so it read as a third formatting control rather than the way into the
    clipboard. Outlined in the accent with its name on it, it is the only
    thing in the bar that looks like a door. */
-
-.ns-clip-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 7px;
-  border-radius: 7px;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease;
-}
-
-.ns-clip-btn > svg {
-  flex: none;
-}
-
-.ns-clip-btn > svg:last-child {
-  opacity: 0.75;
-  margin-left: -2px;
-}
-
-.ns-clip-btn:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-}
-
-/* Open: filled, so the bar says which panel is down. */
-.ns-clip-btn--on,
-.ns-clip-btn--on:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-/* ── Insert picker ───────────────────────────────────────────────── */
-
-/* Two panes: one list covering clips and groups, and a live render of the
-   thing that will land in the note. The old picker had tabs, so a search
-   only ever saw half the account, and card-or-chip was a setting with
-   nothing on screen showing which one was on. */
 
 .ns-embed-picker {
   /* The panel hangs off a button near the right end of the bar and the

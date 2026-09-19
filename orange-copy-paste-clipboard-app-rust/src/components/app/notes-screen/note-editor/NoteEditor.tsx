@@ -23,7 +23,7 @@ import {
   ListNumbersIcon,
   TableIcon,
   LinkSimpleIcon,
-  ClipboardTextIcon,
+  CardsThreeIcon,
   CaretDownIcon,
   TextUnderlineIcon,
   LightbulbIcon,
@@ -973,7 +973,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           className={`ns-format-bar${readOnly ? " ns-format-bar--locked" : ""}`}
         >
           {/* Inline marks */}
-          <div className="ns-fmt-group ns-fmt-group--marks">
+          <div className="ns-fmt-group ns-fmt-group--marks" data-label="Text">
             <button
               className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
               onClick={() => dispatch({ kind: "bold" })}
@@ -1017,7 +1017,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Color and highlight */}
-          <div className="ns-fmt-group ns-fmt-group--color">
+          <div className="ns-fmt-group ns-fmt-group--color" data-label="Color">
             <ToolbarPopover
               open={openMenu === "color"}
               onClose={closeMenu}
@@ -1066,7 +1066,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Block types */}
-          <div className="ns-fmt-group ns-fmt-group--blocks">
+          <div className="ns-fmt-group ns-fmt-group--blocks" data-label="Blocks">
             <ToolbarPopover
               open={openMenu === "heading"}
               onClose={closeMenu}
@@ -1168,7 +1168,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Lists and alignment */}
-          <div className="ns-fmt-group ns-fmt-group--layout">
+          <div className="ns-fmt-group ns-fmt-group--layout" data-label="Layout">
             <ToolbarPopover
               open={openMenu === "lists"}
               onClose={closeMenu}
@@ -1225,7 +1225,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
 
           {/* Insert */}
-          <div className="ns-fmt-group ns-fmt-group--insert">
+          <div className="ns-fmt-group ns-fmt-group--insert" data-label="Insert">
             <ToolbarPopover
               open={openMenu === "link"}
               onClose={closeMenu}
@@ -1290,7 +1290,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               it apart, and a labelled pill rather than a nineteenth icon:
               this is the feature the app is built around and it was reading
               as one more formatting control. */}
-          <div className="ns-fmt-group ns-fmt-group--clip">
+          <div className="ns-fmt-group ns-fmt-group--clip" data-label="Clipboard">
             <ToolbarPopover
               open={openMenu === "embed"}
               onClose={closeMenu}
@@ -1298,14 +1298,13 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               panelClassName="ns-popover--panel ns-embed-picker"
               trigger={
                 <button
-                  className={`ns-clip-btn${openMenu === "embed" ? " ns-clip-btn--on" : ""}`}
+                  className={`ns-fmt-btn ns-fmt-btn--dropdown${openMenu === "embed" ? " ns-fmt-btn--active" : ""}`}
                   onClick={() => toggleMenu("embed")}
                   data-tooltip="Insert a clipboard entry or a group"
                   data-tooltip-pos="below"
                 >
-                  <ClipboardTextIcon size={13} weight="bold" />
-                  <span>Clipboard</span>
-                  <CaretDownIcon size={9} weight="bold" />
+                  <CardsThreeIcon size={15} weight="bold" />
+                  {caret("embed")}
                 </button>
               }
             >
