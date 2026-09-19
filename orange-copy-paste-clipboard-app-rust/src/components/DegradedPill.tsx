@@ -37,5 +37,3 @@ export const DegradedPill: React.FC<{ className?: string }> = ({ className }) =>
     </span>
   );
 };
-
-export default DegradedPill;

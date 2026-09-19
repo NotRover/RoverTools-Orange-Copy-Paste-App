@@ -5,7 +5,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 
-export type CalloutTone = "info" | "success" | "warning" | "danger" | "neutral";
+type CalloutTone = "info" | "success" | "warning" | "danger" | "neutral";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {

@@ -40,7 +40,7 @@ const OWN_ONLY: DeleteOrigin = {
  * Self-contained (no app context), so the history list, the notes list and both
  * quick popups can each render their own.
  */
-export const ConfirmDeleteDialog: React.FC<Props> = ({
+const ConfirmDeleteDialog: React.FC<Props> = ({
   open,
   count = 1,
   entryKeys,

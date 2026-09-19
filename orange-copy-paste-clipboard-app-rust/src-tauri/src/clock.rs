@@ -80,12 +80,6 @@ pub fn now_ms() -> u64 {
     corrected.max(0) as u64
 }
 
-/// Move a reading already taken from the local clock into the shared frame, for
-/// the few places handed a raw local timestamp by the platform.
-pub fn to_shared(local: u64) -> u64 {
-    (local as i64 + OFFSET_MS.load(Ordering::Relaxed)).max(0) as u64
-}
-
 pub fn offset_ms() -> i64 {
     OFFSET_MS.load(Ordering::Relaxed)
 }
