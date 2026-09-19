@@ -87,13 +87,17 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
 
 #[tauri::command]
 pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    // Capture IDs of unpinned entries before clearing so tombstones can propagate (invariant #5).
+    // Capture IDs of the entries clear() will actually drop, so tombstones
+    // propagate for exactly those (invariant #5). Must match clear()'s
+    // retention (`is_saved` = pinned OR in the "Saved" group): a saved-but-
+    // unpinned entry is kept locally, so pushing a delete for it would wipe it
+    // from the cloud and other devices while this one keeps it.
     let deleted: Vec<(String, u64)> = state
         .history
         .lock()
         .all()
         .iter()
-        .filter(|e| !e.pinned)
+        .filter(|e| !e.is_saved())
         .map(|e| (e.id.clone(), e.timestamp))
         .collect();
 
