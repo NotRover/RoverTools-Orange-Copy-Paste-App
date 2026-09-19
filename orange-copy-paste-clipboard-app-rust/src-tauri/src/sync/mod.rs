@@ -2675,7 +2675,6 @@ impl SyncClient {
                     pinned: e.pinned,
                     groups,
                     server_id: Some(e.server_id.clone()),
-                    sync_status: crate::sync::types::SyncStatus::Synced,
                 });
                 notes_changed = true;
             } else {
@@ -2777,7 +2776,6 @@ impl SyncClient {
                     label,
                     content_hash: None,
                     server_id: Some(e.server_id.clone()),
-                    sync_status: crate::sync::types::SyncStatus::Synced,
                 };
                 // Auto-copy: only live space entries, per the receiving
                 // device's per-space toggle. Backfill never touches the
@@ -5012,7 +5010,6 @@ impl SyncClient {
                 label: meta.label,
                 content_hash: None,
                 server_id: Some(meta.server_id.clone()),
-                sync_status: crate::sync::types::SyncStatus::Synced,
             };
             if meta.autocopy {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
@@ -5114,7 +5111,6 @@ impl SyncClient {
                 label: meta.label,
                 content_hash: None,
                 server_id: Some(meta.server_id.clone()),
-                sync_status: crate::sync::types::SyncStatus::Synced,
             };
             if meta.autocopy {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);

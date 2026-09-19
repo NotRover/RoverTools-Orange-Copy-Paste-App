@@ -44,9 +44,6 @@ pub struct Note {
     /// Server-assigned UUID after a successful push.
     #[serde(skip)]
     pub server_id: Option<String>,
-    /// Whether this note has been synced to the server.
-    #[serde(skip, default)]
-    pub sync_status: crate::sync::types::SyncStatus,
 }
 
 impl Default for Note {
@@ -68,7 +65,6 @@ impl Note {
             pinned: false,
             groups: Vec::new(),
             server_id: None,
-            sync_status: crate::sync::types::SyncStatus::LocalOnly,
         }
     }
 }

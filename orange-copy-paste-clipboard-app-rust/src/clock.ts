@@ -23,11 +23,6 @@ export function sharedNow(): number {
   return Date.now() + offsetMs;
 }
 
-/** This machine's error against the server, in ms. Positive means slow. */
-export function clockOffset(): number {
-  return offsetMs;
-}
-
 /**
  * Read the offset and follow it. Called once per window at startup.
  *

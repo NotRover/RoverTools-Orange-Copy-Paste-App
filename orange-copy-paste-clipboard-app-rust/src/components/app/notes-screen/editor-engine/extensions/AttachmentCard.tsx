@@ -77,7 +77,7 @@ export function kindLabel(kind: Kind): string {
   }
 }
 
-export const MISSING_TITLE = "Removed from clipboard";
+const MISSING_TITLE = "Removed from clipboard";
 
 /** One-line title for an entry. `max` is the character budget. */
 export function entryTitle(entry: ClipboardEntry | undefined, max = 60): string {
@@ -93,7 +93,7 @@ export function entryTitle(entry: ClipboardEntry | undefined, max = 60): string 
 }
 
 /** Plain text of a text-like entry, for the card body. */
-export function entryText(entry: ClipboardEntry): string {
+function entryText(entry: ClipboardEntry): string {
   return (entry.type === "html" ? stripHtml(entry.content) : entry.content).trim();
 }
 
@@ -165,7 +165,7 @@ export interface CardAction {
   done?: boolean;
 }
 
-export const ActionButton: React.FC<CardAction> = ({ label, icon, onClick, done }) => (
+const ActionButton: React.FC<CardAction> = ({ label, icon, onClick, done }) => (
   <button
     type="button"
     className={`ee-card-act${done ? " ee-card-act--done" : ""}`}
@@ -355,7 +355,7 @@ export const GroupBody: React.FC<{
 
 // ── File helpers ─────────────────────────────────────────────────────────
 
-export function formatBytes(bytes: number | null | undefined): string | null {
+function formatBytes(bytes: number | null | undefined): string | null {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
   if (bytes < 1024) return `${bytes} B`;
   const kb = bytes / 1024;
@@ -366,7 +366,7 @@ export function formatBytes(bytes: number | null | undefined): string | null {
 }
 
 /** "PDF", "DOCX" from a filename; null without an extension. */
-export function fileExtLabel(name: string): string | null {
+function fileExtLabel(name: string): string | null {
   const base = fileNameFromPath(name);
   const dot = base.lastIndexOf(".");
   if (dot <= 0 || dot === base.length - 1) return null;

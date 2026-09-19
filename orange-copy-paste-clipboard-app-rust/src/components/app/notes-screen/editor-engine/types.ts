@@ -2,8 +2,6 @@
 // Notion-like Tiptap editor. Storage is ProseMirror JSON serialized as a
 // string. Anything that does not parse renders as an empty document.
 
-import type { JSONContent } from "@tiptap/react";
-
 export type AlignValue = "left" | "center" | "right" | "justify";
 
 /** How a clip or group reference enters the note: a chip in the sentence or
@@ -78,5 +76,3 @@ export interface ActiveState {
   textColor?: string;
   highlight?: string;
 }
-
-export type EditorContent = JSONContent;

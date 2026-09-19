@@ -50,7 +50,7 @@ import "../clipboard-screen/entry-viewer/EntryViewer.css";
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
 /** What the toolbar says about the entry, to the right of the type pill. */
-export function entryFacts(entry: ClipboardEntry): string[] {
+function entryFacts(entry: ClipboardEntry): string[] {
   if (entry.type === "text" || entry.type === "html") {
     const lines = entry.content.split("\n").length;
     const chars = entry.content.length;

@@ -2,23 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// ── Sync status per entry ───────────────────────────────────────────
-
-/// Tracks whether a clipboard entry or note has been pushed to the server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum SyncStatus {
-    /// Pushed and confirmed by the server (server_id is set).
-    Synced,
-    /// Queued in sync_pending.json, waiting for connectivity.
-    Pending,
-    /// Sync disabled or entry predates sync enrollment.
-    #[default]
-    LocalOnly,
-}
-
-
 // ── User & auth ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

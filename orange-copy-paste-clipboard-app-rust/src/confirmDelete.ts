@@ -13,7 +13,7 @@ import type { Space } from "./types";
 export const CONFIRM_SYNC_DELETE_KEY = "confirm_sync_delete";
 
 /** Whether the confirmation is still switched on (default true when unset). */
-export async function syncDeleteConfirmEnabled(): Promise<boolean> {
+async function syncDeleteConfirmEnabled(): Promise<boolean> {
   try {
     const v = await invoke<boolean | null>("get_setting", {
       key: CONFIRM_SYNC_DELETE_KEY,
@@ -40,7 +40,7 @@ export async function disableSyncDeleteConfirm(): Promise<void> {
 export const CONFIRM_SPACE_REMOVE_KEY = "confirm_space_remove";
 
 /** Whether the remove-from-space confirmation is still on (default true). */
-export async function spaceRemoveConfirmEnabled(): Promise<boolean> {
+async function spaceRemoveConfirmEnabled(): Promise<boolean> {
   try {
     const v = await invoke<boolean | null>("get_setting", {
       key: CONFIRM_SPACE_REMOVE_KEY,
@@ -78,7 +78,7 @@ export async function shouldConfirmSpaceRemove(): Promise<boolean> {
  * read from `sync_get_entry_states`. Sync off / signed out yields an empty map,
  * i.e. nothing is synced and nothing needs confirming.
  */
-export async function anyEntrySynced(keys: string[]): Promise<boolean> {
+async function anyEntrySynced(keys: string[]): Promise<boolean> {
   try {
     const states = await invoke<Record<string, string>>("sync_get_entry_states");
     return keys.some((k) => !!states[k]);

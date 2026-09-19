@@ -519,5 +519,3 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
 // comparison is safe and effective here.
 export const EntryCard = React.memo(EntryCardImpl);
 EntryCard.displayName = "EntryCard";
-
-export default EntryCard;

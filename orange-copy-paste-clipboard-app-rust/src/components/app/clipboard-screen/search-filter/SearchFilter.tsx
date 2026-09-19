@@ -33,8 +33,6 @@ import type {
 } from "./FilterParts";
 import "./SearchFilter.css";
 
-export type { CloudFilter, ShareFilter, OwnerFilter, DatePreset };
-
 const ALL_DISPLAY_KINDS: DisplayKind[] = [
   "text",
   "url",

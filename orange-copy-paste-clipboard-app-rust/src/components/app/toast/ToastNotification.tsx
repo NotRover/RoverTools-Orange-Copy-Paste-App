@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import "./ToastNotification.css";
 
 // Types 
-export interface ToastAction {
+interface ToastAction {
   label: string;
   icon?: React.ReactNode;
   onClick: () => void;

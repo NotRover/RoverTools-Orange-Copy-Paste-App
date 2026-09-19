@@ -20,9 +20,8 @@ const REFRESH_ON = [
  *
  * This lives outside the entry model on purpose: it is sync bookkeeping owned
  * by Rust (id_map.json + the pending queue), not something persisted with the
- * entry. The card's cloud badge used to read `entry.sync_status`, which Rust
- * marks `#[serde(skip)]` — so it was always undefined and the badge never
- * rendered at all.
+ * entry. The entry model carries no sync-state field of its own, so the card's
+ * cloud badge derives its state here rather than from the entry.
  */
 /** Fired on the document when the Settings screen flips the badge preference,
  *  so open screens drop or restore their badges without a remount. */
