@@ -398,38 +398,6 @@ button.card-type-chip {
 
 button.card-type-chip:hover {
   opacity: 0.75;
-}.card-file-thumb {
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  border-radius: 3px;
-  overflow: hidden;
-  background: var(--border);
-}
-
-.card-file-thumb-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.card-file-thumb-placeholder {
-  width: 100%;
-  height: 100%;
-  background: var(--border);
-}
-
-.card-file-name {
-  font-size: 11px;
-  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
-  font-weight: 400;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
 }
 
 /*  Card footer (type chip + timestamp on same line)  */
@@ -663,8 +631,7 @@ button.card-type-chip:hover {
 }/* Ensure Cascadia Code is applied to all text content within folder entry cards */
 .entry-card[data-kind="folder"] .card-text,
 .entry-card[data-kind="folder"] .card-text--file,
-.entry-card[data-kind="folder"] .card-file-preview-name,
-.entry-card[data-kind="folder"] .card-file-name {
+.entry-card[data-kind="folder"] .card-file-preview-name {
   font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
 }
 

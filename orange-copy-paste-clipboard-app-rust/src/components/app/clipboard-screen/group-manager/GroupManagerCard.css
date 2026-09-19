@@ -270,35 +270,6 @@
   white-space: nowrap;
 }
 
-.gm-detail-input {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-hover);
-  color: var(--text);
-  font-size: 11.5px;
-  font-family: inherit;
-  outline: none;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.gm-detail-input::placeholder {
-  color: var(--text-muted);
-}
-
-.gm-detail-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
-}
-
-.gm-detail-input--error {
-  border-color: var(--danger);
-}
-
 .gm-detail-delete {
   display: flex;
   align-items: center;
