@@ -260,7 +260,7 @@ by intention, and the copy that drifts is the one nobody was reading when it bro
 | The release pipeline | `docs/RELEASING.md` |
 | The backend's host and deployment — box access, hardening, recovery, the deploy pipeline, ops | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | User-facing release history, and the next release's notes | `changelog/` — one file per release, staged in `changelog/next.md` (skeleton `changelog/TEMPLATE.md`, convention `changelog/README.md`) |
-| End-user how-to and the public marketing site | `orange-copy-paste-clipboard-website/` — its own repo (Astro + Starlight). Describes product behavior for users; links to the contract/internals homes rather than restating them |
+| End-user how-to, the public marketing site, and the Developers section (architecture/security overviews, self-hosting, contributing, shipped design records and walkthroughs) | `orange-copy-paste-clipboard-website/` — its own repo (Astro + Starlight). Describes product behavior for users; hosts the decision records + walkthroughs. Its Developers > Reference pages *render* the homes below (not a copy — see the mirror note) so devs read everything on one site; edit the home, never the rendered page |
 | How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |
 | Where everything lives, and cross-component invariants with no other home | `docs/ARCHITECTURE.md` — a map, not a description |
 
@@ -277,34 +277,57 @@ Two consequences worth stating outright, because both are easy to get wrong:
 - **A README is a front door, not a reference.** It may say what the thing is and how to
   run it. Anything a reader could act on wrongly — a payload, a key derivation, a
   precedence rule — is a link.
+- **The website mirror is a build artifact, not a copy.** The site's Developers > Reference
+  pages are *generated* from the homes above by `scripts/pull-dev-docs.mjs` (run
+  automatically on the website's `dev`/`build`), written to a **git-ignored** folder, and
+  never committed — so there is no second copy in version control and nothing to drift. The
+  generator reads the local sibling repo when checked out, else the raw file from GitHub
+  `main`. To change what a Reference page says, edit its home and rebuild; never edit or
+  commit the generated page. This does not violate one-fact-one-home: a transient render is
+  not a home.
 
-**Design memos have a lifecycle.** `docs/SPACE-*.md` are memos: they argue for a change
-before it exists, so while a design is unbuilt the memo is its home and may hold the whole
-spec. **On ship, the memo shrinks to a decision record** — the rejected alternatives and
-why, which is the one thing the reference docs deliberately do not carry — and everything
-the code now enforces is deleted, having moved to the homes above. A memo left whole after
-shipping is a second wire contract with no owner.
+**Design memos have a lifecycle, and shipped decision records live on the website.** A memo
+argues for a change before it exists: while a design is unbuilt it may hold the whole spec,
+and drafting it in `docs/` is fine. **On ship, the memo shrinks to a decision record** — the
+rejected alternatives and why, the one thing the reference docs deliberately do not carry —
+and everything the code now enforces is deleted, having moved to the homes above. The
+decision record then moves to the website's Developers section
+(`orange-copy-paste-clipboard-website/src/content/docs/docs/developers/design/`), which is
+its home; a copy left in `docs/` after shipping is a second contract with no owner.
 
-- Root `docs/_doc-template.html` — the house style for a rendered walkthrough. See Visual
-  Docs below.
+- Root `docs/_doc-template.html` — the in-repo house style for a rendered walkthrough. See
+  Visual Docs below.
 
 ## Visual Docs
 
-Some things do not land as markdown: a before/after UX change, a flow whose point is the
+Some things do not land as plain prose: a before/after UX change, a flow whose point is the
 *order* of events, a mechanism where the interesting part is what a person sees at each
-step. Those get a rendered HTML page with real diagrams. Prose docs stay markdown — this is
-for explaining a change to a human, not for the durable spec.
+step. Those get real diagrams. This is for explaining a change to a human, not for the
+durable spec.
 
 **A walkthrough is dated and then left alone.** It explains one change at one moment, so it
 is exempt from One fact, one home for the same reason it is cheap: nobody has to keep it
-true. Say so in its header, date it, and never update it when the contract moves — the
+true. Say so on the page, date it, and never update it when the contract moves — the
 reference doc is what moves. A walkthrough that gets maintained has quietly become a
 fourth copy of the spec.
 
-**Start from the template, never from scratch.** `docs/_doc-template.html` carries the
-stylesheet, the font links, the mermaid init line, and a commented skeleton of every block.
-Copy it, replace the body, leave the `<style>` alone. Reference implementation:
-`docs/space-key-handover.html`.
+**Walkthroughs live on the website, with diagrams inline.** A finished walkthrough is an
+MDX page in the site's Developers section
+(`orange-copy-paste-clipboard-website/src/content/docs/docs/developers/`), and its diagrams
+are authored inline as Mermaid via the `Mermaid.astro` component in `src/components/docs/`.
+The component emits only the shared `.mermaid-figure` markup; the theme and rendering are
+global (`public/mermaid-plates.js` + `src/styles/mermaid.css`), a fixed-dark AMOLED plate
+that matches the site, so do **not** paste a `%%{init}%%` theme line into an inline diagram
+— the global renderer supplies it. The generated Reference mirrors reuse the same markup and
+renderer, so inline diagrams and mirrored ones look identical. The `docs/`
+`_doc-template.html` is the standalone-HTML house style, kept for one-off Artifacts only.
+
+**For a standalone Artifact, start from the template, never from scratch.**
+`docs/_doc-template.html` carries the stylesheet, the font links, the mermaid init line, and
+a commented skeleton of every block. Copy it, replace the body, leave the `<style>` alone.
+The rest of this section — the token set, the fixed-dark plates, the structural blocks — is
+that standalone house style; an inline MDX diagram on the site uses the `Mermaid.astro`
+component instead and inherits Starlight's theme.
 
 **The token set.** Cool graphite neutrals biased toward the accent's complement, so the
 app's orange reads as a decision. Never write a literal hex in the body, and never define a
@@ -351,10 +374,10 @@ does not appear.
   not a record.
 - `.chk--pass` / `.chk--open` — verification status. Never mark passed what was not run.
 
-**Two ways to ship the same file.** As an Artifact, publish it as-is: the host supplies the
-document wrapper and renders mermaid natively. As a repo file in `docs/`, add the doctype
-wrapper, a four-rule CSS reset, and the mermaid ESM loader from jsDelivr before `</body>`.
-Keep both copies in step when a page is published and committed.
+**Shipping a standalone Artifact.** Publish it as-is: the host supplies the document wrapper
+and renders mermaid natively. A walkthrough that instead belongs on the site is an MDX page
+with inline `Mermaid.astro` diagrams (above), not a standalone HTML file — so there is no
+second copy to keep in step.
 
 ## Token-Saving
 

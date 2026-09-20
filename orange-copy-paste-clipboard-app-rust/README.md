@@ -60,8 +60,8 @@ It watches the OS clipboard, keeps a searchable history of text/images/files, sh
 **Cloud sync (optional)**
 - Sign in with email/password or Google; per-device registration and revocation.
 - Encrypted push/pull of clipboard history, notes, and settings, with live updates over WebSocket and an offline queue that drains on reconnect.
-- Sharing via persistent **pool groups** and ephemeral **Live Share** sessions.
-- End-to-end encryption throughout: AES-256-GCM content keys, Argon2id password-derived key wrapping, X25519 key exchange between devices and group members. Key material lives in memory (zeroized on drop) and the OS credential store — never on disk in plaintext, never on the server.
+- Sharing through **Spaces** — persistent, live, multi-member; a user can belong to several at once, each with its own key distributed to members.
+- End-to-end encryption throughout: AES-256-GCM content keys, Argon2id password-derived key wrapping, X25519 key exchange between devices and space members. Key material lives in memory (zeroized on drop) and the OS credential store — never on disk in plaintext, never on the server.
 
 ---
 
@@ -112,8 +112,8 @@ src/                                 # React frontend
 │  │  ├─ App.tsx                     # shell: routing, theme, event wiring
 │  │  ├─ clipboard-screen/           # timeline, entry cards, search, groups, bulk actions
 │  │  ├─ notes-screen/               # note CRUD + editor-engine/ (Tiptap, content codec, previews)
-│  │  ├─ sync-screen/                # shared feed (groups, live sessions)
-│  │  ├─ account-screen/             # auth, devices, groups, sharing
+│  │  ├─ spaces-screen/              # shared feed: spaces, invites, members, per-space filters
+│  │  ├─ account-screen/             # auth, cloud sync mode, devices/presence, storage
 │  │  ├─ settings-screen/            # preferences; owns shared scr-*/set-section-* styles
 │  │  ├─ shortcuts-screen/           # hotkey reference
 │  │  └─ sidebar/ topbar/ toast/ tooltip/ status-pill/ update-banner/
@@ -248,146 +248,21 @@ Use the real installed binary name/path (check the `Exec=` line in the installed
 
 ## Releases & updates
 
-Nobody hand-distributes an installer after the first one. Cutting a release is a
-single manual workflow; installed copies notice it and offer it, at launch and
-every six hours after. You pick the bump at dispatch — nothing is inferred from commit messages — and
-the version number, release notes and update feed follow from that one choice.
-
-Full operational detail, including one-time setup, lives in
-[`../docs/RELEASING.md`](../docs/RELEASING.md). Working through Claude Code, the
-`/create-rovertools-orangecp-release` skill walks the same flow: it asks for the
-bump, channel and mode rather than assuming any of them, shows the version and notes
-about to ship, dispatches only after an explicit yes, then verifies both channels.
-
-### The shape of it
-
-```text
-you dispatch release.yml (patch, minor or major)
-   │
-   ├─ bump src-tauri/Cargo.toml
-   ├─ notes = changelog/next.md  (renamed to changelog/<ver>-<bump>-<channel>.md)
-   │
-   └─ matrix build ─► signed NSIS (Windows) + AppImage/deb (Linux)
-                          │
-                          └─► public releases repo: bundles + latest.json
-                                      │
-                                      └─► app checks ~8s after launch, then 6-hourly
-```
-
-The source repo is private; the **releases** repo is public because the updater
-fetches over plain HTTPS with no credentials. Reaching a private repo's assets
-would mean shipping a token inside the app.
-
-### Cutting a release
+Cutting a release is a single manual workflow dispatch; installed copies notice it at launch and every six hours after, and offer it. You pick the bump at dispatch — nothing is inferred from commit messages — and the version, release notes, and update feed follow from that one choice. The source repo is private; the **releases** repo is public because the updater fetches over plain HTTPS with no credentials.
 
 ```bash
 gh workflow run release.yml
 ```
 
-That is a patch release. Use `-f bump=minor` for a feature release or `-f bump=major` for
-a breaking one, or click **Run workflow** in the Actions tab and pick from the dropdown. The workflow checks its own
-prerequisites first, so a misconfigured release fails in seconds rather than after a
-build.
+That is a patch release; `-f bump=minor` / `-f bump=major` for feature/breaking, `-f dry_run=true` to build without publishing, `-f prerelease=true` for a beta. From Claude Code: `/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]` — anything omitted is asked for, not defaulted.
 
-Two optional flags: `-f dry_run=true` builds and verifies without publishing (worth it
-after editing the workflow), and `-f prerelease=true` publishes a beta — offered to
-beta subscribers only, invisible to everyone else, and promoted later with a
-`gh release edit` of the same bundles rather than another build.
-
-From Claude Code:
-`/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]`.
-Every argument is optional and anything omitted is **asked for, not defaulted**.
-
-The one-time setup — signing keypair, public releases repo, three Actions secrets — is
-in [docs/RELEASING.md](../docs/RELEASING.md), along with the versioning rules and the
-smoke test. The workflow checks all three itself and names whichever is missing.
-
-### What users get
-
-Within a few seconds of launch — and every six hours while the app keeps running,
-since this one lives in the tray for weeks — a strip appears under the titlebar:
-*"Version 0.3.0 is available"*, with the generated notes behind **What's new**.
-Nothing downloads or installs until they press something — **Download**, then
-**Restart & install** as a separate confirmation, so a background download
-finishing never takes the window out from under someone mid-paste. **Skip this
-version** silences that one release; the ✕ defers to the next launch. Settings →
-**Updates** shows the running version, a manual check, a toggle for the automatic
-one, and **Get beta versions**.
-
-Beta is opt-in per install and additive: subscribers are offered betas *and* every
-normal release, so nobody has to choose between early features and staying current.
-Turning it off stops future betas but never moves anyone backwards — the updater only
-goes forward.
-
-### Windows will warn on the first install
-
-The bundles carry a minisign signature — that is what the updater verifies — but
-no **Authenticode** certificate, which is the separate, paid thing Windows checks.
-So a downloaded installer gets *"Windows protected your PC — unrecognized app"*
-from SmartScreen. **More info** → **Run anyway** installs it.
-
-It's a one-time cost per user, not per version: SmartScreen keys off the Mark of
-the Web, a tag the *browser* attaches to downloads. The updater fetches the
-installer itself, so no MOTW and no prompt — every update after the first install
-is silent.
-
-Removing the warning entirely means an Authenticode certificate, and there is no
-free one for a closed-source project. [SignPath
-Foundation](https://signpath.org/) signs open-source projects at no cost (the
-codebase must be public under an OSS licence, and the publisher shows as
-"SignPath Foundation"); [Azure Trusted
-Signing](https://azure.microsoft.com/en-in/pricing/details/trusted-signing/) is
-~$10/month but individual accounts are US/Canada only. EV certificates no longer
-skip the reputation period — that behaviour was removed in 2024 — so the
-expensive option is no longer a shortcut.
-
-### What to watch out for
-
-| Trap | Why it matters |
-| --- | --- |
-| **The signing key is load-bearing** | Every installed copy only trusts bundles signed by it. Lose it and the update channel is dead — users would have to reinstall by hand to get a build carrying a new public key. Back it up outside CI before the first release. |
-| **`changelog/next.md` *is* the release notes** | The workflow ships it verbatim into the update prompt, then renames it to `changelog/<version>-<bump>-<channel>.md`. Author it with `/update-changelog` before releasing — an empty one **fails the release** on purpose. Internal changes go under `### Internal` and are kept but never shown to users. |
-| **`bun run tauri build` output cannot be served as an update** | Local builds are unsigned. Only `release.yml` produces the `.sig` files the feed needs. Use local bundles for testing, never for publishing. |
-| **Only NSIS and AppImage self-update** | `.deb`/`.rpm` are owned by the package manager. They are still built and attached for manual install, but never appear in `latest.json` — offering an update the client can't apply is worse than offering none. |
-| **The version lives in exactly one place** | `src-tauri/Cargo.toml`. `tauri.conf.json` has no `version` field on purpose (Tauri falls back to Cargo.toml), and `package.json`'s copy is cosmetic. Don't reintroduce it. |
-| **`build-linux.yml` is not a release** | Its `v0.1.0-build.N` tags are throwaway CI builds, ignored when picking the last release, and it publishes to this repo rather than the releases repo. Never point the updater at it — its prune step would then be a way to break every install. |
-| **Dev builds refuse to update** | A debug build reports the Cargo.toml version, so it would see any release as an upgrade and install over `target/debug`, replacing a build that loads from `devUrl`. Settings says so rather than letting it happen. |
-| **Prereleases are invisible to the *stable* channel** | `releases/latest/download/…` resolves to the newest *non*-prerelease. That is exactly how `-f prerelease=true` works, so it is a feature when deliberate — and a silent one when not. Marking a release as a prerelease by hand pulls it out of the stable feed too. Beta subscribers read `beta.json` instead and still get it. |
-| **`beta.json` is what makes the beta channel additive** | The workflow rewrites it on *every* publish, beta or stable, so it always names the newest release of either kind. Skip that step for a stable release and beta subscribers silently stop receiving stable updates — they would sit on the last beta forever. |
-| **A beta still spends its version number** | `prerelease=true` changes only how the release is published: the bump, the `release:` commit and the tag still land on `main`. A beta that fails testing costs you that number. |
-
-Two safety rails worth knowing about, because they mean a bad release fails in CI
-rather than in front of users: the workflow refuses to publish a version that isn't
-plain semver or a bundle whose `.sig` is missing, and after publishing it re-fetches
-`latest.json` through the same URL the app uses and checks every bundle URL it
-advertises is reachable.
+The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key and releases-repo setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/RELEASING.md`](../docs/RELEASING.md).
 
 ---
 
 ## Storage & config reference
 
-**App data directory** — Windows `%APPDATA%\com.spect.orange-copy-paste\`, Linux `~/.config/com.spect.orange-copy-paste/`:
-
-| File | Contents |
-| --- | --- |
-| `history.bin` | Full clipboard history (MessagePack) |
-| `pinned_entries.bin` | Saved/pinned entries, kept even when history isn't persisted |
-| `notes.bin` | Notes store |
-| `settings.json` | Preferences and sync/endpoint overrides |
-| `images/`, attachments dir | Externalized clipboard images and note attachments |
-| `boot_id.txt` | Boot marker deciding whether history survives a reboot |
-
-**localStorage keys** (UI-only preferences):
-
-| Key | Values | Purpose |
-| --- | --- | --- |
-| `sc-theme` | `dark` \| `light` | Manual theme override |
-| `sc-layout` | `tiles` \| `list` | Clipboard layout mode |
-| `sc-sort` | `newest` \| `oldest` \| `a-z` \| `z-a` \| `type` | Sort order |
-| `sc-paste-slots` | `3`–`10` | Paste popup entry count |
-| `sc-recent-searches` | JSON array (max 8) | Recent search terms |
-| `sc-groups` | JSON array | Custom groups |
-| `sc-group-colors` | JSON object (group → palette index) | Group colors |
+Runtime state lives in the app data directory (Windows `%APPDATA%\com.spect.orange-copy-paste\`, Linux `~/.config/com.spect.orange-copy-paste/`): clipboard history, saved entries, notes, settings, and externalized images/attachments, all as described in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), which owns the persistence layout. UI-only preferences (theme, layout, sort, paste-slot count, recent searches, groups) are kept in `localStorage` under `sc-*` keys.
 
 ---
 

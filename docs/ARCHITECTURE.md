@@ -36,8 +36,7 @@ describes product behavior and links to the homes below, it enforces nothing.
 | How do I reach, recover, harden, and deploy the self-hosted VPS? | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | How do I work in this repo? | `CLAUDE.md` at the workspace root |
 | Where do end users learn to install and use the app? | `orange-copy-paste-clipboard-website/` — the public docs + marketing site |
-| How is a space key handed over / how does join approval work, as a walkthrough? | `space-key-handover.html`, `join-approval.html` — dated explainers, not references |
-| Why was a design chosen, and what was rejected? | `SPACE-ACCESS.md`, `SPACE-JOIN-APPROVAL.md` — decision records |
+| How is a space key handed over / how does join approval work, and why was the design chosen? | website Developers section — `/docs/developers/design/*` (decision records with inline sequence diagrams) |
 
 The backend doc is the source of truth for anything crossing the wire. When it and this
 page disagree, the backend doc wins; when the backend doc and the code disagree, the code

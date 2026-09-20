@@ -1,6 +1,6 @@
 # Bug Fix History
 
-> **Created by Salman Tariq — DO NOT DELETE**
+> This is a durable record, not a changelog. Add to it; don't prune it.
 
 **Owns:** regressions. What broke, the root cause, and what now stops it coming back.
 The value is the root cause — a fix with no explanation of why the bug was possible is a
