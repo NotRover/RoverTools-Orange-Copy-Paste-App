@@ -6,77 +6,50 @@ A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real
 events, local persistence, the capture pipeline, and the client half of the sync engine —
 what it does with what it receives.
 **Not here:** the wire contract itself. Routes, payloads, DDL, socket-event shapes and the
-crypto envelope live in `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`;
-who-may-do-what in the root `docs/PERMISSIONS.md`; cross-component invariants in the root
-`docs/ARCHITECTURE.md`. Restating a payload here creates a second contract that nothing
+crypto envelope live in `orange-copy-paste-clipboard-backend/docs/architecture.md`;
+who-may-do-what in the root `docs/permissions.md`; cross-component invariants in the root
+`docs/architecture.md`. Restating a payload here creates a second contract that nothing
 keeps true.
-
----
-
-## Table of Contents
-
-- [High-Level Overview](#high-level-overview)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Rust Backend](#rust-backend)
-  - [Entry Point & Setup](#entry-point--setup)
-  - [State Management](#state-management)
-  - [Clipboard Module](#clipboard-module)
-  - [Notes Module](#notes-module)
-  - [Cloud Sync Module](#cloud-sync-module)
-  - [Runtime Module](#runtime-module)
-- [Frontend](#frontend)
-  - [Build & Entry Points](#build--entry-points)
-  - [Shared Types](#shared-types)
-  - [Main App (App.tsx)](#main-app)
-  - [Screens](#screens)
-  - [Popups](#popups)
-  - [UI Components](#ui-components)
-- [Data Flows](#data-flows)
-- [Persistence & Storage](#persistence--storage)
-- [Tauri Configuration & Permissions](#tauri-configuration--permissions)
-- [Cross-System Invariants](#cross-system-invariants)
-- [Cloud Sync — Implementation Status](#cloud-sync--implementation-status)
 
 ---
 
 ## High-Level Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Tauri Process                            │
-│                                                                  │
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────┐          │
-│  │  Clipboard   │   │   Hotkey     │   │  Popup     │          │
-│  │  Watcher     │   │   Handlers   │   │  Windows   │          │
-│  │  (220ms poll)│   │  Ctrl+Shift  │   │  copy/paste│          │
-│  └──────┬───────┘   └──────┬───────┘   └─────┬──────┘          │
-│         │                  │                  │                  │
-│         └──────────┬───────┘                  │                  │
-│                    ▼                          │                  │
-│         ┌──────────────────┐                  │                  │
-│         │   AppState       │                  │                  │
-│         │  ┌─────────────┐ │                  │                  │
-│         │  │ History     │ │◄─────────────────┘                  │
-│         │  │ (Mutex)     │ │                                     │
-│         │  └─────────────┘ │                                     │
-│         │  suppress_flag   │◄──────────────────────────────────┐ │
-│         └────────┬─────────┘                                   │ │
-│                  │                                             │ │
-│                  ▼ events + commands          ┌────────────────┴─┴──┐
-│  ┌───────────────────────────────────────┐   │   SyncClient         │
-│  │          Tauri IPC Bridge             │   │  (background runtime)│
-│  └───────────────────────────────────────┘   │  HTTP push/pull      │
-│                                              │  WebSocket listener  │
-└──────────┬──────────────┬──────────────┬─────│  crypto (AES/X25519) │
-           ▼              ▼              ▼     │  offline queue       │
-   ┌──────────────┐  ┌──────────┐  ┌────────┐ └──────────┬───────────┘
-   │  Main Window │  │ Copy Pop │  │ Paste  │            │ HTTPS+WSS
-   │  (React SPA) │  │ (React)  │  │ Popup  │            ▼
-   │  920×560     │  │ 340×260  │  │(React) │  ┌─────────────────────┐
-   └──────────────┘  └──────────┘  └────────┘  │  FastAPI Backend    │
-                                               │  (cloud, optional)  │
-                                               └─────────────────────┘
+```mermaid
+flowchart TB
+    subgraph tauri["Tauri Process - Rust core"]
+        watcher["Clipboard Watcher<br/>220ms poll"]:::proc
+        hotkeys["Hotkey Handlers<br/>Ctrl+Shift"]:::proc
+        popupwin["Popup Windows<br/>copy / paste"]:::proc
+        appstate[["AppState<br/>History (Mutex), suppress_flag"]]:::state
+        ipc{{"Tauri IPC Bridge"}}:::bridge
+        sync["SyncClient, background runtime<br/>HTTP push/pull, WebSocket,<br/>crypto (AES, X25519), offline queue"]:::proc
+    end
+
+    subgraph views["Webview windows — React"]
+        direction LR
+        main["Main Window<br/>920x560"]:::view
+        copyp["Copy Popup<br/>340x260"]:::view
+        pastep["Paste Popup"]:::view
+    end
+
+    backend[("FastAPI Backend<br/>cloud, optional")]:::ext
+
+    watcher ==> appstate
+    hotkeys ==> appstate
+    popupwin ==> appstate
+    appstate ==>|"events + commands"| ipc
+    ipc ==> main
+    ipc ==> copyp
+    ipc ==> pastep
+    appstate <==> sync
+    sync -.->|"HTTPS + WSS"| backend
+
+    classDef proc fill:#1b1b1b,stroke:#9a9a9a,stroke-width:1.5px,color:#fafafa
+    classDef state fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
+    classDef bridge fill:#161616,stroke:#6f6f6f,color:#e4e4e4
+    classDef view fill:#141414,stroke:#4d4d4d,color:#cfcfcf
+    classDef ext fill:#141414,stroke:#4d4d4d,stroke-dasharray:5 3,color:#cfcfcf
 ```
 
 The app runs as a single Tauri process with three webview windows. The Rust backend owns all clipboard operations, history storage, and OS integrations. The React frontends communicate via Tauri commands (request/response) and events (push notifications). The `SyncClient` runs in a dedicated background Tokio runtime and is entirely optional — the app is fully functional without it.
@@ -99,12 +72,12 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | parking_lot                  | 0.12    | Mutex without poisoning                                                        |
 | serde + serde_json           | 1       | Serialization for IPC and settings persistence                                 |
 | rmp-serde                    | 1       | MessagePack binary serialization for history persistence                       |
-| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — **Phase 6, sync module only**     |
-| tokio-tungstenite            | 0.24    | Async WebSocket client for realtime events — **Phase 6, sync module only**                  |
-| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **Phase 6, sync module only**           |
-| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **Phase 6, sync module only**                   |
-| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and space key wrapping — **Phase 6, sync module only** |
-| keyring                      | 2       | OS credential store for the device private key and cached Supabase session — **Phase 6, sync module only** |
+| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — **sync module only**     |
+| tokio-tungstenite            | 0.24    | Async WebSocket client for realtime events — **sync module only**                  |
+| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **sync module only**           |
+| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **sync module only**                   |
+| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and space key wrapping — **sync module only** |
+| keyring                      | 2       | OS credential store for the device private key and cached Supabase session — **sync module only** |
 
 > **Auth is delegated to Supabase.** The backend moved to **Supabase Auth (GoTrue) +
 > Supabase Postgres**. The client performs sign-up / login / refresh / email
@@ -663,20 +636,13 @@ a change takes effect on the next cue rather than the next launch.
 > Rust module and React UI both.
 > **Location:** `src-tauri/src/sync/` (UI in `src/components/app/account-screen/`
 > and `spaces-screen/`)
-> **Principle:** Additive only — no existing capture, storage, or popup logic changes.
 >
 > **Auth path as built:** identity comes from **Supabase Auth** (`sync/supabase.rs`
 > — password login, signup, refresh, recovery, and PKCE for Google via
-> `sync/oauth.rs`), not from a backend login route. Sign-in then calls
-> `POST /api/v1/auth/bootstrap` for `kdf_salt` and the password-wrapped UMK, and
-> `POST /api/v1/auth/devices` for a `device_id`. Every device-scoped request carries
-> `Authorization: Bearer <supabase jwt>` plus `X-Device-Id`, and the WebSocket opens
-> as `/ws?token=<jwt>&device_id=…`. Deletes are tombstones pushed through
-> `POST /api/v1/sync/push`; there is no delete route. Sharing is one primitive, the
-> **Space**: `POST /api/v1/spaces` to create, `POST /api/v1/spaces/join` with an
-> invite code, `POST /api/v1/spaces/{id}/invites` to invite by email, and
-> `POST /api/v1/spaces/{id}/keys` to hand out wrapped space keys. See
-> `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`.
+> `sync/oauth.rs`), not from a backend login route; the backend verifies the Supabase
+> token and never issues one. The exact routes, headers, payloads and socket events
+> are the wire contract: see
+> `orange-copy-paste-clipboard-backend/docs/architecture.md`.
 
 #### Google sign-in (two phases, and why)
 
@@ -698,7 +664,7 @@ password is the E2E secret and only the user has it:
 2. `complete_oauth` takes the password, writes the envelope, and finalizes.
 
 Three rules in phase 2, each of which was once broken - see bugs #9 and #10 in
-`BUGFIX_HISTORY.md`:
+`docs/bugfix-history.md`:
 
 - The stash is **cloned**, not taken, and cleared only on success. A wrong
   password has to leave a retry possible, or the only way to guess again is
@@ -774,7 +740,7 @@ held in `SyncClient::pending_reset` and reused - dropped on success, and by
 `sync_cancel_password_reset` when the panel closes, because it is a live
 credential for the account. The device id is set on the reset's HTTP client
 before the wrap is fetched; without it the device-wrap source silently cannot
-apply (bug #15 in `docs/BUGFIX_HISTORY.md`).
+apply (bug #15 in `docs/bugfix-history.md`).
 
 #### Recovery code
 
@@ -834,20 +800,25 @@ answers with a 302 to the static page.
 
 The sync module runs entirely in a dedicated background Tokio runtime (separate from Tauri's internal runtime) so it can never block clipboard capture or the UI.
 
-```
-Clipboard capture (existing, unchanged)
-         │
-         ▼
-  history.push(entry)          ← plaintext, same as today
-         │
-         ├──► emit clipboard:new-entry   ← UI update (unchanged)
-         │
-         └──► SyncClient.on_new_entry(entry)   ← new side-effect
-                    │
-                    ├─ mint CEK → encrypt(CEK, content) → wrap CEK under UMK
-                    │  (+ under each target space key) → encrypted_entry
-                    ├─ online? → POST /sync/push immediately
-                    └─ offline? → append to sync_pending.json
+```mermaid
+flowchart TB
+    rust[["Rust Backend"]]:::src
+    rust ==> newe["clipboard:new-entry"]:::evt
+    rust ==> dele["clipboard:entry-deleted"]:::evt
+    rust ==> active["clipboard:active-id"]:::evt
+    newe ==> prepend["prepend to entries[]"]:::act
+    dele ==> filter["filter out by id"]:::act
+    active ==> updateid["update activeClipboardId"]:::act
+    filter ==> focus["tauri://focus<br/>(main window)"]:::act
+    focus ==> refetch["re-fetch get_history()<br/>merge with existing"]:::act
+    prepend ==> rerender(["React re-render"]):::out
+    updateid ==> rerender
+    refetch ==> rerender
+
+    classDef src fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
+    classDef evt fill:#141414,stroke:#6f6f6f,color:#e4e4e4
+    classDef act fill:#1b1b1b,stroke:#9a9a9a,stroke-width:1.5px,color:#fafafa
+    classDef out fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
 ```
 
 #### `mod.rs` — SyncClient
@@ -873,7 +844,7 @@ is *coming back*, from local state only, and then hands the attempt to
 `RestoreOutcome.restoring` is true from the first instant rather than only after a
 transient failure. The UI has nothing else to go on: while it awaited this command it
 drew a sign-in form over a live session, and users signed in again — see bug #17 in
-[BUGFIX_HISTORY.md](BUGFIX_HISTORY.md). Three local questions decide the answer, none of
+[bugfix-history.md](docs/bugfix-history.md). Three local questions decide the answer, none of
 them touching the network:
 
 | Question | Source | Answer |
@@ -989,8 +960,6 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `generate_recovery_code() → Zeroizing<String>`          | 150 bits, six groups of five, look-alike characters removed |
 | `normalize_recovery_code(input)`                        | Dashes and spaces out, uppercased - whatever the user types back derives the same key |
 | `wrap_umk_recovery` / `unwrap_umk_recovery`             | The recovery envelope: `derive_kek(code, kdf_salt)` with AAD `umk-recovery-v1` |
-| `wrap_key(wrapping_key, key_to_wrap) → String`          | AES-256-GCM encrypt key material                        |
-| `unwrap_key(wrapping_key, wrapped_b64) → [u8; 32]`      | Reverse of wrap_key                                     |
 
 **Encryption invariant:** The UMK is passed in at call time from the in-memory `SyncClient` state. It is never written to disk. `crypto.rs` receives it as a `&[u8; 32]` slice.
 
@@ -1080,14 +1049,15 @@ content key exists for.
 **Encryption envelope.** For every push the client mints a random 32-byte **CEK**,
 encrypts content and metadata once under it (AAD = `client_id`), then wraps the CEK:
 
-- once under the **UMK**, stored in `wrapped_keys` as `"personal"` — so your own devices
-  can always read your own entry without holding any space key;
-- once under `keyring[0]` of each target space, keyed by space id.
+- once under the **UMK** — so your own devices can always read your own entry without
+  holding any space key;
+- once under `keyring[0]` of each target space.
 
-`space_ids` is the routing array the server fans out on; `wrapped_keys` is opaque to it.
 Receiving a shared entry means unwrapping the CEK with the first carried space id we hold
 a key for, trying that space's keyring in order (AES-GCM authentication failure is the
-signal to try the next key, so no epoch tracking is needed).
+signal to try the next key, so no epoch tracking is needed). The exact on-wire shape of
+the wrapped-key map and the routing array is the wire contract:
+`orange-copy-paste-clipboard-backend/docs/architecture.md`.
 
 **Where an entry goes** is the union of two sources, evaluated on push:
 
@@ -1191,6 +1161,8 @@ Push is debounced: after any synced setting changes, a 2-second timer starts. If
 
 On `settings:updated` WS event: call `sync_pull_settings()` automatically.  
 On pull: emit `sync:settings` Tauri event with decrypted JSON → React applies `localStorage` keys; Rust writes `settings.json` keys directly.
+
+Settings are not pulled at sign-in: `sync_pull_settings` runs only on the `settings:updated` WebSocket event (App.tsx) or an explicit invoke, so a freshly signed-in device keeps its local preferences until another device changes one.
 
 #### `config.rs` — Sync Settings
 
@@ -1505,117 +1477,31 @@ Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 
 ## Data Flows
 
-### Clipboard Capture (Background)
-
-```
-OS Clipboard Changes
-        │
-        ▼ (220ms poll)
-GetClipboardSequenceNumber()
-        │ token changed?
-        ▼
-capture_clipboard_change()
-        │
-        ├─ suppress flag set? → clear flag, skip (return true)
-        │
-        ├─ read_clipboard_entry() → None? → return false (retry next poll)
-        │
-        ├─ duplicate of top entry? → skip (return true)
-        │
-        └─ history.push(entry)
-           set_active_clipboard_id(app, entry.id)
-           emit("clipboard:new-entry")
-           notify_if_enabled(app, entry)   ← copy notification
-           return true → advance last_token
-```
-
-### Ctrl+Shift+C (Copy to History)
-
-```
-User presses Ctrl+Shift+C
-        │
-        ├─ popup already visible? → toggle hide, done
-        │
-        ▼ (spawn thread)
-    set suppress = true
-    simulate Ctrl+C
-    wait 120ms
-    read_clipboard_entry()
-        │
-        ▼
-    history.push_if_distinct()
-        │
-        ├─ inserted? → emit("clipboard:new-entry")
-        │
-        ▼
-    set_active_clipboard_id(app, entry.id)
-    show copy-popup
-    emit("clipboard:copied") to popup window
-```
-
-### Ctrl+Shift+V (Quick Paste)
-
-```
-User presses Ctrl+Shift+V
-        │
-        ├─ popup already visible? → toggle hide, done
-        │
-        ▼
-    history.top(10) + pinned_entries().take(10)
-    emit("paste-popup:entries") to popup
-    show paste-popup near cursor
-        │
-        ▼ (user presses 1-9 or Enter)
-    invoke("paste_entry", { id })
-        │
-        ▼
-    hide paste-popup (move offscreen first)
-    set_active_clipboard_id(app, entry.id)
-    spawn background thread:
-        suppress = true
-        write_entry_to_clipboard()
-          ├─ Text: arboard with retry (6 attempts)
-          ├─ Image (Win, file-backed): CF_HDROP (instant, no decode)
-          ├─ Image (Win, data-URL): direct Win32 API (CF_DIB + PNG)
-          ├─ Image (Linux): arboard set_image()
-          └─ File: CF_HDROP
-        wait 80ms
-        simulate Ctrl+V (release modifiers first on Windows)
-        notify_paste_if_enabled(app, entry)  ← paste notification
-```
+The background capture pipeline and the two global-shortcut flows are described
+step-by-step in the Runtime Module above (`clipboard_watcher.rs`, `hotkeys.rs`).
 
 ### Frontend State Sync
 
-```
-                    Rust Backend
-                        │
-            ┌───────────┼───────────┐
-            ▼           ▼           ▼
-     clipboard:    clipboard:    clipboard:
-     new-entry    entry-deleted  active-id
-            │           │           │
-            ▼           ▼           ▼
-     prepend to    filter out    update
-     entries[]     by id         activeClipboardId
-            │           │           │
-            │           │           │
-            │           ▼           │
-            │     tauri://focus     │
-            │     (main window)     │
-            │           │           │
-            │           ▼           │
-            │      re-fetch         │
-            │      get_history()    │
-            │      merge with       │
-            └───────existing────────┘
-                        ▼
-                  React re-render
+```mermaid
+flowchart TB
+    rust["Rust Backend"]
+    rust --> newe["clipboard:new-entry"]
+    rust --> dele["clipboard:entry-deleted"]
+    rust --> active["clipboard:active-id"]
+    newe --> prepend["prepend to entries[]"]
+    dele --> filter["filter out by id"]
+    active --> updateid["update activeClipboardId"]
+    filter --> focus["tauri://focus (main window)"]
+    focus --> refetch["re-fetch get_history()<br/>merge with existing"]
+    prepend --> rerender["React re-render"]
+    updateid --> rerender
+    refetch --> rerender
 ```
 
 ### Cloud Sync — Push (Local Capture → Server)
 
-> All backend calls below carry `Authorization: Bearer <supabase access token>` and,
-> on device-scoped routes, `X-Device-Id: <device_id>`.
+> Route, headers and response shape are the wire contract:
+> `orange-copy-paste-clipboard-backend/docs/architecture.md`.
 
 ```
 capture_clipboard_change() → history.push(entry)
@@ -1625,15 +1511,11 @@ capture_clipboard_change() → history.push(entry)
                     ├─ cek = crypto::random_key()
                     ├─ crypto::encrypt(cek, content, aad=client_id)
                     ├─ crypto::encrypt(cek, metadata_json, aad=client_id)
-                    ├─ wrapped_keys = { "personal": wrap_key(UMK, cek),
-                    │                  <space_id>: wrap_key(space_key, cek), … }
+                    ├─ wrap cek under UMK ("personal") and under each target space key
                     ├─ space_ids = explicit shares ∪ matching send filters
                     │
-                    ├─ online? ──► POST /api/v1/sync/push [entry]
-                    │              Server assigns server_ts
-                    │              Server publishes to Redis
-                    │              Response: { server_id, server_ts }
-                    │              Update id_map.json, set sync_status=Synced
+                    ├─ online? ──► push to server (see wire contract)
+                    │              on success: update id_map.json, set sync_status=Synced
                     │
                     └─ offline? ─► append to sync_pending.json
                                   sync_status stays Pending
@@ -1643,7 +1525,7 @@ capture_clipboard_change() → history.push(entry)
 
 ```
 On startup / reconnect:
-  GET /api/v1/sync/pull?after_ts={last_cursor}&limit=200
+  pull delta after {last_cursor}, paginated (route/params: see wire contract)
          │
          ▼ (removals first, then entries)
   drop_space_entry(space_id, client_id, entry_type, by_author=author==remover)
@@ -1663,7 +1545,7 @@ On startup / reconnect:
          │              assign local id, record in id_map.json
          │
          ├─ emit clipboard:new-entry (or notes:updated) → React re-render
-         └─ POST /api/v1/sync/cursor { last_server_ts }
+         └─ advance the server cursor to last_server_ts (see wire contract)
               next_cursor when the server sent one - it is already clamped to
               the point both streams are complete to, so it can be behind the
               newest entry received - otherwise the newest row seen either side
@@ -1674,15 +1556,14 @@ Repeat until next_cursor = null
 ### Cloud Sync — Realtime (WebSocket → Local)
 
 ```
-WebSocket message received:
-  { "event": "sync:entry", "payload": { ...encrypted_entry } }
+WebSocket entry event received (event/payload shape: see wire contract)
          │
          ▼
   Same as Pull path above for the single entry
   (skip if entry originated from this device_id;
    skip personal entries in passive mode — the next pull will bring them)
 
-  A delete arrives as the same event with deleted_at set (a tombstone):
+  A delete arrives as the same event carrying a tombstone marker:
          │
          ▼
   Find entry by client_id → history.remove(local_id)
@@ -1765,7 +1646,7 @@ Applied to all three windows:
 
 The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee.
 
-The **promises** are the workspace root `docs/ARCHITECTURE.md` (Cross-Component Invariants) - that is where they are stated and where a new one is added. What only this file can say is the second column: which function, which file, and what has to be called to keep each one. Rows without a root counterpart (7, 8, 17, 18) are this app's alone.
+The **promises** are the workspace root `docs/architecture.md` (Cross-Component Invariants) - that is where they are stated and where a new one is added. What only this file can say is the second column: which function, which file, and what has to be called to keep each one. Rows without a root counterpart (7, 8, 17, 18) are this app's alone.
 
 | #   | Invariant                                      | App-side implication                                                                                                                                                  |
 | --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1788,57 +1669,3 @@ The **promises** are the workspace root `docs/ARCHITECTURE.md` (Cross-Component 
 | 17  | **Auto-copy cannot flood the clipboard**       | Only WebSocket-delivered space entries may auto-copy — never a pull page, never a personal entry — and the write sets the suppress flag before touching the clipboard. |
 | 18  | **Passive mode never loses an entry**          | `last_server_ts` advances only in the pull path. An entry skipped live in passive mode must still arrive on the next interval or manual pull.                          |
 
----
-
-## Cloud Sync — Implementation Status
-
-Cloud sync shipped across what were originally sequenced as phases 6–8; this
-section records what that left behind rather than tracking work. Checklists are
-gone because they had drifted — verify anything load-bearing in the source.
-
-**Built and in use**
-
-- **Sync module** — `mod.rs`, `client.rs`, `supabase.rs`, `oauth.rs`, `ws_listener.rs`,
-  `pending_queue.rs`, `id_map.rs`, `sync_state.rs`, `persist.rs`, `crypto.rs`,
-  `types.rs`, `commands.rs`, `config.rs`, on a dedicated Tokio runtime.
-- **Auth** — Supabase Auth for password login, signup, refresh, and recovery, plus
-  Google via loopback PKCE. `POST /api/v1/auth/bootstrap` supplies `kdf_salt` and the
-  password-wrapped UMK; `POST /api/v1/auth/devices` supplies the `device_id` sent as
-  `X-Device-Id`. `GET /api/v1/auth/umk/device` backs silent session restore, and
-  only its own 404 - the one stamped `X-Wrap-Absent` - ends a session; every other
-  failure, an unmarked 404 included, is retried, because the keychain credentials
-  are still good and a forced password prompt would be the app's own fault.
-- **Mutation hooks** — capture (watcher and hotkey), single and bulk deletes, pin and
-  group changes, `clear_history`, and note CRUD all notify `SyncClient`. Bulk paths
-  funnel through `finish_bulk_update` in `clipboard/commands.rs`.
-- **Settings sync** — 2-second debounced push, the `sync:collect-settings` →
-  `sync_receive_local_settings` bridge for `localStorage` keys, and last-write-wins
-  resolution with `sync:settings` applied without a reload.
-- **Blob sync** — files and videos upload through `request-upload` → presigned PUT →
-  `confirm-upload`, and download through `{key}/download-url`. Entries over the 5 MB
-  gate emit `sync:file-skipped`, surfaced in the UI.
-- **Spaces** — one sharing primitive with a per-space keyring held in `SyncClient` and
-  recovered from the server-side wrapped keyring on reconnect. Entries carry a per-entry
-  CEK wrapped under the UMK plus each target space key, so one entry can be in several
-  spaces at once. A space whose key we don't hold is skipped rather than encrypted
-  unreadably.
-- **Spaces UI** — create, join by code, invite by email, accept/decline, member list with
-  presence, remove (rekeys), leave, delete, per-space auto-copy and send filters, driven by
-  the `space:*` WebSocket events. Device list with revoke lives in the account screen.
-- **Cloud sync modes** — realtime, passive or manual per device, with a 5-minute pull loop and a
-  flush on every socket reconnect backing every non-manual mode.
-
-**Known gaps**
-
-- **Settings are not pulled at sign-in.** `sync_pull_settings` runs only on the
-  `settings:updated` WebSocket event (App.tsx) or an explicit invoke, so a freshly
-  signed-in device keeps its local preferences until another device changes one.
-
-**Superseded by later design decisions** — these appeared in the original plan and will
-not be built:
-
-- `sync:remote-entry` / `sync:remote-delete` per-entry React events. Merging happens in
-  Rust, which owns the UMK; the frontend refreshes on `sync:history-merged` and
-  `sync:notes-merged` instead.
-- `sync_set_server_url` and a server URL field in settings. Endpoints are compiled into
-  `sync/config.rs`; self-hosting overrides them through `settings.json` with no UI.

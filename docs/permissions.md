@@ -10,8 +10,8 @@ rule underneath all of it:
 try anyway, and the `path:line` where each rule is enforced. Any new action on a card menu,
 a bulk bar, or a space route gets a row here.
 **Not here:** how the action works. Payloads and routes are the backend's
-(`orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md`), client mechanics are the
-app's (`orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md`). This file answers
+(`orange-copy-paste-clipboard-backend/docs/architecture.md`), client mechanics are the
+app's (`orange-copy-paste-clipboard-app-rust/docs/architecture.md`). This file answers
 *may they*, not *how*.
 
 Server rows are keyed `(user_id, client_id)`, so this is not only policy — a
@@ -160,7 +160,7 @@ belong to. Two consequences follow, and both are intended:
 - **Removing a member is not retroactive** for anything they already pulled. See
   "What the server does not enforce" below - the same limit applies to bytes.
 
-Backend detail: `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` sections 2.4
+Backend detail: `orange-copy-paste-clipboard-backend/docs/architecture.md` sections 2.4
 and 6.3.
 
 ## Where each rule lives
@@ -252,7 +252,7 @@ enforce without reading anything: it is about which account owns a key, not
 about what the content says.
 
 It is enforced there because the client half cannot be sufficient. Bug #8 (see
-the client's `docs/BUGFIX_HISTORY.md`) was created by a client that pushed such
+the client's `docs/bugfix-history.md`) was created by a client that pushed such
 a row, and every member's client then had to defend against it on the way in.
 Old builds keep running, so the write has to be refused at the only point every
 client shares.

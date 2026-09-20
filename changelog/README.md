@@ -3,7 +3,7 @@
 **Owns:** the user-facing history of the Smart Clipboard desktop app, one file per
 release, and `next.md` — the notes staged for the release you have not cut yet.
 **Not here:** the version of record (`orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml`),
-and how releases are cut ([`../docs/RELEASING.md`](../docs/RELEASING.md)).
+and how releases are cut ([`../docs/releasing.md`](../docs/releasing.md)).
 
 ## The files
 

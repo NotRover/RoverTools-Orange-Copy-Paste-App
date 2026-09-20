@@ -28,7 +28,7 @@ run-name: >-
 #               Settings → Updates, invisible to the stable feed. Promoting it
 #               later is an edit of the same bundles, not another build.
 #
-# Required secrets (see docs/RELEASING.md):
+# Required secrets (see docs/releasing.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
 #   RELEASES_REPO_TOKEN                 PAT with contents:write on RELEASES_REPO
@@ -97,7 +97,7 @@ jobs:
           # A build with the placeholder key succeeds and is then rejected by
           # every client — the one failure that is invisible until users are stuck.
           if grep -q 'REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY' "$APP_DIR/src-tauri/tauri.conf.json"; then
-            bad "The updater pubkey in tauri.conf.json is still the placeholder. Generate a keypair (docs/RELEASING.md step 1) and commit the public half, or every client will reject this release."
+            bad "The updater pubkey in tauri.conf.json is still the placeholder. Generate a keypair (docs/releasing.md step 1) and commit the public half, or every client will reject this release."
           fi
 
           [ -n "$SIGNING_KEY" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY is not set. Bundles would be unsigned and unusable as updates."
@@ -125,7 +125,7 @@ jobs:
         # bumped: an empty changelog should fail the run in seconds, not after a
         # matrix build. The notes are `changelog/next.md`, written by a human — or by
         # `/update-changelog` — before the release. The workflow only reads and
-        # publishes them; nothing is derived from commit subjects. See docs/RELEASING.md
+        # publishes them; nothing is derived from commit subjects. See docs/releasing.md
         # and changelog/README.md.
         env:
           DRY_RUN: ${{ inputs.dry_run }}

@@ -15,7 +15,7 @@ running this before a release is how the release gets its notes.
 
 Reference: the convention and its home are
 [`changelog/README.md`](../../../changelog/README.md); the release flow is
-[`docs/RELEASING.md`](../../../docs/RELEASING.md); the empty skeleton is
+[`docs/releasing.md`](../../../docs/releasing.md); the empty skeleton is
 [`changelog/TEMPLATE.md`](../../../changelog/TEMPLATE.md).
 
 ## What this does and does not touch

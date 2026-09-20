@@ -50,7 +50,7 @@ The app lives in this parent repo; the backend and the website are each submodul
 
 **Sharing** is one primitive: the **Space** — persistent, live, any number of members, and a user can be in several at once. Each space has a random key (kept as a keyring, newest first) distributed to members by wrapping it for each member's X25519 public key.
 
-The full contract — payload shapes, event envelopes, key lifecycle — is in the [backend architecture doc](orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md), which owns it.
+The full contract — payload shapes, event envelopes, key lifecycle — is in the [backend architecture doc](orange-copy-paste-clipboard-backend/docs/architecture.md), which owns it.
 
 ---
 
@@ -64,8 +64,8 @@ RoverTools/
 ├─ orange-copy-paste-clipboard-backend/    # submodule → RoverTools-Smart-Clipboard-App-Backend
 ├─ orange-copy-paste-clipboard-website/    # submodule → RoverTools-OrangeCP-Website
 ├─ docs/
-│  ├─ ARCHITECTURE.md                      # cross-system architecture and integration contract
-│  └─ RELEASING.md                         # how a release is cut
+│  ├─ architecture.md                      # cross-system architecture and integration contract
+│  └─ releasing.md                         # how a release is cut
 ├─ .github/workflows/
 │  ├─ release.yml                          # manual: version, build, sign, publish
 │  └─ build-linux.yml                      # manual: Linux bundles without a Linux machine
@@ -132,7 +132,7 @@ A release is one manual workflow run: `gh workflow run release.yml` for a patch,
 
 From Claude Code: `/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]` — the skill asks for whatever you leave out, shows the version and notes about to ship, and dispatches only after an explicit yes.
 
-The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/beta design, the one-time signing-key and releases-repo setup, and the pre-trust smoke test all live in [`docs/RELEASING.md`](docs/RELEASING.md). `.github/workflows/build-linux.yml` builds Linux bundles on demand. Releases never touch the sync backend; it deploys on its own.
+The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/beta design, the one-time signing-key and releases-repo setup, and the pre-trust smoke test all live in [`docs/releasing.md`](docs/releasing.md). `.github/workflows/build-linux.yml` builds Linux bundles on demand. Releases never touch the sync backend; it deploys on its own.
 
 ---
 
@@ -148,9 +148,9 @@ The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/bet
 
 ## Further reading
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the map: which doc owns which fact, and the invariants that bind the two components. Start here to find the right doc.
-- [`docs/RELEASING.md`](docs/RELEASING.md) — the release pipeline end to end.
-- [Client README](orange-copy-paste-clipboard-app-rust/README.md) · [client architecture](orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md) · [bugfix history](orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md).
-- [Backend README](orange-copy-paste-clipboard-backend/README.md) · [backend architecture](orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md) · [deployment guide](orange-copy-paste-clipboard-backend/docs/DEPLOY.md).
+- [`docs/architecture.md`](docs/architecture.md) — the map: which doc owns which fact, and the invariants that bind the two components. Start here to find the right doc.
+- [`docs/releasing.md`](docs/releasing.md) — the release pipeline end to end.
+- [Client README](orange-copy-paste-clipboard-app-rust/README.md) · [client architecture](orange-copy-paste-clipboard-app-rust/docs/architecture.md) · [bugfix history](orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md).
+- [Backend README](orange-copy-paste-clipboard-backend/README.md) · [backend architecture](orange-copy-paste-clipboard-backend/docs/architecture.md) · [deployment guide](orange-copy-paste-clipboard-backend/docs/DEPLOY.md).
 
 > Docs are context, not truth. Where a doc and the code disagree, the code wins — and the doc is worth fixing.

@@ -6,15 +6,13 @@
 The value is the root cause — a fix with no explanation of why the bug was possible is a
 changelog entry, not history.
 **Not here:** how the system works. Describe only the mechanism the bug turned on, and
-link the rest: `docs/ARCHITECTURE.md` for client internals, the backend's for anything on
-the wire.
+link the rest: `docs/architecture.md` for client internals,
+`orange-copy-paste-clipboard-backend/docs/architecture.md` for anything on the wire.
 
 ---
 
 ## #1 — Clipboard screen missing entries that paste popup shows
 
-**Date**: 2026-03-07  
-**Severity**: High  
 **Symptoms**:
 
 - A copied entry never appeared in the main Clipboard Screen, but did show up in the Quick Paste popup
@@ -45,8 +43,6 @@ On startup, `get_history` replaced the entire React state. If a `clipboard:new-e
 
 ## #2 — Paste popup intercepts clicks / images fail to paste / popup unresponsive after paste
 
-**Date**: 2026-03-09  
-**Severity**: High  
 **Symptoms**:
 
 - Pasting copied images (especially from Discord without downloading) via the paste popup would fail to paste.
@@ -75,8 +71,6 @@ On startup, `get_history` replaced the entire React state. If a `clipboard:new-e
 
 ## #3 — Pasting large images from paste popup takes 5–15 seconds
 
-**Date**: 2026-03-15
-**Severity**: High
 **Symptoms**:
 
 - Pasting a large screenshot or high-resolution image from the paste popup would freeze the app for 5–15 seconds before the paste completed.
@@ -101,8 +95,6 @@ Clipboard images were stored as `data:image/png;base64,…` strings directly ins
 
 ## #4 — CardMenu (right-click context menu) appears at top-left on first open
 
-**Date**: 2026-03-19
-**Severity**: Low
 **Symptoms**:
 
 - Right-clicking an entry card for the first time spawned the context menu at the top-left corner of the window (0, 0) instead of at the click position.
@@ -117,8 +109,6 @@ The `CardMenu` component used `useState` to track its position, initialized with
 
 ## #5 — Footer chip overflow: +N button hidden under timestamp in tiles view
 
-**Date**: 2026-03-19
-**Severity**: Low
 **Symptoms**:
 
 - On narrow card widths (tiles view, small window), the "+N" group overflow button and group chips would be clipped behind the timestamp.
@@ -147,8 +137,6 @@ The `.card-chips` container had `overflow: hidden`, which silently clipped any c
 
 ## #6 — Screenshots and image copies produce duplicate history entries
 
-**Date**: 2026-03-19
-**Severity**: Medium
 **Symptoms**:
 
 - Taking a screenshot (Win+Shift+S, Snipping Tool) or copying an image from certain apps would add the same image entry to clipboard history twice.
@@ -167,8 +155,6 @@ On the first capture, `push()` externalised the image from an inline data-URL (`
 
 ## #7 — "Remove from cloud" left rows behind, so storage stayed occupied after clearing the account
 
-**Date**: 2026-08-17
-**Severity**: High (unreclaimable storage, no way to reach it from the UI)
 **Symptoms**:
 
 - Account & Sync reported `1.1 MB of 50.0 MB` in use immediately after "Remove from cloud" said `Removed 10 items from the server`.
@@ -202,8 +188,6 @@ Two smaller faults made the leak invisible rather than obvious:
 
 ## #8 — A shared entry showed the wrong author, and the name changed depending on where you looked
 
-**Date**: 2026-08-18
-**Severity**: High (attribution — an entry read as written by someone who only edited it)
 **Symptoms**:
 
 - A note written by one member and shared into a space showed that member's name on one surface and the *viewer's* name on another, for the same note at the same moment.
@@ -221,7 +205,7 @@ The merge collapses both onto one local key (`note:<client_id>`), and two things
 - `set_entry_owner` was a plain map insert, so the last row merged named the author.
 - The row's content was merged unconditionally, so the editor's text overwrote the author's on every device.
 
-Pull is ordered `server_ts ASC` (`src/sync/service.py:180`), so the rival row — pushed later, higher `server_ts` — always arrived last and always won. Meanwhile `mark_entry_remote` *is* sticky, so the entry stayed correctly flagged as "someone else's" for the permission guards. That split is what made the surfaces disagree: the guards said not-yours, the name said yours.
+Pull is ordered `server_ts ASC` (`src/sync/service.py`), so the rival row — pushed later, higher `server_ts` — always arrived last and always won. Meanwhile `mark_entry_remote` *is* sticky, so the entry stayed correctly flagged as "someone else's" for the permission guards. That split is what made the surfaces disagree: the guards said not-yours, the name said yours.
 
 The push guards in `spawn_push_note` and `spawn_push_clipboard_entry` already refuse to publish an entry flagged remote, so a current build does not create rival rows. They are the sending half only — rows already on the server, or written by a device that has not been updated, could still take an entry over on the way in.
 
@@ -230,17 +214,10 @@ The push guards in `spawn_push_note` and `spawn_push_clipboard_entry` already re
 - `set_entry_owner` is sticky like `mark_entry_remote`: the first author on record keeps the entry, and a later row naming somebody else is refused rather than applied. It returns whether the record now names the given account, so a caller can tell agreement from refusal.
 - The merge loop drops a rival row whole — content, tombstone and all — via `row_is_authoritative`. An entry has one author; a row from anyone else is not a version of it.
 - `author_of` also answers for entries with nobody on record: one this device knows and has *not* flagged remote is one we wrote. Without that, the takeover ran the other way — another member's row could claim an entry of ours.
-- Installs already damaged are repaired once, at sign-in: every recorded author is dropped and the pull cursor is rewound, so the server rebuilds them (`clear_all_entry_owners` + `SyncState::authorship_repaired`). A narrower repair was tried first — release only the records naming *this* account on an entry flagged remote, which is the impossible pairing — but it only helps the device that did the editing. A third device that merely watched had recorded the editor's name, which is neither impossible nor locally distinguishable from the truth. Worse, with the record now sticky, that wrong name would refuse the real author's next update as if *they* were the impostor: strictly worse than the original bug. Nothing local can tell a good record from a bad one, so all of them go. The rewind is what puts them back — pull returns rows in `server_ts` order, and a rival copy can only be pushed after the original exists, so the author's row always arrives first and establishes them. **Cost: one full re-pull per install, once.**
+- Installs already damaged are repaired once, at sign-in: every recorded author is dropped and the pull cursor is rewound, so the server rebuilds them (`clear_all_entry_owners` + `SyncState::authorship_repaired`). A narrower repair — releasing only the impossible pairings — was rejected because a device that merely watched recorded a wrong name that is locally indistinguishable from the truth, so all records go and the rewind re-establishes each author from the `server_ts`-ordered pull (the original always precedes any rival copy). **Cost: one full re-pull per install, once.**
 - `useEntryOwners` seeds from `sync_get_remote_entries` before the name map, so an entry known to be someone else's but with no name reads "A member". Dropping the chip because the name is unknown says the opposite of what is true.
 
-**How a regression is caught, not just avoided**:
-
-The bug was silent — a wrong answer looked exactly like an ordinary merge — so the fix is only worth as much as what fails when it is undone. Four layers, each closing a different way back in:
-
-1. **The rule is a pure function.** `accepts_row` and `resolve_author` take plain arguments and return a decision, so every case is covered by `sync/mod.rs::ownership_tests` — including the two that actually broke: a rival row being refused, and this account released as the author of something flagged remote. Reintroducing last-write-wins fails a named test rather than quietly changing behaviour.
-2. **Stickiness is tested at the store.** `id_map.rs::tests` asserts the first author on record keeps the entry and that `set_entry_owner` reports refusal.
-3. **The server refuses the write.** `sync/service.py::_belongs_to_someone_else` rejects a push inserting a row for a `client_id` another account holds in a space the push targets, with `not_your_entry`. This is the layer that matters most: the client guards protect a device running current code, and old builds keep running. Covered by four tests in `tests/test_spaces_invites.py`, including the two cases that must *not* be refused (the author's own edit, and one person's two accounts colliding outside a shared space).
-4. **A refusal is visible.** `push_entry_task` routes `not_your_entry` through `record_skip`, so it lands in the notification centre instead of only stderr. A guard failing silently is how this class of bug survives.
+**How a regression is caught, not just avoided**: the bug was silent, so the fix is tested at every layer. The rule is a pure function covered by `sync/mod.rs::ownership_tests`; stickiness is asserted at the store (`id_map.rs::tests`); the server itself refuses a rival write (`sync/service.py::_belongs_to_someone_else` returns `not_your_entry` — the layer that matters most, since old client builds keep running), covered in `tests/test_spaces_invites.py`; and a refusal reaches the notification centre (`push_entry_task` routes it through `record_skip`) instead of only stderr.
 
 **Invariant to keep**: an entry has exactly one author, and neither the recorded owner nor the entry's content may change hands on arrival order. Anything that decides authorship must be sticky or explicitly ordered — never last-write-wins.
 
@@ -248,8 +225,6 @@ The bug was silent — a wrong answer looked exactly like an ordinary merge — 
 
 ## #9 — One typo in the password after a Google sign-in meant doing the whole Google sign-in again
 
-**Date**: 2026-08-19
-**Severity**: High (a dead end in the sign-in flow, hit by anyone who mistypes once)
 **Symptoms**:
 
 - Sign in with Google, get to the account-password step, mistype the password. The error is correct: "Incorrect password. It does not match the one this account was encrypted with."
@@ -284,9 +259,6 @@ A second defect sat next to it. On a first-ever OAuth sign-in the flow also has 
 
 ## #10 — After a Google sign-in the app stayed in the background
 
-**Date**: 2026-08-19
-**Severity**: Medium (every OAuth sign-in, and the flow cannot continue until the user finds the window)
-
 **Symptoms**: the browser tab said to return to the app, and the app was still behind everything else. The password step was waiting, unseen. A sign-in that *failed* was worse: the tab said so, the app said nothing, and nothing had focus.
 
 **Root Cause**:
@@ -309,9 +281,6 @@ The `sync:oauth-ready` event and the `sync_oauth_pending` probe exist to keep th
 
 ## #11 — The password-reset email linked to localhost, and resetting would have lost the data anyway
 
-**Date**: 2026-08-19
-**Severity**: Critical (password reset was unusable; the only account-wide envelope was tied to a password nobody could change)
-
 **Symptoms**: "Send reset link" reported success and the email arrived, pointing at `http://localhost:3000/...`. Nothing served that, so the link was dead on every machine. A user who forgot their password had no way back into their account.
 
 **Root Cause**:
@@ -333,16 +302,13 @@ Two independent causes, and the second only became visible once the first was fi
 - Envelope first, password second. The reverse order can leave an account whose password opens nothing, which is exactly the failure bug #9 fixed in the OAuth path.
 - `change_password` for a signed-in user is the same steps minus the code exchange, and cannot lose anything. It is what the account screen offers; the reset link is the fallback.
 
-**Requires one dashboard entry**: `{public_base_url}/reset` must be in Supabase Authentication -> URL Configuration -> Redirect URLs, or GoTrue ignores the redirect and mails the Site URL again.
+**Requires one deploy-config entry**: the reset redirect URL must be registered with the identity provider, or GoTrue ignores the redirect and mails the Site URL again. See `orange-copy-paste-clipboard-backend/docs/DEPLOY.md`.
 
 **Invariant to keep**: a password change is a re-wrap, never a new key. Any path that sets a password must have the UMK in hand first, and must write the new envelope before the credential changes.
 
 ---
 
 ## #12 — Any stray 404 on one route signed the user out and demanded a password
-
-**Date**: 2026-08-19
-**Severity**: High (a recoverable session was thrown away; the user had to retype a password they had not forgotten)
 
 **Symptoms**: reported as sessions ending around backend deploys. The app came back at the sign-in screen with credentials still in the keychain and nothing wrong with them.
 
@@ -501,24 +467,20 @@ the notification is really reporting that the process started.
 
 ## #17 - The app drew a sign-in form over a session it was busy restoring
 
-**Date**: 2026-08-21
-**Severity**: Critical (the headline complaint against the product: "it keeps logging me out")
-
 **Symptom.** Users were signed out of cloud sync on app or machine restart,
 repeatedly, for weeks, across six releases that each hardened some part of the
 credential path.
 
-**What the evidence said.** Nothing was ever rejected. On the Supabase project at
-the time of the investigation:
+**What the evidence said.** Nothing was ever rejected. Across the identity
+provider and our own backend the records were clean:
 
-- 111 sessions across 6 users, and the newest refresh token of **every one** of
-  them was unrevoked. No token family had ever been killed by reuse detection.
-- Zero 4xx from GoTrue in 24 hours: 41 calls to `/token`, all 200.
-- Zero 4xx from our own backend on `POST /auth/bootstrap` or
-  `GET /auth/umk/device` across three days of retained logs. Successful restores
-  were plainly visible in them - `bootstrap 200`, `umk/device 200`, socket
-  accepted - several times a day.
-- Sessions were being *abandoned*, not revoked: four or five rotations each, then
+- Every session's newest refresh token was unrevoked. No token family had ever
+  been killed by reuse detection.
+- No 4xx from GoTrue: every `/token` call returned 200.
+- No 4xx from our own backend on `POST /auth/bootstrap` or
+  `GET /auth/umk/device` across the retained logs. Successful restores were
+  plainly visible in them - `bootstrap 200`, `umk/device 200`, socket accepted.
+- Sessions were being *abandoned*, not revoked: a handful of rotations each, then
   silence, while the user started a new one.
 
 Six rounds of fixes had gone at refresh-token durability. No refresh token had
@@ -534,12 +496,11 @@ is false - so that card could only ever appear *after* an attempt had already
 failed transiently. For the entire duration of the attempt the app showed a
 password field.
 
-That duration is not short. `supabase.rs` allows 15 s for the refresh grant;
-`RESTORE_TIMEOUT_SECS` is 30 s and `TRANSPORT_RETRY_DELAYS` is `[3, 8]`, applied
-to both the bootstrap and the device-wrap call - up to about three and a half
-minutes end to end, and reliably 30-60 s whenever the backend had spun down while
-idle, which is exactly the state it is in when someone boots their machine in the
-morning.
+That duration is not short. Between the refresh grant, the restore timeout, and
+the transport retry ladder applied to both the bootstrap and the device-wrap
+call, a restore can run to several minutes end to end, and reliably tens of
+seconds whenever the backend had spun down while idle - exactly its state when
+someone boots their machine in the morning.
 
 So: the user restarts, opens the Account screen, is told to sign in, and does.
 Google sign-in is two clicks. A second session is minted, the first is abandoned
@@ -556,31 +517,20 @@ token missed.
   `sync:session-restored` / `sync:restore-gave-up`, which the UI already listened
   for, so the frontend needed no change: `restoring` is now true from the first
   instant and the reconnecting card is what users see.
-- Six adjacent defects found in the same sweep, each of which could end a session
-  on its own:
-  - `try_restore_session` aborted when the rotated refresh token failed to reach
-    the keychain. The rotated value lived nowhere else at that point, so the
-    abort destroyed the account's only live credential and every later launch
-    presented the spent one. It now records the fault and carries on, exactly as
-    `refresh_access_token` already did.
-  - A bare 401 or 403 on either restore call was `Terminal`. Neither is a
-    statement about the credential - our backend answered 401 when it could not
-    reach the JWKS endpoint, and `HTTPBearer` answers 403 before a route is
-    entered - so both are now `Unavailable`, retried under the existing cap.
-  - A failed token refresh inside `run()` was relabelled `status: Some(401)`, so
-    a timeout or a 429 from GoTrue read as a dead credential.
-    `refresh_access_token` now returns `AuthError` and its status survives.
-  - A `settings.json` that would not open read as "sync is off", which skipped
-    the restore entirely with no retry for the life of the process.
-    `SyncConfig::enabled_known` keeps the two apart.
-  - `load_session_pointer` collapsed "the store would not answer" into "you were
-    never signed in" - a verdict that is never retried.
-  - Windows Credential Manager answers a zero-length blob with `Ok("")` rather
-    than `NoEntry`, so an empty string could be spent as a refresh token.
-    `read_secret` reports empty as absent.
+- Six related credential-path defects, each of which could end a session on its
+  own, were fixed in the same sweep. All shared one shape: an ambiguous or
+  transient failure was treated as a terminal verdict about the credential. For
+  example, `try_restore_session` aborted when a rotated refresh token failed to
+  reach the keychain - destroying the account's only live credential - and now
+  records the fault and carries on; a bare 401/403 on a restore call (the backend
+  answers 401 when it cannot reach the JWKS endpoint, and `HTTPBearer` answers 403
+  before a route is entered) was `Terminal` and is now `Unavailable`, retried under
+  the existing cap; and Windows Credential Manager's zero-length `Ok("")` could be
+  spent as a refresh token, so `read_secret` now reports empty as absent.
 - Backend: `PyJWKClientConnectionError` now answers `503` with `Retry-After`
   instead of 401, and `jwt.decode` takes 30 s of leeway. See the token
-  verification section of the backend's `docs/ARCHITECTURE.md`.
+  verification section of
+  `orange-copy-paste-clipboard-backend/docs/architecture.md`.
 - `try_restore_session` yields to a manual sign-in that landed while it was away,
   instead of tearing two sessions into one.
 
@@ -761,12 +711,12 @@ triggers a deploy, so the push published code that selected columns and a table
 the live database did not have, and `GET /api/v1/spaces` 500'd on
 `relation ... does not exist`.
 
-Nothing caught it and nothing was going to. `render.yaml` does set
-`preDeployCommand: alembic upgrade head`, but that field is paid-plan only, and
-which plan the live service is actually on is a dashboard setting the repository
-cannot see - so a green deploy says nothing either way. `pytest` cannot catch it
-either: the harness builds its schema with `Base.metadata.create_all`, so a table
-can exist for every test and be absent from every real database.
+Nothing caught it and nothing was going to. The deploy pipeline runs no migration
+step against the live database (see
+`orange-copy-paste-clipboard-backend/docs/DEPLOY.md`), so a green deploy says
+nothing about the schema either way. `pytest` cannot catch it either: the harness
+builds its schema with `Base.metadata.create_all`, so a table can exist for every
+test and be absent from every real database.
 
 Then the recovery was delayed by the tool meant to perform it. The **Migrate
 database** workflow was dispatched with its default `action=current`, which is
@@ -781,8 +731,8 @@ a read-only run that finds pending revisions warns and prints the dispatch that
 would apply them; `run-name` states whether the run applies changes; an `upgrade`
 re-reads the revision afterwards and fails if the database did not move; and an
 unreachable database now fails the step instead of being reported as an empty
-one. The backend's `docs/DEPLOY.md` documents the workflow and no longer implies
-a deploy migrates.
+one. `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` documents the workflow
+and no longer implies a deploy migrates.
 
 **Not fixed, deliberately.** `action` still defaults to the read-only `current`.
 A default that writes to a production database is a worse failure than a default
@@ -864,57 +814,34 @@ taken out themselves.
 **Cause.** Two facts the feed needs were never written down, so both were
 inferred.
 
-*Placement.* `feedTimestamp` had only `deleted_at` to go on for a placeholder -
-`DeletedMarker` kept when the removal happened and nothing about when the item
-had. The comment on it said as much ("which is the only time it has"), which is
-true of the record and not of the item: at every point a marker is written the
-item's own timestamp is still readable, either from the local copy or off the
-tombstone that announced it.
+*Placement.* `feedTimestamp` had only `deleted_at` to place a placeholder - when
+the removal happened, nothing about when the item sat. Yet the item's own
+timestamp is still readable whenever a marker is written, either from the local
+copy or off the tombstone that announced it.
 
 *Wording.* The copy branched on `by_author`, a *relation* between two ids
-computed upstream rather than a fact recorded on the spot, and it is wrong in at
-least two ways that both land on this reader. The WS handler reads
-`(Some(a), Some(r)) => a == r, _ => false`, so a payload arriving without either
-id is reported as moderation. And the backend takes `author_id` from
-`matched[0].user_id` while clearing every row carrying that `client_id` whoever
-wrote it, so an owner removing an item can have the removal recorded against
-another member's row - author and remover then differ, and the owner is told a
-space owner moderated them. The user's own `id_map.json` held the proof:
-`owner_id: null` (our item, so the badge read "You") with `by_author: false`,
-a combination the local command cannot produce, because it derives `by_author`
-from the same `is_remote` that picks the branch writing the marker.
+computed upstream rather than a fact recorded on the spot, wrong in two ways that
+both land on this reader: a payload missing either id was reported as moderation,
+and the backend records `author_id` against a row that may not be the remover's
+(it clears every row carrying that `client_id`), so an owner removing their own
+item is told a space owner moderated them.
 
 **Fix.** Record both facts instead of deriving them. `DeletedMarker` gains
-`entry_ts` - the item's own time, read while the copy is still there, or off the
-tombstone's `created_at` - and `removed_by`, the actor as an id. The feed places
-a placeholder by `entry_ts`, and the wording compares `removed_by` with this
-account's own id, so "You" is a fact rather than an inference.
-`drop_space_entry` takes the actor from its three callers; the delete commands
-read the timestamp before dropping the copy, since by the time sync hears about
-it there is nothing left to read.
+`entry_ts` (the item's own time, read while the copy is still there) and
+`removed_by` (the actor as an id); the feed places by `entry_ts` and compares
+`removed_by` with this account's own id, so "You" is a fact. `by_author` is then
+computed locally against the author of the copy *this device holds*, with the
+wire's value kept only as a fallback when there is nothing to compare.
 
-`by_author` is then computed locally rather than accepted from the wire.
-`drop_space_entry` compares `removed_by` against the author of the copy *this
-device holds* - `owner_of` for one we received, ourselves for one we wrote -
-which is the only version of the question that is about the item in front of the
-reader. The wire's value survives only as the fallback for when there is nothing
-to compare: no `removed_by` from an older server, or no session to name
-ourselves with.
-
-The backend half was fixed in the same pass. `remove_entry_from_space` now
-prefers the remover's own row when choosing which author to record, and the
-lowest id otherwise, so the field is at least stable across calls; the wire
-contract in the backend's `docs/ARCHITECTURE.md` now says outright that
-`author_id` is advisory and that a client must not compute "did the author
-remove this" from it. The record cannot be made fully correct at its current
-granularity - one row per (space, entry), and the collision is several authors
-for one `client_id` - which is the other reason the client stopped depending on
-it.
-
-Both fields are `#[serde(default)]` and absent on records already on disk. Those
-keep the old wording with one change: with no actor recorded, nothing is claimed
-about who, so a removal that is not the author's now reads "This item was taken
-out of the space" rather than naming a party it cannot identify.
+The backend half was fixed in the same pass: `remove_entry_from_space` prefers
+the remover's own row when choosing which author to record, and the wire contract
+in `orange-copy-paste-clipboard-backend/docs/architecture.md` now says outright
+that `author_id` is advisory and a client must not compute "did the author remove
+this" from it. The record cannot be made fully correct at its current granularity
+(one row per (space, entry), several authors for one `client_id`), which is the
+other reason the client stopped depending on it. Older records without the fields
+(`#[serde(default)]`) drop the actor claim entirely, reading "This item was taken
+out of the space".
 
 **Invariant to keep**: **a relation between two ids is not a fact - record the
 id.** `by_author` had to be computed by whoever published the event, from fields
@@ -1105,10 +1032,6 @@ publishes a resolution event, tracked in backend issue
 ---
 
 ## #29 - Relaunching the running app replaced it with a fresh copy instead of surfacing it
-
-**Date**: 2026-09-07
-**Severity**: Medium (every relaunch of an app already running in the background;
-the window never came forward, and the reported fix in 0.3.3 changed nothing)
 
 **Symptom.** Launching the app while it was already running in the background -
 from the taskbar, a second click of the icon - flashed the startup toast and left

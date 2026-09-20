@@ -4,7 +4,7 @@
 together so neither doc can own them alone.
 **Not here:** anything one component enforces by itself. Wire contract, payloads and DDL are
 the backend's; state, commands and runtime behavior are the client's; who-may-do-what is
-`PERMISSIONS.md`. This file links, it does not describe.
+`permissions.md`. This file links, it does not describe.
 
 One fact, one home. This page is deliberately short: it used to describe the whole system a
 third time, and the third copy is what went stale.
@@ -28,11 +28,11 @@ describes product behavior and links to the homes below, it enforces nothing.
 
 | Question | Doc |
 |----------|-----|
-| What does the API look like — routes, payloads, DDL, socket events, the crypto envelope? | `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` |
-| How does the app work inside — state, Tauri commands, events, persistence, the sync engine? | `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md` |
-| Who may do what to an entry or inside a space, and where is it enforced? | `PERMISSIONS.md` |
-| Has this broken before, and why? | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
-| How does a release get cut? | `RELEASING.md` |
+| What does the API look like — routes, payloads, DDL, socket events, the crypto envelope? | `orange-copy-paste-clipboard-backend/docs/architecture.md` |
+| How does the app work inside — state, Tauri commands, events, persistence, the sync engine? | `orange-copy-paste-clipboard-app-rust/docs/architecture.md` |
+| Who may do what to an entry or inside a space, and where is it enforced? | `permissions.md` |
+| Has this broken before, and why? | `orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md` |
+| How does a release get cut? | `releasing.md` |
 | How do I reach, recover, harden, and deploy the self-hosted VPS? | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | How do I work in this repo? | `CLAUDE.md` at the workspace root |
 | Where do end users learn to install and use the app? | `orange-copy-paste-clipboard-website/` — the public docs + marketing site |
@@ -75,11 +75,11 @@ Anything crossing the wire touches both repos and their docs disagree easily, so
 matters:
 
 1. **Backend first**, because it is the contract. Route, payload, DDL, socket event — and
-   its `docs/ARCHITECTURE.md` in the same commit, since the doc *is* the contract's
+   its `docs/architecture.md` in the same commit, since the doc *is* the contract's
    readable form.
 2. **Client second**, against what the backend now accepts. Its doc gets a line only if
    client internals changed — not a copy of the payload.
-3. **`PERMISSIONS.md`** only if the change is about who may do something.
+3. **`permissions.md`** only if the change is about who may do something.
 4. **This file** only if the change adds an invariant neither component can keep alone.
 
 Migrations are authored freely, but **the deploy never applies them** — it only rebuilds and
