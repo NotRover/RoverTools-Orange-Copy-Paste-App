@@ -3,10 +3,11 @@
   <style> alone. Rules: CLAUDE.md, "Visual Docs".
 
   A walkthrough is a DATED EXPLAINER, not a reference. It describes one change at one
-  moment and is never updated afterwards - that is what makes it cheap. Date it in the
-  header of your copy and say so, the way docs/join-approval.html does. If a fact here
-  ever needs correcting, correct the doc that owns it instead; see "Docs & Source
-  Priority" in CLAUDE.md for which doc that is.
+  moment and is never updated afterwards - that is what makes it cheap. Date it on the
+  page and say so. This template is the standalone-HTML house style, kept for one-off
+  Artifacts; a walkthrough that belongs on the docs site is an MDX page with inline
+  Mermaid.astro diagrams instead. If a fact here ever needs correcting, correct the doc
+  that owns it instead; see "Docs & Source Priority" in CLAUDE.md for which doc that is.
 -->
 <title>Page Name Here</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -509,9 +510,9 @@
   Two ways to ship a page built from this:
     1. As an Artifact - publish the file as-is, the host supplies the document
        wrapper and renders mermaid natively.
-    2. As a repo file in docs/ - wrap it in <!doctype html><html><head>...<body>
-       and add the mermaid ESM loader before </body>. See
-       docs/space-key-handover.html for a worked example of both.
+    2. On the docs site - author it as an MDX page and render diagrams inline with the
+       Mermaid.astro component (src/components/docs/), which is theme-aware. This standalone
+       wrapper is only for the Artifact case above.
   ─────────────────────────────────────────────────────────────────────────────
 -->
 

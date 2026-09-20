@@ -1,7 +1,5 @@
 # Smart Clipboard — Architecture
 
-> **Created by Salman Tariq — DO NOT DELETE**
-
 A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
 
 **Owns:** how this app works inside. Windows and runtime, app state, Tauri commands and
@@ -345,20 +343,18 @@ entry between the two is kept and marked local-only.
 
 ```
 ClipboardEntry {
-    id: String            ← monotonic counter (AtomicU64); used as client_id in sync
+    id: String            ← UUIDv4, generated at capture; doubles as the cross-device client_id
     kind: EntryKind       ← Text | Image | File | Html
     content: String       ← plain text / file path (images) / newline-delimited paths / html---PLAINTEXT---text
     timestamp: u64        ← Unix ms
     pinned: bool
     groups: Vec<String>   ← user-defined group tags (e.g. "Saved")
     label: Option<String> ← display name (e.g. "Image Mar 17, 2:45 PM" for images)
-    // Sync fields — NOT persisted to history.bin; maintained in id_map.json by SyncClient
-    server_id: Option<String>   ← UUID assigned by server after first successful push
-    sync_status: SyncStatus     ← Synced | Pending | LocalOnly (default: LocalOnly)
+    content_hash: Option<u64> ← session-only dedupe hash; #[serde(skip)], not persisted
 }
 ```
 
-> **Sync note:** `server_id` and `sync_status` are transient fields populated at runtime by the SyncClient from `id_map.json`. They are excluded from MessagePack serialization. Their sole purpose is UI display (cloud icon on entry cards) and push dedup logic.
+> **Sync note:** per-entry sync state is *not* stored on the entry. It lives in `id_map.json` and the pending queue, and the UI reads it via the `sync_get_entry_states` command (`useEntrySyncStates()`), gated by the `show_sync_badges` setting.
 
 **`ClipboardHistory`** is a `Vec<ClipboardEntry>` with most-recent-first ordering:
 
@@ -496,7 +492,7 @@ Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal pr
 
 Notes are sorted by `updated_at` descending, and a monotonic in-process counter is advanced on load to avoid ID collisions.
 
-Like `ClipboardEntry`, notes carry transient `server_id: Option<String>` and `sync_status: SyncStatus` fields (not persisted to `notes.bin`).
+As with clipboard entries, per-note sync state is not a field on the note — it lives in `id_map.json`/the pending queue and is read via `sync_get_entry_states` (`useEntrySyncStates()`).
 
 #### Persistence Behavior
 
@@ -979,7 +975,7 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 | Function                                                | Description                                             |
 | ------------------------------------------------------- | ------------------------------------------------------- |
-| `derive_kek(password, kdf_salt) → [u8; 32]`             | Argon2id(password, salt, m=65536, t=3, p=4) — wrapping key |
+| `derive_kek(password, kdf_salt) → [u8; 32]`             | Argon2id password-derived wrapping key; the exact KDF parameters are the backend doc's (they must match cross-device or unwrap fails) |
 | `wrap_umk(kek, umk) → String` / `unwrap_umk(kek, b64)`  | Wrap/unwrap the random UMK envelope; unwrap fails ⇒ wrong password |
 | `encrypt(key, plaintext, aad) → String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
 | `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
@@ -1010,7 +1006,6 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `sync_get_status`      | `() → SyncStatusInfo`                               | `{ connected, pending_count, skipped_count, last_synced_at }`                            |
 | `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
 | `sync_set_enabled`     | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                                 |
-| `sync_set_server_url`  | `(url: String) → ()`                                | Override default server URL (self-hosted)                                                |
 | `sync_set_mode`        | `(mode: String) → ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
 | `sync_get_mode`        | `() → String`                                       | Current cloud sync mode                                                                  |
 | `sync_push_settings`   | `() → ()`                                           | Encrypt current settings blob and `PUT /settings`; internally debounced (2s)             |
@@ -1335,11 +1330,11 @@ interface ClipboardEntry {
   label?: string; // e.g. "Image Mar 17, 2:45 PM"
 }
 
-type AppScreen = "clipboard" | "notes" | "sync" | "shortcuts" | "settings";
+type AppScreen = "clipboard" | "notes" | "spaces" | "shortcuts" | "account" | "settings";
 type AppTheme = "dark" | "light";
 ```
 
-Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `fileExtension()`, `fileNameFromPath()`, `isImageFile()`, `isVideoFile()`, `isDocumentFile()`, `isUrl()`, `classifyFileEntry()`, `deriveDisplayKind()`, `imageDisplayName()`, `resolveImageSrc()`, `htmlFragment()`, `htmlPlainText()`, `groupColorIndex()`, `groupColor()`, `setGroupColorIndex()`, `removeGroupColor()`, `renameGroupColor()`.
+Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `fileNameFromPath()`, `isImageFile()`, `isVideoFile()`, `isUrl()`, `classifyFileEntry()`, `deriveDisplayKind()`, `imageDisplayName()`, `resolveImageSrc()`, `htmlFragment()`, `htmlPlainText()`, `groupColorIndex()`, `groupColor()`, `setGroupColorIndex()`, `removeGroupColor()`, `renameGroupColor()`.
 
 ### Shared Hooks
 
@@ -1413,11 +1408,11 @@ Renders a single `ClipboardEntry` with type-specific previews:
 
 **Footer chip overflow**: The chip bar (type, pinned, saved, in-clipboard, user groups) uses `flex-wrap` for graceful line wrapping. A dynamic measurement algorithm calculates how many group chips fit on the first row and renders a "+N" overflow button for the rest. When all groups fit, no overflow button is shown.
 
-**Cloud sync indicator** (Phase 6): A small cloud icon is shown on each card driven by `SyncStatus` in the entry:
+**Cloud sync indicator**: A small cloud icon can be shown on each card. It is *not* a field on the entry — the per-entry state is fetched with the `sync_get_entry_states` command (`useEntrySyncStates()`) and the badge is gated by the `show_sync_badges` setting:
 
-- Filled cloud ✓ — `Synced` (server_id exists and up-to-date)
-- Outline cloud — `Pending` (queued in sync_pending.json)
-- No icon — `LocalOnly` (sync disabled or entry predates sync enrollment)
+- Filled cloud — synced (a server id is mapped for this entry and it is up to date)
+- Outline cloud — pending (queued in the pending queue, not yet acknowledged)
+- No icon — local-only (sync disabled, badges off, or entry predates sync enrollment)
 
 #### Settings Screen (`SettingsScreen.tsx`)
 
@@ -1426,15 +1421,9 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - **Close to tray**: Hide to system tray on close instead of quitting. Stored in `settings.json`.
 - **Start minimized**: Launch hidden in tray. Stored in `settings.json`.
 - **Notifications**: Master toggle + individual checkboxes for copy and paste notifications. Stored in `settings.json`.
+- **Show sync badges**: Toggle for the per-entry cloud icon on cards. Stored in `settings.json`.
 
-**Cloud Sync section** (Phase 6 additions):
-
-- **Enable Cloud Sync** toggle → calls `sync_set_enabled`
-- **Server URL** input (default blank = official server; enter custom for self-hosted) → calls `sync_set_server_url`
-- **Login / Logout** form → calls `sync_login` / `sync_logout`
-- **Connected devices** list → fetched via `GET /api/v1/auth/devices`; shows current device highlighted
-- **Sync status indicator**: Synced ✓ / Syncing… / Offline / Re-login required → driven by `sync_get_status`
-- **Cloud sync** section: Realtime / Passive segmented control → `sync_set_mode` / `sync_get_mode`, next to the existing `Sync now` button. Spaces are not managed here — they live on the Spaces screen.
+> Cloud-sync auth (login/logout), the connected-devices list and presence, sync status, and the realtime/passive/manual mode control all live on the **Account screen** (`AccountScreen.tsx`), not here.
 
 #### Notes Screen (`NotesScreen.tsx`)
 
@@ -1496,7 +1485,7 @@ Shown on Ctrl+Shift+V near the cursor. Displays:
 - **Numbered slots** (1–9, 0): Press number key to instantly paste that entry.
 - Arrow key navigation + Enter to paste selected.
 - Expandable file entries for multi-file items.
-- Dynamic height resize via `invoke("resize_paste_popup", { height })`.
+- Dynamic resize via `invoke("resize_paste_popup", { width, height })`.
 
 Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 
@@ -1504,7 +1493,7 @@ Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 
 | Component           | Purpose                                                                                                                                                                                   |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Sidebar`           | Navigation (4 screens) + theme toggle. Icon-based, fixed position.                                                                                                                        |
+| `Sidebar`           | Navigation (6 screens: clipboard, notes, spaces, shortcuts, account, settings) + notifications bell + theme toggle. Icon-based, fixed position.                                             |
 | `StatusPill`        | "N text · M img · K files · X total" summary bar.                                                                                                                                         |
 | `CardMenu`          | Right-click context menu (Copy, Pin/Unpin, Save, Groups, Expand/Collapse, Delete). Portal to body. Uses direct DOM positioning in `useLayoutEffect` to avoid first-render flash at (0,0). |
 | `ToastNotification` | Timed notification with progress bar + optional action (Undo).                                                                                                                            |

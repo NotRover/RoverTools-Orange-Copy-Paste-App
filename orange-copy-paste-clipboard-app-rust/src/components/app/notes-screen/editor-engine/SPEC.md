@@ -32,7 +32,8 @@ whether an untitled note is worth keeping (text, image, table, rule or embed).
 | `EditorStats`               | `{ blocks, line, chars, words }` from `onStatsChange`. |
 | `NotionPreview`             | Read-only renderer for note cards.                 |
 | `EditorCommand`             | Toolbar command type.                              |
-| `ActiveState` / `BlockKind` | Toolbar feedback (current block, marks, alignment).|
+| `ActiveState`               | Toolbar feedback (current block, marks, alignment).|
+| `AlignValue` / `EmbedForm`  | Alignment values; embed insert-form shape.         |
 | `CalloutTone`               | `info` \| `success` \| `warning` \| `danger` \| `neutral` |
 | `extractPlainText`          | Plain-text projection for titles/search.           |
 | `hasRenderableContent`      | Whether the doc holds anything a reader would miss.|
