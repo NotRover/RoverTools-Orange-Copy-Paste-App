@@ -100,13 +100,15 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 
 ## Project Structure
 
-```
+```filetree
 src-tauri/
 ├── src/
 │   ├── main.rs                 # Process entry point
 │   ├── lib.rs                  # App builder, setup, Tauri command registration
 │   ├── health.rs               # Panic hook, heartbeat watchdog, atomic writes, quarantine
 │   ├── updater.rs              # Signed self-update: check, download, install
+│   ├── clock.rs                # One clock for the whole product: every timestamp is read here
+│   ├── settings_file.rs        # settings.json reader (tolerates transient Windows sharing violations)
 │   ├── clipboard/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_history, copy, paste, etc.)
@@ -127,9 +129,10 @@ src-tauri/
 │   │   ├── client.rs           # reqwest HTTP client, Bearer + X-Device-Id injection, 401 refresh
 │   │   ├── supabase.rs         # Supabase Auth (GoTrue): login, signup, refresh, recover, PKCE
 │   │   ├── oauth.rs            # Google sign-in: loopback redirect server (ports 53170-53172)
+│   │   ├── device_id.rs        # Stable per-machine device fingerprint (not identity)
 │   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
 │   │   ├── pending_queue.rs    # sync_pending.json read/write for offline accumulation
-│   │   ├── id_map.rs           # client_id → server_id map (id_map.json)
+│   │   ├── id_map.rs           # client_id -> server_id map (id_map.json)
 │   │   ├── sync_state.rs       # Connection/status state shared with the UI
 │   │   ├── persist.rs          # Cached session + sync metadata persistence
 │   │   ├── crypto.rs           # UMK unwrap (Argon2id KEK), AES-256-GCM, X25519 key exchange
@@ -141,6 +144,7 @@ src-tauri/
 │   │   ├── clipboard_watcher.rs # Background polling thread (220ms)
 │   │   ├── hotkeys.rs          # Global shortcut handlers (Ctrl+Shift+C/V)
 │   │   ├── notifications.rs    # Copy/paste notification toast logic
+│   │   ├── os_notify.rs        # OS desktop toast (Windows/Linux), distinct from the in-app popup
 │   │   ├── popup_windows.rs    # Window creation, show/hide, focus handlers
 │   │   ├── commands.rs         # Window control commands (close/resize popups)
 │   │   ├── tray.rs             # System tray icon and menu
@@ -172,16 +176,19 @@ src/
 │   │   │   ├── search-filter/  # Search + filters panel
 │   │   │   └── entry-card/     # Entry cards (EntryCard, ChipBar, VideoPlayer)
 │   │   ├── topbar/             # Sort/layout/filter/group controls (shared)
+│   │   ├── view-toolbar/       # Toolbar above a single opened item (entry/space item/note)
 │   │   ├── notes-screen/       # Notes UI (editor-engine, list, filters, groups)
 │   │   ├── spaces-screen/      # Spaces: shared feed + space management/settings
 │   │   ├── account-screen/     # Sync auth, cloud sync mode, devices/presence, storage
 │   │   ├── settings-screen/    # User preferences + Cloud Sync controls
 │   │   ├── shortcuts-screen/   # Keyboard shortcut reference
 │   │   ├── card-menu/          # Right-click context menu (portal)
+│   │   ├── notifications/      # Notification centre popout (bell)
 │   │   ├── status-pill/        # Entry count summary bar
 │   │   ├── update-banner/      # In-app update prompt (check/download/install)
 │   │   ├── toast/              # Toast notifications (undo clear)
 │   │   └── tooltip/            # Tooltip portal
+│   ├── common/                 # Shared components (ConfirmDeleteDialog)
 │   ├── entry-types/            # EntryTypePill (shared type badge)
 │   ├── splash/                 # SplashScreen (startup)
 │   ├── copy-popup/
