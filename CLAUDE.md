@@ -114,12 +114,12 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 
 ## Cross-System Contract
 
-**The backend defines the contract, and its `docs/ARCHITECTURE.md` is the readable form of
+**The backend defines the contract, and its `docs/architecture.md` is the readable form of
 it.** Read that file before changing anything that crosses the wire, and update it in the
 same commit — payload shapes, event names, key derivation, the entry keying tuple and the
 route prefixes all live there and are deliberately not repeated here, because a second copy
-is a copy that goes stale. Who-may-do-what is `docs/PERMISSIONS.md`; the promises neither
-side can keep alone are the root `docs/ARCHITECTURE.md`.
+is a copy that goes stale. Who-may-do-what is `docs/permissions.md`; the promises neither
+side can keep alone are the root `docs/architecture.md`.
 
 What you need before you have read any of it — shapes and prohibitions, no values:
 
@@ -149,7 +149,7 @@ What you need before you have read any of it — shapes and prohibitions, no val
 - Don't regress file-backed image behavior or large-image performance.
 - Keep group operations consistent across clipboard entries **and** notes.
 - Sync must never echo a merge back as a new push, and must skip self-device entries.
-- `id_map.json` (and `entry_states()` on top of it) is **this device's** record of what it pushed or pulled — never a view of the account. Anything account-wide (removing cloud copies, quota, reconciliation) must ask the server; a row another device pushed is invisible locally. See bug #7 in `docs/BUGFIX_HISTORY.md`.
+- `id_map.json` (and `entry_states()` on top of it) is **this device's** record of what it pushed or pulled — never a view of the account. Anything account-wide (removing cloud copies, quota, reconciliation) must ask the server; a row another device pushed is invisible locally. See bug #7 in `docs/bugfix-history.md`.
 - Be careful with autostart while running `tauri dev` (dev-path startup entries can break launches without Vite).
 
 ## Code Conventions
@@ -216,7 +216,7 @@ Pick the smallest valid check set for what you touched.
 Shipping is one dispatch of `.github/workflows/release.yml`: it bumps the version, builds
 signed bundles and publishes them to the **public** `NotRover/RoverTools-Releases` repo
 the in-app updater reads. The backend has no release pipeline. Reference:
-[`docs/RELEASING.md`](docs/RELEASING.md).
+[`docs/releasing.md`](docs/releasing.md).
 
 - **Never dispatch unless the user asks in that turn**, and never guess the three inputs —
   bump, channel, mode. Ask for whatever wasn't stated; the
@@ -253,16 +253,16 @@ by intention, and the copy that drifts is the one nobody was reading when it bro
 
 | Fact | Home |
 |------|------|
-| Wire contract — routes, payloads, DDL, socket events, crypto envelope | `orange-copy-paste-clipboard-backend/docs/ARCHITECTURE.md` |
-| Client internals — state, commands, events, persistence, runtime behavior | `orange-copy-paste-clipboard-app-rust/docs/ARCHITECTURE.md` |
-| Who may do what, and where it is enforced | `docs/PERMISSIONS.md` |
-| Regressions and their root causes | `orange-copy-paste-clipboard-app-rust/docs/BUGFIX_HISTORY.md` |
-| The release pipeline | `docs/RELEASING.md` |
+| Wire contract — routes, payloads, DDL, socket events, crypto envelope | `orange-copy-paste-clipboard-backend/docs/architecture.md` |
+| Client internals — state, commands, events, persistence, runtime behavior | `orange-copy-paste-clipboard-app-rust/docs/architecture.md` |
+| Who may do what, and where it is enforced | `docs/permissions.md` |
+| Regressions and their root causes | `orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md` |
+| The release pipeline | `docs/releasing.md` |
 | The backend's host and deployment — box access, hardening, recovery, the deploy pipeline, ops | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | User-facing release history, and the next release's notes | `changelog/` — one file per release, staged in `changelog/next.md` (skeleton `changelog/TEMPLATE.md`, convention `changelog/README.md`) |
 | End-user how-to, the public marketing site, and the Developers section (architecture/security overviews, self-hosting, contributing, shipped design records and walkthroughs) | `orange-copy-paste-clipboard-website/` — its own repo (Astro + Starlight). Describes product behavior for users; hosts the decision records + walkthroughs. Its Developers > Reference pages *render* the homes below (not a copy — see the mirror note) so devs read everything on one site; edit the home, never the rendered page |
 | How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |
-| Where everything lives, and cross-component invariants with no other home | `docs/ARCHITECTURE.md` — a map, not a description |
+| Where everything lives, and cross-component invariants with no other home | `docs/architecture.md` — a map, not a description |
 
 Every reference doc opens with a two-line **Owns / Not here** header naming what only it
 may say and where the neighbouring facts live. Read it before adding to that file: if what
@@ -272,7 +272,7 @@ duplicate you happen to be standing next to is always in scope.
 Two consequences worth stating outright, because both are easy to get wrong:
 
 - **A contract change is one edit, not four.** Change the backend doc. Add a
-  `docs/PERMISSIONS.md` row only if the change is about *who may*, and a client-doc row
+  `docs/permissions.md` row only if the change is about *who may*, and a client-doc row
   only if it is about client internals. Do not restate the payload anywhere.
 - **A README is a front door, not a reference.** It may say what the thing is and how to
   run it. Anything a reader could act on wrongly — a payload, a key derivation, a

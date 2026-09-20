@@ -90,9 +90,9 @@ Please also:
 
 ## Architecture and internals
 
-`docs/ARCHITECTURE.md` in this repo maps the client internals. The wire contract
+`docs/architecture.md` in this repo maps the client internals. The wire contract
 (routes, payloads, socket events, crypto envelope) is owned by the backend
-repository's `docs/ARCHITECTURE.md`. A change that crosses the client/backend
+repository's `docs/architecture.md`. A change that crosses the client/backend
 boundary is a change in both repositories.
 
 ## License

@@ -5,7 +5,7 @@
 //! "sync-worker") so that background tasks — the WebSocket listener, debounce
 //! timer, pending-queue flusher — never block clipboard capture or the UI.
 //!
-//! # Invariants (see the Cross-System Invariants section in ARCHITECTURE.md)
+//! # Invariants (see the Cross-System Invariants section in architecture.md)
 //! - UMK is in-memory only; never written to any file or log.
 //! - Sync runtime never calls `block_on` on Tauri's runtime.
 //! - Capture pipeline is untouched; hooks fire only after a confirmed push.
@@ -5216,7 +5216,7 @@ fn reminder_id(kind: &str) -> String {
 ///
 /// Split out from [`SyncClient::row_is_authoritative`] so the rule can be tested
 /// on its own. It decided a bug that cost attribution outright (see bug #8 in
-/// `docs/BUGFIX_HISTORY.md`), and the failure was silent - the wrong answer
+/// `docs/bugfix-history.md`), and the failure was silent - the wrong answer
 /// looked exactly like an ordinary merge.
 ///
 /// A row with no `user_id` predates the field. Refusing those would strand

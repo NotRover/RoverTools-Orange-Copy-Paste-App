@@ -135,8 +135,8 @@ src-tauri/src/                       # Rust core
 ├─ health.rs                         # panic hook, heartbeat watchdog, atomic writes, quarantine
 └─ updater.rs                        # signed self-update check/download/install
 
-docs/ARCHITECTURE.md                 # deep dive
-docs/BUGFIX_HISTORY.md               # regression history — read before touching runtime flows
+docs/architecture.md                 # deep dive
+docs/bugfix-history.md               # regression history — read before touching runtime flows
 ```
 
 ---
@@ -256,20 +256,20 @@ gh workflow run release.yml
 
 That is a patch release; `-f bump=minor` / `-f bump=major` for feature/breaking, `-f dry_run=true` to build without publishing, `-f prerelease=true` for a beta. From Claude Code: `/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]` — anything omitted is asked for, not defaulted.
 
-The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key and releases-repo setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/RELEASING.md`](../docs/RELEASING.md).
+The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key and releases-repo setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/releasing.md`](../docs/releasing.md).
 
 ---
 
 ## Storage & config reference
 
-Runtime state lives in the app data directory (Windows `%APPDATA%\com.spect.orange-copy-paste\`, Linux `~/.config/com.spect.orange-copy-paste/`): clipboard history, saved entries, notes, settings, and externalized images/attachments, all as described in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), which owns the persistence layout. UI-only preferences (theme, layout, sort, paste-slot count, recent searches, groups) are kept in `localStorage` under `sc-*` keys.
+Runtime state lives in the app data directory (Windows `%APPDATA%\com.spect.orange-copy-paste\`, Linux `~/.config/com.spect.orange-copy-paste/`): clipboard history, saved entries, notes, settings, and externalized images/attachments, all as described in [`docs/architecture.md`](docs/architecture.md), which owns the persistence layout. UI-only preferences (theme, layout, sort, paste-slot count, recent searches, groups) are kept in `localStorage` under `sc-*` keys.
 
 ---
 
 ## Further reading
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architecture: modules, data flows, IPC surface, sync internals.
-- [`docs/BUGFIX_HISTORY.md`](docs/BUGFIX_HISTORY.md) — regression history; read before changing watcher, hotkey, popup, or paste behavior.
-- Workspace root [`docs/RELEASING.md`](../docs/RELEASING.md) — releasing and the update feed: one-time setup, signing keys, verification rails.
-- Workspace root `docs/ARCHITECTURE.md` — the map: which doc owns which fact, plus the cross-component invariants.
-- Backend repo `docs/ARCHITECTURE.md` — the source of truth for the wire contract.
+- [`docs/architecture.md`](docs/architecture.md) — full architecture: modules, data flows, IPC surface, sync internals.
+- [`docs/bugfix-history.md`](docs/bugfix-history.md) — regression history; read before changing watcher, hotkey, popup, or paste behavior.
+- Workspace root [`docs/releasing.md`](../docs/releasing.md) — releasing and the update feed: one-time setup, signing keys, verification rails.
+- Workspace root `docs/architecture.md` — the map: which doc owns which fact, plus the cross-component invariants.
+- Backend repo `docs/architecture.md` — the source of truth for the wire contract.

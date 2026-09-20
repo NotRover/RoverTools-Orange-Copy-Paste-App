@@ -245,7 +245,7 @@ pub enum EntryType {
 
 /// What a removal is allowed to reach.
 ///
-/// An entry belongs to whoever wrote it (see `docs/PERMISSIONS.md`), and this
+/// An entry belongs to whoever wrote it (see `docs/permissions.md`), and this
 /// is how that rule is carried to the one function that performs a removal,
 /// instead of each caller remembering to filter its own list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

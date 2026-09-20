@@ -561,7 +561,7 @@ pub fn sync_retry_skipped(state: State<'_, AppState>) -> Result<usize, String> {
 /// "The server has never seen it" is not enough on its own. A copy of another
 /// member's item that this device has dropped is also absent from
 /// `entry_states`, and publishing one would insert a rival row under this
-/// account for an entry someone else wrote - see `docs/PERMISSIONS.md`. The
+/// account for an entry someone else wrote - see `docs/permissions.md`. The
 /// push guard would refuse it, but the key would still be counted and the
 /// progress bar would wait forever for something that is never going to send.
 fn sendable(

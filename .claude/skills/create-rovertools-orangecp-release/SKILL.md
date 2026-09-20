@@ -31,7 +31,7 @@ in-app updater reads.
 secrets, missing or private releases repo — and stops in seconds with a message saying
 what to fix. Do not re-implement those checks here; dispatch and read the failure.
 
-Reference: [`docs/RELEASING.md`](../../../docs/RELEASING.md).
+Reference: [`docs/releasing.md`](../../../docs/releasing.md).
 
 ## Arguments
 
@@ -231,7 +231,7 @@ gh release list --repo NotRover/RoverTools-Releases --limit 5 --json tagName,isL
 
 | Symptom | Cause |
 | --- | --- |
-| Stops immediately on prerequisites | Read the message — it names the missing piece. Setup is `docs/RELEASING.md`; the user fixes it, not you. |
+| Stops immediately on prerequisites | Read the message — it names the missing piece. Setup is `docs/releasing.md`; the user fixes it, not you. |
 | `has no .sig` | `createUpdaterArtifacts` was removed from `tauri.conf.json`, or the signing secrets are wrong. |
 | Publish step 403 / not found | `RELEASES_REPO_TOKEN` is missing, expired, or lacks `contents: write` on the releases repo. |
 | Published but nobody is offered it | It went out as a beta, or the pubkey in the shipped build does not match the signing key. |
