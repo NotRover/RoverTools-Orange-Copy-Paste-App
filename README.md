@@ -19,19 +19,24 @@ The app lives in this parent repo; the backend and the website are each submodul
 
 ## How the halves fit together
 
-```
-  Device A                          Device B
-  ┌──────────────────┐              ┌──────────────────┐
-  │  Desktop app     │              │  Desktop app     │
-  │  local store     │              │  local store     │
-  │  SyncClient ─────┼──HTTPS/WSS───┼───── SyncClient  │
-  └────────┬─────────┘              └─────────┬────────┘
-           │                                  │
-           ▼                                  ▼
-  ┌──────────────────────────────────────────────────────┐
-  │  FastAPI backend — stateless, horizontally scalable   │
-  │  Supabase (Postgres + Auth) · Redis · S3 / R2         │
-  └──────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph A["Device A"]
+        A1["Desktop app<br/>local store<br/>SyncClient"]
+    end
+    subgraph B["Device B"]
+        B1["Desktop app<br/>local store<br/>SyncClient"]
+    end
+    BE["FastAPI backend<br/>stateless, horizontally scalable<br/>Supabase (Postgres + Auth), Redis, S3 / R2"]
+    A1 -- "HTTPS / WSS" --> BE
+    B1 -- "HTTPS / WSS" --> BE
+
+    classDef device fill:#1b1b1b,stroke:#9a9a9a,stroke-width:1.5px,color:#fafafa
+    classDef backend fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
+    class A1,B1 device
+    class BE backend
+    style A fill:#161616,stroke:#6f6f6f,color:#e4e4e4
+    style B fill:#161616,stroke:#6f6f6f,color:#e4e4e4
 ```
 
 **The client is the source of truth.** It captures the clipboard, stores history and notes locally, holds every key, and performs all encryption and decryption. The Rust side owns crypto and the sync engine; React is only UI.

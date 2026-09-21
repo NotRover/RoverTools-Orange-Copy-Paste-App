@@ -3,16 +3,18 @@
 A Tiptap editor for the Smart Clipboard notes screen. There is one editable
 surface and one read-only preview, both backed by ProseMirror JSON.
 
-```
-┌─ Editor Engine ─────────────────────────────────────────────────────────┐
-│                                                                         │
-│   note.content ─── string ─── Tiptap JSON                               │
-│         │                                                               │
-│         ├──► NotionEditor   (Tiptap WYSIWYG, single surface)            │
-│         │                                                               │
-│         └──► NotionPreview  (read-only, used in note cards)             │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    NC["note.content<br/>string, Tiptap JSON"]
+    NE["NotionEditor<br/>(Tiptap WYSIWYG, single surface)"]
+    NP["NotionPreview<br/>(read-only, used in note cards)"]
+    NC --> NE
+    NC --> NP
+
+    classDef source fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
+    classDef surface fill:#1b1b1b,stroke:#9a9a9a,stroke-width:1.5px,color:#fafafa
+    class NC source
+    class NE,NP surface
 ```
 
 ## Storage
