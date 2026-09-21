@@ -34,17 +34,19 @@ release would contain without dispatching anything.
 
 ## How it fits together
 
-```
-you dispatch release.yml
-   │
-   ├─ bump the version in Cargo.toml   (patch or minor — your choice)
-   ├─ notes = changelog/next.md  (renamed to changelog/<ver>-<bump>-<channel>.md on release)
-   │
-   ├─ build signed NSIS (Windows) + AppImage/deb (Linux)
-   │
-   └─ publish to the PUBLIC releases repo: bundles + latest.json
-              │
-              └─ app checks that feed ~8s after launch, then every 6h → banner
+```mermaid
+flowchart TB
+    dispatch(["You dispatch release.yml"]):::start
+    dispatch ==> bump["Bump version in Cargo.toml<br/>(patch, minor, or major)"]:::step
+    dispatch ==> notes["Notes from changelog/next.md<br/>renamed on release"]:::step
+    dispatch ==> build["Build signed NSIS (Windows)<br/>+ AppImage / deb (Linux)"]:::step
+    build ==> publish[("Publish to the public releases repo<br/>bundles + latest.json")]:::store
+    publish ==> banner(["App checks the feed ~8s after launch,<br/>then every 6h, shows an update banner"]):::out
+
+    classDef start fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
+    classDef step fill:#1b1b1b,stroke:#9a9a9a,stroke-width:1.5px,color:#fafafa
+    classDef store fill:#161616,stroke:#6f6f6f,color:#e4e4e4
+    classDef out fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
 ```
 
 The source repo stays private. The **releases** repo is public because the updater
