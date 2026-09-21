@@ -1,5 +1,5 @@
 ---
-name: create-rovertools-orangecp-release
+name: create-rovertools-orange-copy-paste-release
 description: "Cut a release of the Orange Copy Paste desktop app — optional args: [patch|minor|major] [stable|beta] [dry-run|preview]. Asks for whatever is not specified rather than assuming, shows the version and notes about to ship, dispatches the release workflow after an explicit yes, then verifies both update channels. Use when asked to create/cut/ship a release, publish a new version, bump the app version, ship a beta, or preview what the next release would contain."
 argument-hint: "[patch|minor|major] [stable|beta] [dry-run|preview] — asks for anything omitted"
 ---
@@ -90,8 +90,8 @@ Step 3 until all three are settled.
 
 ## Step 1 — Show what will ship
 
-Constants: source repo `NotRover/RoverTools-Smart-Clipboard-App-RUST`, releases repo
-`NotRover/RoverTools-Releases`.
+Constants: source repo `NotRover/RoverTools-Orange-Copy-Paste-App`, releases repo
+`NotRover/RoverTools-Orange-Copy-Paste-Releases`.
 
 ```bash
 grep -m1 '^version = ' orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml && git fetch origin main --tags -q && git rev-parse --abbrev-ref HEAD && git status --porcelain
@@ -147,7 +147,7 @@ All three flags, always, filled in from Step 0 — never shortened by leaning on
 workflow default:
 
 ```bash
-gh workflow run release.yml -f bump=patch -f prerelease=false -f dry_run=false --repo NotRover/RoverTools-Smart-Clipboard-App-RUST
+gh workflow run release.yml -f bump=patch -f prerelease=false -f dry_run=false --repo NotRover/RoverTools-Orange-Copy-Paste-App
 ```
 
 Substitute the settled values: `bump=patch|minor|major`, `prerelease=true` for a beta,
@@ -160,13 +160,13 @@ between commands, and a literal `<RUN_ID>` placeholder parses as input redirecti
 immediately picks up the *previous* run.
 
 ```bash
-sleep 8 && RUN_ID=$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId' --repo NotRover/RoverTools-Smart-Clipboard-App-RUST) && echo "watching run $RUN_ID" && gh run watch "$RUN_ID" --exit-status --repo NotRover/RoverTools-Smart-Clipboard-App-RUST
+sleep 8 && RUN_ID=$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId' --repo NotRover/RoverTools-Orange-Copy-Paste-App) && echo "watching run $RUN_ID" && gh run watch "$RUN_ID" --exit-status --repo NotRover/RoverTools-Orange-Copy-Paste-App
 ```
 
 On failure, read the log rather than guessing:
 
 ```bash
-gh run view "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId' --repo NotRover/RoverTools-Smart-Clipboard-App-RUST)" --log-failed --repo NotRover/RoverTools-Smart-Clipboard-App-RUST
+gh run view "$(gh run list --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId' --repo NotRover/RoverTools-Orange-Copy-Paste-App)" --log-failed --repo NotRover/RoverTools-Orange-Copy-Paste-App
 ```
 
 Stop here if invoked with `dry-run` — nothing was published, so there is nothing to verify.
@@ -190,11 +190,11 @@ Neither block needs a local `jq` or `base64` — `gh --jq` runs the whole expres
 itself, including the base64 decode, so these work on a bare machine:
 
 ```bash
-echo "stable channel:" && curl -fsSL https://github.com/NotRover/RoverTools-Releases/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64"'
+echo "stable channel:" && curl -fsSL https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64"'
 ```
 
 ```bash
-echo "beta channel:" && gh api repos/NotRover/RoverTools-Releases/contents/beta.json --jq '.content | gsub("\n";"") | @base64d | fromjson | "version=\(.version)  platforms=\(.platforms | keys | join(", "))"'
+echo "beta channel:" && gh api repos/NotRover/RoverTools-Orange-Copy-Paste-Releases/contents/beta.json --jq '.content | gsub("\n";"") | @base64d | fromjson | "version=\(.version)  platforms=\(.platforms | keys | join(", "))"'
 ```
 
 Both must list `windows-x86_64` and `linux-x86_64`. A `.deb` entry would be a bug —
@@ -202,7 +202,7 @@ package-manager installs cannot self-update, so they are published for manual do
 only and must never appear in a feed.
 
 ```bash
-gh release list --repo NotRover/RoverTools-Releases --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'
+gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'
 ```
 
 ## Step 5 — Report
@@ -216,7 +216,7 @@ gh release list --repo NotRover/RoverTools-Releases --limit 5 --json tagName,isL
   bundles, no rebuild:
 
   ```bash
-  gh release edit v0.3.0 --repo NotRover/RoverTools-Releases --prerelease=false --latest
+  gh release edit v0.3.0 --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --prerelease=false --latest
   ```
 
   The release's changelog file keeps its `-beta` name — it records how the release was

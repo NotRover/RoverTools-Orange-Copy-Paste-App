@@ -57,7 +57,7 @@ const KEY_CHANNEL: &str = "update_channel";
 /// `HEAD` rather than a branch name so renaming the default branch cannot break
 /// the channel for already-installed copies.
 const BETA_FEED: &str =
-    "https://raw.githubusercontent.com/NotRover/RoverTools-Releases/HEAD/beta.json";
+    "https://raw.githubusercontent.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/HEAD/beta.json";
 
 /// What the UI needs to describe an update. Field names are snake_case to match
 /// the rest of the Rust→TS surface (see `src/types.ts`).

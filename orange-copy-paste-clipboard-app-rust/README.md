@@ -254,7 +254,7 @@ Cutting a release is a single manual workflow dispatch; installed copies notice 
 gh workflow run release.yml
 ```
 
-That is a patch release; `-f bump=minor` / `-f bump=major` for feature/breaking, `-f dry_run=true` to build without publishing, `-f prerelease=true` for a beta. From Claude Code: `/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]` — anything omitted is asked for, not defaulted.
+That is a patch release; `-f bump=minor` / `-f bump=major` for feature/breaking, `-f dry_run=true` to build without publishing, `-f prerelease=true` for a beta. From Claude Code: `/create-rovertools-orange-copy-paste-release [patch|minor|major] [stable|beta] [dry-run|preview]` — anything omitted is asked for, not defaulted.
 
 The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key and releases-repo setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/releasing.md`](../docs/releasing.md).
 
