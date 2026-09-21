@@ -1,0 +1,15 @@
+{
+  "version": "0.3.8",
+  "notes": "This release points the in-app updater at the current release location.\n\n### Fixed\n- The updater now checks for new versions in the right place, so update checks and downloads work correctly.",
+  "pub_date": "2026-09-21T16:38:56Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUhRajA5Z1R5RDN3clVOUndyRFNnaThzNXUzZkR5TnEvTzd1RUtFNC9wYU9yTHdTQjcyTEVUV2lQZkd2Z1lpL1dkYlhZdHI4SXBDRGtrL1FCcm0xZ1FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDA4NjkzCWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC4zLjhfeDY0LXNldHVwLmV4ZQpWcGhCMmxtYjNLNCtlSmlrT0cvK3ZIdmZSQkRkZE5CVlVXVDZFaDVkanlRbnFjdlhhY0piaHl1OFArWnNlUTlhd0pKUXdsSkdndEZuYnl5R2RHQnZBdz09Cg==",
+      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.3.8/RoverTools_0.3.8_x64-setup.exe"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUQ1L21XTmN1eFQ3d2wvT0xJcGFpNmVUSmlJS1JzSlZ4WHkvb29WakJTZndqQUNRWlhOanE1ODliNUhBLzVWY2pQZURZMlBDUzZBRTdMSEQ1T3p1TFFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDA4NzEwCWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC4zLjhfYW1kNjQuQXBwSW1hZ2UKRlhaZHRQbDd3T3pmaCs5ZWFkZTNSaDd5cXFYNU5qZ09FSFVPTVd4aXBTcDRWWVZoMTVRWXk2WGJOK3dUbTJSdmpEY2M3bkFpMHJBdVFjS2MrWDJWQ2c9PQo=",
+      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.3.8/RoverTools_0.3.8_amd64.AppImage"
+    }
+  }
+}
