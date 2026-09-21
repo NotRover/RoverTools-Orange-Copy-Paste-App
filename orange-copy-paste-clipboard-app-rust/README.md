@@ -10,6 +10,10 @@ It watches the OS clipboard, keeps a searchable history of text/images/files, sh
 
 > Linux runs the same source tree; X11 is the smoothest experience. See [Linux support](#linux-support) for Wayland caveats.
 
+**Download:** installable Windows and Linux builds are on the [releases repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases).
+**Documentation:** end-user guides and developer reference at **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)**.
+This repo is part of a three-repo project — see [Related repositories](#related-repositories).
+
 ---
 
 ## Table of contents
@@ -22,6 +26,7 @@ It watches the OS clipboard, keeps a searchable history of text/images/files, sh
 - [Linux support](#linux-support)
 - [Releases & updates](#releases--updates)
 - [Storage & config reference](#storage--config-reference)
+- [Related repositories](#related-repositories)
 - [Further reading](#further-reading)
 
 ---
@@ -266,8 +271,22 @@ Runtime state lives in the app data directory (Windows `%APPDATA%\io.github.notr
 
 ---
 
+## Related repositories
+
+The desktop app is one of three code repositories, plus a public feed for downloads. The app lives in the workspace repo; the backend and website are submodules with their own repos.
+
+| Repository | What it is |
+| --- | --- |
+| **[Orange-Copy-Paste-App](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App)** | This app and the workspace |
+| [Orange-Copy-Paste-Backend](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The cloud-sync API — stand up your own with its `docs/DEPLOY.md` |
+| [Orange-Copy-Paste-Website](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The docs and marketing site |
+| [Orange-Copy-Paste-Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases) | The public release feed the updater reads |
+
+---
+
 ## Further reading
 
+- **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)** — the public site: end-user guides and the Developers section.
 - [`docs/architecture.md`](docs/architecture.md) — full architecture: modules, data flows, IPC surface, sync internals.
 - [`docs/bugfix-history.md`](docs/bugfix-history.md) — regression history; read before changing watcher, hotkey, popup, or paste behavior.
 - Workspace root [`docs/releasing.md`](../docs/releasing.md) — releasing and the update feed: one-time setup, signing keys, verification rails.

@@ -12,6 +12,9 @@ This workspace holds both halves of the product, plus its public docs site:
 
 The app lives in this parent repo; the backend and the website are each submodules with their own repos. Each component has its own README with setup, structure, and development instructions.
 
+**Documentation:** user guides and developer reference live at **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)**.
+**Download the app:** installable Windows and Linux builds are published to the [releases repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases), which the in-app updater also reads.
+
 ---
 
 ## How the halves fit together
@@ -146,11 +149,26 @@ The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/bet
 
 ---
 
+## Related repositories
+
+Orange Copy Paste spans three code repositories, plus a public feed for downloads:
+
+| Repository | What it is |
+| --- | --- |
+| **[Orange-Copy-Paste-App](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App)** | The desktop app and this workspace |
+| [Orange-Copy-Paste-Backend](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The cloud-sync API (submodule) |
+| [Orange-Copy-Paste-Website](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The docs and marketing site (submodule) |
+| [Orange-Copy-Paste-Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases) | The public release feed the updater reads |
+
+---
+
 ## Further reading
 
+- **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)** — the public site: end-user guides and the Developers section (architecture and security overviews, self-hosting, design records).
 - [`docs/architecture.md`](docs/architecture.md) — the map: which doc owns which fact, and the invariants that bind the two components. Start here to find the right doc.
 - [`docs/releasing.md`](docs/releasing.md) — the release pipeline end to end.
 - [Client README](orange-copy-paste-clipboard-app-rust/README.md) · [client architecture](orange-copy-paste-clipboard-app-rust/docs/architecture.md) · [bugfix history](orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md).
 - [Backend README](orange-copy-paste-clipboard-backend/README.md) · [backend architecture](orange-copy-paste-clipboard-backend/docs/architecture.md) · [deployment guide](orange-copy-paste-clipboard-backend/docs/DEPLOY.md).
+- [Website README](orange-copy-paste-clipboard-website/README.md) — how the docs and landing site are built and deployed.
 
 > Docs are context, not truth. Where a doc and the code disagree, the code wins — and the doc is worth fixing.
