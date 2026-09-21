@@ -10,7 +10,7 @@ It watches the OS clipboard, keeps a searchable history of text/images/files, sh
 
 > Linux runs the same source tree; X11 is the smoothest experience. See [Linux support](#linux-support) for Wayland caveats.
 
-**Download:** installable Windows and Linux builds are on the [releases repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases).
+**Download:** installable Windows and Linux builds are on this repo's [Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
 **Documentation:** end-user guides and developer reference at **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)**.
 This repo is part of a three-repo project — see [Related repositories](#related-repositories).
 
@@ -253,7 +253,7 @@ Use the real installed binary name/path (check the `Exec=` line in the installed
 
 ## Releases & updates
 
-Cutting a release is a single manual workflow dispatch; installed copies notice it at launch and every six hours after, and offer it. You pick the bump at dispatch — nothing is inferred from commit messages — and the version, release notes, and update feed follow from that one choice. The source repo is private; the **releases** repo is public because the updater fetches over plain HTTPS with no credentials.
+Cutting a release is a single manual workflow dispatch; installed copies notice it at launch and every six hours after, and offer it. You pick the bump at dispatch — nothing is inferred from commit messages — and the version, release notes, and update feed follow from that one choice. Releases publish as GitHub Releases on this repo; because it is public, the updater fetches the feed over plain HTTPS with no credentials.
 
 ```bash
 gh workflow run release.yml
@@ -261,7 +261,7 @@ gh workflow run release.yml
 
 That is a patch release; `-f bump=minor` / `-f bump=major` for feature/breaking, `-f dry_run=true` to build without publishing, `-f prerelease=true` for a beta. From Claude Code: `/create-rovertools-orange-copy-paste-release [patch|minor|major] [stable|beta] [dry-run|preview]` — anything omitted is asked for, not defaulted.
 
-The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key and releases-repo setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/releasing.md`](../docs/releasing.md).
+The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/releasing.md`](../docs/releasing.md).
 
 ---
 
@@ -273,14 +273,13 @@ Runtime state lives in the app data directory (Windows `%APPDATA%\io.github.notr
 
 ## Related repositories
 
-The desktop app is one of three code repositories, plus a public feed for downloads. The app lives in the workspace repo; the backend and website are submodules with their own repos.
+The desktop app is one of three code repositories. The app lives in the workspace repo; the backend and website are submodules with their own repos. Downloads and the update feed are published as [GitHub Releases on this repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
 
 | Repository | What it is |
 | --- | --- |
 | **[Orange-Copy-Paste-App](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App)** | This app and the workspace |
 | [Orange-Copy-Paste-Backend](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The cloud-sync API — stand up your own with its `docs/DEPLOY.md` |
 | [Orange-Copy-Paste-Website](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The docs and marketing site |
-| [Orange-Copy-Paste-Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases) | The public release feed the updater reads |
 
 ---
 

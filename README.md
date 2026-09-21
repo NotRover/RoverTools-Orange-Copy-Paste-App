@@ -13,7 +13,7 @@ This workspace holds both halves of the product, plus its public docs site:
 The app lives in this parent repo; the backend and the website are each submodules with their own repos. Each component has its own README with setup, structure, and development instructions.
 
 **Documentation:** user guides and developer reference live at **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)**.
-**Download the app:** installable Windows and Linux builds are published to the [releases repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases), which the in-app updater also reads.
+**Download the app:** installable Windows and Linux builds are published as [GitHub Releases on this repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases), which the in-app updater also reads.
 
 ---
 
@@ -131,11 +131,11 @@ Full end-to-end sync needs a live backend, a Supabase project, and two accounts.
 
 A release is one manual workflow run: `gh workflow run release.yml` for a patch, `-f bump=minor` for a feature release, `-f bump=major` for a breaking one.
 
-`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, publishes [`changelog/next.md`](changelog/) as the notes (erroring right away if it is empty), bumps the version in `src-tauri/Cargo.toml`, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. On release it renames `next.md` to `changelog/<version>-<bump>-<channel>.md`. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
+`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, publishes [`changelog/next.md`](changelog/) as the notes (erroring right away if it is empty), bumps the version in `src-tauri/Cargo.toml`, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` as a GitHub Release on this repo, which the in-app updater reads. On release it renames `next.md` to `changelog/<version>-<bump>-<channel>.md`. Because this repo is public, the updater fetches the feed over plain HTTPS with no credentials.
 
 From Claude Code: `/create-rovertools-orange-copy-paste-release [patch|minor|major] [stable|beta] [dry-run|preview]` — the skill asks for whatever you leave out, shows the version and notes about to ship, and dispatches only after an explicit yes.
 
-The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/beta design, the one-time signing-key and releases-repo setup, and the pre-trust smoke test all live in [`docs/releasing.md`](docs/releasing.md). `.github/workflows/build-linux.yml` builds Linux bundles on demand. Releases never touch the sync backend; it deploys on its own.
+The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/beta design, the one-time signing-key setup, and the pre-trust smoke test all live in [`docs/releasing.md`](docs/releasing.md). `.github/workflows/build-linux.yml` builds Linux bundles on demand. Releases never touch the sync backend; it deploys on its own.
 
 ---
 
@@ -151,14 +151,13 @@ The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/bet
 
 ## Related repositories
 
-Orange Copy Paste spans three code repositories, plus a public feed for downloads:
+Orange Copy Paste spans three code repositories. Downloads and the update feed are published as [GitHub Releases on this repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
 
 | Repository | What it is |
 | --- | --- |
 | **[Orange-Copy-Paste-App](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App)** | The desktop app and this workspace |
 | [Orange-Copy-Paste-Backend](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The cloud-sync API (submodule) |
 | [Orange-Copy-Paste-Website](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The docs and marketing site (submodule) |
-| [Orange-Copy-Paste-Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases) | The public release feed the updater reads |
 
 ---
 
@@ -167,6 +166,7 @@ Orange Copy Paste spans three code repositories, plus a public feed for download
 - **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)** — the public site: end-user guides and the Developers section (architecture and security overviews, self-hosting, design records).
 - [`docs/architecture.md`](docs/architecture.md) — the map: which doc owns which fact, and the invariants that bind the two components. Start here to find the right doc.
 - [`docs/releasing.md`](docs/releasing.md) — the release pipeline end to end.
+- [`CHANGELOG.md`](CHANGELOG.md) — every shipped release, newest first (generated from [`changelog/`](changelog/)).
 - [Client README](orange-copy-paste-clipboard-app-rust/README.md) · [client architecture](orange-copy-paste-clipboard-app-rust/docs/architecture.md) · [bugfix history](orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md).
 - [Backend README](orange-copy-paste-clipboard-backend/README.md) · [backend architecture](orange-copy-paste-clipboard-backend/docs/architecture.md) · [deployment guide](orange-copy-paste-clipboard-backend/docs/DEPLOY.md).
 - [Website README](orange-copy-paste-clipboard-website/README.md) — how the docs and landing site are built and deployed.

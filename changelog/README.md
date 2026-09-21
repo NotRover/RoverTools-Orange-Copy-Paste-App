@@ -16,7 +16,12 @@ and how releases are cut ([`../docs/releasing.md`](../docs/releasing.md)).
   workflow creates it by renaming `next.md` on release, so the name always states the
   real version, the bump, and the channel it went out on. You never name these by hand.
 - Every shipped release from `0.1.0` on has a file here; the published assets also live
-  on the [releases repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases).
+  on this repo's [Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
+- **`../CHANGELOG.md`** (repo root) is a browsable index of every release, newest first,
+  generated from the files here by
+  [`../.github/scripts/gen-changelog.sh`](../.github/scripts/gen-changelog.sh) on each
+  release. It is an artifact, not a source — never hand-edit it; edit the per-release file
+  here and it rebuilds on the next release.
 
 ## What goes in one
 

@@ -57,7 +57,7 @@
     },
     "updater": {
       "endpoints": [
-        "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases/latest/download/latest.json"
+        "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwNThCN0U4QTg3MzY0RUEKUldUcVpIT282TGRZTUgrKzA1QWtOWUNuWE9IOXNkdHVFS05Gc1JaQ3JnQVlHbmhMeXphY2hoWWMK",
       "windows": {
@@ -68,7 +68,7 @@
   "bundle": {
     "active": true,
     "publisher": "NotRover",
-    "homepage": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases",
+    "homepage": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App",
     "copyright": "Copyright © NotRover",
     "category": "Productivity",
     "shortDescription": "Cross-device smart clipboard with history, notes and end-to-end encrypted sync.",
