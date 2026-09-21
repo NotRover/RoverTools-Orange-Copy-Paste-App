@@ -5,6 +5,15 @@ per-release files in [`changelog/`](changelog/) by
 `.github/scripts/gen-changelog.sh` on each release. Do not edit by hand; edit the
 source file in `changelog/` instead.
 
+## 0.3.8 (patch, beta) - 2026-09-21
+
+This release points the in-app updater at the current release location.
+
+### Fixed
+- The updater now checks for new versions in the right place, so update checks and downloads work correctly.
+
+---
+
 ## 0.3.7 (patch, beta) - 2026-09-16
 
 ### Improved
