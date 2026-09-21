@@ -1618,6 +1618,12 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 
 **Sync note**: `sync_pending.json` and `id_map.json` are safe to delete — loss triggers a re-sync (duplicate entries are deduped on next push). `sync_state.json` loss causes a full re-pull from the server on next startup.
 
+### `{app_data}` location and the identifier-rename migration
+
+Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: on Windows `%APPDATA%\<identifier>\`, on Linux `~/.local/share/<identifier>/`. The identifier is `io.github.notrover.orange-copy-paste`.
+
+**Temporary migration.** The identifier was previously `com.spect.orange-copy-paste`. Because `{app_data}` is keyed by the identifier, the rename alone would point a renamed build at an empty folder and the user's history, notes and settings would look wiped (the old files are orphaned, not gone). `migrate_legacy_app_data` in `lib.rs` handles this: on the first launch of a renamed build, before any store loads, it copies the old identifier's folder into the new one. It copies rather than moves (the old folder stays as a backup), and it runs only when the new folder is still empty, so it no-ops on every later launch. The OS keychain is **not** keyed by the identifier, so sign-in state carries over on its own. Install directory, autostart entry and the uninstall registry key are keyed by `productName` ("Orange Copy Paste", unchanged), so an update upgrades in place with no duplicate entries. This shim is temporary and is meant to be removed a few stable releases after the rename has propagated, once no install still holds data under the old identifier.
+
 ---
 
 ## Tauri Configuration & Permissions
