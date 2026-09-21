@@ -11,7 +11,7 @@ third time, and the third copy is what went stale.
 
 ---
 
-## The components
+## 1. The components
 
 | Path | Role | Repo |
 |------|------|------|
@@ -24,7 +24,7 @@ store: it never holds a key that could open anything it persists, which is why i
 stateless about content and strict about identity. The website is documentation only — it
 describes product behavior and links to the homes below, it enforces nothing.
 
-## Which doc answers which question
+## 2. Which doc answers which question
 
 | Question | Doc |
 |----------|-----|
@@ -42,7 +42,7 @@ The backend doc is the source of truth for anything crossing the wire. When it a
 page disagree, the backend doc wins; when the backend doc and the code disagree, the code
 wins and the doc is a bug.
 
-## Cross-Component Invariants
+## 3. Cross-Component Invariants
 
 These are the reason this file exists. Each one is a promise **neither** component can keep
 alone, so it has no home in either doc. Preserve them across any change to either repo.
@@ -69,7 +69,7 @@ alone, so it has no home in either doc. Preserve them across any change to eithe
 | 18 | **Keyrings grow at the front and are never replaced.** A rekey prepends; dropping older keys makes every entry written under them permanently unreadable. |
 | 19 | **Tombstones keep their `space_ids`.** A delete must reach the same members the entry did, or their copies never disappear. |
 
-## The shape of a change
+## 4. The shape of a change
 
 Anything crossing the wire touches both repos and their docs disagree easily, so the order
 matters:

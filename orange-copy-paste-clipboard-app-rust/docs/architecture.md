@@ -1,4 +1,4 @@
-# Smart Clipboard — Architecture
+# RoverTools' Orange Copy Paste — Client Architecture
 
 A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
 
@@ -13,7 +13,7 @@ keeps true.
 
 ---
 
-## High-Level Overview
+## 1. High-Level Overview
 
 ```mermaid
 flowchart TB
@@ -56,9 +56,9 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 
 ---
 
-## Tech Stack
+## 2. Tech Stack
 
-### Backend
+### 2.1 Backend
 
 | Component                    | Version | Purpose                                                                        |
 | ---------------------------- | ------- | ------------------------------------------------------------------------------ |
@@ -86,7 +86,7 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 > `/auth/login` or `/auth/refresh` on our server. A Supabase auth client (GoTrue REST
 > or an SDK) is required in the sync module.
 
-### Frontend
+### 2.2 Frontend
 
 | Component       | Version | Purpose                             |
 | --------------- | ------- | ----------------------------------- |
@@ -98,7 +98,7 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 
 ---
 
-## Project Structure
+## 3. Project Structure
 
 ```filetree
 src-tauri/
@@ -207,9 +207,9 @@ src/
 
 ---
 
-## Rust Backend
+## 4. Rust Backend
 
-### Entry Point & Setup
+### 4.1 Entry Point & Setup
 
 **`main.rs`** — Minimal entry: calls `lib::run()`.
 
@@ -271,7 +271,7 @@ is in flight, the replacement token never existed locally. Only a write-ahead
 marker closes that part, and it would change what the next launch may conclude
 from a rejected token.
 
-### State Management
+### 4.2 State Management
 
 ```
 AppState
@@ -317,7 +317,7 @@ entry between the two is kept and marked local-only.
 
 **History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.bin` (MessagePack binary) every 2 seconds when dirty. Image data is externalised to individual files in the `images/` directory.
 
-### Clipboard Module
+### 4.3 Clipboard Module
 
 #### `history.rs` — In-Memory History Store
 
@@ -457,7 +457,7 @@ Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal pr
 
 **Writing (Linux/other)** — uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()` (which works reliably on non-Windows platforms).
 
-### Notes Module
+### 4.4 Notes Module
 
 #### `store.rs` — Note Model and Storage
 
@@ -482,7 +482,7 @@ As with clipboard entries, per-note sync state is not a field on the note — it
 
 ---
 
-### Notification Centre
+### 4.5 Notification Centre
 
 One surface for everything the app has to tell the user, reached from the bell in
 the sidebar bottom. It ships with space invites; `NotificationKind` is the seam
@@ -637,7 +637,7 @@ a change takes effect on the next cue rather than the next launch.
 
 ---
 
-### Cloud Sync Module
+### 4.6 Cloud Sync Module
 
 > **Status:** Implemented against the current Supabase-based backend contract,
 > Rust module and React UI both.
@@ -714,7 +714,7 @@ with it.
 
 #### Password reset, and change password
 
-The password is only a wrapping key (see the backend's ARCHITECTURE section 7.1),
+The password is only a wrapping key (see `orange-copy-paste-clipboard-backend/docs/architecture.md`, section 7.1),
 so a reset that mints a new one would leave everything already synced unreadable.
 Both flows therefore re-wrap the **same** UMK.
 
@@ -1190,7 +1190,7 @@ the single source for which deployment a build ships against. A key present and 
 | `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
 | `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
 
-### Runtime Module
+### 4.7 Runtime Module
 
 #### `clipboard_watcher.rs` — Background Polling Thread
 
@@ -1279,9 +1279,9 @@ Saves window position, size, and maximized state to `{app_data}/window-state.jso
 
 ---
 
-## Frontend
+## 5. Frontend
 
-### Build & Entry Points
+### 5.1 Build & Entry Points
 
 Vite is configured for a **multi-page build** (four separate HTML entry points → four separate JS bundles):
 
@@ -1294,7 +1294,7 @@ Vite is configured for a **multi-page build** (four separate HTML entry points �
 
 Dev server runs on port 1420 (fixed for Tauri dev mode).
 
-### Shared Types
+### 5.2 Shared Types
 
 **`types.ts`** defines the core `ClipboardEntry` interface matching the Rust struct, plus helpers:
 
@@ -1315,7 +1315,7 @@ type AppTheme = "dark" | "light";
 
 Helpers: `timeAgo()`, `truncateText()`, `filePaths()`, `fileNameFromPath()`, `isImageFile()`, `isVideoFile()`, `isUrl()`, `classifyFileEntry()`, `deriveDisplayKind()`, `imageDisplayName()`, `resolveImageSrc()`, `htmlFragment()`, `htmlPlainText()`, `groupColorIndex()`, `groupColor()`, `setGroupColorIndex()`, `removeGroupColor()`, `renameGroupColor()`.
 
-### Shared Hooks
+### 5.3 Shared Hooks
 
 Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen logic and cut re-renders:
 
@@ -1328,7 +1328,7 @@ Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen 
 | `useLayoutTransition` | Animate the tiles ↔ list layout change |
 | `useFileMeta` | Batched + cached file preview / missing-file lookups (dedupes IPC across cards and popups) |
 
-### Main App
+### 5.4 Main App
 
 **`App.tsx`** is the root of the main window. It owns:
 
@@ -1349,7 +1349,7 @@ Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen 
 **Focus resync:**
 Listens to `tauri://focus` on the main window. On focus, re-fetches full history from Rust to catch up with any events that may have been missed while the app was in the background.
 
-### Screens
+### 5.5 Screens
 
 #### Clipboard Screen (`ClipboardScreen.tsx`)
 
@@ -1443,7 +1443,7 @@ and the cloud sync mode — stays on the Account screen.
 
 Read-only reference page showing all keyboard shortcuts organized by section (Global, Clipboard Cards, Search & Filter).
 
-### Popups
+### 5.6 Popups
 
 #### Copy Popup (`CopyPopup.tsx`)
 
@@ -1468,7 +1468,7 @@ Shown on Ctrl+Shift+V near the cursor. Displays:
 
 Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 
-### UI Components
+### 5.7 UI Components
 
 | Component           | Purpose                                                                                                                                                                                   |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1482,12 +1482,12 @@ Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 
 ---
 
-## Data Flows
+## 6. Data Flows
 
 The background capture pipeline and the two global-shortcut flows are described
 step-by-step in the Runtime Module above (`clipboard_watcher.rs`, `hotkeys.rs`).
 
-### Frontend State Sync
+### 6.1 Frontend State Sync
 
 ```mermaid
 flowchart TB
@@ -1505,7 +1505,7 @@ flowchart TB
     refetch --> rerender
 ```
 
-### Cloud Sync — Push (Local Capture → Server)
+### 6.2 Cloud Sync — Push (Local Capture → Server)
 
 > Route, headers and response shape are the wire contract:
 > `orange-copy-paste-clipboard-backend/docs/architecture.md`.
@@ -1528,7 +1528,7 @@ capture_clipboard_change() → history.push(entry)
                                   sync_status stays Pending
 ```
 
-### Cloud Sync — Pull (Server → Local)
+### 6.3 Cloud Sync — Pull (Server → Local)
 
 ```
 On startup / reconnect:
@@ -1560,7 +1560,7 @@ On startup / reconnect:
 Repeat until next_cursor = null
 ```
 
-### Cloud Sync — Realtime (WebSocket → Local)
+### 6.4 Cloud Sync — Realtime (WebSocket → Local)
 
 ```
 WebSocket entry event received (event/payload shape: see wire contract)
@@ -1579,9 +1579,9 @@ WebSocket entry event received (event/payload shape: see wire contract)
 
 ---
 
-## Persistence & Storage
+## 7. Persistence & Storage
 
-### Binary Persistence Format
+### 7.1 Binary Persistence Format
 
 History and pinned entries use a **MessagePack binary format** for fast, compact disk storage:
 
@@ -1590,7 +1590,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 3. **On load** — File-path image entries are served to the frontend via Tauri's `convertFileSrc()` asset protocol. Old inline data-URLs from previous sessions are automatically externalised on load.
 4. **Orphan cleanup** — `save_all_to_file` removes image files in `images/` that no longer correspond to any history entry.
 
-### Storage Locations
+### 7.2 Storage Locations
 
 | What               | Location                               | Format                                                           | When Saved               | When Loaded        |
 | ------------------ | -------------------------------------- | ---------------------------------------------------------------- | ------------------------ | ------------------ |
@@ -1618,7 +1618,7 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 
 **Sync note**: `sync_pending.json` and `id_map.json` are safe to delete — loss triggers a re-sync (duplicate entries are deduped on next push). `sync_state.json` loss causes a full re-pull from the server on next startup.
 
-### `{app_data}` location and the identifier-rename migration
+### 7.3 `{app_data}` location and the identifier-rename migration
 
 Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: on Windows `%APPDATA%\<identifier>\`, on Linux `~/.local/share/<identifier>/`. The identifier is `io.github.notrover.orange-copy-paste`.
 
@@ -1626,9 +1626,9 @@ Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: o
 
 ---
 
-## Tauri Configuration & Permissions
+## 8. Tauri Configuration & Permissions
 
-### Windows (tauri.conf.json)
+### 8.1 Windows (tauri.conf.json)
 
 | Window       | Size    | Properties                                                                                              |
 | ------------ | ------- | ------------------------------------------------------------------------------------------------------- |
@@ -1637,7 +1637,7 @@ Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: o
 | paste-popup  | 340×460 | Same as copy-popup                                                                                      |
 | notification | 220×72  | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
 
-### Permissions (capabilities/default.json)
+### 8.2 Permissions (capabilities/default.json)
 
 Applied to all three windows:
 
@@ -1646,7 +1646,7 @@ Applied to all three windows:
 - `core:event:default` — emit/listen for custom events
 - `global-shortcut:default` — register/unregister global keyboard shortcuts
 
-### Build
+### 8.3 Build
 
 - **Dev**: `bun run dev` → Vite on `localhost:1420`
 - **Prod**: `bun run build` → `tsc && vite build` → `dist/`
@@ -1655,7 +1655,7 @@ Applied to all three windows:
 
 ---
 
-## Cross-System Invariants
+## 9. Cross-System Invariants
 
 The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee.
 
