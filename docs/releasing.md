@@ -1,4 +1,4 @@
-# Releasing the Smart Clipboard app
+# Releasing RoverTools' Orange Copy Paste
 
 **Owns:** shipping. The release workflow, the two update channels, the signing key, the
 version-of-record, and the smoke test. Read before touching
@@ -32,7 +32,7 @@ release would contain without dispatching anything.
 
 ---
 
-## How it fits together
+## 1. How it fits together
 
 ```mermaid
 flowchart TB
@@ -57,11 +57,11 @@ Nothing here touches the sync backend.
 
 ---
 
-## One-time setup
+## 2. One-time setup
 
 Three things. The workflow will tell you if any are missing.
 
-### 1. Signing keypair
+### 2.1 Signing keypair
 
 ```bash
 cd orange-copy-paste-clipboard-app-rust && bun tauri signer generate -w ~/.tauri/rovertools-updater.key
@@ -75,7 +75,7 @@ replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`, and commit it.
 > channel is dead — shipping a new public key means a new build, which users can only
 > get by installing by hand, which is the friction this exists to remove.
 
-### 2. Public releases repo
+### 2.2 Public releases repo
 
 ```bash
 gh repo create NotRover/RoverTools-Releases --public --add-readme
@@ -84,7 +84,7 @@ gh repo create NotRover/RoverTools-Releases --public --add-readme
 `--add-readme` matters: a release needs a commit to tag, and an empty repo has none.
 It holds no source, only assets and `latest.json`.
 
-### 3. Three secrets
+### 2.3 Three secrets
 
 In the **source** repo → Settings → Secrets and variables → Actions:
 
@@ -101,7 +101,7 @@ nobody is updating *to* a first release, they install it.
 
 ---
 
-## Versioning
+## 3. Versioning
 
 You choose the bump at dispatch. Nothing is inferred from commit messages.
 
@@ -125,7 +125,7 @@ is cosmetic, kept in step by the workflow. Only plain `vX.Y.Z` tags count as rel
 the `v0.1.0-build.N` tags from [`build-linux.yml`](../.github/workflows/build-linux.yml)
 are throwaway CI builds and are ignored.
 
-## Release notes
+## 4. Release notes
 
 Notes live in [`changelog/`](../changelog/): one file per shipped release, plus
 `changelog/next.md`, the notes staged for the release you have not cut yet. You write
@@ -174,7 +174,7 @@ one home you edit — the releases-repo copy is generated, never hand-edited.
 
 ---
 
-## Beta releases
+## 5. Beta releases
 
 ```bash
 gh workflow run release.yml -f bump=minor -f prerelease=true
@@ -219,7 +219,7 @@ Two things to know:
 
 ---
 
-## What can and cannot self-update
+## 6. What can and cannot self-update
 
 | Bundle | Self-updates | Why |
 |---|---|---|
@@ -233,7 +233,7 @@ install is worse than offering none. macOS is not built at all; that needs a
 
 ---
 
-## Safety rails
+## 7. Safety rails
 
 The workflow fails rather than shipping something broken:
 
@@ -254,7 +254,7 @@ The workflow fails rather than shipping something broken:
 Use `-f dry_run=true` to build and verify without publishing. Worth doing after editing
 the workflow itself; not needed for an ordinary release.
 
-### Asset names have no spaces, deliberately
+### 7.1 Asset names have no spaces, deliberately
 
 Tauri names bundles after `productName` — "Orange Copy Paste" — and GitHub rewrites
 spaces in uploaded asset names to dots, which would break every URL in `latest.json`.
@@ -263,7 +263,7 @@ from the renamed files.
 
 ---
 
-## Things worth knowing
+## 8. Things worth knowing
 
 **Windows warns on the first install.** The bundles have a minisign signature, not
 an Authenticode one, so SmartScreen shows "unrecognized app" — *More info → Run
@@ -290,7 +290,7 @@ nobody should lose their window to a background download finishing.
 
 ---
 
-## Smoke test before trusting it
+## 9. Smoke test before trusting it
 
 The updater itself can only be checked with two releases:
 

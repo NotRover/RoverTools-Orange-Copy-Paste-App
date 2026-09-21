@@ -1,4 +1,4 @@
-# Orange Copy Paste — Smart Clipboard
+# RoverTools' Orange Copy Paste
 
 A desktop clipboard manager and notes app for **Windows and Linux**, built with React 19 + TypeScript + Vite on a Rust/Tauri 2 core.
 

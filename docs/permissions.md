@@ -25,7 +25,7 @@ its scope has not been decided.
 
 ---
 
-## Entries
+## 1. Entries
 
 "Yours" means you wrote it. "Theirs" means it arrived from another member of a
 space (`id_map.is_remote`, surfaced to the UI as `useRemoteEntryKeys`).
@@ -83,7 +83,7 @@ copies of items other people had shared with them. The authors kept theirs — t
 removal stayed local, as `spawn_delete_entry` intends for someone else's item —
 so the damage was one-sided and invisible from the other end.
 
-## Spaces
+## 2. Spaces
 
 | Action | Space owner | Member |
 |---|---|---|
@@ -140,7 +140,7 @@ it mints - before adopting it. A correctly wrapped *wrong* key unwraps fine and 
 nothing, which is the failure this catches. Nothing about waiting fixes it, so the client
 reports it (`space:key-rejected`); the owner removing whoever sent it rekeys the space.
 
-## Who pays for what
+## 3. Who pays for what
 
 Ownership decides cost the same way it decides editing: **an account is charged for
 what it uploaded, and for nothing else.**
@@ -158,12 +158,12 @@ belong to. Two consequences follow, and both are intended:
 - **The owner deleting the entry breaks it for everyone.** The blob is released, the
   hourly sweep removes the object, and a member who had not fetched it yet gets a 404.
 - **Removing a member is not retroactive** for anything they already pulled. See
-  "What the server does not enforce" below - the same limit applies to bytes.
+  ["What the server does not enforce"](#5-what-the-server-does-not-enforce) below - the same limit applies to bytes.
 
 Backend detail: `orange-copy-paste-clipboard-backend/docs/architecture.md` sections 2.4
 and 6.3.
 
-## Where each rule lives
+## 4. Where each rule lives
 
 Client, Rust — the enforcement that matters, since only Rust can push:
 
@@ -238,7 +238,7 @@ Backend — the only place a rule survives a modified client:
   links by construction: `/join/{code}` only hands the code to the app, which
   calls the same `POST /spaces/join`.
 
-## What the server does not enforce
+## 5. What the server does not enforce
 
 Worth being honest about the shape of this. The server never sees plaintext, so
 it cannot tell a good edit from a bad one. Everything above about pins, groups,
@@ -266,7 +266,7 @@ What the server still cannot do is tell whether the *author's own* edit is one
 the author meant. Nobody can write into anyone else's row, and that is the
 guarantee.
 
-## Open
+## 6. Open
 
 - **Removing your copy of a shared entry.** Handled by local delete. There is no
   separate "stop showing me this" — deleting locally is that, and it leaves a
@@ -278,7 +278,7 @@ guarantee.
   dropped yourself (`local_only`) keeps blocking, since nothing about the space
   changed.
 
-## Recovery code
+## 7. Recovery code
 
 Account-scoped, never space-scoped: a recovery code opens the account's own
 encryption key and has nothing to do with membership of anything.
