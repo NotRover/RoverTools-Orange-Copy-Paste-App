@@ -137,6 +137,76 @@ pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle) {
     }
 }
 
+/// The bundle identifier before the 2026 rename that dropped a personal handle
+/// (`com.spect.*`). Kept only so an existing install's data can be carried across
+/// the rename once; safe to delete a few releases after the renamed build ships.
+const LEGACY_APP_DATA_IDENTIFIER: &str = "com.spect.orange-copy-paste";
+
+/// TEMPORARY (added with the 2026 `com.spect.*` -> `io.github.notrover.*` identifier
+/// rename). Delete this function, `copy_dir_recursive`, `LEGACY_APP_DATA_IDENTIFIER`
+/// and the call in `setup` once every install has run a renamed build at least once -
+/// a few stable releases after the rename ships. At that point no install still keeps
+/// its data under the old identifier, so this only ever no-ops.
+///
+/// Copy the previous identifier's app-data folder into the current one, once.
+///
+/// The bundle identifier keys `app_data_dir()`, so renaming it points the app at
+/// a fresh, empty folder and the user's history, notes and settings look wiped -
+/// the old files are orphaned on disk, not gone. This copies them forward on the
+/// first launch of the renamed build, before anything reads `app_data_dir`. It
+/// copies rather than moves, so a failure leaves the old data untouched, and it
+/// runs only when the new folder holds nothing yet, so it never clobbers a real
+/// install and is a no-op on every later launch. The OS keychain is not keyed by
+/// the identifier, so sign-in state carries over without any help here.
+fn migrate_legacy_app_data(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let Ok(new_dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let Some(old_dir) = new_dir.parent().map(|b| b.join(LEGACY_APP_DATA_IDENTIFIER)) else {
+        return;
+    };
+    if old_dir == new_dir || !old_dir.is_dir() {
+        return;
+    }
+    // Skip when the new location already holds data: an install that has run
+    // before, or a migration that already happened.
+    let new_has_data = std::fs::read_dir(&new_dir)
+        .map(|mut it| it.next().is_some())
+        .unwrap_or(false);
+    if new_has_data {
+        return;
+    }
+    match copy_dir_recursive(&old_dir, &new_dir) {
+        Ok(()) => eprintln!(
+            "[migrate] carried app-data across the identifier rename: {} -> {}",
+            old_dir.display(),
+            new_dir.display()
+        ),
+        Err(e) => eprintln!(
+            "[migrate] app-data copy {} -> {} failed: {e}",
+            old_dir.display(),
+            new_dir.display()
+        ),
+    }
+}
+
+/// Recursively copy a directory tree. Used once by `migrate_legacy_app_data`.
+fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
+}
+
 /// Read every boolean flag from one already-loaded settings map.
 ///
 /// One read for the whole startup rather than one per key: nine reads of the
@@ -937,6 +1007,12 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // Before anything reads app_data_dir: carry an existing install's
+            // data across the identifier rename (see migrate_legacy_app_data),
+            // so the diag dir and every store below resolve to the migrated
+            // folder rather than a fresh empty one. TEMPORARY - remove this line
+            // with migrate_legacy_app_data once the rename has propagated.
+            migrate_legacy_app_data(app.handle());
             // Installed before any other setup work, so a panic inside it lands
             // in the log too.
             crate::health::set_diag_dir(app.path().app_data_dir().ok());

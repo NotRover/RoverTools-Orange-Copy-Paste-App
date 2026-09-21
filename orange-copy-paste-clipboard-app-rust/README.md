@@ -262,7 +262,7 @@ The full pipeline — the signed-bundle flow, the stable/beta channels, one-time
 
 ## Storage & config reference
 
-Runtime state lives in the app data directory (Windows `%APPDATA%\com.spect.orange-copy-paste\`, Linux `~/.config/com.spect.orange-copy-paste/`): clipboard history, saved entries, notes, settings, and externalized images/attachments, all as described in [`docs/architecture.md`](docs/architecture.md), which owns the persistence layout. UI-only preferences (theme, layout, sort, paste-slot count, recent searches, groups) are kept in `localStorage` under `sc-*` keys.
+Runtime state lives in the app data directory (Windows `%APPDATA%\io.github.notrover.orange-copy-paste\`, Linux `~/.local/share/io.github.notrover.orange-copy-paste/`): clipboard history, saved entries, notes, settings, and externalized images/attachments, all as described in [`docs/architecture.md`](docs/architecture.md), which owns the persistence layout. UI-only preferences (theme, layout, sort, paste-slot count, recent searches, groups) are kept in `localStorage` under `sc-*` keys.
 
 ---
 
