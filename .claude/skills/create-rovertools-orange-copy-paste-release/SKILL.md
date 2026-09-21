@@ -24,12 +24,12 @@ Step 0. Never infer one decision from another: "ship a release" says nothing abo
 bump, and `beta` says nothing about whether it is a patch or a minor.
 
 Drives [`.github/workflows/release.yml`](../../../.github/workflows/release.yml), which
-bumps the version, builds signed bundles, and publishes to the public releases repo the
-in-app updater reads.
+bumps the version, builds signed bundles, and publishes them as GitHub Releases on the
+App repo the in-app updater reads.
 
-**The workflow checks its own prerequisites** — placeholder signing key, missing
-secrets, missing or private releases repo — and stops in seconds with a message saying
-what to fix. Do not re-implement those checks here; dispatch and read the failure.
+**The workflow checks its own prerequisites** — placeholder signing key or a missing
+signing secret — and stops in seconds with a message saying what to fix. Do not
+re-implement those checks here; dispatch and read the failure.
 
 Reference: [`docs/releasing.md`](../../../docs/releasing.md).
 
@@ -90,8 +90,8 @@ Step 3 until all three are settled.
 
 ## Step 1 — Show what will ship
 
-Constants: source repo `NotRover/RoverTools-Orange-Copy-Paste-App`, releases repo
-`NotRover/RoverTools-Orange-Copy-Paste-Releases`.
+Constant: the repo `NotRover/RoverTools-Orange-Copy-Paste-App`, which is both the source
+and where releases are published.
 
 ```bash
 grep -m1 '^version = ' orange-copy-paste-clipboard-app-rust/src-tauri/Cargo.toml && git fetch origin main --tags -q && git rev-parse --abbrev-ref HEAD && git status --porcelain
@@ -190,11 +190,11 @@ Neither block needs a local `jq` or `base64` — `gh --jq` runs the whole expres
 itself, including the base64 decode, so these work on a bare machine:
 
 ```bash
-echo "stable channel:" && curl -fsSL https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64"'
+echo "stable channel:" && curl -fsSL https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64"'
 ```
 
 ```bash
-echo "beta channel:" && gh api repos/NotRover/RoverTools-Orange-Copy-Paste-Releases/contents/beta.json --jq '.content | gsub("\n";"") | @base64d | fromjson | "version=\(.version)  platforms=\(.platforms | keys | join(", "))"'
+echo "beta channel:" && gh api repos/NotRover/RoverTools-Orange-Copy-Paste-App/contents/beta.json --jq '.content | gsub("\n";"") | @base64d | fromjson | "version=\(.version)  platforms=\(.platforms | keys | join(", "))"'
 ```
 
 Both must list `windows-x86_64` and `linux-x86_64`. A `.deb` entry would be a bug —
@@ -202,7 +202,7 @@ package-manager installs cannot self-update, so they are published for manual do
 only and must never appear in a feed.
 
 ```bash
-gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'
+gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-App --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'
 ```
 
 ## Step 5 — Report
@@ -216,7 +216,7 @@ gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --limit 5 
   bundles, no rebuild:
 
   ```bash
-  gh release edit v0.3.0 --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --prerelease=false --latest
+  gh release edit v0.3.0 --repo NotRover/RoverTools-Orange-Copy-Paste-App --prerelease=false --latest
   ```
 
   The release's changelog file keeps its `-beta` name — it records how the release was
@@ -233,7 +233,7 @@ gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --limit 5 
 | --- | --- |
 | Stops immediately on prerequisites | Read the message — it names the missing piece. Setup is `docs/releasing.md`; the user fixes it, not you. |
 | `has no .sig` | `createUpdaterArtifacts` was removed from `tauri.conf.json`, or the signing secrets are wrong. |
-| Publish step 403 / not found | `RELEASES_REPO_TOKEN` is missing, expired, or lacks `contents: write` on the releases repo. |
+| Publish step 403 / not found | The publish job lacks `contents: write`, or a branch protection rule blocks the release commit/tag. The built-in `GITHUB_TOKEN` handles publishing to this repo — no PAT. |
 | Published but nobody is offered it | It went out as a beta, or the pubkey in the shipped build does not match the signing key. |
 | `stable feed is serving it` on a beta run | The prerelease flag did not take. Fix with `gh release edit <tag> --prerelease=true` before anyone launches. |
 | `beta.json serves <older>` | The beta-feed step failed or was skipped. Beta subscribers are stuck on the previous release until it is rewritten. |

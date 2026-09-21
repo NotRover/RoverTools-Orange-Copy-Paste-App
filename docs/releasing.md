@@ -40,7 +40,7 @@ flowchart TB
     dispatch ==> bump["Bump version in Cargo.toml<br/>(patch, minor, or major)"]:::step
     dispatch ==> notes["Notes from changelog/next.md<br/>renamed on release"]:::step
     dispatch ==> build["Build signed NSIS (Windows)<br/>+ AppImage / deb (Linux)"]:::step
-    build ==> publish[("Publish to the public releases repo<br/>bundles + latest.json")]:::store
+    build ==> publish[("Publish a GitHub Release on this repo<br/>bundles + latest.json")]:::store
     publish ==> banner(["App checks the feed ~8s after launch,<br/>then every 6h, shows an update banner"]):::out
 
     classDef start fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
@@ -49,9 +49,9 @@ flowchart TB
     classDef out fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
 ```
 
-The source repo stays private. The **releases** repo is public because the updater
-fetches over plain HTTPS with no credentials — a private repo's assets are behind
-auth, and the only way to reach them would be shipping a token inside the app.
+Releases are published as GitHub Releases on this repo. The repo is public, so the
+updater fetches the feed over plain HTTPS with no credentials — there is no separate
+releases repo, and no token is shipped inside the app.
 
 Nothing here touches the sync backend.
 
@@ -59,7 +59,7 @@ Nothing here touches the sync backend.
 
 ## 2. One-time setup
 
-Three things. The workflow will tell you if any are missing.
+Two things. The workflow will tell you if either is missing.
 
 ### 2.1 Signing keypair
 
@@ -75,26 +75,17 @@ replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`, and commit it.
 > channel is dead — shipping a new public key means a new build, which users can only
 > get by installing by hand, which is the friction this exists to remove.
 
-### 2.2 Public releases repo
+### 2.2 Two secrets
 
-```bash
-gh repo create NotRover/RoverTools-Orange-Copy-Paste-Releases --public --add-readme
-```
-
-`--add-readme` matters: a release needs a commit to tag, and an empty repo has none.
-It holds no source, only assets and `latest.json`.
-
-### 2.3 Three secrets
-
-In the **source** repo → Settings → Secrets and variables → Actions:
+In the repo → Settings → Secrets and variables → Actions:
 
 | Secret | What it is |
 |---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | Contents of the private key file |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you set when generating it |
-| `RELEASES_REPO_TOKEN` | A fine-grained PAT with `contents: write` on the releases repo |
 
-The PAT is needed because the workflow's own token cannot write to another repo.
+The release publishes to this same repo, so the workflow's built-in `GITHUB_TOKEN`
+handles it — no PAT needed.
 
 **No baseline tag is required.** The first release's notes are just "First release" —
 nobody is updating *to* a first release, they install it.
@@ -163,14 +154,12 @@ A promoted beta keeps its `-beta` filename — the name records how it was first
 Rename it (`git mv changelog/<v>-<bump>-beta.md …-stable.md`) if you want the directory
 to track the current channel.
 
-**The releases repo gets a copy too.** After the tag lands, the workflow mirrors the
-`changelog/` files into the public releases repo and regenerates that repo's `README.md`
-from them — releases split into a Stable group and a Beta group, each a collapsible entry,
-newest first — so someone browsing the releases repo reads the same notes as the app. The
-layout lives in one place, [`.github/scripts/gen-releases-readme.sh`](../.github/scripts/gen-releases-readme.sh);
-the grouping comes from each file's heading, so renaming a promoted beta's file to
-`-stable` moves it between groups on the next release. The source `changelog/` is still the
-one home you edit — the releases-repo copy is generated, never hand-edited.
+Each shipped release's notes also render on this repo's GitHub Releases page, from the
+same body the workflow publishes — so someone browsing the releases reads what the app
+shows. The workflow also rebuilds a browsable [`CHANGELOG.md`](../CHANGELOG.md) at the
+repo root from the `changelog/` files (via
+[`.github/scripts/gen-changelog.sh`](../.github/scripts/gen-changelog.sh)) and commits it
+with the release. Both are generated; `changelog/` stays the one home you edit.
 
 ---
 
@@ -202,7 +191,7 @@ pruning by hand.
 Promoting a beta to everyone, once you are happy with it:
 
 ```bash
-gh release edit v0.3.0 --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --prerelease=false --latest
+gh release edit v0.3.0 --repo NotRover/RoverTools-Orange-Copy-Paste-App --prerelease=false --latest
 ```
 
 An edit of the same bundles, not another build — so stable users receive exactly what
@@ -237,8 +226,8 @@ install is worse than offering none. macOS is not built at all; that needs a
 
 The workflow fails rather than shipping something broken:
 
-- **Prerequisites** — placeholder pubkey, missing secret, or a releases repo that is
-  missing, private or empty. Checked before building.
+- **Prerequisites** — placeholder pubkey or a missing signing secret. Checked before
+  building.
 - **Non-semver version** → refused. The updater compares semver, so an unparseable
   version would publish and then never be offered.
 - **A missing `.sig`** for an updatable bundle → refused. Unsigned bundles build fine
@@ -248,8 +237,9 @@ The workflow fails rather than shipping something broken:
 - **Channel correctness** → every run confirms `beta.json` names the release just
   published, and a beta run additionally confirms the *stable* feed is **not** serving
   it. A beta leaking to everyone is silent otherwise.
-- **Pruning** keeps the newest 5 releases and skips whichever is marked latest, so the
-  release being served is never deleted.
+
+Every release is kept — the workflow never deletes an old one, so the published history
+stays complete.
 
 Use `-f dry_run=true` to build and verify without publishing. Worth doing after editing
 the workflow itself; not needed for an ordinary release.

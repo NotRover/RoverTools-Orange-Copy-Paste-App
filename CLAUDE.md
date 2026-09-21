@@ -214,8 +214,9 @@ Pick the smallest valid check set for what you touched.
 ## Releases (client only)
 
 Shipping is one dispatch of `.github/workflows/release.yml`: it bumps the version, builds
-signed bundles and publishes them to the **public** `NotRover/RoverTools-Orange-Copy-Paste-Releases` repo
-the in-app updater reads. The backend has no release pipeline. Reference:
+signed bundles and publishes them as GitHub Releases on this repo
+(`NotRover/RoverTools-Orange-Copy-Paste-App`), which the in-app updater reads over plain
+HTTPS now that the repo is public. The backend has no release pipeline. Reference:
 [`docs/releasing.md`](docs/releasing.md).
 
 - **Never dispatch unless the user asks in that turn**, and never guess the three inputs —

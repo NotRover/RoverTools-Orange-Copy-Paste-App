@@ -19,8 +19,8 @@ run-name: >-
 #   2. Bumps the version, and collects the commit subjects since the last release
 #      tag as the notes users will read.
 #   3. Builds signed Windows (NSIS) and Linux (AppImage + deb) bundles.
-#   4. Assembles `latest.json` and publishes everything to the PUBLIC releases
-#      repo, which is what the app's updater reads.
+#   4. Assembles `latest.json` and publishes a GitHub Release on this repo,
+#      which is what the app's updater reads.
 #
 # Two escape hatches, both off by default:
 #   dry_run     build and verify, publish nothing. For after editing this file.
@@ -31,7 +31,7 @@ run-name: >-
 # Required secrets (see docs/releasing.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
-#   RELEASES_REPO_TOKEN                 PAT with contents:write on RELEASES_REPO
+# Releases publish to this same repo with the built-in GITHUB_TOKEN — no PAT needed.
 
 on:
   workflow_dispatch:
@@ -54,9 +54,10 @@ on:
         default: false
 
 env:
-  # Public, releases-only repo. Source stays private; this holds binaries and
-  # `latest.json`, and is what tauri.conf.json's updater endpoint points at.
-  RELEASES_REPO: NotRover/RoverTools-Orange-Copy-Paste-Releases
+  # Releases publish to this same repo (`github.repository`). Its GitHub Releases
+  # hold the binaries and `latest.json`, and are what tauri.conf.json's updater
+  # endpoint points at. No separate releases repo: the source repo is public, so
+  # the updater can fetch the feed from here with no credentials.
   APP_DIR: orange-copy-paste-clipboard-app-rust
   # Space-free bundle prefix. GitHub rewrites spaces in uploaded asset names to
   # dots, which would silently break every URL in latest.json — so the bundles are
@@ -88,7 +89,6 @@ jobs:
         env:
           SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
         run: |
           set -uo pipefail
           fail=0
@@ -102,20 +102,6 @@ jobs:
 
           [ -n "$SIGNING_KEY" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY is not set. Bundles would be unsigned and unusable as updates."
           [ -n "$SIGNING_PASSWORD" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set."
-
-          # Checked here rather than at publish time, where it would fail only
-          # after both platforms have finished building.
-          if [ -z "$GH_TOKEN" ]; then
-            bad "Secret RELEASES_REPO_TOKEN is not set. Needs a PAT with contents:write on $RELEASES_REPO."
-          else
-            repo=$(gh repo view "$RELEASES_REPO" --json visibility,defaultBranchRef 2>&1) || repo=""
-            if [ -z "$repo" ]; then
-              bad "Cannot see $RELEASES_REPO. Create it as a PUBLIC repo with a README, and check RELEASES_REPO_TOKEN grants contents:write on it."
-            else
-              [ "$(jq -r '.visibility' <<< "$repo")" = "PUBLIC" ] || bad "$RELEASES_REPO must be PUBLIC — the app fetches the update feed with no credentials."
-              [ "$(jq -r '.defaultBranchRef.name // ""' <<< "$repo")" != "" ] || bad "$RELEASES_REPO has no commits. Add a README — a release needs a commit to tag."
-            fi
-          fi
 
           [ "$fail" -eq 0 ] || exit 1
           echo "All prerequisites present."
@@ -304,9 +290,13 @@ jobs:
           } > "$dest"
           cp changelog/TEMPLATE.md changelog/next.md
 
+          # Rebuild the browsable index at the repo root from every per-release file,
+          # this new one included. Generated artifact — the source stays in changelog/.
+          bash .github/scripts/gen-changelog.sh changelog > CHANGELOG.md
+
           echo "── new release file: $dest ──"
           cat "$dest"
-          echo "── changelog/next.md reset to the empty template ──"
+          echo "── changelog/next.md reset to the empty template, CHANGELOG.md rebuilt ──"
 
       - name: Commit and tag
         if: ${{ !inputs.dry_run }}
@@ -317,42 +307,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$APP_DIR/package.json" "$APP_DIR/src-tauri/Cargo.toml" \
-                  "$APP_DIR/src-tauri/Cargo.lock" changelog/
+                  "$APP_DIR/src-tauri/Cargo.lock" changelog/ CHANGELOG.md
           git commit -m "release: $TAG"
           git tag -a "$TAG" -m "$TAG"
           git push origin HEAD:${{ github.ref_name }}
           git push origin "$TAG"
-
-      - name: Sync the changelog to the releases repo
-        # The per-release changelog files live in this repo (one home). This mirrors
-        # them into the PUBLIC releases repo and regenerates its README (releases
-        # grouped Stable vs Beta) so anyone browsing there reads the same notes. The
-        # source repo has already committed the freshly stamped file by now, so this
-        # copies the whole set and lets the generator rebuild the page.
-        if: ${{ !inputs.dry_run }}
-        env:
-          RELEASES_REPO_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
-          TAG: v${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          tmp=$(mktemp -d)
-          git clone --depth 1 \
-            "https://x-access-token:${RELEASES_REPO_TOKEN}@github.com/${RELEASES_REPO}.git" "$tmp"
-          mkdir -p "$tmp/changelog"
-          # Release files start with a version digit; README.md/TEMPLATE.md/next.md
-          # start with a letter and are staging/convention docs that do not belong here.
-          cp changelog/[0-9]*.md "$tmp/changelog/"
-          bash .github/scripts/gen-releases-readme.sh "$tmp/changelog" > "$tmp/README.md"
-          cd "$tmp"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No changelog changes to publish."
-          else
-            git commit -m "docs: sync changelog for $TAG"
-            git push origin HEAD
-          fi
 
   # ── 2. Build signed bundles ────────────────────────────────────────────────
   build:
@@ -481,14 +440,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ── 3. Publish to the public releases repo ─────────────────────────────────
+  # ── 3. Publish a GitHub Release on this repo ────────────────────────────────
   publish:
     needs: [prepare, build]
     name: publish ${{ needs.prepare.outputs.tag }}
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # create the release, commit beta.json
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v7
@@ -506,7 +465,7 @@ jobs:
             -exec cp {} release/ \;
 
           notes=$(cat artifacts/release-notes/RELEASE_NOTES.md)
-          base="https://github.com/${RELEASES_REPO}/releases/download/${TAG}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
 
           # The feed the app reads. Only the two self-updatable targets appear —
           # a .deb entry here would offer an update the client cannot install.
@@ -540,9 +499,9 @@ jobs:
 
       - name: Publish release
         env:
-          # A PAT: the workflow token is scoped to this repo and cannot write to
-          # the releases repo.
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          # The built-in token: the release lands on this same repo, so the
+          # workflow token's contents:write is enough — no PAT.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
@@ -581,7 +540,7 @@ jobs:
           FOOTER
 
           gh release create "$TAG" \
-            --repo "$RELEASES_REPO" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" \
             --notes-file RELEASE_BODY.md \
             "${visibility[@]}" \
@@ -592,18 +551,19 @@ jobs:
         # newest release of either kind — that is what gives beta subscribers
         # stable releases as well as prereleases.
         #
-        # A file in the releases repo rather than a release asset: the stable
-        # channel gets its mutability from GitHub's own `latest` resolution, and a
-        # mutable pointer *release* would either hijack that or have to be excluded
-        # from pruning by hand. A committed file has neither problem.
+        # A committed file rather than a release asset: the stable channel gets its
+        # mutability from GitHub's own `latest` resolution, and a mutable pointer
+        # *release* would either hijack that or have to be excluded from pruning by
+        # hand. A committed file has neither problem. It lands on this repo's default
+        # branch, which is what the beta endpoint (raw .../HEAD/beta.json) reads.
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           # Updating an existing file needs its blob sha; creating one must omit it.
-          sha=$(gh api "repos/$RELEASES_REPO/contents/beta.json" --jq '.sha' 2>/dev/null || true)
-          args=(--method PUT "repos/$RELEASES_REPO/contents/beta.json"
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/contents/beta.json" --jq '.sha' 2>/dev/null || true)
+          args=(--method PUT "repos/$GITHUB_REPOSITORY/contents/beta.json"
                 -f "message=beta channel -> $TAG"
                 -f "content=$(base64 -w0 release/latest.json)")
           # `if`, not `[ … ] && …`: a bare test that fails is a non-zero command,
@@ -615,19 +575,19 @@ jobs:
 
       - name: Verify the published feed
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          stable="https://github.com/${RELEASES_REPO}/releases/latest/download/latest.json"
+          stable="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
 
           # A prerelease is not reachable through the `latest` URL — that is the
           # point of it — so verify the feed at its own tag and then confirm the
           # invisibility actually holds.
           if [ "$PRERELEASE" = "true" ]; then
-            feed="https://github.com/${RELEASES_REPO}/releases/download/${TAG}/latest.json"
+            feed="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/latest.json"
           else
             # The same URL the app uses, so a broken redirect or a mangled asset
             # name fails here rather than in front of users.
@@ -654,7 +614,7 @@ jobs:
           # subscribers there get both. Read through the API rather than the raw
           # CDN: raw.githubusercontent caches for minutes, so a fresh commit would
           # flake here for reasons that have nothing to do with the release.
-          beta=$(gh api "repos/$RELEASES_REPO/contents/beta.json" --jq '.content' | base64 -d | jq -r '.version')
+          beta=$(gh api "repos/$GITHUB_REPOSITORY/contents/beta.json" --jq '.content' | base64 -d | jq -r '.version')
           [ "$beta" = "$VERSION" ] || { echo "::error::beta.json serves $beta, expected $VERSION"; exit 1; }
           echo "ok: beta channel serves $beta"
 
@@ -670,20 +630,3 @@ jobs:
             fi
             echo "Stable channel still serves: ${public:-nothing yet} — $TAG is beta-only, as intended."
           fi
-
-      - name: Prune old releases (keep last 5)
-        # Storage hygiene. Sorted newest-first and sliced from index 5, so the
-        # release the updater is currently serving is never a candidate.
-        # Best-effort — cleanup problems never fail a successful release.
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
-          KEEP: 5
-        run: |
-          gh release list --repo "$RELEASES_REPO" --limit 100 --json tagName,createdAt,isLatest \
-            --jq "[.[] | select(.isLatest | not)] | sort_by(.createdAt) | reverse | .[$((KEEP - 1)):] | .[].tagName" \
-            | while read -r t; do
-                [ -z "$t" ] && continue
-                echo "Deleting old release+tag: $t"
-                gh release delete "$t" --repo "$RELEASES_REPO" --yes --cleanup-tag
-              done
