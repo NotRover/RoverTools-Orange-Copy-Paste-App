@@ -88,7 +88,7 @@ so the damage was one-sided and invisible from the other end.
 | Action | Space owner | Member |
 |---|---|---|
 | Rename, delete the space | yes | no |
-| Invite by email, rotate the invite code | yes | no |
+| Invite by email | yes | no |
 | Mint the space's key | yes | no |
 | Hand the key to a member who lacks one | yes | yes (any keyholder) |
 | Change the share-history policy | yes | no |
@@ -185,9 +185,11 @@ Client, Rust — the enforcement that matters, since only Rust can push:
   of the tombstone branch in `merge_pulled`. This is what makes "keep the local
   copy" true when the device's own tombstone comes back.
 - `notes/commands.rs` — `update_note` refuses outright.
-- `sync/mod.rs` — `has_space_key`, and the `space_comment_add` refusal built on
-  it. Commenting needs something readable to comment on, so it is gated on the
-  key. Sharing is not: `space_set_entry_shares` records the intent either way,
+- `sync/commands.rs` — `space_comment_add`, which delegates to
+  `add_space_comment` in `sync/mod.rs`; its refusal is built on
+  `space_current_key` returning `None`. Commenting needs something readable to
+  comment on, so it is gated on the key. Sharing is not:
+  `space_set_entry_shares` records the intent either way,
   `share_targets` drops a keyless space on the way out, and
   `flush_pending_shares` sends it when the key lands.
 - `sync/mod.rs` — `stamp_keys`, which sets `Space::has_key` from the live

@@ -119,17 +119,17 @@ The `CardMenu` component used `useState` to track its position, initialized with
 
 ### 5a. Chip measurement did not account for the "In clipboard" chip
 
-**File**: `src/components/app/clipboard-screen/entry-card/EntryCard.tsx`
-The `measureVisibleGroupCount` callback measured widths for the type, pinned, and saved chips but did not include the new "In clipboard" chip width. This caused it to over-estimate available space for group chips.
+**File**: `src/components/app/clipboard-screen/entry-card/ChipBar.tsx` (the chip-measurement logic since moved out of `EntryCard.tsx` into this component)
+The chip-overflow measurement measured widths for the type, pinned, and saved chips but did not include the new "In clipboard" chip width. This caused it to over-estimate available space for group chips.
 
-**Fix**: Added a `clipboardMeasureRef` and included its width in the `baseChipWidths` calculation alongside type, pinned, and saved chip widths.
+**Fix**: Added a `clipboardMeasureRef` and included its width in the `baseWidths` calculation alongside type, pinned, and saved chip widths.
 
 ### 5b. Chip container used `overflow: hidden` causing hard clipping
 
 **File**: `src/components/app/clipboard-screen/entry-card/EntryCard.css`
 The `.card-chips` container had `overflow: hidden`, which silently clipped any chips that exceeded the single-row width. Even when the measurement correctly determined no group chips would fit, the +N overflow button was still rendered inside the clipped container and became invisible.
 
-**Fix**: Replaced `overflow: hidden` with `flex-wrap: wrap` on `.card-chips`. Chips now gracefully wrap to a second row when the card is narrow instead of being invisibly clipped. Changed `.card-footer` from `align-items: center` to `align-items: flex-start` so the timestamp stays aligned with the first row of chips. Rewrote the measurement algorithm to:
+**Fix**: Replaced `overflow: hidden` with `flex-wrap: wrap` on `.card-chips`. Chips now gracefully wrap to a second row when the card is narrow instead of being invisibly clipped. (This fix survives.) A `.card-footer` `align-items: flex-start` tweak was tried at the time but was later superseded when the chips moved into `ChipBar`; `.card-footer` currently uses `align-items: center`. Rewrote the measurement algorithm to:
 
 1. First try fitting all groups without an overflow button.
 2. If not all fit, reserve overflow button width before calculating how many groups fit.
@@ -612,7 +612,7 @@ did, which is what made it look like a settings problem.
 
 **Cause.** Two construction sites for one object. `setup_runtime` built a
 `SyncClient` and put the `Arc` straight into `AppState`; `get_or_create_client` in
-`sync/commands.rs` built one *and* started `spawn_passive_pull_loop` and
+`sync/commands.rs` built one *and* started `spawn_background_pull_loop` and
 `spawn_reminder_loop`, which are called from nowhere else.
 
 So whenever sync was already enabled at launch - the normal case for anyone using
@@ -1027,7 +1027,7 @@ device until dismissed - there is no per-request "resolved elsewhere" event the
 way invites have one. Resolving at the shared command covers the common case
 (the same user approves); the cross-approver case is left for when the server
 publishes a resolution event, tracked in backend issue
-`RoverTools-Smart-Clipboard-App-Backend#22`.
+`RoverTools-Orange-Copy-Paste-Backend#22`.
 
 ---
 

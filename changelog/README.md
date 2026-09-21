@@ -16,7 +16,7 @@ and how releases are cut ([`../docs/releasing.md`](../docs/releasing.md)).
   workflow creates it by renaming `next.md` on release, so the name always states the
   real version, the bump, and the channel it went out on. You never name these by hand.
 - Every shipped release from `0.1.0` on has a file here; the published assets also live
-  on the [releases repo](https://github.com/NotRover/RoverTools-Releases/releases).
+  on the [releases repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Releases/releases).
 
 ## What goes in one
 

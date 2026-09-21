@@ -22,12 +22,12 @@ The workflow checks its own prerequisites first and stops in the first few secon
 with a message telling you what to fix, so a misconfigured release fails before it
 spends a build rather than after.
 
-**Or from Claude Code:** `/create-rovertools-orangecp-release`
-([`.claude/skills/…/SKILL.md`](../.claude/skills/create-rovertools-orangecp-release/SKILL.md)).
+**Or from Claude Code:** `/create-rovertools-orange-copy-paste-release`
+([`.claude/skills/…/SKILL.md`](../.claude/skills/create-rovertools-orange-copy-paste-release/SKILL.md)).
 It asks for the bump, the channel and the mode — assuming none of them, on every call —
 shows the version and the notes about to ship, dispatches only after an explicit yes,
 then verifies both channels. Arguments pre-answer whatever you already know:
-`/create-rovertools-orangecp-release minor beta`, or `preview` to see what the next
+`/create-rovertools-orange-copy-paste-release minor beta`, or `preview` to see what the next
 release would contain without dispatching anything.
 
 ---
@@ -78,7 +78,7 @@ replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`, and commit it.
 ### 2.2 Public releases repo
 
 ```bash
-gh repo create NotRover/RoverTools-Releases --public --add-readme
+gh repo create NotRover/RoverTools-Orange-Copy-Paste-Releases --public --add-readme
 ```
 
 `--add-readme` matters: a release needs a commit to tag, and an empty repo has none.
@@ -202,7 +202,7 @@ pruning by hand.
 Promoting a beta to everyone, once you are happy with it:
 
 ```bash
-gh release edit v0.3.0 --repo NotRover/RoverTools-Releases --prerelease=false --latest
+gh release edit v0.3.0 --repo NotRover/RoverTools-Orange-Copy-Paste-Releases --prerelease=false --latest
 ```
 
 An edit of the same bundles, not another build — so stable users receive exactly what

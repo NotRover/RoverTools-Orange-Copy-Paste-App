@@ -61,8 +61,8 @@ Three components, **three git repositories**. The client lives directly in this 
 ```text
 RoverTools/
 ├─ orange-copy-paste-clipboard-app-rust/   # desktop app — part of this repo
-├─ orange-copy-paste-clipboard-backend/    # submodule → RoverTools-Smart-Clipboard-App-Backend
-├─ orange-copy-paste-clipboard-website/    # submodule → RoverTools-OrangeCP-Website
+├─ orange-copy-paste-clipboard-backend/    # submodule → RoverTools-Orange-Copy-Paste-Backend
+├─ orange-copy-paste-clipboard-website/    # submodule → RoverTools-Orange-Copy-Paste-Website
 ├─ docs/
 │  ├─ architecture.md                      # cross-system architecture and integration contract
 │  └─ releasing.md                         # how a release is cut
@@ -76,7 +76,7 @@ RoverTools/
 Clone with the submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/NotRover/RoverTools-Smart-Clipboard-App-RUST.git
+git clone --recurse-submodules https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
 ```
 
 If you already cloned without it:
@@ -130,7 +130,7 @@ A release is one manual workflow run: `gh workflow run release.yml` for a patch,
 
 `.github/workflows/release.yml` (dispatch only) checks its own prerequisites, publishes [`changelog/next.md`](changelog/) as the notes (erroring right away if it is empty), bumps the version in `src-tauri/Cargo.toml`, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` to the **public** releases repo the in-app updater reads. On release it renames `next.md` to `changelog/<version>-<bump>-<channel>.md`. The source repo stays private; the releases repo has to be public because the updater fetches over plain HTTPS with no credentials.
 
-From Claude Code: `/create-rovertools-orangecp-release [patch|minor|major] [stable|beta] [dry-run|preview]` — the skill asks for whatever you leave out, shows the version and notes about to ship, and dispatches only after an explicit yes.
+From Claude Code: `/create-rovertools-orange-copy-paste-release [patch|minor|major] [stable|beta] [dry-run|preview]` — the skill asks for whatever you leave out, shows the version and notes about to ship, and dispatches only after an explicit yes.
 
 The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/beta design, the one-time signing-key and releases-repo setup, and the pre-trust smoke test all live in [`docs/releasing.md`](docs/releasing.md). `.github/workflows/build-linux.yml` builds Linux bundles on demand. Releases never touch the sync backend; it deploys on its own.
 

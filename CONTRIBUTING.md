@@ -43,8 +43,8 @@ Prerequisites:
 Clone with submodules and install:
 
 ```bash
-git clone --recurse-submodules https://github.com/NotRover/RoverTools-Smart-Clipboard-App-RUST.git
-cd RoverTools-Smart-Clipboard-App-RUST
+git clone --recurse-submodules https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
+cd RoverTools-Orange-Copy-Paste-App
 bun install
 ```
 

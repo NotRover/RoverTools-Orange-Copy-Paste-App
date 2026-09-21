@@ -46,9 +46,9 @@ Three components, **three git repos**:
 
 | Path | Role | Repo |
 |------|------|------|
-| `orange-copy-paste-clipboard-app-rust/` | Desktop Smart Clipboard app (React + TypeScript + Vite + Tauri/Rust). Clipboard, notes, and cloud-sync domains. | Part of the **parent** repo (`RoverTools` → renamed `RoverTools-Smart-Clipboard-App-RUST`) |
-| `orange-copy-paste-clipboard-backend/` | Cloud-sync API: FastAPI + Supabase (Postgres + GoTrue Auth) + Redis + S3/R2 blobs. | **Submodule** — its own repo (`RoverTools-Smart-Clipboard-App-Backend`) |
-| `orange-copy-paste-clipboard-website/` | Public docs + presentation site (Astro + Starlight, bun). End-user how-to and the marketing landing page. | **Submodule** — its own repo (`RoverTools-OrangeCP-Website`) |
+| `orange-copy-paste-clipboard-app-rust/` | Desktop Smart Clipboard app (React + TypeScript + Vite + Tauri/Rust). Clipboard, notes, and cloud-sync domains. | Part of the **parent** repo (`RoverTools` → renamed `RoverTools-Orange-Copy-Paste-App`) |
+| `orange-copy-paste-clipboard-backend/` | Cloud-sync API: FastAPI + Supabase (Postgres + GoTrue Auth) + Redis + S3/R2 blobs. | **Submodule** — its own repo (`RoverTools-Orange-Copy-Paste-Backend`) |
+| `orange-copy-paste-clipboard-website/` | Public docs + presentation site (Astro + Starlight, bun). End-user how-to and the marketing landing page. | **Submodule** — its own repo (`RoverTools-Orange-Copy-Paste-Website`) |
 
 The client lives **directly** in the parent repo; the backend and the website are each submodules with their own repos. Default branch on all three repos is `main`.
 
@@ -183,7 +183,7 @@ Covers every string a user reads: labels, buttons, empty states, toasts, errors,
 **Client** (from `orange-copy-paste-clipboard-app-rust/`):
 - Install: `bun install` · Frontend dev: `bun run dev` · Full app: `bun run tauri dev`
 - Frontend typecheck+build: `bun run build` · Rust check: `cd src-tauri && cargo check` · Bundle: `bun run tauri build`
-- Release (from the workspace root, only when asked): `/create-rovertools-orangecp-release`, or `gh workflow run release.yml -f bump=… -f prerelease=… -f dry_run=…`
+- Release (from the workspace root, only when asked): `/create-rovertools-orange-copy-paste-release`, or `gh workflow run release.yml -f bump=… -f prerelease=… -f dry_run=…`
 
 **Backend** (from `orange-copy-paste-clipboard-backend/`, via `uv`):
 - Lint: `uv run ruff check src` · Types: `uv run ty check src` · Tests: `uv run pytest`
@@ -214,13 +214,13 @@ Pick the smallest valid check set for what you touched.
 ## Releases (client only)
 
 Shipping is one dispatch of `.github/workflows/release.yml`: it bumps the version, builds
-signed bundles and publishes them to the **public** `NotRover/RoverTools-Releases` repo
+signed bundles and publishes them to the **public** `NotRover/RoverTools-Orange-Copy-Paste-Releases` repo
 the in-app updater reads. The backend has no release pipeline. Reference:
 [`docs/releasing.md`](docs/releasing.md).
 
 - **Never dispatch unless the user asks in that turn**, and never guess the three inputs —
   bump, channel, mode. Ask for whatever wasn't stated; the
-  `/create-rovertools-orangecp-release` skill enforces this.
+  `/create-rovertools-orange-copy-paste-release` skill enforces this.
 - **Never hand-edit what the workflow owns:** versions, tags, `latest.json`, `beta.json`,
   or a published release's prerelease flag.
 - `src-tauri/Cargo.toml` is the single source of version truth (`tauri.conf.json` has no
