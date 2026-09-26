@@ -52,7 +52,7 @@ alone, so it has no home in either doc. Preserve them across any change to eithe
 | 1 | **The local store is always plaintext.** `history.bin` and `notes.bin` are never encrypted. The encryption boundary is the network, not the disk. |
 | 2 | **Sync is always optional.** The app is fully functional with no account, no network and no server. Nothing in the capture, search, paste or notes paths may block on it. |
 | 3 | **The server never sees plaintext or any key.** `encrypted_content` and `encrypted_metadata` are sealed on-device before any network call, and `wrapped_keys` / `wrapped_space_keys` stay opaque — the server holds no private key that could open either. |
-| 4 | **The UMK never leaves the device in the clear.** In memory only, unwrapped at login from the password and `kdf_salt`, cleared on lock or exit. The server holds only the wrapped envelope. |
+| 4 | **The UMK never leaves the device in the clear, and neither does the password.** In memory only, unwrapped at login from the password, the address and `kdf_salt`, cleared on lock or exit. The server holds only the wrapped envelope; Supabase holds only a separate login key derived from the password. |
 | 5 | **Tombstones always propagate and always win.** A `deleted_at` on a received entry is honoured; deletion beats a concurrent update. |
 | 6 | **The capture pipeline is untouched by sync.** The clipboard watcher and the suppress-flag flow are not modified by sync logic. Sync is a post-capture side effect. |
 | 7 | **Pins and groups sync both ways.** A pin or group change on one device reaches every other device holding that entry. |

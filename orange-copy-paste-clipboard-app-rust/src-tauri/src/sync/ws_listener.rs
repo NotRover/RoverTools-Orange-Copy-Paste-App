@@ -34,6 +34,12 @@ const MAX_BACKOFF_SECS: u64 = 60;
 /// three missed pings is a dead connection worth replacing.
 const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(70);
 
+/// How long the server gets to answer the auth frame.
+const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Server close code: this account already holds every socket slot it gets.
+const WS_TOO_MANY: u16 = 4429;
+
 // ── WS event payloads from server ────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
@@ -86,6 +92,9 @@ impl WsListener {
             if established {
                 backoff = INITIAL_BACKOFF_SECS;
             }
+            if err.contains("too many sockets") {
+                backoff = MAX_BACKOFF_SECS;
+            }
             self.set_connected(false);
             eprintln!("[sync:ws] disconnected: {err}; reconnecting in {backoff}s");
             tokio::time::sleep(Duration::from_secs(backoff)).await;
@@ -126,13 +135,50 @@ impl WsListener {
             .replacen("https://", "wss://", 1)
             .replacen("http://", "ws://", 1);
         let endpoint = format!("{}/ws", base.trim_end_matches('/'));
-        // The token has to travel in the query string — that is the wire contract
-        // — but it must never be logged with it.
-        let url = format!("{endpoint}?token={token}&device_id={device_id}");
 
-        let (ws_stream, _) = connect_async(&url)
+        let (ws_stream, _) = connect_async(&endpoint)
             .await
             .map_err(|e| format!("ws connect: {e}"))?;
+        let (mut write, mut read) = ws_stream.split();
+
+        // The token goes in the first frame, not the URL. A query string is
+        // written to every access log between here and the server, and a
+        // bearer token in a log is a bearer token. The server answers
+        // `auth_ok` or closes; anything else within the deadline is a failed
+        // handshake and the loop reconnects.
+        let hello = serde_json::json!({
+            "type": "auth",
+            "token": token,
+            "device_id": device_id,
+        });
+        write
+            .send(Message::Text(hello.to_string().into()))
+            .await
+            .map_err(|e| format!("ws auth send: {e}"))?;
+        let first = tokio::time::timeout(WS_AUTH_TIMEOUT, read.next())
+            .await
+            .map_err(|_| "ws auth: no answer".to_string())?;
+        match first {
+            Some(Ok(Message::Text(text))) => {
+                let ok = serde_json::from_str::<serde_json::Value>(&text)
+                    .ok()
+                    .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|t| t == "auth_ok"))
+                    .unwrap_or(false);
+                if !ok {
+                    return Err("ws auth: refused".into());
+                }
+            }
+            Some(Ok(Message::Close(frame))) => {
+                let code = frame.map(|f| u16::from(f.code)).unwrap_or_default();
+                // 4429 is the per-user socket cap. Another window of this
+                // account holds the slots, so hammering the door does nothing;
+                // the reconnect loop reads this code and waits the full backoff.
+                return Err(format!("ws auth: closed ({code}){}", if code == WS_TOO_MANY { " too many sockets" } else { "" }));
+            }
+            Some(Ok(_)) => return Err("ws auth: unexpected frame".into()),
+            Some(Err(e)) => return Err(format!("ws auth: {e}")),
+            None => return Err("ws auth: socket ended".into()),
+        }
 
         // Endpoint and device only: the token is a live bearer credential, and
         // stdout here is a log file that outlives the session.
@@ -162,8 +208,6 @@ impl WsListener {
                 }
             });
         }
-
-        let (mut write, mut read) = ws_stream.split();
 
         loop {
             let next = match tokio::time::timeout(WS_IDLE_TIMEOUT, read.next()).await {
@@ -275,6 +319,19 @@ impl WsListener {
                     "sync:device-presence",
                     &serde_json::json!({ "device_id": msg.payload.get("device_id"), "online": false }),
                 );
+            }
+            // This install's device row was revoked from another device. The
+            // server closes the socket next; ending the session here, rather
+            // than reconnecting into a 4401, is what makes a revoke take
+            // effect while the app is running.
+            "device:revoked" => {
+                let mine = self.http.device_id();
+                let target = msg.payload.get("device_id").and_then(|v| v.as_str());
+                if target.is_some() && target == mine.as_deref() {
+                    if let Some(sync) = self.sync_client() {
+                        sync.end_session_revoked();
+                    }
+                }
             }
             // The owner persisted a fresh wrapped keyring for us — reconcile
             // recovers it (Rust owns the identity key), then tells the UI.

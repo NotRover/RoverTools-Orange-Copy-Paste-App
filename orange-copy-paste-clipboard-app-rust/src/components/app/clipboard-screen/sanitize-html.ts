@@ -3,9 +3,11 @@
  *
  * Clipboard HTML comes from whatever app the user copied from, so it is
  * untrusted: everything outside the allow-list below is stripped, including
- * every script vector and every `javascript:` URI. Local image paths are
- * rewritten to Tauri asset URLs so a fragment copied from a document still
- * shows its pictures.
+ * every script vector. Links keep only http, https and mailto targets. Nothing
+ * in the result loads from the network: a remote `img src` and any CSS `url()`
+ * are dropped, so HTML shared into a space cannot work as a tracking pixel.
+ * Local image paths are rewritten to Tauri asset URLs so a fragment copied
+ * from a document still shows its pictures.
  *
  * Shared by the card preview and the full viewer, which must agree - a tag the
  * preview strips and the viewer renders would be a hole opened by the click
@@ -76,23 +78,67 @@ const SAFE_STYLE_PROPS = new Set([
   "display",
 ]);
 
+// A declaration that can fetch something (`url()`, `image-set()`, ...) or that
+// hides a function name behind a CSS escape or comment is dropped whole.
+const STYLE_FETCH = /url\s*\(|image-set\s*\(|image\s*\(|cross-fade\s*\(|element\s*\(|[\\]|\/\*/i;
+
 function sanitizeStyle(style: string): string {
   return style
     .split(";")
     .map((decl) => decl.trim())
     .filter((decl) => {
       const prop = decl.split(":")[0]?.trim().toLowerCase() ?? "";
-      return SAFE_STYLE_PROPS.has(prop);
+      return SAFE_STYLE_PROPS.has(prop) && !STYLE_FETCH.test(decl);
     })
     .join("; ");
+}
+
+// Base for resolving hrefs; a result on this host was a relative link.
+const URL_BASE = "https://x.invalid/";
+const LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+/**
+ * The href to keep, or null to drop the attribute. Parsing with `URL` rather
+ * than matching the raw string is the point: the browser strips tabs, newlines
+ * and leading control characters before it reads a scheme, so
+ * `java&#9;script:` is `javascript:` to it and must be to us too.
+ */
+export function safeLinkHref(href: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(href, URL_BASE);
+  } catch {
+    return null;
+  }
+  if (!LINK_PROTOCOLS.has(url.protocol)) return null;
+  if (url.protocol !== "mailto:" && url.host === "x.invalid") return null;
+  return url.href;
+}
+
+/** Whether an image URL stays on this machine: an inline image or a Tauri asset. */
+function isLocalImageUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "data:") return /^image\//i.test(url.pathname);
+  if (url.protocol === "asset:") return true;
+  // convertFileSrc on Windows yields http://asset.localhost/<path>.
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.hostname === "asset.localhost"
+  );
 }
 
 function normalizeImageSrc(src: string): string | null {
   const value = src.trim();
   if (!value) return null;
 
-  // Safe URI schemes that the webview can render directly.
-  if (/^(https?:|data:|blob:|asset:)/i.test(value)) {
+  // Inline images and Tauri asset URLs render directly. Remote http(s) images
+  // are dropped: loading one tells its host who viewed the entry, and when.
+  if (isLocalImageUrl(value)) {
     return value;
   }
 
@@ -154,25 +200,18 @@ export function sanitizeHtml(html: string): string {
         const name = attr.name.toLowerCase();
         if (!allowedSet.has(name)) continue;
         let value = attr.value;
-        // Prevent javascript: URIs
-        if (
-          (name === "href" || name === "src") &&
-          /^\s*javascript:/i.test(value)
-        )
-          continue;
-        // img src: normalize local file paths and keep only renderable schemes
-        if (tag === "img" && name === "src") {
+        if (name === "href") {
+          const safe = safeLinkHref(value);
+          if (!safe) continue;
+          value = safe;
+        } else if (name === "src") {
+          // Only img carries src here: keep local, renderable images only.
           const normalized = normalizeImageSrc(value);
           if (!normalized) continue;
           value = normalized;
-        } else if (
-          name === "src" &&
-          !/^(https?:|data:|blob:|asset:)/i.test(value)
-        ) {
-          continue;
         }
         if (name === "style") value = sanitizeStyle(value);
-        attrs += ` ${name}="${value.replace(/"/g, "&quot;")}"`;
+        attrs += ` ${name}="${value.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
       }
     }
 

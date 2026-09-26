@@ -110,7 +110,7 @@ Specifics (models, quotas, exact payloads) change — **treat the code as source
 - `spaces/` — spaces, invites, and space-key distribution.
 - `blobs/` — presigned upload/download (`s3.py`), quota. `admin/` — internal stats/ops.
 - `announcements/` — server-authored messages to users. `web/` — human-facing HTML pages (`templates/`).
-- `migrations/versions/` — Alembic, currently through `0019`. Which of them a given database has actually seen is a separate question — see the deploy-never-migrates note above. `tests/` — pytest, one module per domain (`test_auth`, `test_sync`, `test_blobs`, `test_spaces_invites`, `test_announcements`, `test_web`, and others).
+- `migrations/versions/` — Alembic, currently through `0020`. Which of them a given database has actually seen is a separate question — see the deploy-never-migrates note above. `tests/` — pytest, one module per domain (`test_auth`, `test_sync`, `test_blobs`, `test_spaces_invites`, `test_announcements`, `test_web`, and others).
 
 ## Cross-System Contract
 

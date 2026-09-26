@@ -83,6 +83,7 @@ pub(crate) fn after_new_entry(
     if state.autosave.load(Ordering::Relaxed) {
         history.lock().add_group(&entry.id, "Saved");
     }
+    crate::clipboard::commands::allow_entry_assets(app, entry);
     let _ = app.emit("clipboard:new-entry", entry);
     crate::clipboard::commands::auto_save_history(app);
     let sync = state.sync_client.lock().clone();

@@ -63,8 +63,35 @@ fn schedule_paste() {
 }
 
 #[tauri::command]
-pub fn get_history(state: State<'_, AppState>) -> Vec<ClipboardEntry> {
-    state.history.lock().all().to_vec()
+pub fn get_history(app: tauri::AppHandle, state: State<'_, AppState>) -> Vec<ClipboardEntry> {
+    let entries = state.history.lock().all().to_vec();
+    for entry in &entries {
+        allow_entry_assets(&app, entry);
+    }
+    entries
+}
+
+/// Let the webview load the files a file entry points at.
+///
+/// The asset protocol's static scope covers only the app's own folders. A file
+/// entry names files wherever the user copied them from, and the viewers show
+/// those (a video, the full image) through the asset protocol - so each path is
+/// allowed here, one at a time, by the side that captured it. The webview never
+/// gets to pick a path itself.
+pub(crate) fn allow_entry_assets(app: &tauri::AppHandle, entry: &ClipboardEntry) {
+    if entry.kind != crate::clipboard::history::EntryKind::File {
+        return;
+    }
+    let scope = app.asset_protocol_scope();
+    for line in entry.content.lines() {
+        let path = line.trim();
+        if path.is_empty() {
+            continue;
+        }
+        if let Err(e) = scope.allow_file(path) {
+            eprintln!("[assets] {path}: {e}");
+        }
+    }
 }
 
 #[tauri::command]
@@ -210,6 +237,13 @@ pub fn set_setting(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> bool {
+    // The sync endpoints and the Supabase key are not preferences. Anything
+    // that can run in the webview can call this command, and a rewritten
+    // server URL would carry the next sign-in to whoever wrote it.
+    if crate::sync::config::SyncConfig::is_endpoint_key(&key) {
+        crate::health::note("settings write refused", &format!("{key} is not settable over IPC"));
+        return false;
+    }
     // Keep the in-memory cache in sync when boolean flags change.
     let flag = match key.as_str() {
         "keep_history" => Some(&state.keep_history),
@@ -1205,4 +1239,33 @@ pub(crate) fn read_clipboard_capture() -> Capture {
     }
 
     Capture::Nothing
+}
+
+/// Open a link from an entry in the system browser.
+///
+/// The webview has no navigation of its own (see `webview-guards.ts`), so
+/// this is the only way a link in shared content leaves the app. Only web and
+/// mail links, and none aimed back at this machine: a link that reaches a
+/// local port is a request forged from inside the app, not a page to read.
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|e| format!("not a link: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {
+            let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+            let local = host.is_empty()
+                || host == "localhost"
+                || host.ends_with(".localhost")
+                || host == "127.0.0.1"
+                || host == "[::1]"
+                || host.starts_with("127.")
+                || host == "0.0.0.0";
+            if local {
+                return Err("links to this machine do not open from the app".into());
+            }
+        }
+        "mailto" => {}
+        other => return Err(format!("links of type {other}: are not opened")),
+    }
+    open::that_detached(parsed.as_str()).map_err(|e| format!("could not open the link: {e}"))
 }

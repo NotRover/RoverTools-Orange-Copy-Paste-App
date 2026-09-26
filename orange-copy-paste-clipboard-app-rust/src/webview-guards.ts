@@ -11,8 +11,16 @@
  * Both are suppressed in release builds only. In `tauri dev` the whole set stays
  * available, because reload and devtools are how the frontend is worked on.
  *
+ * Link clicks are guarded in every build: a link in rendered clipboard HTML
+ * must never navigate the window, because the page it lands on would run with
+ * the app's IPC. Links inside an element marked `data-open-links` open in the
+ * system browser instead; anywhere else a click on a link does nothing.
+ *
  * Called once per window entry, before the React root mounts.
  */
+
+import { invoke } from "@tauri-apps/api/core";
+import { safeLinkHref } from "./components/app/clipboard-screen/sanitize-html";
 
 /** Fields where the native menu is Cut/Copy/Paste and worth keeping. */
 function isEditable(node: EventTarget | null): boolean {
@@ -32,7 +40,43 @@ function isBrowserShortcut(e: KeyboardEvent): boolean {
   return (e.ctrlKey || e.metaKey) && ["r", "p", "s", "u"].includes(key);
 }
 
+/** The link a click landed on, unless it is inside an editor. */
+function linkTarget(node: EventTarget | null): HTMLAnchorElement | null {
+  const el = node instanceof Element ? node : null;
+  const link = el?.closest<HTMLAnchorElement>("a[href]") ?? null;
+  // An editor's links are text being edited; the webview does not follow them.
+  if (!link || isEditable(link)) return null;
+  return link;
+}
+
+/** Hands a link to the system browser; only http, https and mailto, never the app's own hosts. */
+function openExternally(href: string): void {
+  const url = safeLinkHref(href);
+  if (!url) return;
+  const host = new URL(url).hostname;
+  if (host === "localhost" || host.endsWith(".localhost")) return;
+  invoke("open_external_url", { url }).catch((err) =>
+    console.error("[links] could not open link", err),
+  );
+}
+
+function installLinkGuard(): void {
+  window.addEventListener("click", (e) => {
+    const link = linkTarget(e.target);
+    if (!link) return;
+    // preventDefault only: the card or row the link sits in keeps its click.
+    e.preventDefault();
+    if (e.button === 0 && link.closest("[data-open-links]")) {
+      openExternally(link.getAttribute("href") ?? "");
+    }
+  });
+  window.addEventListener("auxclick", (e) => {
+    if (linkTarget(e.target)) e.preventDefault();
+  });
+}
+
 export function installWebviewGuards(): void {
+  installLinkGuard();
   if (import.meta.env.DEV) return;
 
   window.addEventListener(

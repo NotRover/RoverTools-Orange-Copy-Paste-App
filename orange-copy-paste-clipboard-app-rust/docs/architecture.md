@@ -135,7 +135,7 @@ src-tauri/
 │   │   ├── id_map.rs           # client_id -> server_id map (id_map.json)
 │   │   ├── sync_state.rs       # Connection/status state shared with the UI
 │   │   ├── persist.rs          # Cached session + sync metadata persistence
-│   │   ├── crypto.rs           # UMK unwrap (Argon2id KEK), AES-256-GCM, X25519 key exchange
+│   │   ├── crypto.rs           # password split (Argon2id + HKDF), UMK envelope, AES-256-GCM, X25519
 │   │   ├── types.rs            # Wire types mirrored from the backend contract
 │   │   ├── commands.rs         # Tauri commands: sync_login, sync_logout, sync_now, etc.
 │   │   └── config.rs           # Server/Supabase endpoints + sync-enabled flag
@@ -761,10 +761,12 @@ user keeps rather than one they remember. 30 characters in six groups of five -
 150 bits - from a 32-symbol alphabet with `O`, `0`, `I` and `1` removed. Exactly 32
 symbols so each character is 5 unbiased bits from one random byte.
 
-`derive_kek` and the account's own `kdf_salt` are reused; only the secret and the
-AAD differ (`umk-recovery-v1` against `umk-envelope-v1`). Sharing the salt is
-deliberate, and the distinct AAD is what makes feeding one envelope to the other's
-unwrap fail loudly rather than half-work - there is a test for exactly that.
+The same Argon2id step and the account's own `kdf_salt` are reused; only the secret
+and the AAD differ (`umk-recovery-v1` against `umk-envelope-v2`, or `-v1` before the
+split). Sharing the salt is deliberate, and the distinct AAD is what makes feeding
+one envelope to the other's unwrap fail loudly rather than half-work - there is a
+test for exactly that. The code is never sent anywhere, so unlike the password it
+is not split into a credential half.
 
 The code is generated in Rust and returned once. It is not stored anywhere: only
 its envelope goes to the server, and the envelope is uploaded **before** the code
@@ -958,8 +960,11 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 
 | Function                                                | Description                                             |
 | ------------------------------------------------------- | ------------------------------------------------------- |
-| `derive_kek(password, kdf_salt) → [u8; 32]`             | Argon2id password-derived wrapping key; the exact KDF parameters are the backend doc's (they must match cross-device or unwrap fails) |
-| `wrap_umk(kek, umk) → String` / `unwrap_umk(kek, b64)`  | Wrap/unwrap the random UMK envelope; unwrap fails ⇒ wrong password |
+| `derive_master(password, email) → [u8; 32]`             | One Argon2id pass over the password, salted with the normalized address; the exact parameters are the backend doc's (they must match cross-device or unwrap fails) |
+| `derive_auth_key(master) → String`                      | The HKDF half sent to Supabase as the account credential. The only password-derived value that leaves the device |
+| `derive_kek(master, kdf_salt) → [u8; 32]`               | The HKDF half that wraps the UMK; never leaves the device |
+| `derive_legacy_kek(password, kdf_salt)` / `unwrap_umk_legacy` | Read-only path for an envelope written before the split (`umk-envelope-v1`), so `finalize_session` can re-wrap it |
+| `wrap_umk(kek, umk) → String` / `unwrap_umk(kek, b64)`  | Wrap/unwrap the random UMK envelope (`umk-envelope-v2`); unwrap fails ⇒ wrong password |
 | `encrypt(key, plaintext, aad) → String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
 | `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
 | `generate_x25519_keypair() → (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |
@@ -971,7 +976,7 @@ All cryptography is performed here. Nothing outside this module touches raw key 
 | `store_reset_verifier` / `load_reset_verifier` / `clear_reset_verifier` | The reset verifier in the OS keychain, install-scoped - the two halves of a reset are usually separated by a restart |
 | `generate_recovery_code() → Zeroizing<String>`          | 150 bits, six groups of five, look-alike characters removed |
 | `normalize_recovery_code(input)`                        | Dashes and spaces out, uppercased - whatever the user types back derives the same key |
-| `wrap_umk_recovery` / `unwrap_umk_recovery`             | The recovery envelope: `derive_kek(code, kdf_salt)` with AAD `umk-recovery-v1` |
+| `wrap_umk_recovery` / `unwrap_umk_recovery`             | The recovery envelope: `Argon2id(code, kdf_salt)` with AAD `umk-recovery-v1` |
 
 **Encryption invariant:** The UMK is passed in at call time from the in-memory `SyncClient` state. It is never written to disk. `crypto.rs` receives it as a `&[u8; 32]` slice.
 

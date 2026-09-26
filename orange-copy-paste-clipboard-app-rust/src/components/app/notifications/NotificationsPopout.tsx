@@ -265,7 +265,6 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
         await invoke("space_approve_join", {
           spaceId,
           requestId,
-          identityPubkey: null,
         });
       } else {
         await invoke("space_decline_join", { spaceId, requestId });

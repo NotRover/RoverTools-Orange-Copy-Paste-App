@@ -75,7 +75,7 @@ jobs:
       tag: v${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Whole history and every tag: the notes are the commits since the last
           # release tag, so both have to be present.
@@ -86,9 +86,12 @@ jobs:
         # All of it up front, before a build is spent. Each of these fails
         # silently or expensively otherwise, and the message says what to do
         # rather than what went wrong.
+        #
+        # Only whether each secret is set reaches this step, never its value: the
+        # signing key is in exactly one environment, the `tauri build` step below.
         env:
-          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          HAS_SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
         run: |
           set -uo pipefail
           fail=0
@@ -100,8 +103,8 @@ jobs:
             bad "The updater pubkey in tauri.conf.json is still the placeholder. Generate a keypair (docs/releasing.md step 1) and commit the public half, or every client will reject this release."
           fi
 
-          [ -n "$SIGNING_KEY" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY is not set. Bundles would be unsigned and unusable as updates."
-          [ -n "$SIGNING_PASSWORD" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set."
+          [ "$HAS_SIGNING_KEY" = "true" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY is not set. Bundles would be unsigned and unusable as updates."
+          [ "$HAS_SIGNING_PASSWORD" = "true" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set."
 
           [ "$fail" -eq 0 ] || exit 1
           echo "All prerequisites present."
@@ -176,7 +179,7 @@ jobs:
       - name: Install cargo-edit
         # `cargo set-version` keeps Cargo.toml and Cargo.lock consistent, which
         # hand-editing the version does not.
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
         with:
           tool: cargo-edit
 
@@ -257,7 +260,7 @@ jobs:
 
       - name: Upload release notes
         # Passed to the publish job as a file: multi-line job outputs get mangled.
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-notes
           path: RELEASE_NOTES.md
@@ -338,7 +341,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: false
 
@@ -355,19 +358,19 @@ jobs:
             librsvg2-dev patchelf
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: ${{ env.APP_DIR }}/src-tauri -> target
           key: ${{ matrix.artifact }}
 
       - name: Install cargo-edit
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
         with:
           tool: cargo-edit
 
@@ -379,10 +382,14 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: ${{ env.APP_DIR }}
-        run: bun install
+        # --frozen-lockfile: install exactly what bun.lock names, and fail rather
+        # than resolve something newer into a signed release.
+        run: bun install --frozen-lockfile
 
       - name: Build bundles
         working-directory: ${{ env.APP_DIR }}
+        # The only step that sees the signing key: step-level env, not job-level,
+        # so no other step (and no action it runs) can read it.
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -433,7 +440,7 @@ jobs:
           ls -la "$out"
 
       - name: Upload bundles
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bundle-${{ matrix.artifact }}
           path: staging/*
@@ -450,7 +457,7 @@ jobs:
       contents: write # create the release, commit beta.json
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           path: artifacts
 

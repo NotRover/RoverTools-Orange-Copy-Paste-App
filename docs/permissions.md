@@ -89,8 +89,10 @@ so the damage was one-sided and invisible from the other end.
 |---|---|---|
 | Rename, delete the space | yes | no |
 | Invite by email | yes | no |
+| Accept an email invite | n/a | only with a verified address (`email_verified` not false on the token) |
 | Mint the space's key | yes | no |
-| Hand the key to a member who lacks one | yes | yes (any keyholder) |
+| Hand the key to a member who lacks one | yes | yes (any keyholder), only onto a member with no key |
+| Replace a key a member already holds | yes | no |
 | Change the share-history policy | yes | no |
 | Choose whether members may approve join requests | yes | no |
 | Approve or decline a join request | yes | only if the owner turned it on |
@@ -227,7 +229,17 @@ Client, React — hides what is not allowed, so nothing dead is on screen:
 Backend — the only place a rule survives a modified client:
 
 - `spaces/service.py` — `remove_entry_from_space` narrows to the caller's own
-  rows for non-owners; owner-only checks on the rest of the space routes.
+  rows for non-owners, and answers a non-member with the same 404 as a missing
+  entry; owner-only checks on the rest of the space routes.
+- `spaces/service.py` — `distribute_keys` lets a non-owner write only a member
+  row that holds no wrap, and never the owner's row; everything else in the
+  request is skipped.
+- `sync/service.py` — `_require_memberships`: a push that adds a space the
+  caller is not a current member of is refused (422 `not_a_member`). This is what
+  "Share an entry into the space" rests on server-side.
+- `sync/service.py` — `_require_own_blob`: a push may only name a blob the caller
+  uploaded and confirmed; `blobs/service.py:_shares_space_with_blob` only counts
+  rows written by the blob's owner.
 - `spaces/service.py` — `_require_member` is the whole gate for reading and
   writing comments: a space is a room, and everyone in it can talk.
   `delete_comment` is the narrower one, author or space owner.
@@ -247,8 +259,8 @@ it cannot tell a good edit from a bad one. Everything above about pins, groups,
 and read-only editing is client-side, and a modified client can ignore all of it.
 
 **Authorship is the exception, and is enforced server-side.** A push that would
-insert a row for a `client_id` another account already holds *in a space the
-push targets* is refused with `not_your_entry`
+insert or update a row for a `client_id` another account already holds *in a
+space the push adds* is refused with `not_your_entry`
 (`sync/service.py:_belongs_to_someone_else`). That is a rule the server can
 enforce without reading anything: it is about which account owns a key, not
 about what the content says.
@@ -287,10 +299,25 @@ encryption key and has nothing to do with membership of anything.
 
 | Action | Who can do it | Enforced where |
 | --- | --- | --- |
-| Save a recovery code | the account holder, on a signed-in device | `sync_create_recovery_code` needs the UMK in memory; `PUT /auth/umk/recovery` needs the account's own JWT |
+| Save a recovery code | the account holder, on a signed-in device | `sync_create_recovery_code` needs the UMK in memory; `PUT /auth/umk/recovery` needs the account's own JWT and, once the account has one, its UMK proof |
 | Regenerate one | the same | the same route; storing replaces the envelope, so the previous code stops working |
 | Use one | anyone holding the code, on any machine | client-side only - the server stores a blob it cannot open |
 | Clear one | the account holder | `DELETE /auth/umk/recovery`, used when an account starts over with a new key |
 
 There is deliberately no route that lets the server, an admin, or another member
 recover somebody's key. That would end the end-to-end guarantee.
+
+## 8. Key material and devices
+
+A bearer token proves who signed in, not that the caller holds the account's key. So
+every write that changes key material also needs the UMK proof (`X-Umk-Proof`), and
+every device-scoped route needs a device that is still the caller's. The rule itself is
+in the backend's `docs/architecture.md` (section 7.1 and the API conventions).
+
+| Action | Who can do it | Enforced where |
+| --- | --- | --- |
+| Replace the password envelope, save or clear the recovery envelope | the account holder with the UMK unlocked | backend `auth/service.py` `enforce_umk_proof`; trust on first use for accounts with no proof yet |
+| Wrap the UMK for a device | the same, and only for an unrevoked device of the same account | backend `store_wrapped_umk` |
+| Revoke a device | the same | backend `revoke_device`; the device is refused at once (`device_revoked`) and its sockets are closed |
+| Start over with a new key | whoever opened a Supabase password-recovery link for the account | backend `set_wrapped_umk` with `reset: true`, gated on the token's `amr` method `recovery` |
+| Call a device-scoped route or open the socket | the account's own, unrevoked device | backend `dependencies.py` `check_device` |

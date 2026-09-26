@@ -1084,3 +1084,45 @@ self-initiated restart may take over a running copy, and it has to say so - a
 launch that unconditionally kills the previous instance makes every focus/forward
 mechanism downstream of it unreachable, no matter how correct that mechanism is
 in isolation. Shipped in 0.3.4.
+
+## #30 - The account password was sent to Supabase and also derived the encryption key
+
+**Symptom.** None a user would see, which is what made it dangerous. The docs promised
+that the password never left the device and that the server held nothing that could
+open the data. Neither was true. One secret, the account password, did two jobs: it was
+sent in plaintext (inside TLS) to Supabase Auth on every sign-in, sign-up and password
+change (`supabase.rs` `sign_in_password`, `sign_up`, `update_password`), and the same
+string was fed to Argon2id on the device to derive the key that unwraps the User Master
+Key (`crypto.rs` `derive_kek`, called from `finalize_session`).
+
+**Cause.** The envelope model was designed as if Supabase Auth were a separate party
+from the sync backend, and it is not: the backend's tables live in the same Supabase
+Postgres as `auth.users`. Whoever holds that database holds `bcrypt(password)`,
+`kdf_salt` and `pw_wrapped_umk` in one dump. bcrypt is orders of magnitude cheaper to
+guess against than the 64 MB Argon2id the design relied on, so the memory-hard KDF was
+bypassed for any guessable password: crack the bcrypt hash, run Argon2id once on the
+match, unwrap the UMK, read every clip and note. The same shortcut was open to anyone
+who could read sign-in traffic to Supabase: the project owner, Supabase itself, a
+compromised Supabase account, a TLS-terminating proxy. The recovery code, the device
+wraps and the space keys were not affected; the sync backend never received the
+password.
+
+**Fix.** The password is stretched once with Argon2id, salted with the normalized email
+address so the result exists before sign-in, and split with HKDF-SHA256 into two
+independent halves. The *auth key* is what Supabase receives as the account "password"
+everywhere the raw password used to go. The *KEK* is bound to the account's `kdf_salt`
+and wraps the UMK under a new AAD, `umk-envelope-v2`. Cracking the auth key's bcrypt
+hash now costs a full Argon2id run per guess and yields only the ability to sign in.
+
+Existing accounts migrate on their next sign-in with no server change and no
+re-encryption: sign-in with the auth key is refused, the client retries once with the
+raw password, opens the old envelope with the legacy KEK, re-wraps the same UMK under
+the new one, and only then replaces the Supabase credential. Envelope first, credential
+second, so a failure between the two leaves the old sign-in working and the next
+attempt finishes the job. The Google path does the same when it finds an old envelope.
+The exact derivation is the backend doc's, section 7.1.
+
+What the fix cannot undo: a database backup taken before an account migrated still
+holds the bcrypt hash of its raw password. Migration replaces the live hash, not the
+history, so a weak password that was set before the fix is only truly protected by
+changing it.
