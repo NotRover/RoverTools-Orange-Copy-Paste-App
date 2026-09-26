@@ -1,15 +1,15 @@
 {
-  "version": "0.4.0",
-  "notes": "### New\n- Passwords must be at least 8 characters. This applies when you sign up, change your password, or set one after signing in with Google.\n\n### Improved\n- Changing your password now asks for your current one first, and creating a recovery code asks for your password. Both actions can open your account from another machine, so only someone who knows the password can do them.\n- A device you revoke from the account screen is signed out within seconds, even while it is running, instead of keeping access until its session expires.\n- Links inside copied web content open in your browser only when you click them in the viewer. Previews no longer follow links on their own.\n- Joining a space from a link now shows the join form with the code filled in, so you confirm before joining.\n\n### Fixed\n- Copied web content is cleaned before it is shown, so a page cannot run scripts or load remote images inside the app.\n- Your account password now stays on your device. Signing in sends a separate login key derived from it, so the service that checks your sign-in never holds the password that unlocks your data. Existing accounts switch over the next time you sign in, with nothing to do and nothing re-encrypted.",
-  "pub_date": "2026-09-26T19:59:12Z",
+  "version": "0.4.1",
+  "notes": "This release updates the libraries the app is built on to fix known security issues.\n\n### Fixed\n- The app framework and two of its networking and data libraries are updated to versions that fix published security advisories.",
+  "pub_date": "2026-09-26T21:10:12Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUJEc2NTd25HdW91dEhvTTkxUHE5SFU5UzFIbitXL3RWcGNlSXJXQVBEV0JwRG4yRHczV3dWcGhoeXdENnFTdkxUdVY1TkU5V1hrTHNYaGtPYlBoNFFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDUyNzE3CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjBfeDY0LXNldHVwLmV4ZQpQSEh4ajVmQXlDTjZud1NWUUw2MFBmMkZFNVZsRU1VOGdhaTR0OUxLT0c1cnhaVzk4ck9ZNDJkai9hSTlGUW4zRmhjT09hbysxZlRQMzRpWkZLcWpBUT09Cg==",
-      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.0/RoverTools_0.4.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUcvZnU1ZEtWYWU2Yk1Dam1iWGtJVUJZOGNGRkxBYjdDMmlYRFFYck12dHNDK2VsRVh6OGlrb0JYQ2pWMit1ZFhBMzNQMHFVVkx0R212ZXB1dFhXbWdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDU2OTY5CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjFfeDY0LXNldHVwLmV4ZQpuaEx3eDhUUDFVaUQyZCtTbDh0T3luUDU2cEp1L2VLbFVVY1VEV0MvREMzdEVkOHlXZmpFOTVidXg4SXJjcW5DS3NuMU5VQzVsRjRBTWovTGNTOVpBZz09Cg==",
+      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.1/RoverTools_0.4.1_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUlDZkdXbDJTcnRISTZXV2FwaDVYVXhlbzVWeGFLRDBLTWM1eVUyVkFvN3F4eFVreEFSdzFZeTdqUW9lOC9hMzQ0MHoyUityM2lIekZPMk56WUFaTHdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDUyNjg2CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjBfYW1kNjQuQXBwSW1hZ2UKTk9iMjM3c2RNSWJZQnQwRzF1aTIwZDIvclpHa2Z6ZVl6SFY2U0RFMm9Remd3V1FtOE0xUkNjRktkckd3Ukt5blpFQ0JGc2wzMWZVNzROdnQyRC83Qnc9PQo=",
-      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.0/RoverTools_0.4.0_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUM4ZFpFblE0VDlORDhYa2piTDZHWlBZcjRjRmdUMkp2Z0ZOVmpmTHdrMWQwZ0NQay9QWkNONkpzSVZ4T0s5N1J4eUFBVUhlcmwwSW9Mait4Y0lJOXdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDU2ODI2CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjFfYW1kNjQuQXBwSW1hZ2UKOHFpR3FaWi92T0xiV0w1dzIxanh3U2ltTjQvQTVzZ3dQN0o2WG5hNm1mNDZMbnJobXhxSVNRK0d5M29UYlNhZXZrdU44MXNsempjOU1QYlcvZ1dnQkE9PQo=",
+      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.1/RoverTools_0.4.1_amd64.AppImage"
     }
   }
 }
