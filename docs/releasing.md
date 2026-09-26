@@ -59,7 +59,7 @@ Nothing here touches the sync backend.
 
 ## 2. One-time setup
 
-Two things. The workflow will tell you if either is missing.
+The workflow will tell you if any of it is missing.
 
 ### 2.1 Signing keypair
 
@@ -75,17 +75,26 @@ replacing `REPLACE_ME_WITH_TAURI_SIGNER_PUBLIC_KEY`, and commit it.
 > channel is dead — shipping a new public key means a new build, which users can only
 > get by installing by hand, which is the friction this exists to remove.
 
-### 2.2 Two secrets
+### 2.2 Three secrets, in the `release` environment
 
-In the repo → Settings → Secrets and variables → Actions:
+In the repo, go to Settings, then Environments, then `release`, and add these as
+environment secrets. The environment only admits runs from `main`, so a workflow edited
+on a branch cannot read them.
 
 | Secret | What it is |
 |---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | Contents of the private key file |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you set when generating it |
+| `RELEASE_PUSH_TOKEN` | A fine-grained personal access token from the releaser's account: resource owner `NotRover`, this repo only, Contents read and write |
 
-The release publishes to this same repo, so the workflow's built-in `GITHUB_TOKEN`
-handles it — no PAT needed.
+`main` only accepts changes from a repo admin, and the built-in `GITHUB_TOKEN` is not
+one. The release pushes the version bump, the tag and `beta.json` with
+`RELEASE_PUSH_TOKEN`, so those pushes act as the releaser. The GitHub Release itself
+still uses the built-in token. When the token expires, a real release stops at the
+prerequisite check; make a new one and replace the secret.
+
+Only the account named in `RELEASER` at the top of the workflow can start a release.
+Anyone else's run stops at its first step.
 
 **No baseline tag is required.** The first release's notes are just "First release" —
 nobody is updating *to* a first release, they install it.
@@ -226,8 +235,8 @@ install is worse than offering none. macOS is not built at all; that needs a
 
 The workflow fails rather than shipping something broken:
 
-- **Prerequisites** — placeholder pubkey or a missing signing secret. Checked before
-  building.
+- **Prerequisites** — placeholder pubkey, a missing signing secret, or, for a real
+  run, a missing `RELEASE_PUSH_TOKEN`. Checked before building.
 - **Non-semver version** → refused. The updater compares semver, so an unparseable
   version would publish and then never be offered.
 - **A missing `.sig`** for an updatable bundle → refused. Unsigned bundles build fine
