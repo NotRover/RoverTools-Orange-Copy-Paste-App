@@ -1,102 +1,63 @@
-# Contributing to RoverTools
+# Contributing to Orange Copy Paste
 
-Thanks for your interest in RoverTools, the cross-device Smart Clipboard app.
-This repository holds the **desktop client** (React + TypeScript + Vite on the
-front end, Tauri + Rust underneath). The cloud-sync backend lives in its own
-repository and is included here as a submodule.
-
-If you are a *user* looking for how to install or use the app, see the docs site
-instead: https://orange-copy-paste-app.pages.dev. This file is for people
-building or changing the code.
+This file is for people changing the desktop app or the workspace around it. To install or use the app, see the [user guide](https://orange-copy-paste-app.pages.dev/docs/) instead. The sync server and the website have their own repositories and their own CONTRIBUTING files.
 
 ## Ways to contribute
 
-- Report a bug or request a feature by opening an issue.
-- Fix a bug or build a feature via a pull request.
-- Improve the docs in `docs/` (contributor reference) — user-facing how-to lives
-  on the website, not here.
+- Report a bug or ask for a feature by [opening an issue](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/issues).
+- Fix a bug or build a feature with a pull request. For anything bigger than a small fix, open an issue first so the approach is agreed before you spend time on it.
+- Improve the docs. User how-to lives on the [website repository](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website); contributor reference lives in `docs/` here and in the app's `docs/`.
 
-For anything larger than a small fix, open an issue first so we can agree on the
-approach before you spend time on it.
-
-## Project layout
+## Where things are
 
 | Path | What it is |
-|------|------------|
-| `src/` | React + TypeScript front end |
-| `src-tauri/` | Tauri v2 + Rust: clipboard capture, storage, all crypto and the sync engine |
-| `docs/` | Contributor reference (architecture, permissions, release process) |
-| `orange-copy-paste-clipboard-backend/` | Cloud-sync API — a git submodule with its own repo |
+|---|---|
+| `orange-copy-paste-clipboard-app-rust/src/` | The app's interface, in React and TypeScript |
+| `orange-copy-paste-clipboard-app-rust/src-tauri/` | Rust: clipboard capture, storage, all encryption, and the sync engine |
+| `orange-copy-paste-clipboard-app-rust/docs/` | How the app works inside, and past regressions |
+| `docs/` | The architecture map, permissions, the release process, and the writing guide |
+| `changelog/` | Release notes, one file per release |
+| `orange-copy-paste-clipboard-backend/`, `orange-copy-paste-clipboard-website/` | Submodules, each with its own repository |
 
-The Rust side owns state, persistence, and all encryption; React is the UI. Do
-not reimplement crypto, key handling, or merge logic in TypeScript.
+Rust owns state, storage and all encryption; React is only the interface. Do not reimplement encryption, key handling or merge logic in TypeScript.
 
-## Getting set up
+## Set up
 
-Prerequisites:
-
-- [Bun](https://bun.sh) (package manager and script runner)
-- A [Rust toolchain](https://rustup.rs) (stable)
-- The [Tauri v2 system dependencies](https://v2.tauri.app/start/prerequisites/)
-  for your OS
-
-Clone with submodules and install:
+You need [Bun](https://bun.sh), a stable [Rust toolchain](https://rustup.rs), and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system.
 
 ```bash
 git clone --recurse-submodules https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
-cd RoverTools-Orange-Copy-Paste-App
+cd RoverTools-Orange-Copy-Paste-App/orange-copy-paste-clipboard-app-rust
 bun install
-```
-
-Run the app in development:
-
-```bash
 bun run tauri dev
 ```
 
-Front-end only (no Rust shell):
-
-```bash
-bun run dev
-```
+The app window opens with an empty history. To work on the interface without the Rust side, run `bun run dev` instead.
 
 ## Before you open a pull request
 
-Run the checks that match what you touched:
+Run the checks for what you changed, from `orange-copy-paste-clipboard-app-rust/`:
 
-- **Front end** (`src/`): `bun run build` (typechecks and builds).
-- **Rust / Tauri** (`src-tauri/`): `cd src-tauri && cargo check`.
-- **Runtime behavior** (clipboard watcher, hotkeys, popups, paste, sync): run
-  `bun run tauri dev` and smoke-test the specific flow. Full end-to-end sync
-  needs a live backend and two accounts; if you cannot run it, say so in the PR.
+| You changed | Run |
+|---|---|
+| The interface (`src/`) | `bun run build` |
+| Rust (`src-tauri/`) | `cd src-tauri && cargo check` |
+| Clipboard capture, hotkeys, popups, paste or sync | `bun run tauri dev`, then try that exact flow by hand |
+| Docs or any text a user reads | The checklist at the end of [`docs/writing-docs.md`](docs/writing-docs.md) |
 
-Please also:
+Testing sync end to end needs a running server and two accounts. If you could not test it, say so in the pull request.
 
-- Branch off `main`; keep each pull request scoped to one change.
-- Open pull requests as **drafts** until they are ready for review.
-- Write clear commit messages: a lowercase `type(scope): subject` line, then a
-  few bullets on what changed and why.
-- Match the surrounding code — naming, structure, and comment density.
+Then:
 
-## Coding notes
+- Branch off `main`, and keep each pull request to one change.
+- Open the pull request as a draft until it is ready for review.
+- Write the commit message as a lowercase `type(scope): subject` line, then a few bullets on what changed and why.
+- Match the surrounding code: naming, structure and how much it comments.
 
-- Front end to Rust: `invoke<T>("command_name", { camelCaseArgs })`. Commands are
-  snake_case and domain-prefixed; register new ones in `src-tauri/src/lib.rs`.
-- Rust to front end: events are namespaced `domain:event` in kebab-case. Update
-  both sides together.
-- Shared TypeScript types live in `src/types.ts`; keep them in step with the
-  serde structs they mirror.
-- User-facing strings use plain ASCII punctuation and concrete language.
+## Changes that cross to the server
 
-## Architecture and internals
-
-`docs/architecture.md` in this repo maps the client internals. The wire contract
-(routes, payloads, socket events, crypto envelope) is owned by the backend
-repository's `docs/architecture.md`. A change that crosses the client/backend
-boundary is a change in both repositories.
+The server defines what goes over the wire: routes, payloads, socket events and the encryption envelope. Its [`docs/architecture.md`](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend/blob/main/docs/architecture.md) is the reference. A change on one side of that boundary is a change in both repositories, and the reference is updated in the same change. How the app works inside is in [`orange-copy-paste-clipboard-app-rust/docs/architecture.md`](orange-copy-paste-clipboard-app-rust/docs/architecture.md).
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the
-GNU Affero General Public License v3.0, the same license as the project (see
-[LICENSE](LICENSE)).
+By contributing, you agree that your contributions are licensed under the GNU Affero General Public License v3.0, the same license as the project (see [LICENSE](LICENSE)).
