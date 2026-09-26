@@ -1,293 +1,151 @@
-# RoverTools' Orange Copy Paste
+# Orange Copy Paste: desktop app
 
-A desktop clipboard manager and notes app for **Windows and Linux**, built with React 19 + TypeScript + Vite on a Rust/Tauri 2 core.
+The Orange Copy Paste desktop app for **Windows and Linux**: a clipboard history you can search, popups at the cursor for capturing and pasting, a notes editor, and optional end-to-end encrypted sync and sharing. This folder is the app's source, built with React 19 and TypeScript on a Rust and Tauri 2 core.
 
-It watches the OS clipboard, keeps a searchable history of text/images/files, shows quick popups near the cursor for capture and paste, and adds a Markdown notes workspace. Optional **cloud sync** mirrors history and notes across your devices with **end-to-end encryption** — the server only ever sees ciphertext.
+![The clipboard history screen](../docs/images/clipboard-history.png)
 
-- **UI:** React 19, TypeScript 5.8, Vite 7, vanilla CSS (CSS variables for theming)
-- **Core:** Rust + Tauri 2 — owns clipboard I/O, persistence, OS integration, and all crypto
-- **Package manager:** `bun`
+- **Interface:** React 19, TypeScript, Vite, plain CSS with variables for theming.
+- **Core:** Rust and Tauri 2. It owns clipboard access, storage, operating system integration, and all encryption.
+- **Package manager:** Bun.
 
-> Linux runs the same source tree; X11 is the smoothest experience. See [Linux support](#linux-support) for Wayland caveats.
-
-**Download:** installable Windows and Linux builds are on this repo's [Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
-**Documentation:** end-user guides and developer reference at **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)**.
-This repo is part of a three-repo project — see [Related repositories](#related-repositories).
-
----
-
-## Table of contents
-
-- [Features](#features)
-- [Getting started](#getting-started)
-- [How it works](#how-it-works)
-- [Project structure](#project-structure)
-- [Cloud sync setup](#cloud-sync-setup)
-- [Linux support](#linux-support)
-- [Releases & updates](#releases--updates)
-- [Storage & config reference](#storage--config-reference)
-- [Related repositories](#related-repositories)
-- [Further reading](#further-reading)
-
----
+To install and use the app, download it from the [releases page](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest) and follow [Install and first run](https://orange-copy-paste-app.pages.dev/docs/getting-started/). How each feature behaves for a user is in the [user guide](https://orange-copy-paste-app.pages.dev/docs/).
 
 ## Features
 
 **Capture**
-- Global hotkeys: `Ctrl+Shift+C` captures the current selection, `Ctrl+Shift+V` opens the quick-paste popup.
-- Background clipboard watcher (220 ms poll) records anything you copy, with duplicate suppression so copying *from* the app never re-adds an entry.
-- Entry types: text, rich HTML, images, single/multiple files, and videos. Images are written to disk and served over the Tauri asset protocol rather than held in memory.
+- Global hotkeys: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> captures the selection, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> opens the quick-paste popup.
+- A background watcher polls the clipboard every 220 ms and records what you copy. Copying *from* the app never adds a duplicate entry.
+- Entry types: text, rich HTML, images, files and folders, and videos. Images are written to disk and loaded through Tauri's asset protocol instead of being held in memory.
 
 **Clipboard screen**
-- Day-grouped timeline with collapsible sections; tiles or list layout.
-- Search + filter by content, type, date, and group; sort by newest/oldest/A–Z/Z–A/type.
-- Groups: create, rename, recolor, delete. `Pinned` and `Saved` are protected system groups.
-- Pin entries (survive clear-all), bulk select for delete/pin/group ops, per-card context menu, and a 5-second undo toast on clear-all.
-- Active-clipboard indicator marks the entry currently held by the OS clipboard.
-- Custom in-card video player (play/pause, seek, mute) with the native context menu suppressed.
+- Entries grouped by day under collapsible headers, in tiles, grid or single-column view.
+- Search, and filters by type, date, group, cloud state and space. Sort by newest, oldest, A to Z, Z to A, or type.
+- Groups you can create, rename, recolor and delete. `Pinned` and `Saved` are built in and cannot be renamed.
+- Up to 10 pins, which survive **Clear all**. Bulk selection for delete, pin and group changes, a right-click menu on each card, and an undo after **Clear all**.
+- A marker on the entry that is currently on the system clipboard.
+- A built-in video player for video entries.
 
 **Notes screen**
-- Notion-style WYSIWYG editor built on Tiptap. Note content is stored as a serialized ProseMirror JSON document; legacy Markdown notes are migrated on first edit.
-- Toolbar: headings (H1–H5), bold/italic/underline/strike/inline code, bullet, ordered and nested task lists, blockquotes, callouts in five tones, syntax-highlighted code blocks (lowlight), tables with cell backgrounds, links with autolink, images, horizontal rules, text color, multicolor highlight, alignment, and Tab/Shift-Tab indent handling.
-- Read-only card previews render straight from the stored JSON — no editor instance is mounted per card.
-- Export a note as a `.md` file or copy it as Markdown; this is a one-way projection of the document, not the storage format.
-- Attachments are saved to a per-app folder and referenced by custom schemes (`note-attachment://`, `note-file://`) resolved to Tauri asset URLs only at render time, so the stored document stays small and portable.
-- Clipboard embeds and group references, plus the same pin/group/search/bulk model as clipboard entries.
+- A block editor built on Tiptap, stored as ProseMirror JSON. Older Markdown notes are converted the first time they are edited.
+- Headings 1 to 3, bold, italic, underline, strikethrough, inline code, bullet, ordered and nested task lists, quotes, callouts in five tones, highlighted code blocks, tables, links, images, horizontal rules, text color, highlight, alignment, and indenting with <kbd>Tab</kbd>.
+- Cards in the list render from the stored JSON, without an editor instance per card.
+- Export as a `.md` file or copy as Markdown. Export is a one-way conversion, not the storage format.
+- Attachments are saved in the app's data folder and referenced from the note, so the note stays small.
+- Clipboard entries and groups can be embedded in a note. Notes share pins, groups, search and bulk actions with clipboard entries.
 
-**Popups & shell**
-- Copy popup (what was just captured) and paste popup (recent + pinned entries), both cursor-anchored, screen-edge clamped, frameless, and theme-synced with the main window.
-- System tray, close-to-tray, start-minimized, autostart, splash screen, and restored window geometry.
-- Toast notifications with a master toggle plus per-action toggles.
-- Dark/light theme following the OS by default, with a persisted manual override.
-- Health watchdog: a background heartbeat detects a wedged state, warns the user, quarantines suspect data files, and recovers them on the next launch.
-- In-app self-update against a signed release feed (check → download → install).
+**Popups and window**
+- The capture popup shows what was just captured; the paste popup lists recent and pinned entries. Both open at the cursor, stay inside the screen, and follow the main window's theme.
+- System tray, close to tray, start minimized, run on startup, a splash screen, and a remembered window size and position.
+- In-app notifications with a master switch and one switch per action.
+- Dark and light themes, following the system unless you choose one.
+- A health watchdog notices when saving stops working, warns you, sets suspect data files aside, and recovers them on the next launch.
+- Self-update from a signed release feed.
 
-**Cloud sync (optional)**
-- Sign in with email/password or Google; per-device registration and revocation.
-- Encrypted push/pull of clipboard history, notes, and settings, with live updates over WebSocket and an offline queue that drains on reconnect.
-- Sharing through **Spaces** — persistent, live, multi-member; a user can belong to several at once, each with its own key distributed to members.
-- End-to-end encryption throughout: AES-256-GCM content keys, Argon2id password-derived key wrapping, X25519 key exchange between devices and space members. Key material lives in memory (zeroized on drop) and the OS credential store — never on disk in plaintext, never on the server.
+**Sync (optional)**
+- Sign in with email and password or Google. Each computer registers as a device and can be revoked.
+- Encrypted sync of history, notes and settings, with live updates and an offline queue that uploads when you reconnect.
+- Sharing through **spaces**: live, any number of members, and a person can be in several. Each space has its own key.
+- End-to-end encryption throughout. Keys live in memory, wiped when dropped, and in the system credential store; never on disk in plain form, and never on the server. The design is explained in the [security model](https://orange-copy-paste-app.pages.dev/docs/security/).
 
----
+## Run it from source
 
-## Getting started
-
-**Prerequisites:** Bun, a stable Rust toolchain, and Tauri v2 platform prerequisites (WebView2 on Windows; the GTK/WebKitGTK stack on Linux — see [below](#build-prerequisites-debianubuntu)).
+You need Bun, a stable Rust toolchain, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/): WebView2 on Windows, and the GTK and WebKitGTK stack on Linux (see [Linux](#linux) below).
 
 ```bash
 bun install
+bun run tauri dev
 ```
+
+The app window opens with an empty history. Copy something anywhere and it appears at the top. Everything except sync works without further setup.
 
 | Task | Command |
 | --- | --- |
-| Frontend dev server only | `bun run dev` |
+| Interface only, in a browser, without Rust | `bun run dev` |
 | Full desktop app | `bun run tauri dev` |
-| Typecheck + build frontend | `bun run build` |
-| Rust compile check | `cd src-tauri && cargo check` |
-| Build installers/bundles | `bun run tauri build` |
+| Type-check and build the interface | `bun run build` |
+| Check the Rust code compiles | `cd src-tauri && cargo check` |
+| Build installers for this system | `bun run tauri build` |
 
-Recommended VS Code extensions: **Tauri**, **rust-analyzer**.
+Recommended VS Code extensions: **Tauri** and **rust-analyzer**.
 
-> Be careful running `bun run tauri dev` with autostart enabled — the startup entry can point at the dev path and break launches without Vite running.
-
----
+Do not turn on **Run on startup** while running `tauri dev`: the startup entry points at the development build, which does not launch without the dev server.
 
 ## How it works
 
-The app is a single Tauri process with several webview windows (main, copy popup, paste popup, notification, splash). Rust owns state, persistence, OS integration, and all cryptography; React is purely UI. They talk over Tauri IPC: commands (`invoke`) for request/response, events (`domain:event`) for pushes.
+The app is one Tauri process with several windows: the main window, the capture and paste popups, notifications, and the splash screen. Rust owns state, storage, operating system integration and all encryption; React only draws. They talk through Tauri commands (`invoke`) for requests and `domain:event` events for pushes.
 
-**Copy flow** — `Ctrl+Shift+C` → simulate `Ctrl+C` → read clipboard (priority: files → HTML → text → image) → push entry → emit `clipboard:new-entry` → show the copy popup at the cursor → update the active clipboard id.
+- **Capture:** the hotkey simulates <kbd>Ctrl</kbd>+<kbd>C</kbd>, reads the clipboard (files first, then HTML, text, image), adds the entry, and shows the capture popup at the cursor.
+- **Paste:** the hotkey shows the paste popup; picking an entry writes it to the clipboard, hides the popup and simulates <kbd>Ctrl</kbd>+<kbd>V</kbd>.
+- **No duplicates:** a flag is set before every write the app makes to the clipboard, and the watcher skips those writes. This is what keeps history free of duplicates.
+- **Storage:** changes mark the data dirty, and a background thread writes it as MessagePack on an interval. Images and attachments are separate files.
+- **Sync:** runs on its own async runtime, encrypts on the computer, pushes and pulls, and resolves conflicts to the newest edit. It never sends a merged change back out as a new one. The app works fully with sync off.
 
-**Paste flow** — `Ctrl+Shift+V` → show the paste popup with recent + pinned entries → on pick: set the suppress flag, write to the clipboard, hide the popup, simulate `Ctrl+V`.
-
-**Suppress flag** — an `AtomicBool` in `AppState` set before any app-initiated clipboard write and checked by the watcher, so the app's own writes never come back as new captures. This is the invariant behind duplicate-free history.
-
-**Persistence** — mutations mark dirty flags; a background thread coalesces them into MessagePack writes on an interval. Clipboard history lives in `history.bin`, saved entries in `pinned_entries.bin`, notes in `notes.bin`, preferences in `settings.json`, images and attachments as files on disk.
-
-**Sync** — `SyncClient` runs on its own Tokio runtime. It encrypts locally, pushes/pulls against the backend, merges last-write-wins on `updated_at` (tombstones always win), and refreshes the UI via `sync:history-merged` / `sync:notes-merged`. It skips self-device entries so a merge is never echoed back as a push. The app is fully functional with sync switched off.
-
----
+The full picture, including every command, event and file, is in [`docs/architecture.md`](docs/architecture.md).
 
 ## Project structure
 
 ```text
-src/                                 # React frontend
-├─ components/
-│  ├─ app/                           # main window
-│  │  ├─ App.tsx                     # shell: routing, theme, event wiring
-│  │  ├─ clipboard-screen/           # timeline, entry cards, search, groups, bulk actions
-│  │  ├─ notes-screen/               # note CRUD + editor-engine/ (Tiptap, content codec, previews)
-│  │  ├─ spaces-screen/              # shared feed: spaces, invites, members, per-space filters
-│  │  ├─ account-screen/             # auth, cloud sync mode, devices/presence, storage
-│  │  ├─ settings-screen/            # preferences; owns shared scr-*/set-section-* styles
-│  │  ├─ shortcuts-screen/           # hotkey reference
-│  │  └─ sidebar/ topbar/ toast/ tooltip/ status-pill/ update-banner/
-│  ├─ copy-popup/  paste-popup/      # standalone OS windows
-│  ├─ notifications/  splash/        # standalone OS windows
-│  └─ entry-types/  icons.tsx        # shared UI
-├─ hooks/                            # useUpdater, useMultiSelect, useHealthWarning, …
-└─ types.ts                          # shared TS shapes mirroring the serde structs
+src/                               the interface (React)
+|- components/
+|  |- app/                         the main window
+|  |  |- App.tsx                   shell: routing, theme, event wiring
+|  |  |- clipboard-screen/         timeline, entry cards, search, groups, bulk actions
+|  |  |- notes-screen/             notes list and editor (editor-engine/ has its own SPEC.md)
+|  |  |- spaces-screen/            shared feed: spaces, invites, members, per-space rules
+|  |  |- account-screen/           sign-in, sync mode, devices, storage
+|  |  |- settings-screen/          preferences, and the section styles other screens share
+|  |  `- shortcuts-screen/         hotkey reference
+|  |- copy-popup/  paste-popup/    the two popups, each its own window
+|  `- notifications/  splash/      notification and splash windows
+|- hooks/                          shared React hooks
+`- types.ts                        shared types that mirror the Rust structs
 
-src-tauri/src/                       # Rust core
-├─ main.rs / lib.rs                  # entry point; composition root + command registration
-├─ clipboard/                        # commands, history model + persistence, image/files/html formats
-├─ notes/                            # commands, Note model, MessagePack store
-├─ sync/                             # SyncClient, crypto, HTTP + WebSocket clients, Supabase auth,
-│                                    #   OAuth loopback, offline queue, id map, config
-├─ runtime/                          # watcher, hotkeys, popups, tray, notifications, window state
-│  └─ platform/{windows,linux}.rs    # key injection, cursor/monitor geometry
-├─ state/                            # AppState, dirty flags, popup payload types
-├─ health.rs                         # panic hook, heartbeat watchdog, atomic writes, quarantine
-└─ updater.rs                        # signed self-update check/download/install
+src-tauri/src/                     the core (Rust)
+|- lib.rs                          startup, and registration of every command
+|- clipboard/                      commands, history model and storage, image/file/HTML formats
+|- notes/                          commands, note model, storage
+|- sync/                           sync engine, encryption, server and Supabase clients, offline queue
+|- runtime/                        watcher, hotkeys, popups, tray, notifications
+|  `- platform/                    Windows and Linux key injection and screen geometry
+|- state/                          shared app state
+|- health.rs                       watchdog, safe file writes, quarantine
+`- updater.rs                      signed self-update
 
-docs/architecture.md                 # deep dive
-docs/bugfix-history.md               # regression history — read before touching runtime flows
+docs/architecture.md               how the app works inside
+docs/bugfix-history.md             past regressions: read before changing watcher, hotkeys, popups or paste
 ```
 
----
+## Sync in your build
 
-## Cloud sync setup
+Sync stays off until the build knows which server and Supabase project to use: a server URL, the Supabase project URL, and its publishable key, compiled in from `src-tauri/src/sync/config.rs`. An installed copy can be pointed elsewhere through `settings.json`. The steps, and the Google sign-in setup that is easy to get wrong, are in [Point the app at your server](https://orange-copy-paste-app.pages.dev/docs/developers/self-hosting/#point-the-app-at-your-server).
 
-Sync stays off until the app points at a deployment. Three values are needed:
+After Google sign-in, the app asks for an account password. That is expected: it is the encryption secret, not a second login.
 
-| Value | Where it comes from |
-| --- | --- |
-| Backend URL | Your deployed sync API, e.g. `https://sync.your-domain.com` |
-| Supabase project URL | Supabase → Settings → API Keys → Project URL |
-| Supabase publishable key | Supabase → Settings → API Keys |
+## Linux
 
-> Use the **publishable** key (`sb_publishable_…`; older projects call it the **anon** key). Never ship the **secret** key (`sb_secret_…`) — it grants full project access, and the app rejects it outright.
+The Windows-only parts (Win32 clipboard formats, cursor and monitor queries, key injection) are compiled out and replaced with Linux equivalents.
 
-**Setting the endpoints.** They are compiled in, so users never enter anything. Edit the constants at the top of `src-tauri/src/sync/config.rs`:
-
-```rust
-const DEFAULT_SERVER_URL: &str = "https://sync.your-domain.com";
-const DEFAULT_SUPABASE_URL: &str = "https://your-project-ref.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY: &str = "sb_publishable_xxxxxxxxxxxxxxxx";
-```
-
-Committing these is fine — they're public-safe, so every clone and CI build produces a working app. If left blank, the sign-in screen reports an unconfigured build instead of failing silently.
-
-**Overriding a shipped build.** `settings.json` in the app data directory overrides the compiled-in values via `sync_server_url`, `supabase_url`, `supabase_anon_key`. An escape hatch for self-hosting and debugging — deliberately no UI.
-
-**Google sign-in** needs all three of these, or sign-in fails *after* the consent screen with no useful error:
-
-1. Supabase → Authentication → Providers → **Google** enabled, with the Client ID/Secret from Google Cloud Console.
-2. Google Cloud Console → OAuth client → Authorized redirect URIs → add `https://<project-ref>.supabase.co/auth/v1/callback`.
-3. Supabase → Authentication → URL Configuration → Redirect URLs → add **all three** loopback URLs: `http://127.0.0.1:53170`, `:53171`, `:53172`.
-
-Step 3 is the easy one to miss. A desktop app has no web origin, so the app binds a short-lived loopback server on the first free port from that list and uses it as the OAuth `redirect_to`; if those URLs aren't allow-listed, consent succeeds and Supabase then refuses to redirect back, leaving the app waiting until its 5-minute timeout. The port list is fixed in `src-tauri/src/sync/oauth.rs`.
-
-After Google sign-in you'll be asked to set an **account password**. That's expected — it's your end-to-end encryption secret, not a second login. The server never sees it, and you re-enter it on each new device.
-
-See the backend repo's `docs/DEPLOY.md` for standing up the server side.
-
----
-
-## Linux support
-
-All Windows-only integrations (Win32 clipboard formats, cursor/monitor queries, key injection) are compiled out and replaced with Linux equivalents.
-
-### Build prerequisites (Debian/Ubuntu)
+**Build prerequisites (Debian and Ubuntu):**
 
 ```bash
 sudo apt update
-sudo apt install -y \
-  libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
-Fedora/Arch have equivalents — see the Tauri v2 prerequisites docs.
+Fedora and Arch have equivalents; see the Tauri prerequisites.
 
-### Runtime dependencies
+**At runtime** the app types keystrokes with `xdotool` on X11, `wtype` on wlroots compositors, or `ydotool` on GNOME and KDE Wayland, and stores sync keys in GNOME Keyring or KWallet. The full package list, the Wayland hotkey setup, and what does not work on Linux yet are in the [Linux notes](https://orange-copy-paste-app.pages.dev/docs/linux/).
 
-Key injection uses a capability ladder: the app detects the session and picks the best available tool.
+**Packaging:** `bun run tauri build` makes `.deb`, `.rpm` and AppImage on Linux, and the NSIS installer on Windows. Linux bundles cannot be built from Windows: use a Linux machine, a VM, WSL, or the **Build Linux (manual)** workflow in the Actions tab, whose `rovertools-linux` artifact is for testing only.
 
-| Tool | Purpose | When needed |
-| --- | --- | --- |
-| `xdotool` | Ctrl+C/V injection, cursor position | X11 and XWayland |
-| `wtype` | Ctrl+C/V injection | Wayland on wlroots (Sway, Hyprland, River) |
-| `ydotool` + `ydotoold` | Injection fallback | Wayland on GNOME/KDE — needs the daemon and `/dev/uinput` access |
-| `x11-utils` (`xdpyinfo`) | Monitor work area | X11; optional (falls back to 1920×1080) |
-| `xdg-utils` (`xdg-open`) | "Open data folder" | all |
-| GNOME Keyring / KWallet | Sync device keys and refresh tokens | cloud sync only |
-| A tray host (e.g. AppIndicator extension) | Tray icon and menu | tray only |
+## Releases and updates
 
-The `.deb` depends on `xdotool | wtype` and recommends `x11-utils` and `ydotool`. On GNOME/KDE Wayland:
+A release is one workflow run in the workspace repository. Installed copies check for it at startup and every six hours after, and offer it. The process, channels and signing are in [`../docs/releasing.md`](../docs/releasing.md).
 
-```bash
-sudo apt install -y ydotool
-sudo systemctl enable --now ydotool
-```
+## Where data is stored
 
-### Packaging
+Everything lives in the app data folder: `%APPDATA%\io.github.notrover.orange-copy-paste\` on Windows, `~/.local/share/io.github.notrover.orange-copy-paste/` on Linux. That includes history, saved entries, notes, settings, images and attachments. The file layout is in [`docs/architecture.md`](docs/architecture.md). Interface-only preferences, such as theme, layout and sort, are kept in `localStorage` under `sc-*` keys.
 
-`bun run tauri build` produces `.deb`, `.rpm`, and AppImage on Linux, and the NSIS installer on Windows — Tauri builds only the targets valid for the host. Linux bundles **cannot** be cross-compiled from Windows; use a Linux machine, VM, WSL, or CI.
+## Contributing
 
-For **test** Linux builds the parent repo ships a manual workflow, `.github/workflows/build-linux.yml` (`workflow_dispatch` only): Actions → **Build Linux (manual)** → Run workflow, then download the `rovertools-linux` artifact. It builds on `ubuntu-22.04` for broad glibc/WebKit compatibility. Its output is throwaway — to ship to users, see [Releases & updates](#releases--updates).
-
-Install the `.deb` with `sudo apt install ./Orange.Copy.Paste_*.deb` — apt pulls an injector automatically. The AppImage is portable but bundles no injector; install `xdotool` or `wtype`/`ydotool` yourself.
-
-### Known limitations
-
-These degrade gracefully rather than crashing, but are not at Windows parity:
-
-- **Wayland:** built-in global hotkeys don't fire (the plugin relies on X11 grabs), and cursor-anchored popup placement, always-on-top, and transparency are compositor-dependent — popups center on the active monitor instead. Use the CLI trigger below.
-- **File-list and HTML clipboard writes** are Windows-only; on Linux those entries return an error (`text/uri-list` isn't implemented yet).
-- **Capture:** file-drops and HTML sources aren't recorded into history on Linux (text and images are).
-- **Image labels** show a raw timestamp instead of a localized date/time.
-
-**CLI trigger (Wayland global hotkeys).** Bind your compositor's keybind to relaunch the binary with `--trigger`; the single-instance plugin routes it to the running app, which shows the same popup the hotkey would:
-
-```bash
-rovertools --trigger copy
-```
-
-```bash
-rovertools --trigger paste
-```
-
-Use the real installed binary name/path (check the `Exec=` line in the installed `.desktop` file). Examples — Sway/Hyprland: `bindsym $mod+Shift+v exec rovertools --trigger paste`; GNOME: Settings → Keyboard → Custom Shortcuts; KDE: System Settings → Shortcuts → Custom. Works on every compositor including X11, but the app must already be running.
-
----
-
-## Releases & updates
-
-Cutting a release is a single manual workflow dispatch; installed copies notice it at launch and every six hours after, and offer it. You pick the bump at dispatch — nothing is inferred from commit messages — and the version, release notes, and update feed follow from that one choice. Releases publish as GitHub Releases on this repo; because it is public, the updater fetches the feed over plain HTTPS with no credentials.
-
-```bash
-gh workflow run release.yml
-```
-
-That is a patch release; `-f bump=minor` / `-f bump=major` for feature/breaking, `-f dry_run=true` to build without publishing, `-f prerelease=true` for a beta. From Claude Code: `/create-rovertools-orange-copy-paste-release [patch|minor|major] [stable|beta] [dry-run|preview]` — anything omitted is asked for, not defaulted.
-
-The full pipeline — the signed-bundle flow, the stable/beta channels, one-time signing-key setup, the SmartScreen/Authenticode note, the CI safety rails, and every operational trap — lives in [`../docs/releasing.md`](../docs/releasing.md).
-
----
-
-## Storage & config reference
-
-Runtime state lives in the app data directory (Windows `%APPDATA%\io.github.notrover.orange-copy-paste\`, Linux `~/.local/share/io.github.notrover.orange-copy-paste/`): clipboard history, saved entries, notes, settings, and externalized images/attachments, all as described in [`docs/architecture.md`](docs/architecture.md), which owns the persistence layout. UI-only preferences (theme, layout, sort, paste-slot count, recent searches, groups) are kept in `localStorage` under `sc-*` keys.
-
----
-
-## Related repositories
-
-The desktop app is one of three code repositories. The app lives in the workspace repo; the backend and website are submodules with their own repos. Downloads and the update feed are published as [GitHub Releases on this repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
-
-| Repository | What it is |
-| --- | --- |
-| **[Orange-Copy-Paste-App](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App)** | This app and the workspace |
-| [Orange-Copy-Paste-Backend](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The cloud-sync API — stand up your own with its `docs/DEPLOY.md` |
-| [Orange-Copy-Paste-Website](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The docs and marketing site |
-
----
-
-## Further reading
-
-- **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)** — the public site: end-user guides and the Developers section.
-- [`docs/architecture.md`](docs/architecture.md) — full architecture: modules, data flows, IPC surface, sync internals.
-- [`docs/bugfix-history.md`](docs/bugfix-history.md) — regression history; read before changing watcher, hotkey, popup, or paste behavior.
-- Workspace root [`docs/releasing.md`](../docs/releasing.md) — releasing and the update feed: one-time setup, signing keys, verification rails.
-- Workspace root `docs/architecture.md` — the map: which doc owns which fact, plus the cross-component invariants.
-- Backend repo `docs/architecture.md` — the source of truth for the wire contract.
+Setup, checks and pull request rules are in the workspace [CONTRIBUTING.md](../CONTRIBUTING.md). Report vulnerabilities as described in [SECURITY.md](../SECURITY.md).

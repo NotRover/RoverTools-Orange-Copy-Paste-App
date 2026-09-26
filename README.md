@@ -1,33 +1,52 @@
-# RoverTools — Smart Clipboard
+# Orange Copy Paste
 
-A cross-device smart clipboard. Copy text, images, or files on one machine and they show up on every other machine you own — with notes, group sharing, and real-time collaboration on top. Everything that leaves a device is **end-to-end encrypted**, so the server relays and stores ciphertext it cannot read.
+A clipboard manager for Windows and Linux. It keeps a searchable history of what you copy, pastes any recent entry with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> and a number key, and has notes next to your history. With an optional account, history and notes sync to your other computers and can be shared with other people in spaces. Everything that syncs is **end-to-end encrypted**: the server stores it and relays it, but cannot read it.
 
-This workspace holds both halves of the product, plus its public docs site:
+![The clipboard history screen](docs/images/clipboard-history.png)
+
+It works offline and without an account. Sync and spaces are the only parts that need one.
+
+## Install
+
+Download the latest build from the [releases page](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest):
+
+- **Windows 10 or 11:** the file ending in `-setup.exe`. It installs for your user only, without admin rights.
+- **Linux:** `.deb`, `.rpm` or AppImage. X11 works best; Wayland needs one setup step for the hotkeys, described in the [Linux notes](https://orange-copy-paste-app.pages.dev/docs/linux/).
+
+The app updates itself from the same releases page. macOS is not supported yet.
+
+Then follow [Install and first run](https://orange-copy-paste-app.pages.dev/docs/getting-started/): in about five minutes you copy three things, paste one by its number, and pin it. The full user guide is at [orange-copy-paste-app.pages.dev/docs](https://orange-copy-paste-app.pages.dev/docs/).
+
+<p>
+  <img src="docs/images/quick-paste.png" alt="The quick-paste popup" width="44%">
+  <img src="docs/images/spaces.png" alt="A shared space" width="54%">
+</p>
+
+---
+
+## What is in this workspace
+
+This repository is the desktop app and the workspace for the whole product. The sync server and the website are submodules with their own repositories.
 
 | Component | What it is | Stack |
 | --- | --- | --- |
-| [`orange-copy-paste-clipboard-app-rust/`](orange-copy-paste-clipboard-app-rust) | The desktop app — clipboard capture, history, notes, sharing UI, and all cryptography | React 19 + TypeScript + Vite on Tauri 2 / Rust |
-| [`orange-copy-paste-clipboard-backend/`](orange-copy-paste-clipboard-backend) | The cloud-sync API — encrypted store, realtime fan-out, sharing, blob brokering | Python 3.14 + FastAPI, Supabase Postgres, Redis, S3/R2 |
-| [`orange-copy-paste-clipboard-website/`](orange-copy-paste-clipboard-website) | The public docs and marketing site — how-to guides and the landing page | Astro + Starlight, bun |
+| [`orange-copy-paste-clipboard-app-rust/`](orange-copy-paste-clipboard-app-rust) | The desktop app: clipboard capture, history, notes, the sharing screens, and all encryption | React 19 and TypeScript with Vite, on Tauri 2 and Rust |
+| [`orange-copy-paste-clipboard-backend/`](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The sync server: encrypted storage, live updates between devices, sharing, file storage | Python 3.14 and FastAPI, Supabase Postgres and Auth, Redis, S3 or R2 |
+| [`orange-copy-paste-clipboard-website/`](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The public site: the user guide, the developer docs, and the landing page | Astro and Starlight, Bun |
 
-The app lives in this parent repo; the backend and the website are each submodules with their own repos. Each component has its own README with setup, structure, and development instructions.
-
-**Documentation:** user guides and developer reference live at **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)**.
-**Download the app:** installable Windows and Linux builds are published as [GitHub Releases on this repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases), which the in-app updater also reads.
-
----
+Each component has its own README with setup and development instructions.
 
 ## How the halves fit together
 
 ```mermaid
 flowchart TB
     subgraph A["Device A"]
-        A1["Desktop app<br/>local store<br/>SyncClient"]
+        A1["Desktop app<br/>local store<br/>sync engine"]
     end
     subgraph B["Device B"]
-        B1["Desktop app<br/>local store<br/>SyncClient"]
+        B1["Desktop app<br/>local store<br/>sync engine"]
     end
-    BE["FastAPI backend<br/>stateless, horizontally scalable<br/>Supabase (Postgres + Auth), Redis, S3 / R2"]
+    BE["Sync server<br/>stateless, can run as several copies<br/>Supabase (Postgres + Auth), Redis, S3 / R2"]
     A1 -- "HTTPS / WSS" --> BE
     B1 -- "HTTPS / WSS" --> BE
 
@@ -39,141 +58,110 @@ flowchart TB
     style B fill:#161616,stroke:#6f6f6f,color:#e4e4e4
 ```
 
-**The client is the source of truth.** It captures the clipboard, stores history and notes locally, holds every key, and performs all encryption and decryption. The Rust side owns crypto and the sync engine; React is only UI.
+**The app is the source of truth for your data.** It captures the clipboard, stores history and notes on the computer, holds every key, and does all encryption and decryption. Rust owns the encryption and the sync engine; React is only the interface.
 
-**The backend is a relay and durable store.** It verifies Supabase-issued JWTs (it never signs any), persists ciphertext, fans changes out over WebSocket, and hands out presigned blob URLs. It is the source of truth for the wire contract — and for nothing else.
+**The server is a relay and a store.** It checks the sign-in tokens Supabase issues (it never issues one itself), stores encrypted items, sends changes to other devices over a WebSocket, and hands out upload and download links for files. It defines the contract between app and server, and nothing else.
 
-**Cloud is optional.** With sync disabled or the server unreachable, the app is fully functional; work queues locally and drains on reconnect.
+**Sync is optional.** With sync off or the server unreachable, the app works fully; changes queue on the computer and upload when it reconnects.
 
-### The sync flow, end to end
+### Sync, in outline
 
-1. The client authenticates against Supabase Auth directly.
-2. `POST /api/v1/auth/bootstrap` returns the profile's `kdf_salt` and password-wrapped master key.
-3. The client derives a wrapping key from the account password (Argon2id) and unwraps the **User Master Key** in memory — a wrong password simply fails the AES-GCM unwrap.
-4. It registers the device and publishes the device's public key.
-5. Entries are encrypted locally, pushed, and pulled; merges are last-write-wins on `updated_at`.
-6. `/ws` streams live changes from other devices and group members.
+1. The app signs in with Supabase Auth directly. Your password never leaves the computer: the app derives a separate login key from it, and a second key that stays behind.
+2. The app fetches your encrypted master key from the server and opens it with the key that stayed behind.
+3. It registers this computer as a device.
+4. Items are encrypted on the computer, then pushed and pulled. When two edits collide, the newest wins.
+5. A WebSocket brings live changes from your other devices and from your spaces.
 
-**Deletes are tombstones** — a push carrying `deleted_at`, never a DELETE route — and a tombstone always wins a conflict.
+Deletes travel as markers on the item, not as a delete request, so a delete reaches devices that were offline. **Sharing** has one building block, the **space**: live, any number of members, and a person can be in several. Each space has its own random key, locked separately for each member.
 
-**Sharing** is one primitive: the **Space** — persistent, live, any number of members, and a user can be in several at once. Each space has a random key (kept as a keyring, newest first) distributed to members by wrapping it for each member's X25519 public key.
-
-The full contract — payload shapes, event envelopes, key lifecycle — is in the [backend architecture doc](orange-copy-paste-clipboard-backend/docs/architecture.md), which owns it.
+Exact routes, payloads, event names and key derivation are in the [server's architecture doc](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend/blob/main/docs/architecture.md), which owns the contract. What the server can and cannot see is in the [security model](https://orange-copy-paste-app.pages.dev/docs/security/).
 
 ---
 
 ## Repository layout
 
-Three components, **three git repositories**. The client lives directly in this repo; the backend and the website are each submodules with their own repos.
-
 ```text
-RoverTools/
-├─ orange-copy-paste-clipboard-app-rust/   # desktop app — part of this repo
-├─ orange-copy-paste-clipboard-backend/    # submodule → RoverTools-Orange-Copy-Paste-Backend
-├─ orange-copy-paste-clipboard-website/    # submodule → RoverTools-Orange-Copy-Paste-Website
-├─ docs/
-│  ├─ architecture.md                      # cross-system architecture and integration contract
-│  └─ releasing.md                         # how a release is cut
-├─ .github/workflows/
-│  ├─ release.yml                          # manual: version, build, sign, publish
-│  └─ build-linux.yml                      # manual: Linux bundles without a Linux machine
-├─ .claude/skills/                         # Claude Code skills — e.g. cutting a release
-└─ CLAUDE.md                               # workspace guide for AI coding agents
+RoverTools-Orange-Copy-Paste-App/
+|- orange-copy-paste-clipboard-app-rust/   the desktop app (part of this repo)
+|- orange-copy-paste-clipboard-backend/    submodule: RoverTools-Orange-Copy-Paste-Backend
+|- orange-copy-paste-clipboard-website/    submodule: RoverTools-Orange-Copy-Paste-Website
+|- docs/
+|  |- architecture.md    the map: which doc owns which fact, and rules that bind app and server
+|  |- permissions.md     who may do what, and where it is enforced
+|  |- releasing.md       how a release is built, signed and published
+|  |- writing-docs.md    how every doc and user-facing string is written
+|  `- images/            README images, drawn from the website's app mockups
+|- changelog/            release notes, one file per release
+|- .github/workflows/    release.yml (publish a release), build-linux.yml (test Linux builds),
+|                        redeploy-site.yml (rebuild the website when a mirrored doc changes)
+|- .claude/skills/       Claude Code skills, for example cutting a release
+`- CLAUDE.md             the workspace guide for AI coding agents
 ```
 
-Clone with the submodule:
+Clone with the submodules:
 
 ```bash
 git clone --recurse-submodules https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
 ```
 
-If you already cloned without it:
+If you already cloned without them:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-Default branch is `main` on all three repos. Keep each commit scoped to one repo — don't bundle a submodule-pointer bump with client code unless you're coordinating a release.
+The default branch is `main` in all three repositories. Keep each commit to one repository.
 
----
+## Quick start for developers
 
-## Quick start
-
-**Desktop app** — needs Bun, a stable Rust toolchain, and the Tauri v2 prerequisites for your OS:
+**Desktop app.** You need [Bun](https://bun.sh), a stable [Rust toolchain](https://rustup.rs), and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system:
 
 ```bash
-cd orange-copy-paste-clipboard-app-rust && bun install && bun run tauri dev
+cd orange-copy-paste-clipboard-app-rust
+bun install
+bun run tauri dev
 ```
 
-It runs offline out of the box. Cloud sync stays dark until the build points at a deployment — see the client README's cloud sync setup.
+The app window opens with an empty history, and everything except sync works. To build with sync turned on, see [Point the app at your server](https://orange-copy-paste-app.pages.dev/docs/developers/self-hosting/#point-the-app-at-your-server).
 
-**Backend** — needs Python 3.14+, `uv`, and Docker for the local Postgres/Redis/MinIO stack:
+**Sync server.** You need Python 3.14 or newer, [`uv`](https://docs.astral.sh/uv/), Docker, and a Supabase project. The steps, from `.env` to a health check, are in the [server README](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend#run-it-locally).
 
-```bash
-cd orange-copy-paste-clipboard-backend && cp .env.example .env && docker-compose up
-```
+## Checks before you commit
 
-Then apply migrations with `uv run alembic upgrade head`. API docs land at `http://localhost:8000/api/docs`.
+Run the smallest set that covers what you changed:
 
----
-
-## Verification
-
-Run the smallest check set that covers what you touched.
-
-| Changed | Run |
+| You changed | Run |
 | --- | --- |
-| Client frontend | `bun run build` |
-| Client Rust/Tauri | `cd src-tauri && cargo check` |
-| Runtime behavior (watcher, hotkeys, popups, paste, sync) | `bun run tauri dev` and smoke-test that flow |
-| Backend Python | `uv run ruff check src` and `uv run ty check src`, plus `uv run pytest` for logic changes |
+| The app's interface | `bun run build` |
+| The app's Rust code | `cd src-tauri && cargo check` |
+| Clipboard capture, hotkeys, popups, paste or sync | `bun run tauri dev`, then try that flow by hand |
+| Server Python | `uv run ruff check src` and `uv run ty check src`, plus `uv run pytest` for logic changes |
+| Any doc or text a user reads | The checklist in [`docs/writing-docs.md`](docs/writing-docs.md) |
 
-Full end-to-end sync needs a live backend, a Supabase project, and two accounts. If you can't run it, say so rather than assuming it works.
-
----
+Testing sync end to end needs a running server, a Supabase project and two accounts. If you could not test it, say so.
 
 ## Releasing
 
-A release is one manual workflow run: `gh workflow run release.yml` for a patch, `-f bump=minor` for a feature release, `-f bump=major` for a breaking one.
-
-`.github/workflows/release.yml` (dispatch only) checks its own prerequisites, publishes [`changelog/next.md`](changelog/) as the notes (erroring right away if it is empty), bumps the version in `src-tauri/Cargo.toml`, builds signed Windows NSIS and Linux AppImage/deb bundles, and publishes them plus `latest.json` as a GitHub Release on this repo, which the in-app updater reads. On release it renames `next.md` to `changelog/<version>-<bump>-<channel>.md`. Because this repo is public, the updater fetches the feed over plain HTTPS with no credentials.
-
-From Claude Code: `/create-rovertools-orange-copy-paste-release [patch|minor|major] [stable|beta] [dry-run|preview]` — the skill asks for whatever you leave out, shows the version and notes about to ship, and dispatches only after an explicit yes.
-
-The dispatch flags (`bump`, `prerelease`, `dry_run`), the two-channel stable/beta design, the one-time signing-key setup, and the pre-trust smoke test all live in [`docs/releasing.md`](docs/releasing.md). `.github/workflows/build-linux.yml` builds Linux bundles on demand. Releases never touch the sync backend; it deploys on its own.
-
----
+A release is one run of `.github/workflows/release.yml`. It publishes [`changelog/next.md`](changelog/) as the release notes, bumps the version, builds signed Windows and Linux bundles, and publishes them as a GitHub Release on this repository, where the in-app updater finds them. The inputs, the stable and beta channels, and signing-key setup are in [`docs/releasing.md`](docs/releasing.md). Releases never touch the sync server, which deploys on its own.
 
 ## Conventions
 
-- **Commit messages:** lowercase `type(scope): subject`, then a few single-line bullets on what changed and why.
-- **Release notes** live in [`changelog/`](changelog/): draft `changelog/next.md` with `/update-changelog` (or by hand) before releasing — an empty one fails the release. Internal changes go under `### Internal` and are kept but never shown to users.
-- **Pull requests** open as drafts against each repo's own `main`.
-- **Migrations are written, never auto-applied.** Authoring an Alembic revision is normal work; applying it to a real database is a separate, explicitly approved step.
-- **Backend work goes on its own branches** in the backend repo, not alongside client changes.
-
----
-
-## Related repositories
-
-Orange Copy Paste spans three code repositories. Downloads and the update feed are published as [GitHub Releases on this repo](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
-
-| Repository | What it is |
-| --- | --- |
-| **[Orange-Copy-Paste-App](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App)** | The desktop app and this workspace |
-| [Orange-Copy-Paste-Backend](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend) | The cloud-sync API (submodule) |
-| [Orange-Copy-Paste-Website](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website) | The docs and marketing site (submodule) |
-
----
+- **Commit messages:** a lowercase `type(scope): subject` line, then a few single-line bullets on what changed and why.
+- **Release notes:** write `changelog/next.md` before releasing; an empty one stops the release. Internal changes go under `### Internal` and are never shown to users.
+- **Pull requests** open as drafts against each repository's own `main`.
+- **Migrations are written, never applied automatically.** Writing an Alembic migration is normal work; applying it to a real database is a separate, approved step.
+- **Docs and user-facing text** follow [`docs/writing-docs.md`](docs/writing-docs.md) in all three repositories.
 
 ## Further reading
 
-- **[orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev)** — the public site: end-user guides and the Developers section (architecture and security overviews, self-hosting, design records).
-- [`docs/architecture.md`](docs/architecture.md) — the map: which doc owns which fact, and the invariants that bind the two components. Start here to find the right doc.
-- [`docs/releasing.md`](docs/releasing.md) — the release pipeline end to end.
-- [`CHANGELOG.md`](CHANGELOG.md) — every shipped release, newest first (generated from [`changelog/`](changelog/)).
-- [Client README](orange-copy-paste-clipboard-app-rust/README.md) · [client architecture](orange-copy-paste-clipboard-app-rust/docs/architecture.md) · [bugfix history](orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md).
-- [Backend README](orange-copy-paste-clipboard-backend/README.md) · [backend architecture](orange-copy-paste-clipboard-backend/docs/architecture.md) · [deployment guide](orange-copy-paste-clipboard-backend/docs/DEPLOY.md).
-- [Website README](orange-copy-paste-clipboard-website/README.md) — how the docs and landing site are built and deployed.
+- [orange-copy-paste-app.pages.dev](https://orange-copy-paste-app.pages.dev): the user guide and the Developers section (architecture and security overviews, self-hosting, design records).
+- [`docs/architecture.md`](docs/architecture.md): the map of which doc owns which fact. Start here to find the right doc.
+- [App README](orange-copy-paste-clipboard-app-rust/README.md), [app architecture](orange-copy-paste-clipboard-app-rust/docs/architecture.md) and [bug-fix history](orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md).
+- [Server README](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend#readme), [server architecture](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend/blob/main/docs/architecture.md) and [deployment guide](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend/blob/main/docs/DEPLOY.md).
+- [Website README](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website#readme): how the site is built and deployed.
 
-> Docs are context, not truth. Where a doc and the code disagree, the code wins — and the doc is worth fixing.
+## Contributing and security
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, checks and pull requests. Report vulnerabilities as described in [SECURITY.md](SECURITY.md), never in a public issue. See also the [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Licensed under the [GNU AGPL v3.0](LICENSE).
+
+> Docs are context, not truth. Where a doc and the code disagree, the code wins, and the doc is worth fixing.
