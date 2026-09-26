@@ -253,21 +253,35 @@ pub async fn sync_cancel_password_reset(
 /// Nothing is re-derived and nothing can be lost: the key is already in memory,
 /// so this only re-wraps it. The lossless path, which is why the account screen
 /// points a signed-in user here rather than at a reset link.
+///
+/// The current password is checked first, against the envelope on the server.
+/// The key is in memory, so the re-wrap does not need it - but without the
+/// check, anything that could run a command in the webview could set a
+/// password of its own and sign in from anywhere.
 #[tauri::command]
 pub async fn sync_change_password(
+    current_password: String,
     new_password: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    sync_client(&state)?.change_password(new_password).await
+    sync_client(&state)?
+        .change_password(current_password, new_password)
+        .await
 }
 
 /// Mint a recovery code and store its envelope, returning the code once.
 ///
 /// The only time the code exists outside the user's own records: it is not stored
 /// anywhere, and asking again produces a different one which invalidates this.
+///
+/// Asks for the password first, for the same reason as a password change: the
+/// code it returns opens the account on any machine.
 #[tauri::command]
-pub async fn sync_create_recovery_code(state: State<'_, AppState>) -> Result<String, String> {
-    sync_client(&state)?.create_recovery_code().await
+pub async fn sync_create_recovery_code(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    sync_client(&state)?.create_recovery_code(password).await
 }
 
 /// Whether this account has a recovery code saved. `None` means not known yet
@@ -1209,12 +1223,10 @@ pub async fn space_approve_join(
     app: tauri::AppHandle,
     space_id: String,
     request_id: String,
-    identity_pubkey: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (sync, _http) = sync_http(&state)?;
-    sync.approve_join_request(&space_id, &request_id, identity_pubkey.as_deref())
-        .await?;
+    sync.approve_join_request(&space_id, &request_id).await?;
     resolve_join_knock(&app, &state, &request_id, "Let in");
     let sync2 = Arc::clone(&sync);
     tauri::async_runtime::spawn(async move {

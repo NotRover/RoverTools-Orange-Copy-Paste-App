@@ -23,6 +23,18 @@ const KEY_SUPABASE_URL: &str = "supabase_url";
 const KEY_SUPABASE_ANON_KEY: &str = "supabase_anon_key";
 const KEY_RESET_PAGE_URL: &str = "reset_page_url";
 
+/// `https://` anywhere, or plain `http://` only to the local machine.
+fn is_trusted_endpoint(url: &str) -> bool {
+    if url.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split(['/', ':']).next().unwrap_or("");
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
+}
+
 // ── Deployment endpoints ──────────────────────────────────────────────
 //
 // Fill these in to hardcode the deployment this app ships against, so a plain
@@ -128,17 +140,45 @@ impl SyncConfig {
                 .to_string()
         };
 
+        // An endpoint that is not https is ignored in favour of the default.
+        // Every credential the app holds travels to these two hosts, so a
+        // plain-http override - however it got into the file - would hand
+        // them to whatever is on the path. Loopback is the one exception, for
+        // a developer running the stack locally.
+        let https_or = |key: &str, fallback: &str| -> String {
+            let value = str_or(key, fallback);
+            if is_trusted_endpoint(&value) {
+                value
+            } else {
+                crate::health::note(
+                    "sync config: endpoint override ignored",
+                    &format!("{key} is not https, using the built-in value"),
+                );
+                fallback.to_string()
+            }
+        };
+
         Self {
             enabled: map
                 .get(KEY_ENABLED)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
             enabled_known: true,
-            server_url: str_or(KEY_SERVER_URL, &defaults.server_url),
-            supabase_url: str_or(KEY_SUPABASE_URL, &defaults.supabase_url),
+            server_url: https_or(KEY_SERVER_URL, &defaults.server_url),
+            supabase_url: https_or(KEY_SUPABASE_URL, &defaults.supabase_url),
             supabase_anon_key: str_or(KEY_SUPABASE_ANON_KEY, &defaults.supabase_anon_key),
             reset_page_url: str_or(KEY_RESET_PAGE_URL, &defaults.reset_page_url),
         }
+    }
+
+    /// Whether `key` is one of the endpoint or credential settings that only
+    /// this file may set. The generic settings command refuses them, so a
+    /// script running in the webview cannot repoint the app at another server.
+    pub fn is_endpoint_key(key: &str) -> bool {
+        matches!(
+            key,
+            KEY_SERVER_URL | KEY_SUPABASE_URL | KEY_SUPABASE_ANON_KEY | KEY_RESET_PAGE_URL
+        )
     }
 
     /// True once every endpoint needed to reach a deployment is present.

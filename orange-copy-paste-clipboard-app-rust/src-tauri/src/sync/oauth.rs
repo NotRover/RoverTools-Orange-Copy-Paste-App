@@ -70,11 +70,23 @@ impl Loopback {
             match self.listener.accept() {
                 Ok((mut stream, _)) => {
                     let _ = stream.set_nonblocking(false);
+                    // Any page open in the browser can hit this port while the
+                    // sign-in is pending. A request that is not the provider's
+                    // redirect - no code, no error, a stray favicon fetch - is
+                    // answered and ignored, and the wait continues. PKCE makes a
+                    // foreign `code` worthless; this keeps a foreign request
+                    // from ending the attempt.
                     let target = read_request_target(&mut stream);
-                    let result = target
-                        .as_deref()
-                        .map(parse_redirect)
-                        .unwrap_or_else(|| Err("malformed OAuth redirect request".into()));
+                    let result = match target.as_deref().map(parse_redirect) {
+                        Some(Redirect::Code(code)) => Ok(code),
+                        Some(Redirect::Error) => {
+                            Err("sign-in was cancelled or refused by the provider".into())
+                        }
+                        Some(Redirect::Unrelated) | None => {
+                            write_response(&mut stream, false);
+                            continue;
+                        }
+                    };
                     write_response(&mut stream, result.is_ok());
                     return result;
                 }
@@ -102,27 +114,41 @@ fn read_request_target(stream: &mut std::net::TcpStream) -> Option<String> {
     line.split_whitespace().nth(1).map(str::to_string)
 }
 
-/// Parse the redirect target for the `code` (or surface an OAuth `error`).
-fn parse_redirect(target: &str) -> Result<String, String> {
-    let parsed = reqwest::Url::parse(&format!("http://127.0.0.1{target}"))
-        .map_err(|e| format!("parse redirect: {e}"))?;
+/// What one request to the loopback port turned out to be.
+enum Redirect {
+    /// The provider redirect, carrying the authorization code.
+    Code(String),
+    /// The provider redirect, carrying a refusal. Its text is not surfaced:
+    /// anything on the local machine can send a request here, and a message
+    /// shown verbatim in the app would be that page's to write.
+    Error,
+    /// Not the redirect at all.
+    Unrelated,
+}
+
+/// Classify the redirect target: the `code`, a provider `error`, or neither.
+fn parse_redirect(target: &str) -> Redirect {
+    let Ok(parsed) = reqwest::Url::parse(&format!("http://127.0.0.1{target}")) else {
+        return Redirect::Unrelated;
+    };
+    if parsed.path() != "/" {
+        return Redirect::Unrelated;
+    }
 
     let mut code = None;
-    let mut error = None;
+    let mut error = false;
     for (k, v) in parsed.query_pairs() {
         match k.as_ref() {
-            "code" => code = Some(v.into_owned()),
-            "error_description" | "error" if error.is_none() => error = Some(v.into_owned()),
+            "code" if !v.is_empty() => code = Some(v.into_owned()),
+            "error_description" | "error" => error = true,
             _ => {}
         }
     }
 
-    if let Some(code) = code {
-        Ok(code)
-    } else if let Some(error) = error {
-        Err(format!("sign-in was cancelled or failed: {error}"))
-    } else {
-        Err("OAuth redirect carried no authorization code".into())
+    match (code, error) {
+        (Some(code), _) => Redirect::Code(code),
+        (None, true) => Redirect::Error,
+        (None, false) => Redirect::Unrelated,
     }
 }
 

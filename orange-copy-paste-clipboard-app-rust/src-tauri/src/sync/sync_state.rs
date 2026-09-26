@@ -49,6 +49,19 @@ pub struct SyncState {
     /// rebuilt from a full pull exactly once, then this stays true.
     #[serde(default)]
     pub authorship_repaired: bool,
+    /// SHA-256 (hex) of each normalized address this install has signed into
+    /// with the split credential, or whose envelope it has opened in the split
+    /// format. Once an address is here the raw password is never offered to
+    /// Supabase for it again; see `SyncClient::perform_login`.
+    #[serde(default)]
+    pub auth_v2_seen: Vec<String>,
+}
+
+/// The address as it is recorded: hashed, so the state file names no account.
+fn auth_v2_tag(email: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(email.trim().to_lowercase().as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub struct SyncStateStore {
@@ -100,6 +113,22 @@ impl SyncStateStore {
     /// Record that the user has been told they can read a space. Returns false
     /// when they were already told, which is what suppresses the row on the next
     /// launch.
+    /// Record that `email` is known to be on the split credential. Returns
+    /// false when it already was.
+    pub fn mark_auth_v2_seen(&mut self, email: &str) -> bool {
+        let tag = auth_v2_tag(email);
+        if self.data.auth_v2_seen.contains(&tag) {
+            return false;
+        }
+        self.data.auth_v2_seen.push(tag);
+        self.save();
+        true
+    }
+
+    pub fn auth_v2_seen(&self, email: &str) -> bool {
+        self.data.auth_v2_seen.contains(&auth_v2_tag(email))
+    }
+
     pub fn mark_space_announced(&mut self, space_id: &str) -> bool {
         if self.data.spaces_announced.iter().any(|s| s == space_id) {
             return false;
