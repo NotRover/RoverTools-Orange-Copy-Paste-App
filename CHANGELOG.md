@@ -5,6 +5,15 @@ per-release files in [`changelog/`](changelog/) by
 `.github/scripts/gen-changelog.sh` on each release. Do not edit by hand; edit the
 source file in `changelog/` instead.
 
+## 0.4.1 (patch, stable) - 2026-09-26
+
+This release updates the libraries the app is built on to fix known security issues.
+
+### Fixed
+- The app framework and two of its networking and data libraries are updated to versions that fix published security advisories.
+
+---
+
 ## 0.4.0 (minor, stable) - 2026-09-26
 
 ### New
