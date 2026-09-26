@@ -28,15 +28,12 @@ run-name: >-
 #               Settings → Updates, invisible to the stable feed. Promoting it
 #               later is an edit of the same bundles, not another build.
 #
-# Required secrets, in the `release` environment (see docs/releasing.md):
+# Required secrets, best kept in the `release` environment (see docs/releasing.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
-#   RELEASE_PUSH_TOKEN                  the releaser's fine-grained token, Contents: write
+# Releases publish to this same repo with the built-in GITHUB_TOKEN; no PAT needed.
 #
-# Only RELEASER may run this. `main` is protected so that only a repo admin can
-# change it, and the built-in GITHUB_TOKEN is not an admin: the version bump and
-# beta.json are pushed with RELEASE_PUSH_TOKEN instead, which acts as the releaser.
-# The GitHub Release itself still uses the built-in token.
+# Only RELEASER may run this. Anyone else's run stops at its first step.
 
 on:
   workflow_dispatch:
@@ -68,16 +65,15 @@ env:
   # dots, which would silently break every URL in latest.json — so the bundles are
   # renamed to this before upload and the URLs are built from the new names.
   ASSET_PREFIX: RoverTools
-  # The one account allowed to cut a release. Changing it is an edit to `main`,
-  # which only a repo admin can make.
+  # The one account allowed to cut a release. Changing it is an edit to `main`.
   RELEASER: Spectrewolf8
 
 jobs:
   # ── 1. Check prerequisites, decide the version, collect the notes ───────────
   prepare:
     runs-on: ubuntu-latest
-    # Holds the signing secrets and the push token. The environment only admits
-    # runs from `main`, so a workflow edited on a branch cannot reach them.
+    # Holds the signing secrets. The environment only admits runs from `main`,
+    # so a workflow edited on a branch cannot reach them.
     environment: release
     permissions:
       contents: write # commit the version bump, push the tag
@@ -101,10 +97,6 @@ jobs:
           # release tag, so both have to be present.
           fetch-depth: 0
           submodules: false
-          # The version bump and tag are pushed with these credentials. The
-          # fallback only serves a dry run, which pushes nothing; a real run
-          # without the token is stopped by the prerequisite check below.
-          token: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
 
       - name: Check prerequisites
         # All of it up front, before a build is spent. Each of these fails
@@ -116,8 +108,6 @@ jobs:
         env:
           HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
           HAS_SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
-          HAS_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN != '' }}
-          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -uo pipefail
           fail=0
@@ -131,9 +121,6 @@ jobs:
 
           [ "$HAS_SIGNING_KEY" = "true" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY is not set. Bundles would be unsigned and unusable as updates."
           [ "$HAS_SIGNING_PASSWORD" = "true" ] || bad "Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set."
-          if [ "$DRY_RUN" != "true" ] && [ "$HAS_PUSH_TOKEN" != "true" ]; then
-            bad "Secret RELEASE_PUSH_TOKEN is not set. main only accepts pushes from a repo admin, so the version bump could not land (docs/releasing.md section 2.2)."
-          fi
 
           [ "$fail" -eq 0 ] || exit 1
           echo "All prerequisites present."
@@ -483,7 +470,7 @@ jobs:
     name: publish ${{ needs.prepare.outputs.tag }}
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
-    environment: release # the push token for beta.json
+    environment: release
     permissions:
       contents: write # create the release, commit beta.json
     steps:
@@ -595,9 +582,7 @@ jobs:
         # hand. A committed file has neither problem. It lands on this repo's default
         # branch, which is what the beta endpoint (raw .../HEAD/beta.json) reads.
         env:
-          # The releaser's token, not the built-in one: this commits to `main`,
-          # which only a repo admin can change.
-          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
