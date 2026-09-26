@@ -86,7 +86,7 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 # Argon2id — User Master Key derivation
 argon2 = "0.5"
 # AES-256-GCM — symmetric content encryption
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 # SHA-256 — blob checksum for the upload contract
 sha2 = "0.10"
 # HKDF-SHA256 — splits the stretched password into the Supabase credential and the KEK
