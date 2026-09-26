@@ -1,0 +1,41 @@
+# Dependabot for the desktop app. Security updates are switched on in the repo
+# settings and ignore the schedule below; this file sets the weekly version
+# updates and tells Dependabot where each manifest lives, since the app sits in
+# a subfolder rather than at the repo root.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /orange-copy-paste-clipboard-app-rust/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /orange-copy-paste-clipboard-app-rust
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      frontend-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions:
+        patterns: ["*"]
