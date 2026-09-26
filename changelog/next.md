@@ -24,10 +24,12 @@
   set fails a real release on purpose.
 -->
 
-### New
-
-### Improved
+This release updates the libraries the app is built on to fix known security issues.
 
 ### Fixed
+- The app framework and two of its networking and data libraries are updated to versions that fix published security advisories.
 
 ### Internal
+- Bumped tauri to 2.11.1, quinn-proto to 0.11.18, serde_with to 3.23.0 and @tauri-apps/api to 2.11.1.
+- Release workflow: only the owner can start a release; signing secrets live in a main-only release environment. Dependabot config added.
+- Submodule pointer bumps and CLAUDE.md updates.
