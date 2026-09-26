@@ -206,7 +206,10 @@ Pick the smallest valid check set for what you touched.
 ## Git & Repos
 
 - The **client** is committed in the parent repo; the **backend** and the **website** are each submodules with their own repos. Keep each commit scoped to one repo; don't bundle a submodule-pointer bump with client code unless coordinating a release.
-- Backend and website work each go on their **own dedicated branches** in their own repos. Compare/PR against each repo's `main`.
+- **Nothing reaches `main` without the user.** The user is the only account with write access, so outside changes arrive as PRs the user reviews and merges. Rulesets on all three repos block force pushes and deletion of `main` for everyone, the user included, with no bypass, and the app's release tags can't be moved or deleted. Pushes from this session use the user's credentials: push only when the user approves it in that turn, and never try to get around a rule.
+- **Not everything gets a PR.** Default to one commit pushed straight to `main`, once the user approves the push, for low-risk work: docs, `CLAUDE.md`, changelog, config (Dependabot, editor, lint), submodule-pointer bumps, and lockfile-only dependency bumps that passed the repo's checks. Say what is going in before pushing.
+- **Open a PR** only for work the user should review as a diff before it lands: app or backend code, anything crossing the wire contract, migrations, crypto/auth/security changes, the release or deploy workflows, or anything the user asks to review. PR work goes on a dedicated branch in its own repo, against that repo's `main`.
+- **One PR per piece of work.** Related changes in one repo share a branch and a PR; don't split them by file or concern, and don't open a PR just to replace bot PRs when a direct push would do.
 - **`uv.lock` churn:** `uv run` can regenerate `uv.lock`. If a task didn't intend a dependency change, restore it (`git checkout -- uv.lock`) so the commit stays scoped.
 - Never apply migrations, push, or commit-push without explicit approval.
 - **Commit only when the user asks in that turn** — never proactively, and never bundle a push with it.
