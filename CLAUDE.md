@@ -156,6 +156,7 @@ What you need before you have read any of it — shapes and prohibitions, no val
 
 **Everywhere — docs, comments, copy, commits**
 - **Never write the section sign (U+00A7).** Reference a section by number or name instead: "section 7.4", "sections 5.1-5.6", "the Cross-System Invariants section". Unlike the copy rules below, this one covers everything you write: markdown docs, code comments, commit messages, PR bodies, and chat replies.
+- **Every doc and every user-facing string follows [`docs/writing-docs.md`](docs/writing-docs.md). This is mandatory, in all three repos, and has no exceptions.** That covers READMEs, website pages, reference docs, design records, in-app text, emails, web pages and release notes. Before writing, decide which kind of page it is (tutorial, how-to, reference, explanation). Before calling the work done, run its "Checklist before merging a doc change" and fix every failure. If a rule there conflicts with the task, stop and ask; don't quietly skip it. The backend and website repos follow the same file rather than keeping their own copy.
 
 **Client — the Rust/React boundary**
 - Rust owns state, persistence, and **all** crypto; React is UI. Never reimplement encryption, key handling, or merge logic in TypeScript.
@@ -167,7 +168,7 @@ What you need before you have read any of it — shapes and prohibitions, no val
 
 ### User-Facing Copy: No AI Slop
 
-Covers every string a user reads: labels, buttons, empty states, toasts, errors, emails, landing copy. Not code comments, commit messages, or PR bodies.
+Covers every string a user reads: labels, buttons, empty states, toasts, errors, emails, landing copy. Not code comments, commit messages, or PR bodies. These are the hard bans. How to structure and write the text around them is set by [`docs/writing-docs.md`](docs/writing-docs.md), and both apply.
 
 - ASCII punctuation only. No `—`, `–`, `“ ” ‘ ’`, `…`, `•`, `→`, `×`, `✓`, `★`, `✨`, non-breaking spaces, the section sign. Hyphens are fine ("real-time"). Emoji only if the design calls for it, never as an icon.
 - No stock AI words: delve, tapestry, landscape, seamless, robust, elevate, empower, unlock, transform, unleash, supercharge, leverage, utilize, harness, journey, effortless.
@@ -200,6 +201,7 @@ Pick the smallest valid check set for what you touched.
 - **Behavior-sensitive runtime** (watcher/hotkeys/popup/paste/sync) → `bun run tauri dev` and smoke-test that specific flow. Full E2E sync needs a live backend + Supabase + two accounts; if you can't run it, say so — don't claim it works.
 - **Backend Python** (any file) → always `uv run ty check src` and `uv run ruff check src`; fix all errors before done. Run `uv run pytest` for logic changes. Don't suppress with `# type: ignore` unless it's a documented third-party-stub false positive.
 - **Website** (`orange-copy-paste-clipboard-website/`, any content or config) → `bun run build` from the submodule; it typechecks and generates the static output. See that submodule's own `CLAUDE.md`.
+- **Any doc or user-facing text, in any repo** → the "Checklist before merging a doc change" in `docs/writing-docs.md`, with every item passing. Also check each changed number, label and shortcut against the code. A docs change is not done on a green build alone.
 
 ## Git & Repos
 
@@ -262,6 +264,7 @@ by intention, and the copy that drifts is the one nobody was reading when it bro
 | The backend's host and deployment — box access, hardening, recovery, the deploy pipeline, ops | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | User-facing release history, and the next release's notes | `changelog/` — one file per release, staged in `changelog/next.md` (skeleton `changelog/TEMPLATE.md`, convention `changelog/README.md`) |
 | End-user how-to, the public marketing site, and the Developers section (architecture/security overviews, self-hosting, contributing, shipped design records and walkthroughs) | `orange-copy-paste-clipboard-website/` — its own repo (Astro + Starlight). Describes product behavior for users; hosts the decision records + walkthroughs. Its Developers > Reference pages *render* the homes below (not a copy — see the mirror note) so devs read everything on one site; edit the home, never the rendered page |
+| How to write docs and user-facing text: kinds of page, page shape, style, upkeep (all three repos) | `docs/writing-docs.md` |
 | How to work in this repo | `CLAUDE.md` — process, plus enough orientation to navigate. Names of things, yes; **values** that can drift (exact payloads, KDF parameters, route strings) belong to the homes above |
 | Where everything lives, and cross-component invariants with no other home | `docs/architecture.md` — a map, not a description |
 
@@ -389,6 +392,7 @@ second copy to keep in step.
 ## Done Criteria
 
 - Relevant checks pass for the touched repo(s).
+- Any doc or user-facing text touched passes the `docs/writing-docs.md` checklist.
 - No regression in clipboard/notes/sync flows; cross-system contract stays consistent across client and backend.
 - Diff is minimal and matches existing patterns.
 - Assumptions, risks, and any deferred/untested paths are called out explicitly.
