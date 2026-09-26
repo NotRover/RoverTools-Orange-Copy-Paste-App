@@ -26,8 +26,21 @@
 
 ### New
 
+- Passwords must be at least 8 characters. This applies when you sign up, change your password, or set one after signing in with Google.
+
 ### Improved
+
+- Changing your password now asks for your current one first, and creating a recovery code asks for your password. Both actions can open your account from another machine, so only someone who knows the password can do them.
+- A device you revoke from the account screen is signed out within seconds, even while it is running, instead of keeping access until its session expires.
+- Links inside copied web content open in your browser only when you click them in the viewer. Previews no longer follow links on their own.
+- Joining a space from a link now shows the join form with the code filled in, so you confirm before joining.
 
 ### Fixed
 
+- Copied web content is cleaned before it is shown, so a page cannot run scripts or load remote images inside the app.
+- Your account password now stays on your device. Signing in sends a separate login key derived from it, so the service that checks your sign-in never holds the password that unlocks your data. Existing accounts switch over the next time you sign in, with nothing to do and nothing re-encrypted.
+
 ### Internal
+
+- Client: `derive_master` (Argon2id, email-salted) split with HKDF-SHA256 into `derive_auth_key` (the Supabase credential) and `derive_kek` (wraps the UMK, AAD `umk-envelope-v2`). Legacy `umk-envelope-v1` envelopes are opened read-only and re-wrapped on sign-in, then the Supabase credential is replaced.
+- Backend `docs/architecture.md` section 7.1 documents the split and the migration; no backend code change.

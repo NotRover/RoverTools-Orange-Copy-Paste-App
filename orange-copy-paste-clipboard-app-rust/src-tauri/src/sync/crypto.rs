@@ -5,7 +5,8 @@
 //! intermediate key bytes.
 //!
 //! Algorithms used:
-//!   - Argon2id  — User Master Key (UMK) derivation from password
+//!   - Argon2id  — stretches the account password (and the recovery code)
+//!   - HKDF-SHA256 — splits the stretched password into an auth key and a KEK
 //!   - AES-256-GCM — symmetric content encryption / group key wrapping
 //!   - X25519 ECDH — multi-device key exchange and group key wrapping
 //!
@@ -19,6 +20,8 @@ use aes_gcm::{
 };
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use hkdf::Hkdf;
+use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 use zeroize::Zeroizing;
 
@@ -32,30 +35,121 @@ const NONCE_LEN: usize = 12;
 
 // ── Key derivation ──────────────────────────────────────────────────
 
-/// Additional-authenticated-data tag binding a wrapped UMK to its purpose.
-const UMK_WRAP_AAD: &str = "umk-envelope-v1";
+/// Additional-authenticated-data tag of the current password envelope: the UMK
+/// wrapped under the HKDF-split KEK of [`derive_kek`].
+const UMK_WRAP_AAD: &str = "umk-envelope-v2";
 
-/// Derive the 32-byte **key-wrapping key (KEK)** from the account password and
-/// the per-account KDF salt.
+/// AAD of the envelope format before the split, when the KEK was
+/// `Argon2id(password, kdf_salt)` directly. Still opened by
+/// [`unwrap_umk_legacy`] so an account can be migrated on its next sign-in;
+/// never written any more.
+const UMK_WRAP_AAD_LEGACY: &str = "umk-envelope-v1";
+
+/// Domain tag mixed into the salt the password is stretched under.
+const AUTH_SALT_INFO: &str = "orange-copy-paste/auth-salt/v2:";
+/// HKDF info of the half that is sent to Supabase as the account password.
+const AUTH_KEY_INFO: &[u8] = b"orange-copy-paste/auth-key/v2";
+/// HKDF info of the half that wraps the UMK and never leaves the device.
+const KEK_INFO: &[u8] = b"orange-copy-paste/kek/v2";
+/// HKDF info of the proof-of-possession the server asks for before it lets a
+/// caller replace or delete a copy of the UMK.
+const UMK_PROOF_INFO: &[u8] = b"orange-copy-paste/umk-proof/v1";
+
+/// A value only a holder of the UMK can produce, sent as `X-Umk-Proof` on the
+/// routes that overwrite or delete an envelope or a device wrap.
+///
+/// A bearer token alone used to be enough to blank every copy of the master
+/// key - password envelope, recovery envelope, each device wrap - which turned a
+/// stolen access token into permanent data loss. The server keeps only the
+/// SHA-256 of this value, so a database read does not yield it, and the value
+/// itself is one-way from the UMK.
+pub fn umk_proof(umk: &[u8; 32]) -> Zeroizing<String> {
+    let hk = Hkdf::<Sha256>::new(None, umk);
+    let mut out = Zeroizing::new([0u8; 32]);
+    hk.expand(UMK_PROOF_INFO, out.as_mut())
+        .expect("32 bytes is a valid HKDF output length");
+    Zeroizing::new(B64.encode(out.as_ref()))
+}
+
+/// The account password after one Argon2id pass, before it is split.
+///
+/// Nothing derived from this may be used for two purposes: the split in
+/// [`derive_auth_key`] and [`derive_kek`] exists so that the value Supabase Auth
+/// stores a hash of - and the value an attacker with our database can guess at
+/// bcrypt speed - reveals nothing about the key that opens the data. Before the
+/// split the raw password was sent to Supabase and also derived the KEK, so a
+/// bcrypt-speed guess against `auth.users` bypassed the memory-hard KDF entirely.
+///
+/// The salt is the address, not a server-issued value, because the master has to
+/// exist *before* sign-in (it produces the credential) and the only thing known
+/// about the account at that point is what the user typed. Normalized, so a
+/// capitalized address on one machine still opens the account on another.
+pub fn derive_master(password: &str, email: &str) -> Zeroizing<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    hasher.update(AUTH_SALT_INFO.as_bytes());
+    hasher.update(normalize_email(email).as_bytes());
+    let salt = hasher.finalize();
+    argon2id_32(password.as_bytes(), &salt)
+}
+
+/// The address as it enters the salt: surrounding whitespace off, lower case.
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+/// The credential presented to Supabase Auth in place of the password:
+/// sign-in, sign-up and every `PUT /user`. Base64 so it survives as a JSON
+/// string and clears any length-based password rule.
+///
+/// One-way from the master and independent of [`derive_kek`]: capturing it in
+/// transit, or cracking its bcrypt hash out of `auth.users`, yields the ability
+/// to sign in and nothing else.
+pub fn derive_auth_key(master: &[u8; 32]) -> Zeroizing<String> {
+    let hk = Hkdf::<Sha256>::new(None, master);
+    let mut out = Zeroizing::new([0u8; 32]);
+    hk.expand(AUTH_KEY_INFO, out.as_mut())
+        .expect("32 bytes is a valid HKDF output length");
+    Zeroizing::new(B64.encode(out.as_ref()))
+}
+
+/// The 32-byte **key-wrapping key (KEK)**: the other half of the split, bound
+/// to the account's server-issued `kdf_salt`.
 ///
 /// The KEK never encrypts user data directly — it only wraps/unwraps the random
 /// User Master Key (see [`wrap_umk`] / [`unwrap_umk`]).  Decoupling the two means
 /// a password change only re-wraps the UMK instead of re-encrypting everything.
 ///
 /// Returned in a `Zeroizing` wrapper so memory is scrubbed on drop.
-pub fn derive_kek(password: &str, kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
+pub fn derive_kek(master: &[u8; 32], kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
+    let hk = Hkdf::<Sha256>::new(Some(kdf_salt), master);
+    let mut key = Zeroizing::new([0u8; 32]);
+    hk.expand(KEK_INFO, key.as_mut())
+        .expect("32 bytes is a valid HKDF output length");
+    key
+}
+
+/// The KEK of the format before the split: Argon2id over the raw password and
+/// `kdf_salt`. Only for opening an envelope written by an older client, so it
+/// can be re-wrapped under [`derive_kek`].
+pub fn derive_legacy_kek(password: &str, kdf_salt: &[u8]) -> Zeroizing<[u8; 32]> {
+    argon2id_32(password.as_bytes(), kdf_salt)
+}
+
+/// Argon2id, 64 MB / 3 passes / 4 lanes, to 32 bytes. The one memory-hard step;
+/// everything the password or the recovery code derives goes through it.
+fn argon2id_32(secret: &[u8], salt: &[u8]) -> Zeroizing<[u8; 32]> {
     let params =
         Params::new(A2_MEMORY_KB, A2_ITERATIONS, A2_PARALLELISM, Some(32))
             .expect("valid argon2 params");
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(password.as_bytes(), kdf_salt, key.as_mut())
+        .hash_password_into(secret, salt, key.as_mut())
         .expect("argon2 hash");
     key
 }
 
-/// Wrap the random UMK under the password-derived `kek`.  Returns the base64
+/// Wrap the random UMK under the `kek` of [`derive_kek`].  Returns the base64
 /// envelope blob stored server-side (`nonce || ciphertext || tag`).
 pub fn wrap_umk(kek: &[u8; 32], umk: &[u8; 32]) -> Result<String, String> {
     Ok(B64.encode(encrypt_bytes(kek, umk, UMK_WRAP_AAD)?))
@@ -64,10 +158,27 @@ pub fn wrap_umk(kek: &[u8; 32], umk: &[u8; 32]) -> Result<String, String> {
 /// Unwrap the UMK from its base64 envelope using `kek`.  A GCM authentication
 /// failure means the password was wrong, surfaced as a clear message.
 pub fn unwrap_umk(kek: &[u8; 32], wrapped_b64: &str) -> Result<Zeroizing<[u8; 32]>, String> {
+    unwrap_umk_with(kek, wrapped_b64, UMK_WRAP_AAD)
+}
+
+/// Unwrap an envelope written before the split, with the KEK of
+/// [`derive_legacy_kek`]. The caller re-wraps the result under [`wrap_umk`].
+pub fn unwrap_umk_legacy(
+    kek: &[u8; 32],
+    wrapped_b64: &str,
+) -> Result<Zeroizing<[u8; 32]>, String> {
+    unwrap_umk_with(kek, wrapped_b64, UMK_WRAP_AAD_LEGACY)
+}
+
+fn unwrap_umk_with(
+    kek: &[u8; 32],
+    wrapped_b64: &str,
+    aad: &str,
+) -> Result<Zeroizing<[u8; 32]>, String> {
     let combined = B64
         .decode(wrapped_b64)
         .map_err(|e| format!("wrapped_umk base64: {e}"))?;
-    let bytes = decrypt_bytes(kek, &combined, UMK_WRAP_AAD).map_err(|_| {
+    let bytes = decrypt_bytes(kek, &combined, aad).map_err(|_| {
         "Incorrect password. It does not match the one this account was encrypted with."
             .to_string()
     })?;
@@ -136,15 +247,16 @@ pub fn normalize_recovery_code(input: &str) -> Zeroizing<String> {
 
 /// Wrap the UMK under a key derived from `recovery_code`.
 ///
-/// Same salt and same KDF as the password envelope; only the secret and the AAD
-/// differ. The caller passes the code as typed - normalizing happens here, so no
+/// Same Argon2id step and same `kdf_salt` as the legacy password envelope; only
+/// the secret and the AAD differ. The code is typed into the app and nowhere
+/// else, so unlike the password it needs no split. The caller passes the code as typed - normalizing happens here, so no
 /// call site can forget it.
 pub fn wrap_umk_recovery(
     recovery_code: &str,
     kdf_salt: &[u8],
     umk: &[u8; 32],
 ) -> Result<String, String> {
-    let key = derive_kek(&normalize_recovery_code(recovery_code), kdf_salt);
+    let key = argon2id_32(normalize_recovery_code(recovery_code).as_bytes(), kdf_salt);
     Ok(B64.encode(encrypt_bytes(&key, umk, UMK_RECOVERY_AAD)?))
 }
 
@@ -157,7 +269,7 @@ pub fn unwrap_umk_recovery(
     kdf_salt: &[u8],
     wrapped_b64: &str,
 ) -> Result<Zeroizing<[u8; 32]>, String> {
-    let key = derive_kek(&normalize_recovery_code(recovery_code), kdf_salt);
+    let key = argon2id_32(normalize_recovery_code(recovery_code).as_bytes(), kdf_salt);
     let combined = B64
         .decode(wrapped_b64)
         .map_err(|e| format!("recovery envelope base64: {e}"))?;
@@ -230,7 +342,6 @@ pub fn decrypt_bytes(key: &[u8; 32], combined: &[u8], aad: &str) -> Result<Vec<u
 
 /// Lowercase hex SHA-256 of `data` — the checksum the blob upload contract wants.
 pub fn sha256_hex(data: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
     let digest = Sha256::digest(data);
     let mut s = String::with_capacity(64);
     for b in digest {
@@ -250,7 +361,6 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// server that stores it nothing about the key, and the domain prefix keeps it from
 /// ever colliding with another hash this app publishes.
 pub fn space_key_fingerprint(key: &[u8; 32]) -> String {
-    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(b"space-key-v1");
     hasher.update(key);
@@ -270,7 +380,6 @@ pub fn space_key_fingerprint(key: &[u8; 32]) -> String {
 /// The verifier is held only in memory until the token exchange completes.
 pub fn pkce_pair() -> (String, String) {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
-    use sha2::{Digest, Sha256};
 
     let mut raw = [0u8; 32];
     OsRng.fill_bytes(&mut raw);
@@ -344,14 +453,21 @@ pub fn derive_identity_keypair(umk: &[u8; 32]) -> (Zeroizing<[u8; 32]>, [u8; 32]
 
 /// Compute the X25519 shared secret for ECDH key exchange.  Used for
 /// wrapping space keys when distributing them to members.
+///
+/// Refuses a non-contributory result. A peer who registers a low-order public
+/// key makes every keyholder wrap the ring under an all-zero secret, readable by
+/// anyone; `Err` here is what stops that key ever being wrapped to.
 pub fn x25519_shared_secret(
     privkey_bytes: &[u8; 32],
     peer_pubkey_bytes: &[u8; 32],
-) -> Zeroizing<[u8; 32]> {
+) -> Result<Zeroizing<[u8; 32]>, String> {
     let private = StaticSecret::from(*privkey_bytes);
     let peer_public = X25519Public::from(*peer_pubkey_bytes);
     let shared = private.diffie_hellman(&peer_public);
-    Zeroizing::new(*shared.as_bytes())
+    if !shared.was_contributory() {
+        return Err("peer public key is not a valid X25519 point".into());
+    }
+    Ok(Zeroizing::new(*shared.as_bytes()))
 }
 
 // ── Key wrapping ────────────────────────────────────────────────────
@@ -618,10 +734,10 @@ mod tests {
 
         let group_key = random_key();
 
-        let sending = x25519_shared_secret(&owner_priv, &member_pub);
+        let sending = x25519_shared_secret(&owner_priv, &member_pub).unwrap();
         let wrapped = wrap_key(&sending, &group_key).expect("wrap");
 
-        let receiving = x25519_shared_secret(&member_priv, &owner_pub);
+        let receiving = x25519_shared_secret(&member_priv, &owner_pub).unwrap();
         let unwrapped = unwrap_key(&receiving, &wrapped).expect("unwrap");
 
         assert_eq!(*unwrapped, *group_key);
@@ -635,11 +751,62 @@ mod tests {
         let (id_priv, id_pub) = derive_identity_keypair(&umk);
         let group_key = random_key();
 
-        let shared = x25519_shared_secret(&id_priv, &id_pub);
+        let shared = x25519_shared_secret(&id_priv, &id_pub).unwrap();
         let wrapped = wrap_key(&shared, &group_key).expect("wrap");
         let unwrapped = unwrap_key(&shared, &wrapped).expect("unwrap");
 
         assert_eq!(*unwrapped, *group_key);
+    }
+
+    /// The two halves of the split share nothing an observer of one could use on
+    /// the other, and the credential is a full 32 bytes of base64 - long enough
+    /// for any length-based password rule, and never the password itself.
+    #[test]
+    fn password_split_yields_independent_halves() {
+        let master = derive_master("correct horse battery staple", "user@example.com");
+        let kdf_salt = random_key();
+        let auth_key = derive_auth_key(&master);
+        let kek = derive_kek(&master, kdf_salt.as_ref());
+
+        let auth_bytes = B64.decode(auth_key.as_str()).expect("base64");
+        assert_eq!(auth_bytes.len(), 32);
+        assert_ne!(auth_bytes.as_slice(), kek.as_ref());
+        assert_ne!(auth_bytes.as_slice(), master.as_ref());
+        assert_ne!(auth_key.as_str(), "correct horse battery staple");
+        // A different account salt yields a different KEK from the same master.
+        assert_ne!(*derive_kek(&master, random_key().as_ref()), *kek);
+    }
+
+    /// The address is the salt, so however it is capitalized or padded on a
+    /// second machine the same credential has to come out - and a different
+    /// address must not.
+    #[test]
+    fn master_salt_normalizes_email_case_and_whitespace() {
+        let a = derive_master("pw", "User@Example.com");
+        let b = derive_master("pw", "  user@example.com ");
+        let c = derive_master("pw", "other@example.com");
+        assert_eq!(*a, *b);
+        assert_ne!(*a, *c);
+    }
+
+    /// An envelope written before the split opens only through the legacy path,
+    /// and one written now only through the current one: the AADs keep them apart
+    /// so a migration can tell which it is holding.
+    #[test]
+    fn legacy_and_current_envelopes_do_not_cross_open() {
+        let umk = random_key();
+        let kdf_salt = random_key();
+        let legacy_kek = derive_legacy_kek("pw", kdf_salt.as_ref());
+        let legacy_envelope = B64.encode(
+            encrypt_bytes(&legacy_kek, umk.as_ref(), UMK_WRAP_AAD_LEGACY).expect("wrap"),
+        );
+        assert_eq!(*unwrap_umk_legacy(&legacy_kek, &legacy_envelope).expect("legacy"), *umk);
+        assert!(unwrap_umk(&legacy_kek, &legacy_envelope).is_err());
+
+        let kek = derive_kek(&derive_master("pw", "a@b.c"), kdf_salt.as_ref());
+        let envelope = wrap_umk(&kek, &umk).expect("wrap");
+        assert_eq!(*unwrap_umk(&kek, &envelope).expect("current"), *umk);
+        assert!(unwrap_umk_legacy(&kek, &envelope).is_err());
     }
 
     /// The shape the user is shown, and the entropy behind it.
@@ -695,19 +862,22 @@ mod tests {
         assert!(unwrap_umk_recovery(&code, b"another-salt", &wrapped).is_err());
     }
 
-    /// The two envelopes share the account salt, so only the AAD keeps them
-    /// apart. Feeding one to the other's unwrap must fail rather than half-work.
+    /// The legacy password envelope and the recovery envelope share the account
+    /// salt and the KDF, so only the AAD keeps them apart. Feeding one to the
+    /// other's unwrap must fail rather than half-work.
     #[test]
     fn password_and_recovery_envelopes_are_not_interchangeable() {
         let umk = random_key();
         let salt = b"account-kdf-salt";
         let secret = "the-same-string-as-both";
 
-        let pw_envelope = wrap_umk(&derive_kek(secret, salt), &umk).expect("wrap pw");
+        let legacy_kek = derive_legacy_kek(secret, salt);
+        let pw_envelope =
+            B64.encode(encrypt_bytes(&legacy_kek, umk.as_ref(), UMK_WRAP_AAD_LEGACY).expect("wrap pw"));
         let rec_envelope = wrap_umk_recovery(secret, salt, &umk).expect("wrap recovery");
 
         assert!(unwrap_umk_recovery(secret, salt, &pw_envelope).is_err());
-        assert!(unwrap_umk(&derive_kek(secret, salt), &rec_envelope).is_err());
+        assert!(unwrap_umk_legacy(&legacy_kek, &rec_envelope).is_err());
     }
 
     /// A member who was never wrapped for cannot unwrap someone else's blob.
@@ -720,9 +890,9 @@ mod tests {
             derive_identity_keypair(&random_key()).1,
         );
 
-        let wrapped = wrap_key(&x25519_shared_secret(&owner_priv, &m1_pub), &random_key())
+        let wrapped = wrap_key(&x25519_shared_secret(&owner_priv, &m1_pub).unwrap(), &random_key())
             .expect("wrap");
-        let wrong = x25519_shared_secret(&outsider_priv, &owner_pub);
+        let wrong = x25519_shared_secret(&outsider_priv, &owner_pub).unwrap();
         assert!(unwrap_key(&wrong, &wrapped).is_err(), "AES-GCM must reject");
     }
 

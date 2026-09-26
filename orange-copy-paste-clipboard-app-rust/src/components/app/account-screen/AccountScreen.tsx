@@ -236,6 +236,9 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   // Changing the password while signed in - the path that cannot lose anything.
   const [changeOpen, setChangeOpen] = useState(false);
   const [changeDone, setChangeDone] = useState(false);
+  // Checked against the account's envelope before anything changes, so a
+  // password change is something only the person who knows it can do.
+  const [currentPassword, setCurrentPassword] = useState("");
 
   // Saving a recovery code. `recoveryNeeded` is null until asked, and only a
   // definite false answer is allowed to suppress the panel - guessing would put
@@ -247,6 +250,9 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoverySavedTo, setRecoverySavedTo] = useState<string | null>(null);
   const [recoveryCopied, setRecoveryCopied] = useState(false);
+  // The code opens the account from anywhere, so minting one asks for the
+  // password first.
+  const [recoveryPassword, setRecoveryPassword] = useState("");
 
   // Devices
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -437,16 +443,19 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       .catch(() => {});
   }, []);
 
-  /// Mint a code and show it. Used both for the forced first save and for a
+  /// Mint a code and show it. Used both for the first save and for a
   /// deliberate regenerate, which are the same operation server-side.
-  const mintRecoveryCode = useCallback(async () => {
+  const mintRecoveryCode = useCallback(async (password: string) => {
     setRecoveryBusy(true);
     setRecoveryError(null);
     setRecoveryAck(false);
     setRecoverySavedTo(null);
     setRecoveryCopied(false);
     try {
-      const code = await invoke<string>("sync_create_recovery_code");
+      const code = await invoke<string>("sync_create_recovery_code", {
+        password,
+      });
+      setRecoveryPassword("");
       setRecoveryCode(code);
     } catch (e) {
       setRecoveryError(
@@ -457,9 +466,9 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
     }
   }, []);
 
-  // Ask once per session whether this account has a recovery code, and mint one
-  // if it has not. Every account predating this has none, and they are exactly
-  // the accounts a forgotten password would strand.
+  // Ask once per session whether this account has a recovery code, and put the
+  // panel up if it has not. Every account predating this has none, and they are
+  // exactly the accounts a forgotten password would strand.
   useEffect(() => {
     if (!syncUser || recoveryNeeded !== null) return;
     let cancelled = false;
@@ -467,13 +476,12 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       .then((has) => {
         if (cancelled || has === null) return;
         setRecoveryNeeded(!has);
-        if (!has) void mintRecoveryCode();
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [syncUser, recoveryNeeded, mintRecoveryCode]);
+  }, [syncUser, recoveryNeeded]);
 
   const clearOauthTimer = () => {
     if (oauthTimer.current !== null) {
@@ -646,6 +654,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
   };
 
   const closeResetStage = () => {
+    setCurrentPassword("");
     setNewPassword("");
     setNewConfirm("");
     setResetStageError(null);
@@ -674,8 +683,9 @@ Keep this. It is the only way back into your synced items if you forget your pas
     setResetStageError(null);
     try {
       if (changeOpen) {
-        await invoke("sync_change_password", { newPassword });
+        await invoke("sync_change_password", { currentPassword, newPassword });
         setChangeDone(true);
+        setCurrentPassword("");
         setNewPassword("");
         setNewConfirm("");
         setChangeOpen(false);
@@ -711,6 +721,11 @@ Keep this. It is the only way back into your synced items if you forget your pas
 
   const handleLogin = async () => {
     if (!loginEmail || !loginPassword) return;
+    if (authMode === "signup" && loginPassword.length < 8) {
+      setAuthNotice(null);
+      setLoginError("Password must be at least 8 characters.");
+      return;
+    }
     setLoginLoading(true);
     setLoginError(null);
     setAuthNotice(null);
@@ -1286,31 +1301,60 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   </label>
                 </>
               ) : (
-                <p className="auth-hint">
-                  {recoveryBusy ? "Creating your code..." : "No code yet."}
-                </p>
+                <label className="auth-field">
+                  <span className="auth-label">Your password</span>
+                  <input
+                    className="auth-input"
+                    type="password"
+                    placeholder="Confirm it is you"
+                    value={recoveryPassword}
+                    autoFocus
+                    onChange={(e) => setRecoveryPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && recoveryPassword) {
+                        void mintRecoveryCode(recoveryPassword);
+                      }
+                    }}
+                    disabled={recoveryBusy}
+                  />
+                </label>
               )}
               {recoveryError && (
                 <span className="auth-error">{recoveryError}</span>
               )}
-              <button
-                type="button"
-                className="auth-submit"
-                onClick={() => {
-                  setRecoveryNeeded(false);
-                  setRecoveryCode(null);
-                }}
-                disabled={!recoveryCode || !recoveryAck}
-              >
-                Continue
-              </button>
+              {recoveryCode ? (
+                <button
+                  type="button"
+                  className="auth-submit"
+                  onClick={() => {
+                    setRecoveryNeeded(false);
+                    setRecoveryCode(null);
+                  }}
+                  disabled={!recoveryAck}
+                >
+                  Continue
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="auth-submit"
+                  onClick={() => void mintRecoveryCode(recoveryPassword)}
+                  disabled={recoveryBusy || !recoveryPassword}
+                >
+                  {recoveryBusy ? "Creating your code..." : "Create code"}
+                </button>
+              )}
               {!recoveryCode && !recoveryBusy && (
                 <button
                   type="button"
                   className="auth-textlink auth-textlink--center"
-                  onClick={() => void mintRecoveryCode()}
+                  onClick={() => {
+                    setRecoveryNeeded(false);
+                    setRecoveryPassword("");
+                    setRecoveryError(null);
+                  }}
                 >
-                  Try again
+                  Not now
                 </button>
               )}
             </div>
@@ -1332,6 +1376,20 @@ Keep this. It is the only way back into your synced items if you forget your pas
               </p>
             </div>
             <div className="auth-form">
+              {changeOpen && (
+                <label className="auth-field">
+                  <span className="auth-label">Current password</span>
+                  <input
+                    className="auth-input"
+                    type="password"
+                    placeholder="The one you sign in with"
+                    value={currentPassword}
+                    autoFocus
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    disabled={resetBusy}
+                  />
+                </label>
+              )}
               <label className="auth-field">
                 <span className="auth-label">New password</span>
                 <input
@@ -1339,7 +1397,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   type="password"
                   placeholder="At least 8 characters"
                   value={newPassword}
-                  autoFocus
+                  autoFocus={!changeOpen}
                   onChange={(e) => setNewPassword(e.target.value)}
                   disabled={resetBusy}
                 />
@@ -1365,7 +1423,12 @@ Keep this. It is the only way back into your synced items if you forget your pas
                 type="button"
                 className="auth-submit"
                 onClick={() => void submitNewPassword(false)}
-                disabled={resetBusy || !newPassword || !newConfirm}
+                disabled={
+                  resetBusy ||
+                  !newPassword ||
+                  !newConfirm ||
+                  (changeOpen && !currentPassword)
+                }
               >
                 {resetBusy ? "Saving..." : "Save password"}
               </button>
@@ -1879,8 +1942,9 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   type="button"
                   className="acct-btn acct-btn--sm acct-btn--quiet"
                   onClick={() => {
+                    setRecoveryError(null);
+                    setRecoveryCode(null);
                     setRecoveryNeeded(true);
-                    void mintRecoveryCode();
                   }}
                 >
                   {recoveryNeeded === false ? "Replace" : "New code"}

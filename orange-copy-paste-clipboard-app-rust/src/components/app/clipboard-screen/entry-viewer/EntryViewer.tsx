@@ -144,6 +144,7 @@ const HtmlBody: React.FC<{
   return (
     <div
       className="cv-html"
+      data-open-links
       style={scale === 1 ? undefined : { fontSize: `${13.5 * scale}px` }}
       dangerouslySetInnerHTML={{ __html: html }}
     />

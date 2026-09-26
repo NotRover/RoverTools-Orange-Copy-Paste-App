@@ -54,6 +54,7 @@ import {
   type CommentMark,
 } from "./comments/useCommentCounts";
 import BulkActionsBar from "../clipboard-screen/bulk-actions/BulkActionsBar";
+import { sanitizeHtml } from "../clipboard-screen/sanitize-html";
 import type { ClipboardLayout } from "../topbar/Topbar";
 import type { SortMode } from "../sort-options";
 import "../clipboard-screen/search-filter/SearchFilter.css";
@@ -1024,7 +1025,7 @@ const ClipFeedCard: React.FC<{
     preview = (
       <div
         className="card-html-preview"
-        dangerouslySetInnerHTML={{ __html: htmlFragment(entry.content) }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(htmlFragment(entry.content)) }}
       />
     );
   } else if (entry.type === "image") {
@@ -1469,8 +1470,10 @@ const JoinForm: React.FC<{
   onSubmit: (code: string) => void;
   onCancel: () => void;
   loading: boolean;
-}> = ({ onSubmit, onCancel, loading }) => {
-  const [code, setCode] = useState("");
+  /** Code from an opened invite link; shown for the user to confirm, never sent on its own. */
+  initialCode?: string;
+}> = ({ onSubmit, onCancel, loading, initialCode = "" }) => {
+  const [code, setCode] = useState(initialCode);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     inputRef.current?.focus();
@@ -2292,6 +2295,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const [collapsedDays, setCollapsedDays] = useStickySet("sp-collapsed-days");
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
+  const [joinPrefill, setJoinPrefill] = useState("");
   const [formLoading, setFormLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -3538,7 +3542,6 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         await invoke("space_approve_join", {
           spaceId: req.space_id,
           requestId: req.id,
-          identityPubkey: req.identity_pubkey ?? null,
         });
         showToast(
           `${req.display_name || "They"} can read ${req.space_name} now.`,
@@ -3588,15 +3591,18 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
     [reloadSpaces],
   );
 
-  // An invite link the user opened. Joining straight away rather than
-  // prefilling the form: they already chose to open the link, and a second
-  // confirmation would be a step with nothing behind it.
+  // An invite link the user opened. It prefills the join form rather than
+  // joining: any page or message can fire an orange:// link, so the request to
+  // join goes out only when the user presses Join.
   useEffect(() => {
     const code = joinCode?.trim();
     if (!code) return;
     onJoinCodeConsumed?.();
-    void handleJoin(code);
-  }, [joinCode, handleJoin, onJoinCodeConsumed]);
+    setJoinPrefill(code);
+    setShowJoin(true);
+    setShowCreate(false);
+    setListError(null);
+  }, [joinCode, onJoinCodeConsumed]);
 
   const receivedPending = invites.received.filter(
     (i) => i.status === "pending" && !pendingGone.has(`invite:${i.id}`),
@@ -4336,6 +4342,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           )}
           {showJoin && (
             <JoinForm
+              key={joinPrefill}
+              initialCode={joinPrefill}
               onSubmit={handleJoin}
               onCancel={() => setShowJoin(false)}
               loading={formLoading}
@@ -4365,6 +4373,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 className="sp-action-btn"
                 disabled={!signedIn}
                 onClick={() => {
+                  setJoinPrefill("");
                   setShowJoin(true);
                   setShowCreate(false);
                   setListError(null);

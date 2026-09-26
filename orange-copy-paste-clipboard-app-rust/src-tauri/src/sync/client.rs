@@ -20,9 +20,11 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use zeroize::Zeroizing;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+use crate::sync::crypto;
 use crate::sync::supabase::{AuthError, SupabaseAuth};
 
 const REQUEST_TIMEOUT_SECS: u64 = 10;
@@ -30,6 +32,20 @@ const REQUEST_TIMEOUT_SECS: u64 = 10;
 /// Blob transfers move up to 5 MB over a presigned S3/R2 URL, which the
 /// 10-second default cuts off on a slow link.
 const BLOB_TRANSFER_TIMEOUT_SECS: u64 = 90;
+
+/// The most a blob download will buffer: the 5 MB upload cap plus the GCM
+/// nonce and tag, rounded up generously.
+const BLOB_DOWNLOAD_LIMIT: u64 = 5 * 1024 * 1024 + 4096;
+
+/// `<user uuid>/<32 lower-case hex>`, the only key shape the server issues.
+fn is_blob_key(key: &str) -> bool {
+    let Some((user, object)) = key.split_once('/') else {
+        return false;
+    };
+    crate::sync::is_canonical_uuid(user)
+        && object.len() == 32
+        && object.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
 
 /// How long to wait before each retry of a request that never reached the
 /// backend, in seconds.  The first is long enough for a host that spun down
@@ -253,6 +269,7 @@ pub struct BootstrapResponse {
 #[derive(Debug, Serialize)]
 pub struct SetWrappedUmkRequest {
     pub wrapped_umk: String,
+    pub reset: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -785,6 +802,13 @@ pub struct SyncHttpClient {
     /// This device's server-assigned UUID (sent as `X-Device-Id`).
     device_id: Mutex<Option<String>>,
     user_id: Mutex<Option<String>>,
+    /// `crypto::umk_proof` of the UMK in memory, sent on the routes that
+    /// replace or delete a copy of the key. `None` until the UMK is known.
+    umk_proof: Mutex<Option<Zeroizing<String>>>,
+    /// Called once when the server answers 401 `device_revoked`: this install's
+    /// device row was revoked from another device, and the session must end
+    /// rather than be refreshed.
+    revoked_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Serialises token refresh.
     ///
     /// GoTrue rotates the refresh token on every use and revokes the whole
@@ -891,6 +915,8 @@ impl SyncHttpClient {
             supabase,
             access_token: Mutex::new(None),
             refresh_token: Mutex::new(None),
+            umk_proof: Mutex::new(None),
+            revoked_hook: Mutex::new(None),
             device_id: Mutex::new(None),
             user_id: Mutex::new(None),
             refresh_lock: tokio::sync::Mutex::new(()),
@@ -982,6 +1008,41 @@ impl SyncHttpClient {
             rb = rb.header("X-Device-Id", device_id);
         }
         Ok(rb)
+    }
+
+    /// [`Self::authed`] plus `X-Umk-Proof`, for the routes that overwrite or
+    /// delete a copy of the master key. Sent only where the server asks for
+    /// it; it is not a session credential.
+    fn authed_with_proof(
+        &self,
+        method: Method,
+        path: &str,
+    ) -> Result<reqwest::RequestBuilder, String> {
+        let mut rb = self.authed(method, path)?;
+        let proof = self.umk_proof.lock().clone();
+        if let Some(proof) = proof {
+            rb = rb.header("X-Umk-Proof", proof.as_str());
+        }
+        Ok(rb)
+    }
+
+    /// Hand over the proof of UMK possession once the key is in memory.
+    pub fn set_umk_proof(&self, umk: &[u8; 32]) {
+        *self.umk_proof.lock() = Some(crypto::umk_proof(umk));
+    }
+
+    /// Register what to run when the server reports this device revoked.
+    pub fn set_revoked_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self.revoked_hook.lock() = Some(hook);
+    }
+
+    fn fire_revoked(&self) {
+        // Taken, not cloned: the session ends once, however many requests
+        // were in flight when the verdict arrived.
+        let hook = self.revoked_hook.lock().take();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
 
     /// Exchange the stored refresh token for a fresh access token via Supabase.
@@ -1127,6 +1188,17 @@ impl SyncHttpClient {
             };
             let code = resp.status().as_u16();
             if code == 401 && !refreshed {
+                // Not a token problem, and no refresh will fix it: this device
+                // row was revoked. The hook ends the session; the error is
+                // reported as permanent so nothing queues for a retry.
+                let body = resp.text().await.unwrap_or_default();
+                if error_detail(code, &body) == "device_revoked" {
+                    self.fire_revoked();
+                    return Err(ApiError {
+                        status: Some(code),
+                        message: format!("{tag} 401: this device was revoked"),
+                    });
+                }
                 // Carry GoTrue's own verdict, not a 401 of our own invention.
                 // A timeout, a 429 or a 5xx from the refresh grant says nothing
                 // about the credential, and stamping 401 on them made the
@@ -1238,10 +1310,19 @@ impl SyncHttpClient {
 
     /// Store the password-wrapped UMK envelope for this account.  Called once on
     /// first setup, and again if the account password changes (re-wrap).
-    pub async fn set_wrapped_umk(&self, wrapped_umk: String) -> Result<(), String> {
-        let body = SetWrappedUmkRequest { wrapped_umk };
+    ///
+    /// Carries `X-Umk-Proof`. The first call on an account registers the proof;
+    /// every later call must match it, so a bearer token alone cannot replace
+    /// the envelope. `reset` is the one exception: a start-over from the reset
+    /// link, where the old key is gone and the proof with it. The server accepts
+    /// that only from a recovery-link session, and keeps the old envelope
+    /// aside.
+    pub async fn set_wrapped_umk(&self, wrapped_umk: String, reset: bool) -> Result<(), String> {
+        let body = SetWrappedUmkRequest { wrapped_umk, reset };
         self.get_ok("set wrapped umk", false, || {
-            Ok(self.authed(Method::PUT, "/api/v1/auth/umk")?.json(&body))
+            Ok(self
+                .authed_with_proof(Method::PUT, "/api/v1/auth/umk")?
+                .json(&body))
         })
         .await
     }
@@ -1254,7 +1335,7 @@ impl SyncHttpClient {
         let body = SetRecoveryUmkRequest { recovery_wrapped_umk };
         self.get_ok("set recovery umk", false, || {
             Ok(self
-                .authed(Method::PUT, "/api/v1/auth/umk/recovery")?
+                .authed_with_proof(Method::PUT, "/api/v1/auth/umk/recovery")?
                 .json(&body))
         })
         .await
@@ -1265,7 +1346,7 @@ impl SyncHttpClient {
     /// key that decrypts nothing.
     pub async fn clear_recovery_wrapped_umk(&self) -> Result<(), String> {
         self.get_ok("clear recovery umk", false, || {
-            self.authed(Method::DELETE, "/api/v1/auth/umk/recovery")
+            self.authed_with_proof(Method::DELETE, "/api/v1/auth/umk/recovery")
         })
         .await
     }
@@ -1709,6 +1790,12 @@ impl SyncHttpClient {
         &self,
         blob_key: &str,
     ) -> Result<BlobDownloadResponse, String> {
+        // The key arrives on another member's row and goes into a path with
+        // our bearer token behind it. Only the server's own shape is accepted:
+        // `<uuid>/<32 hex>`, nothing that could read as a different route.
+        if !is_blob_key(blob_key) {
+            return Err("blob key has an unexpected shape".into());
+        }
         self.get_json("blob download-url", || {
             self.authed(
                 Method::GET,
@@ -1730,10 +1817,26 @@ impl SyncHttpClient {
         if !resp.status().is_success() {
             return Err(format!("blob download {}", resp.status().as_u16()));
         }
-        resp.bytes()
+        // Streamed under a ceiling. The declared size on the row is the
+        // uploader's claim; what the bucket actually holds is not bounded by
+        // it, and buffering an unbounded body is an abort.
+        let limit = BLOB_DOWNLOAD_LIMIT;
+        if resp.content_length().is_some_and(|len| len > limit) {
+            return Err("blob larger than allowed".into());
+        }
+        let mut body = Vec::new();
+        let mut stream = resp;
+        while let Some(chunk) = stream
+            .chunk()
             .await
-            .map(|b| b.to_vec())
-            .map_err(|e| format!("blob download body: {}", transport_detail(&e)))
+            .map_err(|e| format!("blob download body: {}", transport_detail(&e)))?
+        {
+            if body.len() as u64 + chunk.len() as u64 > limit {
+                return Err("blob larger than allowed".into());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 
     pub async fn blob_quota(&self) -> Result<QuotaResponse, String> {
@@ -1800,7 +1903,7 @@ impl SyncHttpClient {
         let body = serde_json::json!({ "wrapped_umk": wrapped_umk });
         self.get_ok("store device umk", false, || {
             Ok(self
-                .authed(Method::POST, &format!("/api/v1/auth/devices/{device_id}/key-wrap"))?
+                .authed_with_proof(Method::POST, &format!("/api/v1/auth/devices/{device_id}/key-wrap"))?
                 .json(&body))
         })
         .await
@@ -1809,7 +1912,7 @@ impl SyncHttpClient {
     /// Revoke one of the user's devices (soft delete server-side).
     pub async fn revoke_device(&self, device_id: &str) -> Result<(), String> {
         self.get_ok("revoke device", true, || {
-            self.authed(Method::DELETE, &format!("/api/v1/auth/devices/{device_id}"))
+            self.authed_with_proof(Method::DELETE, &format!("/api/v1/auth/devices/{device_id}"))
         })
         .await
     }

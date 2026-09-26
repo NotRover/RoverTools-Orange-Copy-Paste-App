@@ -339,6 +339,46 @@ pub struct OAuthBegin {
     pub is_new: bool,
 }
 
+/// The account password, stretched once and split in two.
+///
+/// `auth_key` is the only one of these that leaves the device, as the credential
+/// Supabase Auth knows as the password. `master` stays here and, with the
+/// account's `kdf_salt`, yields the KEK that wraps the UMK. The raw `password`
+/// is kept solely to open an envelope from before the split. One struct so a
+/// sign-in derives Argon2id once and no call site can pair the wrong half with
+/// the wrong recipient.
+struct PasswordKeys {
+    password: Zeroizing<String>,
+    master: Zeroizing<[u8; 32]>,
+    auth_key: Zeroizing<String>,
+}
+
+/// Fewest characters a new account password may have.
+///
+/// Checked here, not only in the UI, because every route to a password - sign-up,
+/// change, reset, first OAuth sign-in - ends in this module. Supabase never sees
+/// the password itself, so its own policy cannot enforce this.
+pub const MIN_PASSWORD_CHARS: usize = 8;
+
+fn check_password_length(password: &str) -> Result<(), String> {
+    if password.chars().count() < MIN_PASSWORD_CHARS {
+        return Err(format!("Password must be at least {MIN_PASSWORD_CHARS} characters."));
+    }
+    Ok(())
+}
+
+impl PasswordKeys {
+    fn derive(password: &str, email: &str) -> Self {
+        let master = crypto::derive_master(password, email);
+        let auth_key = crypto::derive_auth_key(&master);
+        Self {
+            password: Zeroizing::new(password.to_string()),
+            master,
+            auth_key,
+        }
+    }
+}
+
 // ── SyncClient ───────────────────────────────────────────────────────
 
 /// Request timeout for the session-restore chain, longer than the default.
@@ -798,21 +838,55 @@ impl SyncClient {
     // ── Auth lifecycle ────────────────────────────────────────────
 
     /// Full login flow against Supabase Auth + our backend:
-    ///   1. Supabase password grant (access + refresh tokens, user id).
-    ///   2. `POST /auth/bootstrap` → KDF salt + wrapped-UMK envelope.
-    ///   3. Derive the wrapping key from password + salt, then unwrap the random
-    ///      UMK (or generate + wrap one on a brand-new account).
-    ///   4. Generate a device keypair and register the device → device_id.
-    ///   5. Persist secrets (device key + refresh token) to the OS keychain.
-    ///   6. Wire in-memory state and start the WebSocket listener.
+    ///   1. Stretch the password once and split it ([`PasswordKeys`]).
+    ///   2. Supabase password grant with the *auth key* (access + refresh
+    ///      tokens, user id). The password itself is not sent.
+    ///   3. `POST /auth/bootstrap` → KDF salt + wrapped-UMK envelope.
+    ///   4. Derive the KEK from the master + salt, then unwrap the random UMK
+    ///      (or generate + wrap one on a brand-new account).
+    ///   5. Generate a device keypair and register the device → device_id.
+    ///   6. Persist secrets (device key + refresh token) to the OS keychain.
+    ///   7. Wire in-memory state and start the WebSocket listener.
+    ///
+    /// An account created before the split still has the raw password on file
+    /// with Supabase, so a refused auth key gets exactly one more attempt with
+    /// the password itself. Succeeding that way marks the account for migration,
+    /// which [`Self::finalize_session`] performs: envelope re-wrapped first,
+    /// Supabase credential replaced second. The raw password is never sent to
+    /// an account that has already moved over, and a wrong password on such an
+    /// account is refused twice, which is the same verdict either way.
     pub async fn perform_login(
         &self,
         email: String,
         password: String,
         device_name: String,
     ) -> Result<SyncUser, String> {
-        let session = self.supabase.sign_in_password(&email, &password).await?;
-        self.finalize_session(session, &email, &password, device_name)
+        let keys = PasswordKeys::derive(&password, &email);
+        // Once this install has seen the auth key accepted for an account, the
+        // raw-password retry is closed for good: a Supabase that answers "wrong
+        // password" to the auth key is then either a typo or a host trying to
+        // be handed the password, and both get the same refusal.
+        let moved_over = self.sync_state.lock().auth_v2_seen(&email);
+        let (session, holds_raw_password) =
+            match self.supabase.sign_in_password(&email, &keys.auth_key).await {
+                Ok(session) => {
+                    self.note_auth_v2(&email);
+                    (session, false)
+                }
+                Err(refused) if refused.is_invalid_credentials() && !moved_over => {
+                    // Logged, not shown: the second attempt's verdict is the one
+                    // the user gets, and it is at least as specific.
+                    eprintln!("[auth] {} - retrying as a pre-split account", refused);
+                    let session = self
+                        .supabase
+                        .sign_in_password(&email, &keys.password)
+                        .await
+                        .map_err(String::from)?;
+                    (session, true)
+                }
+                Err(e) => return Err(String::from(e)),
+            };
+        self.finalize_session(session, &email, &keys, device_name, holds_raw_password)
             .await
     }
 
@@ -825,9 +899,12 @@ impl SyncClient {
         password: String,
         device_name: String,
     ) -> Result<SyncUser, String> {
-        match self.supabase.sign_up(&email, &password).await? {
+        check_password_length(&password)?;
+        let keys = PasswordKeys::derive(&password, &email);
+        match self.supabase.sign_up(&email, &keys.auth_key).await? {
             SignUpOutcome::Session(session) => {
-                self.finalize_session(*session, &email, &password, device_name)
+                self.note_auth_v2(&email);
+                self.finalize_session(*session, &email, &keys, device_name, false)
                     .await
             }
             SignUpOutcome::ConfirmationRequired => {
@@ -905,22 +982,18 @@ impl SyncClient {
     }
 
     /// Phase 2 of OAuth sign-in: take the stashed session plus the account
-    /// password and finalize.  On first sign-in the password is also written
-    /// back to Supabase so the account gains a real credential usable for later
-    /// email+password login; on return it is verified against the stored
-    /// identity key inside [`Self::finalize_session`].
-    ///
-    /// Two things here are deliberate, and both used to be wrong.
+    /// password and finalize.  On first sign-in the password's *auth key* is
+    /// also written to Supabase so the account gains a credential usable for
+    /// later email+password login; on return the password is verified against
+    /// the stored envelope inside [`Self::finalize_session`].
     ///
     /// The stash is *cloned*, and only cleared once everything succeeded. It used
     /// to be taken before the password was checked, so one typo threw the session
     /// away: the retry the UI was still offering answered "no pending sign-in,
     /// start again" and the only way forward was another trip through Google.
     ///
-    /// And on a first sign-in the envelope is written *before* the Supabase
-    /// password. The other order left a window where the account had a new
-    /// credential and no envelope that matched it - signable in, undecryptable -
-    /// and this way a failed attempt changes nothing server-side.
+    /// The envelope-before-credential order that a first sign-in needs lives in
+    /// `finalize_session`, which does the same for a migrating account.
     pub async fn complete_oauth(&self, password: String) -> Result<SyncUser, String> {
         let pending = self
             .pending_oauth
@@ -928,27 +1001,19 @@ impl SyncClient {
             .clone()
             .ok_or("no pending sign-in, start again")?;
 
-        let is_new = pending.is_new;
-        let access_token = pending.session.access_token.clone();
+        if pending.is_new {
+            check_password_length(&password)?;
+        }
+        let keys = PasswordKeys::derive(&password, &pending.email);
         let user = self
             .finalize_session(
                 pending.session,
                 &pending.email,
-                &password,
+                &keys,
                 pending.device_name,
+                pending.is_new,
             )
             .await?;
-
-        // Not fatal, and deliberately not returned as an error: the sign-in above
-        // already succeeded, so failing here would leave the app signed in while
-        // the UI still showed the password step. All that is lost is the ability
-        // to sign in later with email and password - Google still works, and the
-        // envelope matches what the user just typed either way.
-        if is_new {
-            if let Err(e) = self.supabase.update_password(&access_token, &password).await {
-                eprintln!("[sync] account password not stored with Supabase: {e}");
-            }
-        }
 
         *self.pending_oauth.lock() = None;
         Ok(user)
@@ -1070,26 +1135,22 @@ impl SyncClient {
         // A supplied recovery code is checked first and its failure is returned:
         // the user typed something specific, and silently falling through to
         // "this device has never held your key" would hide a typo.
-        let umk = match recovery_code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        check_password_length(&new_password)?;
+        let (umk, fresh_key) = match recovery_code.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
             Some(recovery) => {
                 let envelope = boot
                     .recovery_wrapped_umk
                     .as_deref()
                     .ok_or("no recovery code was ever saved for this account")?;
-                crypto::unwrap_umk_recovery(recovery, &kdf_salt, envelope)?
+                (crypto::unwrap_umk_recovery(recovery, &kdf_salt, envelope)?, false)
             }
             None => match self.recover_umk_for_reset(&user_id, &http).await {
-                Some(umk) => umk,
-                None if start_over => {
-                    // The recovery envelope still holds the key being abandoned,
-                    // so it has to go: left in place it would hand a later
-                    // recovery a key that decrypts nothing. Clearing it is also
-                    // what makes the account screen ask for a fresh code.
-                    if let Err(e) = http.clear_recovery_wrapped_umk().await {
-                        eprintln!("[sync] stale recovery envelope not cleared: {e}");
-                    }
-                    crypto::random_key()
-                }
+                Some(umk) => (umk, false),
+                // A key nobody holds. The envelope upload below says so
+                // (`reset`), which the server accepts only from a reset-link
+                // session, and the cleanup that needs the new key's proof -
+                // the stale recovery envelope, the other devices - follows it.
+                None if start_over => (crypto::random_key(), true),
                 None => {
                     return Err(
                         "this device has never held your encryption key, so a new password cannot                          unlock what you synced before. Enter your recovery code, sign in on a                          device you have used, or start over with a new key."
@@ -1103,13 +1164,31 @@ impl SyncClient {
         // the re-wrap then failed, the account would have a password that opens
         // nothing - signed in, and unable to decrypt. This way a failure leaves
         // the old password working and the user can simply ask again.
-        let wrapped = crypto::wrap_umk(&crypto::derive_kek(&new_password, &kdf_salt), &umk)?;
-        http.set_wrapped_umk(wrapped).await?;
+        let keys = PasswordKeys::derive(&new_password, &email);
+        let wrapped = crypto::wrap_umk(&crypto::derive_kek(&keys.master, &kdf_salt), &umk)?;
+        http.set_umk_proof(&umk);
+        http.set_wrapped_umk(wrapped, fresh_key).await?;
+        if fresh_key {
+            // The recovery envelope still holds the key being abandoned, so it
+            // has to go: left in place it would hand a later recovery a key
+            // that decrypts nothing. Clearing it is also what makes the
+            // account screen ask for a fresh code.
+            if let Err(e) = http.clear_recovery_wrapped_umk().await {
+                eprintln!("[sync] stale recovery envelope not cleared: {e}");
+            }
+        }
         self.supabase
-            .update_password(&access_token, &new_password)
+            .update_password(&access_token, &keys.auth_key)
             .await?;
 
         let user = self.perform_login(email, new_password, device_name).await?;
+        if fresh_key {
+            // Every other device still holds a wrap of the old key, and every
+            // one of them is a place the old password may have leaked from.
+            // Their sessions end here; whoever is really at them signs in
+            // with the new password.
+            self.revoke_other_devices().await;
+        }
         // Only now. A failure anywhere above is one the user can retry from the same
         // panel, and the retry needs this session - the link behind it is dead.
         self.pending_reset.lock().take();
@@ -1129,13 +1208,17 @@ impl SyncClient {
     /// The lossless path, and the one to prefer: the UMK is already in memory, so
     /// nothing has to be recovered and nothing can be lost. Same two steps in the
     /// same order as the reset - envelope first, password second.
-    pub async fn change_password(&self, new_password: String) -> Result<(), String> {
+    ///
+    /// The current password is checked against the envelope on the server before
+    /// anything changes. The key in memory would do for the re-wrap alone, but
+    /// then any code that reached the webview could pick a password of its own.
+    pub async fn change_password(
+        &self,
+        current_password: String,
+        new_password: String,
+    ) -> Result<(), String> {
+        check_password_length(&new_password)?;
         let http = self.http().ok_or("not signed in")?;
-        let umk = self
-            .umk
-            .lock()
-            .clone()
-            .ok_or("the encryption key is not loaded, sign in again")?;
         // Refreshed first: the token is handed to Supabase directly rather than
         // through the client's own retry path, so an expired one here is a plain
         // 401 with no second attempt.
@@ -1146,11 +1229,73 @@ impl SyncClient {
             .decode(&boot.kdf_salt)
             .map_err(|e| format!("kdf_salt b64: {e}"))?;
 
-        let wrapped = crypto::wrap_umk(&crypto::derive_kek(&new_password, &kdf_salt), &umk)?;
-        http.set_wrapped_umk(wrapped).await?;
+        let email = self.current_user().map(|u| u.email).ok_or("not signed in")?;
+        let umk = self.verify_password_against_envelope(&current_password, &email, &boot, &kdf_salt)?;
+        let keys = PasswordKeys::derive(&new_password, &email);
+        let wrapped = crypto::wrap_umk(&crypto::derive_kek(&keys.master, &kdf_salt), &umk)?;
+        http.set_umk_proof(&umk);
+        http.set_wrapped_umk(wrapped, false).await?;
         self.supabase
-            .update_password(&access_token, &new_password)
-            .await
+            .update_password(&access_token, &keys.auth_key)
+            .await?;
+        self.note_auth_v2(&email);
+        Ok(())
+    }
+
+    /// Open the account's envelope with `password`, or say why not.
+    ///
+    /// Both envelope formats are tried, in the same order as sign-in. The key
+    /// that comes out is the same one already in memory; opening the envelope
+    /// is the point, the key is a by-product.
+    fn verify_password_against_envelope(
+        &self,
+        password: &str,
+        email: &str,
+        boot: &crate::sync::client::BootstrapResponse,
+        kdf_salt: &[u8],
+    ) -> Result<Zeroizing<[u8; 32]>, String> {
+        let wrapped = boot
+            .wrapped_umk
+            .as_deref()
+            .ok_or("this account has no encryption key yet, sign in again")?;
+        let keys = PasswordKeys::derive(password, email);
+        let kek = crypto::derive_kek(&keys.master, kdf_salt);
+        if let Ok(umk) = crypto::unwrap_umk(&kek, wrapped) {
+            return Ok(umk);
+        }
+        let legacy = crypto::derive_legacy_kek(&keys.password, kdf_salt);
+        crypto::unwrap_umk_legacy(&legacy, wrapped)
+            .map_err(|_| "the current password is wrong".to_string())
+    }
+
+    /// Remember that Supabase holds this account's auth key, so sign-in never
+    /// again offers it the raw password.
+    fn note_auth_v2(&self, email: &str) {
+        self.sync_state.lock().mark_auth_v2_seen(email);
+    }
+
+    /// Revoke every device on the account except this one.
+    ///
+    /// Best effort and logged: a device that could not be revoked is still on
+    /// the account screen, where the user can try again by hand.
+    async fn revoke_other_devices(&self) {
+        let Some(http) = self.http() else { return };
+        let mine = http.device_id();
+        let devices = match http.list_devices().await {
+            Ok(devices) => devices,
+            Err(e) => {
+                eprintln!("[sync] other devices not listed after start-over: {e}");
+                return;
+            }
+        };
+        for device in devices {
+            if Some(&device.id) == mine.as_ref() {
+                continue;
+            }
+            if let Err(e) = http.revoke_device(&device.id).await {
+                eprintln!("[sync] device {} not revoked after start-over: {e}", device.id);
+            }
+        }
     }
 
     /// Mint a recovery code, wrap the account's UMK under it, and store the
@@ -1162,17 +1307,18 @@ impl SyncClient {
     ///
     /// Also how regenerating works. Storing replaces the previous envelope, so
     /// the old code stops opening anything the moment this returns.
-    pub async fn create_recovery_code(&self) -> Result<String, String> {
+    ///
+    /// Asks for the password, and for the same reason as a password change: the
+    /// code it hands back opens the account from anywhere.
+    pub async fn create_recovery_code(&self, password: String) -> Result<String, String> {
         let http = self.http().ok_or("not signed in")?;
-        let umk = self
-            .umk
-            .lock()
-            .clone()
-            .ok_or("the encryption key is not loaded, sign in again")?;
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
             .map_err(|e| format!("kdf_salt b64: {e}"))?;
+        let email = self.current_user().map(|u| u.email).ok_or("not signed in")?;
+        let umk = self.verify_password_against_envelope(&password, &email, &boot, &kdf_salt)?;
+        http.set_umk_proof(&umk);
 
         let code = crypto::generate_recovery_code();
         let envelope = crypto::wrap_umk_recovery(&code, &kdf_salt, &umk)?;
@@ -1203,8 +1349,16 @@ impl SyncClient {
         user_id: &str,
         http: &Arc<SyncHttpClient>,
     ) -> Option<Zeroizing<[u8; 32]>> {
-        if let Some(umk) = self.umk.lock().clone() {
-            return Some(umk);
+        // The key in memory belongs to whoever is signed in here, which is not
+        // necessarily the account the reset link is for.
+        let same_account = self
+            .current_user()
+            .map(|u| u.user_id == user_id)
+            .unwrap_or(false);
+        if same_account {
+            if let Some(umk) = self.umk.lock().clone() {
+                return Some(umk);
+            }
         }
         let device_priv = crypto::load_device_private_key(user_id).ok().flatten()?;
         let wrapped = match http.get_device_wrapped_umk().await {
@@ -1214,17 +1368,26 @@ impl SyncClient {
             _ => return None,
         };
         let device_pub = crypto::device_public_key(&device_priv);
-        let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
+        let shared = crypto::x25519_shared_secret(&device_priv, &device_pub).ok()?;
         crypto::unwrap_key(&shared, &wrapped).ok()
     }
 
-    /// Shared post-authentication flow for both login and signup.
+    /// Shared post-authentication flow for login, signup and OAuth.
+    ///
+    /// `write_auth_key` is the caller saying Supabase does not yet hold this
+    /// account's auth key: sign-in went through with the raw password (an
+    /// account from before the split), or the account has no credential of ours
+    /// at all (an OAuth first sign-in). An envelope found in the pre-split format
+    /// adds itself to that. In both cases the envelope is settled *first* and the
+    /// Supabase credential replaced *second*, so a failure between the two leaves
+    /// the old way in still working and the next sign-in simply tries again.
     async fn finalize_session(
         &self,
         session: SupabaseSession,
         email: &str,
-        password: &str,
+        keys: &PasswordKeys,
         device_name: String,
+        write_auth_key: bool,
     ) -> Result<SyncUser, String> {
         let user_id = session.user.id.clone();
         let user_email = if session.user.email.is_empty() {
@@ -1240,29 +1403,71 @@ impl SyncClient {
         http.set_user_id(user_id.clone());
 
         // 3. Bootstrap: fetch the KDF salt and (if the account is set up) the
-        //    wrapped-UMK envelope.  The password derives only the wrapping key.
+        //    wrapped-UMK envelope.  The master derives only the wrapping key.
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
             .map_err(|e| format!("kdf_salt b64: {e}"))?;
-        let kek = crypto::derive_kek(password, &kdf_salt);
+        let kek = crypto::derive_kek(&keys.master, &kdf_salt);
 
         // 4. Establish the User Master Key (envelope model).
         //    - Returning account → unwrap the stored envelope.  A GCM auth
         //      failure here means the password is wrong; we abort before touching
         //      any device/key state.
+        //    - An envelope from before the split opens only under the legacy KEK
+        //      (Argon2id of the raw password). It is tried second, so a wrong
+        //      password costs two derivations on such an account and one on a
+        //      migrated one, and its failure is the verdict.
         //    - Brand-new account → generate a fresh random UMK, wrap it under the
         //      KEK, and upload the envelope so every future login/device can
         //      unwrap the *same* key.
+        let mut envelope_is_legacy = false;
         let umk = match boot.wrapped_umk.as_deref() {
-            Some(wrapped) => crypto::unwrap_umk(&kek, wrapped)?,
+            Some(wrapped) => match crypto::unwrap_umk(&kek, wrapped) {
+                Ok(umk) => umk,
+                Err(wrong_password) => {
+                    let legacy = crypto::derive_legacy_kek(&keys.password, &kdf_salt);
+                    let umk = crypto::unwrap_umk_legacy(&legacy, wrapped)
+                        .map_err(|_| wrong_password)?;
+                    envelope_is_legacy = true;
+                    umk
+                }
+            },
             None => {
+                // The first envelope upload is also what registers the proof
+                // of possession with the server, so the proof goes on first.
                 let fresh = crypto::random_key();
                 let wrapped = crypto::wrap_umk(&kek, &fresh)?;
-                http.set_wrapped_umk(wrapped).await?;
+                http.set_umk_proof(&fresh);
+                http.set_wrapped_umk(wrapped, false).await?;
                 fresh
             }
         };
+        http.set_umk_proof(&umk);
+
+        // 4b. Move a pre-split account over. Envelope first: a failure here is
+        //     fatal to the sign-in and changes nothing server-side, so the old
+        //     password keeps working. Credential second, and not fatal: the
+        //     sign-in has already succeeded, and an account left with a new
+        //     envelope and the old credential is re-tried on its next sign-in,
+        //     which reaches this point again by the raw-password route.
+        if envelope_is_legacy {
+            http.set_wrapped_umk(crypto::wrap_umk(&kek, &umk)?, false).await?;
+        }
+        if envelope_is_legacy || write_auth_key {
+            http.ensure_fresh_access_token().await;
+            match http.current_access_token() {
+                Some(token) => {
+                    match self.supabase.update_password(&token, &keys.auth_key).await {
+                        Ok(()) => self.note_auth_v2(&user_email),
+                        Err(e) => eprintln!(
+                            "[sync] auth key not stored with Supabase, will retry next sign-in: {e}"
+                        ),
+                    }
+                }
+                None => eprintln!("[sync] auth key not stored with Supabase: no access token"),
+            }
+        }
         let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
         let identity_pub_b64 = B64.encode(identity_pub);
 
@@ -1342,7 +1547,7 @@ impl SyncClient {
         //     is why this sits above step 8, so a login that cannot promise a
         //     passwordless next launch does not rewrite sync_state.json either.
         {
-            let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
+            let shared = crypto::x25519_shared_secret(&device_priv, &device_pub)?;
             let wrapped = crypto::wrap_key(&shared, &umk)
                 .map_err(|e| format!("could not wrap the device key: {e}"))?;
             store_device_wrap(Arc::clone(&http), device_id.clone(), wrapped).await?;
@@ -1392,6 +1597,7 @@ impl SyncClient {
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
+        self.install_revoked_hook(&http);
 
         // One-shot: rebuild who-wrote-what from the server.
         //
@@ -1532,6 +1738,15 @@ impl SyncClient {
         // it degrades the *next* launch at worst. `refresh_access_token`
         // (client.rs) already handles the identical moment this way, and says
         // why in as many words.
+        // The token came from this install's keychain under `stored_user`, and
+        // the session it bought must be that account's: everything below scopes
+        // the key wrap, the id map and the cursor by it.
+        if session.user.id != stored_user {
+            return Err(RestoreError::Terminal(format!(
+                "stored session belongs to another account ({} is not {stored_user}), log in again",
+                session.user.id
+            )));
+        }
         if let Err(e) = crypto::store_refresh_token(&stored_user, &session.refresh_token).await {
             note_token_at_risk("rotated refresh token not stored", &e);
         } else {
@@ -1581,8 +1796,10 @@ impl SyncClient {
             }
         };
         let device_pub = crypto::device_public_key(&device_priv);
-        let shared = crypto::x25519_shared_secret(&device_priv, &device_pub);
+        let shared = crypto::x25519_shared_secret(&device_priv, &device_pub)
+            .map_err(RestoreError::Terminal)?;
         let umk = crypto::unwrap_key(&shared, &wrapped).map_err(RestoreError::Terminal)?;
+        http.set_umk_proof(&umk);
 
         let user = SyncUser {
             user_id: stored_user.clone(),
@@ -1618,9 +1835,39 @@ impl SyncClient {
         *self.umk.lock() = Some(umk);
         *self.http.lock() = Some(Arc::clone(&http));
         *self.user.lock() = Some(user.clone());
+        self.install_revoked_hook(&http);
         self.start_ws_listener();
 
         Ok(user)
+    }
+
+    /// Point the HTTP client's revoked-device hook at [`Self::end_session_revoked`].
+    ///
+    /// Through the app handle rather than an `Arc<Self>`, because the session
+    /// setup paths hold a plain `&self`.
+    fn install_revoked_hook(&self, http: &Arc<SyncHttpClient>) {
+        let app = self.app.clone();
+        http.set_revoked_hook(Arc::new(move || {
+            let sync = app.state::<crate::state::AppState>().sync_client.lock().clone();
+            if let Some(sync) = sync {
+                sync.end_session_revoked();
+            }
+        }));
+    }
+
+    /// This install's device row was revoked from another device: forget the
+    /// session and say so.
+    ///
+    /// Reached from inside an HTTP retry or the socket's own task, so the
+    /// teardown runs on a thread of its own rather than under whichever locks
+    /// the caller holds.
+    pub(crate) fn end_session_revoked(self: &Arc<Self>) {
+        let me = Arc::clone(self);
+        std::thread::spawn(move || {
+            eprintln!("[sync] this device was revoked; signing out");
+            me.logout();
+            let _ = me.app.emit("sync:device-revoked", serde_json::Value::Null);
+        });
     }
 
     /// Whether this install has anything to restore from, answered without a
@@ -1816,8 +2063,23 @@ impl SyncClient {
         // account the user just deliberately left.
         crypto::clear_session_pointer();
 
+        // Half-finished sign-ins are live credentials too.
+        self.pending_reset.lock().take();
+        self.pending_oauth.lock().take();
+        crypto::clear_reset_verifier();
+
         let http = self.http.lock().take();
         if let Some(http) = http {
+            // Told to Supabase as well, so the refresh token family dies with
+            // the session instead of staying valid until it expires.
+            if let Some(token) = http.current_access_token() {
+                let supabase = Arc::clone(&self.supabase);
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = supabase.sign_out(&token).await {
+                        eprintln!("[sync] supabase sign-out: {e}");
+                    }
+                });
+            }
             http.logout();
         }
 
@@ -2440,6 +2702,15 @@ impl SyncClient {
         let mut notes_changed = false;
 
         for e in entries {
+            // The id becomes a path under app data when a blob lands (see
+            // `spawn_blob_files_merge`), and it is chosen by whoever pushed the
+            // row. Anything but a canonical UUID is refused before any use: a
+            // member who could pick `..\..\Startup` as an id could empty and
+            // repopulate any folder on every other member's machine.
+            if !is_canonical_uuid(&e.client_id) {
+                eprintln!("[sync] pulled row with a malformed id refused");
+                continue;
+            }
             // Skip entries this device originated (echoed back over the user
             // channel); they are already present locally.
             if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
@@ -4114,7 +4385,13 @@ impl SyncClient {
         e: &crate::sync::client::PulledEntry,
     ) -> Option<(Zeroizing<[u8; 32]>, bool)> {
         let wraps: HashMap<String, String> = serde_json::from_str(&e.wrapped_keys).ok()?;
-        if let Some(w) = wraps.get("personal") {
+        // A personal wrap is only ours when the row is. Every member receives
+        // our shared rows with their wraps intact, and one re-pushed under
+        // another account would otherwise open as our own, non-remote item -
+        // a replay of our content with their name on the row.
+        let me = self.current_user().map(|u| u.user_id);
+        let own_row = e.user_id.is_some() && e.user_id == me;
+        if let (Some(w), true) = (wraps.get("personal"), own_row) {
             if let Ok(cek) = crypto::unwrap_key(umk, w) {
                 return Some((cek, false));
             }
@@ -4510,7 +4787,7 @@ impl SyncClient {
         if ring.is_empty() {
             return None;
         }
-        let shared = crypto::x25519_shared_secret(&id_priv, &their_pub);
+        let shared = crypto::x25519_shared_secret(&id_priv, &their_pub).ok()?;
         let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
         for key in &ring {
             match crypto::wrap_key(&shared, key) {
@@ -4533,14 +4810,24 @@ impl SyncClient {
     /// created with a key already in it. If we cannot wrap - no ring yet, or the
     /// requester has not registered keys - the approval still goes through and
     /// they wait for a key like any other keyless member.
+    ///
+    /// The requester's public key comes from the server's own record of the
+    /// request, never from the caller: the ring is wrapped to whoever that key
+    /// belongs to, and a key handed in from the webview could be anyone's.
     pub(crate) async fn approve_join_request(
         self: &Arc<Self>,
         space_id: &str,
         request_id: &str,
-        requester_pubkey: Option<&str>,
     ) -> Result<(), String> {
         let http = self.http.lock().clone().ok_or("not signed in")?;
-        let wrapped = self.wrap_ring_for(space_id, requester_pubkey);
+        let requester_pubkey = http
+            .list_join_requests(space_id)
+            .await?
+            .into_iter()
+            .find(|r| r.id == request_id)
+            .ok_or("that request is no longer open")?
+            .identity_pubkey;
+        let wrapped = self.wrap_ring_for(space_id, requester_pubkey.as_deref());
         http.approve_join_request(space_id, request_id, wrapped).await
     }
 
@@ -4674,9 +4961,15 @@ impl SyncClient {
             // Who wrapped it, and so whose public key opens it. Absent means the
             // owner, which was the only writer before handover was widened.
             let wrapper_id = s.my_wrapped_by.clone().unwrap_or_else(|| s.owner_id.clone());
+            // Set when the server holds a wrap for us that opens to nothing. An
+            // owner must not read that as "no key yet" and mint over it: the
+            // wrap may have been overwritten by a member, and a fresh key would
+            // strand every member's history behind a ring nobody holds.
+            let mut server_wrap_unopenable = false;
             if !server_keyring.is_empty() {
-                if let Some(wrapper_pub) = pubkey_of(&wrapper_id) {
-                    let shared = crypto::x25519_shared_secret(&id_priv, &wrapper_pub);
+                let wrapper_shared = pubkey_of(&wrapper_id)
+                    .and_then(|p| crypto::x25519_shared_secret(&id_priv, &p).ok());
+                if let Some(shared) = wrapper_shared {
                     let mut ring: SpaceKeyring = Vec::with_capacity(server_keyring.len());
                     for wrapped in &server_keyring {
                         match crypto::unwrap_key(&shared, wrapped) {
@@ -4691,6 +4984,9 @@ impl SyncClient {
                     // space whose owner has not published a fingerprint yet
                     // cannot be checked at all.
                     let self_written = wrapper_id == me;
+                    if ring.is_empty() {
+                        server_wrap_unopenable = true;
+                    }
                     let mismatch = match (&s.key_fingerprint, ring.first()) {
                         (Some(expected), Some(newest)) if !self_written => {
                             crypto::space_key_fingerprint(newest) != *expected
@@ -4711,6 +5007,18 @@ impl SyncClient {
                     } else if !ring.is_empty() {
                         let mut guard = self.space_keys.lock();
                         let had = guard.get(&s.id).is_some_and(|r| !r.is_empty());
+                        // Merged into what this process already holds, never
+                        // swapped for it. A ring on the server is written by
+                        // whoever wrapped for us, and a shorter one - the newest
+                        // key alone - would otherwise drop the older keys that
+                        // still open this space's history.
+                        if let Some(held) = guard.get(&s.id) {
+                            for key in held {
+                                if !ring.contains(key) {
+                                    ring.push(*key);
+                                }
+                            }
+                        }
                         let changed = guard.get(&s.id) != Some(&ring);
                         if changed {
                             guard.insert(s.id.clone(), ring);
@@ -4748,7 +5056,16 @@ impl SyncClient {
                 .unwrap_or_default();
             let mut minted = false;
             if is_owner {
-                if ring.is_empty() {
+                if ring.is_empty() && server_wrap_unopenable {
+                    // The server has a wrap for us and it does not open. That
+                    // is damage, not absence, and minting would make it
+                    // permanent. Report it and leave the ring alone.
+                    eprintln!("[sync] space {} own key wrap does not open, not re-minting", s.id);
+                    let _ = self.app.emit(
+                        "space:key-rejected",
+                        serde_json::json!({ "space_id": s.id, "wrapped_by": wrapper_id }),
+                    );
+                } else if ring.is_empty() {
                     // Brand-new space, or one whose keys are unrecoverable
                     // because they only ever lived in memory.
                     ring.push(*crypto::random_key());
@@ -4781,7 +5098,10 @@ impl SyncClient {
                     // Wrapping for ourselves works too: X25519(priv, own_pub)
                     // is a valid shared secret, which is how a keyholder
                     // recovers its ring after a restart.
-                    let shared = crypto::x25519_shared_secret(&id_priv, &member_pub);
+                    let Ok(shared) = crypto::x25519_shared_secret(&id_priv, &member_pub) else {
+                        eprintln!("[sync] refusing to wrap for {}: bad public key", m.user_id);
+                        continue;
+                    };
                     let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
                     let mut failed = false;
                     for key in &ring {
@@ -4978,6 +5298,12 @@ impl SyncClient {
                 return;
             };
             let Some(dir) = images_dir else { return };
+            // Checked again here, not only at merge: this is the line that
+            // turns the id into a path, and it must not depend on every caller
+            // remembering to.
+            if !is_canonical_uuid(&meta.client_id) {
+                return;
+            }
             let path = dir.join(format!("{}.{}", meta.client_id, ext_for_mime(&meta.mime)));
             // Atomic, because the entry upserted below points at this file — a
             // torn write would leave history referencing a truncated image.
@@ -5068,6 +5394,11 @@ impl SyncClient {
                 return;
             };
             let Some(root) = files_root else { return };
+            // Same guard as the image path, for the same reason: `dest` is
+            // emptied and rewritten below, so it has to stay under `root`.
+            if !is_canonical_uuid(&meta.client_id) {
+                return;
+            }
             let dest = root.join(&meta.client_id);
             let paths = match extract_zip_to_dir(&bytes, &dest) {
                 Ok(paths) if !paths.is_empty() => paths,
@@ -5664,17 +5995,46 @@ fn zip_dir_into<W: std::io::Write + std::io::Seek>(
 /// the extracted top-level paths, which become the file entry's content. Entry
 /// names are validated with `enclosed_name`, so a crafted archive cannot write
 /// outside `dest` (zip-slip).
+/// True for the one shape an entry id may take on the wire: 36 lower-case
+/// hex-and-dash characters, as `Uuid::to_string` writes them. Ids are minted
+/// by the client (`Uuid::new_v4`), so anything else came from somewhere else.
+pub(crate) fn is_canonical_uuid(id: &str) -> bool {
+    id.len() == 36
+        && uuid::Uuid::parse_str(id).is_ok_and(|u| u.to_string() == id)
+}
+
+/// Ceiling on what one received archive may expand to, in total and per
+/// entry. The archive is bounded by [`BLOB_SIZE_LIMIT`] on the wire, but a
+/// declared size is a claim and a compression ratio is a choice: a small
+/// archive can announce a 2^60-byte entry, and allocating for that is an abort.
+const EXTRACT_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+const EXTRACT_ENTRY_LIMIT: u64 = 32 * 1024 * 1024;
+
 fn extract_zip_to_dir(
     bytes: &[u8],
     dest: &std::path::Path,
 ) -> Result<Vec<std::path::PathBuf>, String> {
     use std::io::Read;
-    let _ = std::fs::remove_dir_all(dest); // idempotent re-merge
-    std::fs::create_dir_all(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+    // Opened before anything on disk is touched, so a hostile archive is
+    // refused with the previous contents of `dest` intact.
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("open archive: {e}"))?;
+    let mut declared: u64 = 0;
+    for i in 0..archive.len() {
+        let file = archive.by_index_raw(i).map_err(|e| e.to_string())?;
+        if file.size() > EXTRACT_ENTRY_LIMIT {
+            return Err("archive entry too large".into());
+        }
+        declared = declared.saturating_add(file.size());
+        if declared > EXTRACT_TOTAL_LIMIT {
+            return Err("archive too large".into());
+        }
+    }
+    let _ = std::fs::remove_dir_all(dest); // idempotent re-merge
+    std::fs::create_dir_all(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
     let mut tops: Vec<std::path::PathBuf> = Vec::new();
     let mut seen = std::collections::HashSet::<std::ffi::OsString>::new();
+    let mut written: u64 = 0;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let Some(rel) = file.enclosed_name() else {
@@ -5692,8 +6052,20 @@ fn extract_zip_to_dir(
             if let Some(parent) = out.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            let mut data = Vec::with_capacity(file.size() as usize);
-            file.read_to_end(&mut data).map_err(|e| e.to_string())?;
+            // The declared size was checked above; what actually inflates is
+            // checked here, because the two need not agree.
+            let mut data = Vec::new();
+            file.by_ref()
+                .take(EXTRACT_ENTRY_LIMIT + 1)
+                .read_to_end(&mut data)
+                .map_err(|e| e.to_string())?;
+            if data.len() as u64 > EXTRACT_ENTRY_LIMIT {
+                return Err("archive entry too large".into());
+            }
+            written = written.saturating_add(data.len() as u64);
+            if written > EXTRACT_TOTAL_LIMIT {
+                return Err("archive too large".into());
+            }
             std::fs::write(&out, &data).map_err(|e| e.to_string())?;
         }
     }

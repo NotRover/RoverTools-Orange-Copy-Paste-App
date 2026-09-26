@@ -35,6 +35,14 @@ impl AuthError {
         }
     }
 
+    /// GoTrue's verdict that the pair matched no account. Sign-in reads it to
+    /// tell "wrong password" from "an account from before the credential split,
+    /// which still has the raw password on file" - the latter gets one more
+    /// attempt with the raw password before the verdict stands.
+    pub fn is_invalid_credentials(&self) -> bool {
+        self.status == Some(400) && self.message.to_lowercase().contains("invalid login credentials")
+    }
+
     /// True when retrying later could plausibly succeed.  No response means
     /// offline / DNS / timeout; 5xx and 429 are the server's problem, not the
     /// token's.  Everything else (notably 400 "Invalid Refresh Token") is a
@@ -111,7 +119,9 @@ impl From<AuthError> for String {
 }
 
 /// A GoTrue session: the tokens plus the authenticated user.
-#[derive(Debug, Clone, Deserialize)]
+/// Deliberately not `Debug`: it holds two live bearer credentials, and one
+/// `{:?}` in a log line would be a token leak.
+#[derive(Clone, Deserialize)]
 pub struct SupabaseSession {
     pub access_token: String,
     pub refresh_token: String,
@@ -221,20 +231,26 @@ impl SupabaseAuth {
     // ── Endpoints ─────────────────────────────────────────────────────
 
     /// Password grant: `POST /token?grant_type=password`.
+    ///
+    /// `credential` is what Supabase knows as the password. For every account
+    /// since the split that is the auth key of `crypto::derive_auth_key`, never
+    /// the password itself; the raw password is offered only once more, by the
+    /// migration path in `SyncClient::perform_login`. Returns the raw
+    /// [`AuthError`] so that caller can read the verdict before it is turned into
+    /// a sentence for the screen.
     pub async fn sign_in_password(
         &self,
         email: &str,
-        password: &str,
-    ) -> Result<SupabaseSession, String> {
-        self.ensure_configured()?;
+        credential: &str,
+    ) -> Result<SupabaseSession, AuthError> {
+        self.ensure_configured().map_err(|e| AuthError::transport("supabase login", e))?;
         self.send_json(
             self.inner
                 .post(self.url("/token?grant_type=password"))
-                .json(&serde_json::json!({ "email": email, "password": password })),
+                .json(&serde_json::json!({ "email": email, "password": credential })),
             "supabase login",
         )
         .await
-        .map_err(String::from)
     }
 
     /// Refresh grant: `POST /token?grant_type=refresh_token`.
@@ -300,17 +316,18 @@ impl SupabaseAuth {
         .map_err(String::from)
     }
 
-    /// Set (or change) the account password for the authenticated user:
-    /// `PUT /user`.  Used to give an OAuth-first account a real password that
-    /// doubles as the E2E secret and enables later email+password login.
-    pub async fn update_password(&self, access_token: &str, password: &str) -> Result<(), String> {
+    /// Set (or change) the credential Supabase holds for the authenticated
+    /// user: `PUT /user`. Always the auth key, never the password: this is how
+    /// an OAuth-first account gains an email+password sign-in, how a reset or a
+    /// change lands, and how an account from before the split is moved over.
+    pub async fn update_password(&self, access_token: &str, credential: &str) -> Result<(), String> {
         self.ensure_configured()?;
         let _: serde_json::Value = self
             .send_json(
                 self.inner
                     .put(self.url("/user"))
                     .bearer_auth(access_token)
-                    .json(&serde_json::json!({ "password": password })),
+                    .json(&serde_json::json!({ "password": credential })),
                 "supabase update password",
             )
             .await?;
@@ -378,6 +395,28 @@ impl SupabaseAuth {
 
     /// Register a new account: `POST /signup`.  When the project requires email
     /// confirmation, no session is issued and we return `ConfirmationRequired`.
+    /// Revoke the session's refresh token at GoTrue: `POST /logout`.
+    ///
+    /// Sign-out used to be local only, which left the refresh token in the
+    /// keychain valid for as long as GoTrue keeps them. Best-effort: the local
+    /// sign-out proceeds whether or not this lands.
+    pub async fn sign_out(&self, access_token: &str) -> Result<(), String> {
+        self.ensure_configured()?;
+        let resp = self
+            .inner
+            .post(self.url("/logout"))
+            .header("apikey", &self.anon_key)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| format!("supabase logout: {e}"))?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("supabase logout ({})", resp.status().as_u16()))
+        }
+    }
+
     pub async fn sign_up(&self, email: &str, password: &str) -> Result<SignUpOutcome, String> {
         self.ensure_configured()?;
         let value: serde_json::Value = self
