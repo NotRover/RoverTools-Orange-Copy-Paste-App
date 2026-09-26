@@ -220,9 +220,10 @@ Two things to know:
 |---|---|---|
 | NSIS (`.exe`) | **Yes** | The installer reruns and replaces the app in place |
 | AppImage | **Yes** | A single file the updater can swap |
-| `.deb` / `.rpm` | No | Owned by the package manager; published for manual install only |
+| `.deb` | No | Owned by the package manager; published for manual install only |
 
-`.deb`/`.rpm` never appear in `latest.json` — offering an update the client cannot
+The release builds no `.rpm` (the Linux build matrix entry lists only `appimage,deb`),
+though a local `tauri build` still makes one. `.deb` never appears in `latest.json` — offering an update the client cannot
 install is worse than offering none. macOS is not built at all; that needs a
 `.app.tar.gz` target plus Apple notarization.
 

@@ -11,7 +11,7 @@ It works offline and without an account. Sync and spaces are the only parts that
 Download the latest build from the [releases page](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest):
 
 - **Windows 10 or 11:** the file ending in `-setup.exe`. It installs for your user only, without admin rights.
-- **Linux:** `.deb`, `.rpm` or AppImage. X11 works best; Wayland needs one setup step for the hotkeys, described in the [Linux notes](https://orange-copy-paste-app.pages.dev/docs/linux/).
+- **Linux:** `.deb` or AppImage. X11 works best; Wayland needs one setup step for the hotkeys, described in the [Linux notes](https://orange-copy-paste-app.pages.dev/docs/linux/).
 
 The app updates itself from the same releases page. macOS is not supported yet.
 
