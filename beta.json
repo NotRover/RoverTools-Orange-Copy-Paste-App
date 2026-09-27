@@ -1,15 +1,15 @@
 {
-  "version": "0.4.1",
-  "notes": "This release updates the libraries the app is built on to fix known security issues.\n\n### Fixed\n- The app framework and two of its networking and data libraries are updated to versions that fix published security advisories.",
-  "pub_date": "2026-09-26T21:10:12Z",
+  "version": "0.4.2",
+  "notes": "This release makes the app's errors and labels say plainly what happened and what to do.\n\n### Improved\n- Errors now say what went wrong in plain words, such as \"Sign in on the Account screen first.\" or \"Confirm your email address first.\", instead of raw server codes.\n- A failed image or file upload now tells you to try again later instead of showing a technical error.\n- Removing items you did not share yourself now explains that other members shared them, instead of saying there is nothing to remove.\n- Sign-in and recovery buttons now say what they do: \"Continue\" and \"Use the recovery code\" replace the old \"Unlock\" buttons.\n- Settings descriptions no longer mention Windows on Linux, and the copy and paste notification options describe the action rather than a key combination.",
+  "pub_date": "2026-09-27T08:09:52Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUcvZnU1ZEtWYWU2Yk1Dam1iWGtJVUJZOGNGRkxBYjdDMmlYRFFYck12dHNDK2VsRVh6OGlrb0JYQ2pWMit1ZFhBMzNQMHFVVkx0R212ZXB1dFhXbWdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDU2OTY5CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjFfeDY0LXNldHVwLmV4ZQpuaEx3eDhUUDFVaUQyZCtTbDh0T3luUDU2cEp1L2VLbFVVY1VEV0MvREMzdEVkOHlXZmpFOTVidXg4SXJjcW5DS3NuMU5VQzVsRjRBTWovTGNTOVpBZz09Cg==",
-      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.1/RoverTools_0.4.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUcwRVZDZmdBdGU0UTJBaHVZbDZxcVhmTjh3cUV4RTg5WnA5d3hwd1YyR2xLU0t1cXJCQnhCOWo3Z2VDeHlGSEN4L283QmF1Y2NlOHpLZW5LMUlON3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDk2NTc0CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjJfeDY0LXNldHVwLmV4ZQowRWdFVkt2N25Hd1NQQ1BiUTA0Q0Zvajk5SzBNcWhtbFRvMWFkSjJjUXlkSjQ0RlNHWXBhZWQxVnU5eDFPbW84WVJqY2N3QnhjZDc4WU1tRGszbzNBQT09Cg==",
+      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.2/RoverTools_0.4.2_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTUM4ZFpFblE0VDlORDhYa2piTDZHWlBZcjRjRmdUMkp2Z0ZOVmpmTHdrMWQwZ0NQay9QWkNONkpzSVZ4T0s5N1J4eUFBVUhlcmwwSW9Mait4Y0lJOXdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDU2ODI2CWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjFfYW1kNjQuQXBwSW1hZ2UKOHFpR3FaWi92T0xiV0w1dzIxanh3U2ltTjQvQTVzZ3dQN0o2WG5hNm1mNDZMbnJobXhxSVNRK0d5M29UYlNhZXZrdU44MXNsempjOU1QYlcvZ1dnQkE9PQo=",
-      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.1/RoverTools_0.4.1_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUcVpIT282TGRZTU9OZVpGbzMxZUdQTHZxa2o4OVMwSnYrRU5qWEYvT3JYTnNIWFE4TDh4NTVhVlZGQ3hRN0xZTW85a2JQU2g3ZTA1MnBOQ0dBTm85emRtYUM5SFc3ekFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDk2NTEyCWZpbGU6T3JhbmdlIENvcHkgUGFzdGVfMC40LjJfYW1kNjQuQXBwSW1hZ2UKOTFXTERwN3p5UEFIdjV5cWdNcEZPZ2ROSHAzLzdHbVZBZEZ5Q2J5alZtc3J4anhkZ2lxekxOQS91Sy84ZWxWUGhMSkxEVVRQRnVHSVNCZjdHc3JIQWc9PQo=",
+      "url": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/download/v0.4.2/RoverTools_0.4.2_amd64.AppImage"
     }
   }
 }
