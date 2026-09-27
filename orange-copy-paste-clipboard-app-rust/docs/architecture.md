@@ -1509,6 +1509,25 @@ Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen 
 | `useLayoutTransition` | Animate the tiles ↔ list layout change |
 | `useFileMeta` | Batched + cached file preview / missing-file lookups (dedupes IPC across cards and popups) |
 
+#### Showing a command error
+
+Every surface that shows a rejected `invoke` goes through `userError(e, fallback)` in
+`src/userError.ts`: `toastError` (and so every `deferDestructive` failure), the Spaces and
+Account screens' `errMsg`, the comment thread and `useUpdater`. Never render the raw
+rejection string.
+
+- A rejection that is already a sentence (capital first letter, final period) is shown
+  as it is. This is how the Rust messages written for people reach the screen, and why
+  the Account screen's two regexes on that text still work.
+- An API failure (`<call tag> <status>: <detail>` or `<call tag>: <transport problem>`,
+  built in `sync/client.rs`) is mapped by status: 401, 402, 403 (with a separate
+  `email_unverified` message), 429 and 5xx each get one plain message, and a transport
+  failure reads as offline. Any other status shows the server's `detail` only if it is a
+  sentence.
+- The three Rust spellings of "no session" (`not authenticated`, `not signed in`, `sync
+  not enabled`) all become "Sign in on the Account screen first."
+- Anything else falls back to the caller's own text.
+
 ### 5.4 Main App
 
 **`App.tsx`** is the root of the main window. It owns:
