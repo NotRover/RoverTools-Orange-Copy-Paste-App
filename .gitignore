@@ -1,6 +1,9 @@
 # Agent working notes (see CLAUDE.md → working-notes)
 .scratch/
 
+# Local dev-server config for the desktop app's preview pane
+.claude/launch.json
+
 # Private companion repo (Spectrewolf8/orangecp-internal), cloned here as a
 # sibling. Never track it from this repo, which is heading public.
 orangecp-internal/
