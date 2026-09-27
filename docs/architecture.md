@@ -1,4 +1,4 @@
-# RoverTools — Where Everything Lives
+# RoverTools - Where Everything Lives
 
 **Owns:** the map of the doc set, and the invariants that bind the client and the backend
 together so neither doc can own them alone.
@@ -21,22 +21,22 @@ third time, and the third copy is what went stale.
 
 The client and the backend are the two product halves. The backend is a relay and a
 store: it never holds a key that could open anything it persists, which is why it can be
-stateless about content and strict about identity. The website is documentation only — it
+stateless about content and strict about identity. The website is documentation only - it
 describes product behavior and links to the homes below, it enforces nothing.
 
 ## 2. Which doc answers which question
 
 | Question | Doc |
 |----------|-----|
-| What does the API look like — routes, payloads, DDL, socket events, the crypto envelope? | `orange-copy-paste-clipboard-backend/docs/architecture.md` |
-| How does the app work inside — state, Tauri commands, events, persistence, the sync engine? | `orange-copy-paste-clipboard-app-rust/docs/architecture.md` |
+| What does the API look like - routes, payloads, DDL, socket events, the crypto envelope? | `orange-copy-paste-clipboard-backend/docs/architecture.md` |
+| How does the app work inside - state, Tauri commands, events, persistence, the sync engine? | `orange-copy-paste-clipboard-app-rust/docs/architecture.md` |
 | Who may do what to an entry or inside a space, and where is it enforced? | `permissions.md` |
 | Has this broken before, and why? | `orange-copy-paste-clipboard-app-rust/docs/bugfix-history.md` |
 | How does a release get cut? | `releasing.md` |
 | How do I reach, recover, harden, and deploy the self-hosted VPS? | `orange-copy-paste-clipboard-backend/docs/DEPLOY.md` |
 | How do I work in this repo? | `CLAUDE.md` at the workspace root |
-| Where do end users learn to install and use the app? | `orange-copy-paste-clipboard-website/` — the public docs + marketing site |
-| How is a space key handed over / how does join approval work, and why was the design chosen? | website Developers section — `/docs/developers/design/*` (decision records with inline sequence diagrams) |
+| Where do end users learn to install and use the app? | `orange-copy-paste-clipboard-website/` - the public docs + marketing site |
+| How is a space key handed over / how does join approval work, and why was the design chosen? | website Developers section - `/docs/developers/design/*` (decision records with inline sequence diagrams) |
 
 The backend doc is the source of truth for anything crossing the wire. When it and this
 page disagree, the backend doc wins; when the backend doc and the code disagree, the code
@@ -51,14 +51,14 @@ alone, so it has no home in either doc. Preserve them across any change to eithe
 |---|---|
 | 1 | **The local store is always plaintext.** `history.bin` and `notes.bin` are never encrypted. The encryption boundary is the network, not the disk. |
 | 2 | **Sync is always optional.** The app is fully functional with no account, no network and no server. Nothing in the capture, search, paste or notes paths may block on it. |
-| 3 | **The server never sees plaintext or any key.** `encrypted_content` and `encrypted_metadata` are sealed on-device before any network call, and `wrapped_keys` / `wrapped_space_keys` stay opaque — the server holds no private key that could open either. |
+| 3 | **The server never sees plaintext or any key.** `encrypted_content` and `encrypted_metadata` are sealed on-device before any network call, and `wrapped_keys` / `wrapped_space_keys` stay opaque - the server holds no private key that could open either. |
 | 4 | **The UMK never leaves the device in the clear, and neither does the password.** In memory only, unwrapped at login from the password, the address and `kdf_salt`, cleared on lock or exit. The server holds only the wrapped envelope; Supabase holds only a separate login key derived from the password. |
 | 5 | **Tombstones always propagate and always win.** A `deleted_at` on a received entry is honoured; deletion beats a concurrent update. |
 | 6 | **The capture pipeline is untouched by sync.** The clipboard watcher and the suppress-flag flow are not modified by sync logic. Sync is a post-capture side effect. |
 | 7 | **Pins and groups sync both ways.** A pin or group change on one device reaches every other device holding that entry. |
-| 8 | **Removing a member rotates the Space Key.** Removal, or a member leaving, clears every remaining member's wrapped keyring and asks the owner's client for a new key. Rotation is best-effort by design — never document or present it as airtight. |
+| 8 | **Removing a member rotates the Space Key.** Removal, or a member leaving, clears every remaining member's wrapped keyring and asks the owner's client for a new key. Rotation is best-effort by design - never document or present it as airtight. |
 | 9 | **The cursor advances only on confirmed receipt.** `POST /sync/cursor` is called after entries are decrypted and merged, never before. |
-| 10 | **The id mapping survives restarts.** Losing `client_id → server_id` duplicates every entry on the next push. |
+| 10 | **The id mapping survives restarts.** Losing `client_id -> server_id` duplicates every entry on the next push. |
 | 11 | **Sharing is always opt-in.** No entry carries a space id unless the user shared it or that space's send filter is on and matches. Nothing enters a space by default. |
 | 12 | **File sync is size-gated on both sides.** A `kind: 'file'` entry over 5 MB total is not pushed, and the server refuses it anyway (413 from `request-upload`). |
 | 13 | **Leaving a space stops future sharing.** Its id is dropped from the client's share records and its keyring dropped and zeroized, so no later entry is tagged with it. Copies already in members' local stores are unaffected. |
@@ -74,15 +74,15 @@ alone, so it has no home in either doc. Preserve them across any change to eithe
 Anything crossing the wire touches both repos and their docs disagree easily, so the order
 matters:
 
-1. **Backend first**, because it is the contract. Route, payload, DDL, socket event — and
+1. **Backend first**, because it is the contract. Route, payload, DDL, socket event - and
    its `docs/architecture.md` in the same commit, since the doc *is* the contract's
    readable form.
 2. **Client second**, against what the backend now accepts. Its doc gets a line only if
-   client internals changed — not a copy of the payload.
+   client internals changed - not a copy of the payload.
 3. **`permissions.md`** only if the change is about who may do something.
 4. **This file** only if the change adds an invariant neither component can keep alone.
 
-Migrations are authored freely, but **the deploy never applies them** — it only rebuilds and
-restarts the service, so a merged revision has not reached the database until someone applies
-it deliberately (the backend's Migrate database workflow). Never assume a green deploy
+Migrations are authored freely, but **the deploy never applies them**. It only rebuilds and
+restarts the service, so a merged revision has not reached the database until someone
+applies it with the backend's Migrate database workflow. Never assume a green deploy
 migrated. Commits stay scoped to one repo; a submodule pointer bump is its own commit.
