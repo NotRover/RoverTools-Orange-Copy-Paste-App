@@ -23,11 +23,16 @@
   changelog/<version>-<bump>-<channel>.md and opens a fresh next.md. An empty user-facing
   set fails a real release on purpose.
 -->
-
-### New
+This release makes the app's errors and labels say plainly what happened and what to do.
 
 ### Improved
 
-### Fixed
+- Errors now say what went wrong in plain words, such as "Sign in on the Account screen first." or "Confirm your email address first.", instead of raw server codes.
+- A failed image or file upload now tells you to try again later instead of showing a technical error.
+- Removing items you did not share yourself now explains that other members shared them, instead of saying there is nothing to remove.
+- Sign-in and recovery buttons now say what they do: "Continue" and "Use the recovery code" replace the old "Unlock" buttons.
+- Settings descriptions no longer mention Windows on Linux, and the copy and paste notification options describe the action rather than a key combination.
 
 ### Internal
+
+- Docs across the app, backend and website rewritten to the writing guide; command-error handling documented; submodule bumps.
