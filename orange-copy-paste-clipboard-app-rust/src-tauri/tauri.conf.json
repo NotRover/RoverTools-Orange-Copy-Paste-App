@@ -76,10 +76,10 @@
     "active": true,
     "publisher": "NotRover",
     "homepage": "https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App",
-    "copyright": "Copyright © NotRover",
+    "copyright": "Copyright (c) NotRover",
     "category": "Productivity",
     "shortDescription": "Cross-device smart clipboard with history, notes and end-to-end encrypted sync.",
-    "longDescription": "Orange Copy Paste captures the text, images and files you copy, keeps a searchable history alongside your notes, and syncs them across your devices. Sync is end-to-end encrypted: every key stays on your machines and the server only ever stores ciphertext. Cloud sync is optional — the app is fully usable offline.",
+    "longDescription": "Orange Copy Paste captures the text, images and files you copy, keeps a searchable history alongside your notes, and syncs them across your devices. Sync is end-to-end encrypted: every key stays on your machines and the server only ever stores ciphertext. Cloud sync is optional. The app works fully offline.",
     "targets": ["nsis", "deb", "rpm", "appimage"],
     "createUpdaterArtifacts": true,
     "icon": [

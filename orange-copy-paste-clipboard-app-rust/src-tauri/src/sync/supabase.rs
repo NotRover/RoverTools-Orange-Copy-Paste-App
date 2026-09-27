@@ -79,8 +79,11 @@ impl AuthError {
         if has("already registered") || has("already been registered") {
             return "An account already uses that email. Sign in instead.".into();
         }
+        if has("should be different") {
+            return "Use a password you have not used on this account before.".into();
+        }
         if has("password should be") || has("password is too short") {
-            return "Use a longer password - at least 8 characters.".into();
+            return "Use at least 8 characters for your password.".into();
         }
         if has("refresh token") || (has("session") && has("expired")) {
             return "Your session expired. Sign in again.".into();

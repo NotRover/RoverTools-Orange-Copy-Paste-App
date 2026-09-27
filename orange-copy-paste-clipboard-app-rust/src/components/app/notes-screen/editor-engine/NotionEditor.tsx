@@ -533,7 +533,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
                 onClick={() => runTableCommand("delRow")}
                 title="Delete current row"
               >
-                − Row
+                - Row
               </button>
             </div>
             {/* Col controls — right of table (or left if near screen edge), vertically centered */}
@@ -558,7 +558,7 @@ const NotionEditorInner = forwardRef<NotionEditorHandle, NotionEditorProps>(
                 onClick={() => runTableCommand("delCol")}
                 title="Delete current column"
               >
-                − Col
+                - Col
               </button>
             </div>
           </>

@@ -770,7 +770,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
               ) : (
                 <div className="timeline-end">
                   <span className="timeline-end-text">
-                    You&rsquo;re all caught up
+                    You're all caught up
                   </span>
                 </div>
               )}

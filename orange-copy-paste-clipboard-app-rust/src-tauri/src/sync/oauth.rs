@@ -44,14 +44,12 @@ pub fn bind() -> Result<Loopback, String> {
             });
         }
     }
-    Err(format!(
-        "could not bind an OAuth loopback port (tried {REDIRECT_PORTS:?}). Close whatever is using them and retry"
-    ))
+    Err("Could not start Google sign-in because another app is using the ports it needs. Close other copies of this app and try again.".to_string())
 }
 
 /// Open the system browser at `url`.
 pub fn open_browser(url: &str) -> Result<(), String> {
-    open::that(url).map_err(|e| format!("could not open browser: {e}"))
+    open::that(url).map_err(|_| "Could not open your browser. Open it yourself and try again.".to_string())
 }
 
 impl Loopback {
@@ -63,7 +61,7 @@ impl Loopback {
     pub fn wait_for_code(self, cancel: Arc<AtomicBool>) -> Result<String, String> {
         self.listener
             .set_nonblocking(true)
-            .map_err(|e| format!("loopback nonblocking: {e}"))?;
+            .map_err(|_| "Google sign-in did not finish. Try again.".to_string())?;
         let deadline = Instant::now() + CAPTURE_TIMEOUT;
 
         loop {
@@ -80,7 +78,7 @@ impl Loopback {
                     let result = match target.as_deref().map(parse_redirect) {
                         Some(Redirect::Code(code)) => Ok(code),
                         Some(Redirect::Error) => {
-                            Err("sign-in was cancelled or refused by the provider".into())
+                            Err("Google sign-in was cancelled.".into())
                         }
                         Some(Redirect::Unrelated) | None => {
                             write_response(&mut stream, false);
@@ -92,14 +90,14 @@ impl Loopback {
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     if cancel.load(Ordering::Relaxed) {
-                        return Err("sign-in was cancelled".into());
+                        return Err("Google sign-in was cancelled.".into());
                     }
                     if Instant::now() >= deadline {
-                        return Err("timed out waiting for the browser sign-in to complete".into());
+                        return Err("Google sign-in timed out. Try again.".into());
                     }
                     std::thread::sleep(Duration::from_millis(150));
                 }
-                Err(e) => return Err(format!("loopback accept: {e}")),
+                Err(_) => return Err("Google sign-in did not finish. Try again.".to_string()),
             }
         }
     }

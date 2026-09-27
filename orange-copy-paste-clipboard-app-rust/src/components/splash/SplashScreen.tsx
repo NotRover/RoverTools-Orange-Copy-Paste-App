@@ -56,7 +56,7 @@ const TIPS: { token: string; text: string }[] = [
   { token: "Ctrl+Shift+C", text: "saves a copy to history" },
   { token: "Pin",          text: "keeps a clip in the popup" },
   { token: "Save",         text: "keeps a clip past restarts" },
-  { token: "1-9",          text: "paste a slot in the popup" },
+  { token: "1-9",          text: "pastes that slot in the popup" },
   { token: "Type",         text: "in the popup to search" },
   { token: "Right-click",  text: "a card for more actions" },
   { token: "Groups",       text: "tag clips to find them fast" },
@@ -211,7 +211,7 @@ const SplashScreen: React.FC = () => {
       case "update":
         return "Update available";
       case "updating":
-        return percent === null ? "Downloading update" : `Downloading update  ${percent}%`;
+        return percent === null ? "Downloading update" : `Downloading update ${percent}%`;
       case "installing":
         return "Installing update";
       default:

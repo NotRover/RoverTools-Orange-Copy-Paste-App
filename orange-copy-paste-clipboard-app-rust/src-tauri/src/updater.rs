@@ -334,7 +334,7 @@ pub async fn updater_download(app: tauri::AppHandle) -> Result<UpdateInfo, Strin
     // is an await, and holding a lock across one blocks every other caller for
     // the length of a network transfer.
     let Some(mut pending) = PENDING.lock().take() else {
-        return Err("No update is pending. Check for updates first.".to_string());
+        return Err("No update is waiting. Check for updates first.".to_string());
     };
 
     if pending.bytes.is_some() {
@@ -396,7 +396,7 @@ pub fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     let Some(pending) = PENDING.lock().take() else {
-        return Err("No update is pending.".to_string());
+        return Err("No update is waiting. Check for updates first.".to_string());
     };
     let Some(bytes) = pending.bytes.as_ref() else {
         // Not downloaded yet — keep it pending so the UI can offer the download.

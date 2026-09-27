@@ -37,7 +37,7 @@ const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
 const CUE_TESTS = [
   { cue: "arrived" as const, label: "Arrived" },
   { cue: "knock" as const, label: "Invite" },
-  { cue: "unlocked" as const, label: "Unlocked" },
+  { cue: "unlocked" as const, label: "Space ready" },
   { cue: "refused" as const, label: "Refused" },
 ];
 
@@ -336,7 +336,7 @@ const SettingsScreen: React.FC = () => {
             />
             <ToggleRow
               label="Run on startup"
-              desc={`Automatically launch when you sign in to Windows.${import.meta.env.DEV ? " Disabled in dev builds." : ""}`}
+              desc={`Launch the app when you sign in to this computer.${import.meta.env.DEV ? " Disabled in dev builds." : ""}`}
               active={runOnStartup}
               onToggle={handleRunOnStartupToggle}
               disabled={autostartEnableBlocked}
@@ -413,7 +413,7 @@ const SettingsScreen: React.FC = () => {
           <div className="set-group">
             <ToggleRow
               label="Desktop notifications"
-              desc="Show Windows notifications while the app is in the background."
+              desc="Show system notifications while the app is in the background."
               active={osNotifications}
               onToggle={() => toggleBoolSetting(osNotifications, setOsNotifications, "os_notifications")}
             />
@@ -445,7 +445,7 @@ const SettingsScreen: React.FC = () => {
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Copy operations</span>
-                      <span className="settings-checkbox-desc">Show notification on Ctrl+C</span>
+                      <span className="settings-checkbox-desc">Show a notification when you copy.</span>
                     </div>
                   </label>
                   <label className="settings-checkbox-row">
@@ -457,7 +457,7 @@ const SettingsScreen: React.FC = () => {
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Paste operations</span>
-                      <span className="settings-checkbox-desc">Show notification on Ctrl+Shift+V</span>
+                      <span className="settings-checkbox-desc">Show a notification when you paste from the popup.</span>
                     </div>
                   </label>
                 </div>
@@ -559,7 +559,7 @@ const SettingsScreen: React.FC = () => {
               <div className="set-row-info">
                 <span className="set-row-label">Number-key paste slots</span>
                 <span className="set-row-desc">
-                  How many entries the quick paste popup numbers 1-0 for one-key paste.
+                  How many entries the quick paste popup numbers for one-key paste (keys 1-9, then 0).
                 </span>
               </div>
               <CustomSelect value={pasteSlots} options={SLOT_OPTIONS} onChange={handleSlotsChange} />
@@ -630,7 +630,7 @@ const SettingsScreen: React.FC = () => {
               <div className="set-row-info">
                 <span className="set-row-label">Open data folder</span>
                 <span className="set-row-desc">
-                  Open the folder where clipboard history, pinned entries, and settings are stored.
+                  Open the folder where your clipboard history, notes, and settings are stored.
                 </span>
               </div>
               <button

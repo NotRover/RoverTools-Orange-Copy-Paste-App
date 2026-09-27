@@ -27,7 +27,7 @@ interface ShortcutSection {
 
 const SECTIONS: ShortcutSection[] = [
   {
-    title: "Global Shortcuts",
+    title: "Global shortcuts",
     icon: <KeyboardIcon size={13} />,
     entries: [
       {
@@ -71,7 +71,7 @@ const SECTIONS: ShortcutSection[] = [
     ],
   },
   {
-    title: "Clipboard Cards",
+    title: "Clipboard cards",
     icon: <ClipboardIcon size={13} />,
     entries: [
       { keys: ["Click"], description: "Copy entry to clipboard" },
@@ -90,10 +90,10 @@ const SECTIONS: ShortcutSection[] = [
     title: "Pin & Save",
     icon: <PinIcon size={13} filled strokeWidth={1.5} />,
     entries: [
-      { keys: ["Pin"], description: "Pin entry. Shows in quick-paste popup (max 10)" },
+      { keys: ["Pin"], description: "Pin entry. Shows in quick-paste popup (max 10)." },
       {
         keys: ["Save"],
-        description: "Save entry. Survives app restarts independently of pin",
+        description: "Save entry. Survives app restarts independently of pin.",
       },
       {
         keys: ["Unsave"],
@@ -101,7 +101,7 @@ const SECTIONS: ShortcutSection[] = [
       },
       {
         keys: ["Max 10"],
-        description: "Pin limit reached. A toast notification appears",
+        description: "Pin limit reached. A toast notification appears.",
       },
     ],
   },
@@ -119,7 +119,7 @@ const SECTIONS: ShortcutSection[] = [
       },
       {
         keys: ["Click chip"],
-        description: "Select a group. Input switches to rename mode",
+        description: "Select a group. Input switches to rename mode.",
       },
       {
         keys: ["Click chip again"],
@@ -132,7 +132,7 @@ const SECTIONS: ShortcutSection[] = [
       { keys: ["Enter"], description: "Confirm add or rename" },
       {
         keys: ["Delete button"],
-        description: "Delete group. Undo available for 5 seconds via toast",
+        description: "Delete group. Undo available for 5 seconds via toast.",
       },
       {
         keys: ["Color swatches"],
@@ -147,11 +147,11 @@ const SECTIONS: ShortcutSection[] = [
       {
         keys: ["Pinned"],
         description:
-          "System group. Shows entries currently pinned to the popup",
+          "System group. Shows entries currently pinned to the popup.",
       },
       {
         keys: ["Saved"],
-        description: "System group. Shows entries saved to survive restarts",
+        description: "System group. Shows entries saved to survive restarts.",
       },
       {
         keys: ["Reserved"],
@@ -161,11 +161,11 @@ const SECTIONS: ShortcutSection[] = [
     ],
   },
   {
-    title: "Search & Filter",
+    title: "Search and filter",
     icon: <SearchIcon size={13} />,
     entries: [
       { keys: ["Type"], description: "Filter entries by content" },
-      { keys: ["Esc / clear btn"], description: "Clear search" },
+      { keys: ["Esc or the clear button"], description: "Clear search" },
     ],
   },
 ];

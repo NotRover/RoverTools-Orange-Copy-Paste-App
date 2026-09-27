@@ -96,7 +96,7 @@ const Notification: React.FC = () => {
           <ClipboardIcon size={14} />
         )}
         <span className="cn-label">{action}</span>
-        <span className="cn-dot">&middot;</span>
+        <span className="cn-dot">-</span>
         <span className="cn-kind">{detail ?? KIND_LABELS[kind] ?? kind}</span>
       </div>
       {note && <p className="cn-note">{note}</p>}

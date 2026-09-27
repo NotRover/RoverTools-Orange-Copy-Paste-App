@@ -563,7 +563,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       showToast(`Saved: ${fileNameFromPath(savedPath)}`);
     } catch (err) {
       console.error("[notes] export failed", err);
-      showToast("Export failed");
+      showToast("Could not export the note. Try again.");
     }
   }, [closeMenu, currentContent, showToast]);
 
@@ -574,7 +574,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
       await navigator.clipboard.writeText(markdown);
       showToast("Copied as Markdown");
     } catch {
-      showToast("Copy failed");
+      showToast("Could not copy the note. Try again.");
     }
   }, [closeMenu, currentContent, showToast]);
 

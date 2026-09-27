@@ -9,6 +9,7 @@
  */
 
 import { markPending } from "../../../hooks/pendingRemoval";
+import { userError } from "../../../userError";
 
 type ToastTone = "info" | "success" | "error" | "danger";
 
@@ -132,6 +133,6 @@ export function deferDestructive(
 
 /** Turn a Tauri command rejection into something worth reading. */
 export function toastError(prefix: string, e: unknown): void {
-  const detail = typeof e === "string" ? e : ((e as Error)?.message ?? "");
-  showToast(detail ? `${prefix}: ${detail}` : prefix, "error");
+  const detail = userError(e, "");
+  showToast(detail ? `${prefix}. ${detail}` : `${prefix}.`, "error");
 }

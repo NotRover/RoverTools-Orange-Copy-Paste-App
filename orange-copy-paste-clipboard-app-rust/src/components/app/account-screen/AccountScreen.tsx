@@ -22,6 +22,7 @@ import type {
   SyncServerBreakdown,
 } from "../../../types";
 import { deriveDisplayKind } from "../../../types";
+import { userError } from "../../../userError";
 import { TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import { showOnlyKinds } from "../clipboard-screen/search-filter/SearchFilter";
 import { showOnlyNotesCloud } from "../notes-screen/notes-filter/NotesFilterDropdown";
@@ -459,7 +460,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       setRecoveryCode(code);
     } catch (e) {
       setRecoveryError(
-        typeof e === "string" ? e : "Could not create a recovery code.",
+        userError(e, "Could not create a recovery code."),
       );
     } finally {
       setRecoveryBusy(false);
@@ -562,7 +563,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
     } catch (e) {
       clearOauthTimer();
       setOauthLoading(false);
-      setLoginError(typeof e === "string" ? e : "Google sign-in failed.");
+      setLoginError(userError(e, "Google sign-in failed."));
     }
   };
 
@@ -571,11 +572,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
     if (!oauthPassword) return;
     if (oauthIsNew) {
       if (oauthPassword.length < 8) {
-        setLoginError("Password must be at least 8 characters.");
+        setLoginError("Use at least 8 characters for your password.");
         return;
       }
       if (oauthPassword !== oauthConfirm) {
-        setLoginError("Passwords don't match.");
+        setLoginError("The two passwords do not match.");
         return;
       }
     }
@@ -588,7 +589,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       resetOauth();
       loadPostLogin(user);
     } catch (e) {
-      setLoginError(typeof e === "string" ? e : "Could not complete sign-in.");
+      setLoginError(userError(e, "Could not complete sign-in."));
     } finally {
       setOauthLoading(false);
     }
@@ -628,7 +629,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
       setResetSent(true);
     } catch (e) {
       setResetError(
-        typeof e === "string" ? e : "Could not send the reset email.",
+        userError(e, "Could not send the reset email."),
       );
     } finally {
       setResetLoading(false);
@@ -649,7 +650,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
       });
       setRecoverySavedTo(path);
     } catch (e) {
-      setRecoveryError(typeof e === "string" ? e : "Could not save the file.");
+      setRecoveryError(userError(e, "Could not save the file."));
     }
   };
 
@@ -672,7 +673,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
   /// same two fields either way, so the same handler.
   const submitNewPassword = async (startOver: boolean) => {
     if (newPassword.length < 8) {
-      setResetStageError("Use at least 8 characters.");
+      setResetStageError("Use at least 8 characters for your password.");
       return;
     }
     if (newPassword !== newConfirm) {
@@ -710,7 +711,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
       loadPostLogin(user);
     } catch (e) {
       const msg =
-        typeof e === "string" ? e : "Could not set the new password.";
+        userError(e, "Could not set the new password.");
       setResetStageError(msg);
       // Rust says so in the one case where a fresh key is the only way through.
       if (/never held your encryption key/i.test(msg)) setOfferStartOver(true);
@@ -723,7 +724,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
     if (!loginEmail || !loginPassword) return;
     if (authMode === "signup" && loginPassword.length < 8) {
       setAuthNotice(null);
-      setLoginError("Password must be at least 8 characters.");
+      setLoginError("Use at least 8 characters for your password.");
       return;
     }
     setLoginLoading(true);
@@ -750,10 +751,12 @@ Keep this. It is the only way back into your synced items if you forget your pas
         setAuthMode("login");
       } else {
         setLoginError(
-          msg ??
-            (authMode === "signup"
+          userError(
+            e,
+            authMode === "signup"
               ? "Sign up failed. Try a different email."
-              : "Login failed. Check your credentials."),
+              : "Could not sign in. Check your email and password.",
+          ),
         );
       }
     } finally {
@@ -801,8 +804,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
     handleSyncNowRef.current = handleSyncNow;
   });
 
-  const errMsg = (e: unknown, fallback: string) =>
-    typeof e === "string" ? e : fallback;
+  const errMsg = (e: unknown, fallback: string) => userError(e, fallback);
 
   // A removed device has to sign in and register again before it syncs, so the
   // call waits out the Undo toast instead of going the moment Remove is hit.
@@ -1145,7 +1147,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
         void trackBulk(keys, "upload");
       }
     } catch (e) {
-      setBulkResult(typeof e === "string" ? e : "Could not start the upload.");
+      setBulkResult(userError(e, "Could not start the upload."));
     }
     setPushingOld(false);
   };
@@ -1196,7 +1198,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
         void trackBulk(keys, "remove");
       }
     } catch (e) {
-      setBulkResult(typeof e === "string" ? e : "Could not remove them.");
+      setBulkResult(userError(e, "Could not remove them."));
     }
     setUnpushing(false);
   };
@@ -1257,7 +1259,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
               <h3 className="auth-title">Save your recovery code</h3>
               <p className="auth-subtitle">
                 If you forget your password, this code is the only thing that can
-                unlock your synced items on a new device. We cannot recover them
+                open your synced items on a new device. We cannot recover them
                 for you.
               </p>
             </div>
@@ -1371,8 +1373,8 @@ Keep this. It is the only way back into your synced items if you forget your pas
               </h3>
               <p className="auth-subtitle">
                 {changeOpen
-                  ? "Your synced items stay readable - the key does not change, only what wraps it."
-                  : "This also unlocks what you have already synced, so nothing is lost."}
+                  ? "Your synced items stay readable. Changing the password does not change what they are encrypted with."
+                  : "This also opens what you have already synced, so nothing is lost."}
               </p>
             </div>
             <div className="auth-form">
@@ -1452,7 +1454,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   onClick={() => void submitNewPassword(false)}
                   disabled={resetBusy}
                 >
-                  {resetBusy ? "Unlocking..." : "Unlock with the code"}
+                  {resetBusy ? "Checking the code..." : "Use the recovery code"}
                 </button>
               )}
               {offerStartOver && (
@@ -1498,7 +1500,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
               className="auth-submit acct-hero-btn"
               onClick={handleSyncToggle}
             >
-              Enable Cloud Sync
+              Turn on cloud sync
             </button>
           </div>
         ) : !syncUser && restoringSession && !signInAnyway ? (
@@ -1560,7 +1562,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   <p className="auth-hint">
                     {oauthIsNew
                       ? "Set a password to encrypt your data. You'll enter it on each device, and it also lets you sign in with email."
-                      : "Enter your account password to unlock your encrypted data."}
+                      : "Enter your account password to read your encrypted data."}
                   </p>
                   <label className="auth-field">
                     <span className="auth-label">
@@ -1608,10 +1610,10 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     disabled={oauthLoading || !oauthPassword}
                   >
                     {oauthLoading
-                      ? "Unlocking..."
+                      ? "Signing in..."
                       : oauthIsNew
                         ? "Set password & continue"
-                        : "Unlock"}
+                        : "Continue"}
                   </button>
                   <button
                     type="button"
@@ -1667,10 +1669,10 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   )}
                   <p className="auth-note">
                     Open the link on a device you have signed in on before and
-                    your synced items stay readable - the new password re-wraps
+                    your synced items stay readable. The new password protects
                     the same encryption key. On a device that has never signed
-                    in, the key is not there to re-wrap, and the only way in is
-                    a new one.
+                    in, that key is not there, and the only way in is a new
+                    key.
                   </p>
                   <button
                     type="button"
@@ -1690,7 +1692,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                       className={`auth-tab${authMode === "login" ? " active" : ""}`}
                       onClick={() => switchAuthMode("login")}
                     >
-                      Sign In
+                      Sign in
                     </button>
                     <button
                       type="button"
@@ -1699,7 +1701,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                       className={`auth-tab${authMode === "signup" ? " active" : ""}`}
                       onClick={() => switchAuthMode("signup")}
                     >
-                      Sign Up
+                      Sign up
                     </button>
                     <span
                       className="auth-tabs-slider"
@@ -1817,7 +1819,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
 
               <div className="auth-secure">
                 <Key size={12} weight="fill" />
-                End-to-end encrypted. Only you can read your data
+                End-to-end encrypted. Only you can read it, and space members can read what you share with them.
               </div>
             </div>
 
@@ -1957,8 +1959,8 @@ Keep this. It is the only way back into your synced items if you forget your pas
               <div className="acct-skipped">
                 {skipped.length === 0 ? (
                   <span className="acct-skipped-empty">
-                    {skippedCount} item{skippedCount === 1 ? "" : "s"} were
-                    skipped before this app was restarted. The details are gone.
+                    {skippedCount} item{skippedCount === 1 ? "" : "s"}{" "}
+                    {skippedCount === 1 ? "was" : "were"} skipped before this app was restarted. The details are gone.
                   </span>
                 ) : (
                   skippedGroups.map(([reason, items]) => (
@@ -2350,7 +2352,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                         <div className="acct-quota">
                           <div className="acct-quota-head">
                             <HardDrives size={13} />
-                            <span>Cloud image storage</span>
+                            <span>Cloud file storage</span>
                             {/* The share is the part that says whether this
                                 matters; the bytes say by how much. */}
                             <span className="acct-quota-value">
@@ -2371,10 +2373,10 @@ Keep this. It is the only way back into your synced items if you forget your pas
                               where it was. */}
                           <p className="acct-quota-note">
                             {formatBytes(quota.used_bytes)} used,{" "}
-                            {formatBytes(free)} free. Only images you uploaded
-                            count here. Text and notes take no storage, and
-                            images other people shared with you stay on their
-                            account.
+                            {formatBytes(free)} free. Only images and files you
+                            uploaded count here. Text and notes take no storage,
+                            and images and files other people shared with you
+                            count against their account.
                           </p>
                         </div>
                       );
@@ -2495,7 +2497,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                           <span className="acct-row-meta">
                             {deviceTally.waiting === 0
                               ? "Nothing queued on this device"
-                              : `${deviceTally.waitingClipboard} clipboard, ${deviceTally.waitingNotes} notes, queued on this device`}
+                              : `${deviceTally.waitingClipboard} clipboard, ${deviceTally.waitingNotes} ${deviceTally.waitingNotes === 1 ? "note" : "notes"}, queued on this device`}
                           </span>
                         </div>
                         <span className="acct-stat-value">
@@ -2526,7 +2528,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
 
             <p className="auth-secure acct-secure-foot">
               <Key size={12} weight="fill" />
-              End-to-end encrypted. Only you can read your data
+              End-to-end encrypted. Only you can read it, and space members can read what you share with them.
             </p>
           </>
         )}

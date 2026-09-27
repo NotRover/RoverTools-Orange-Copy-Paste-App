@@ -50,7 +50,7 @@ export async function setCloudCopy(
       {
         key: "cloud-copy",
         onUndo: unhide,
-        errorPrefix: "Could not remove from your account",
+        errorPrefix: "Could not remove from the cloud",
       },
     );
     return;
@@ -72,9 +72,11 @@ async function runCloudCopy(
       { clientIds, entryType },
     );
     if (count === 0) {
-      showToast(`Nothing to ${upload ? "upload" : "remove"}`, "error", {
-        key: "cloud-copy",
-      });
+      showToast(
+        `Other members shared the selected items, so there is nothing of yours to ${upload ? "upload" : "remove"}.`,
+        "error",
+        { key: "cloud-copy" },
+      );
       return false;
     }
     if (upload) {
@@ -85,7 +87,7 @@ async function runCloudCopy(
     return true;
   } catch (e) {
     toastError(
-      upload ? "Could not upload" : "Could not remove from your account",
+      upload ? "Could not upload to the cloud" : "Could not remove from the cloud",
       e,
     );
     return false;

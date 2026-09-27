@@ -506,7 +506,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
               <NotesIcon size={36} className="ns-empty-icon" />
               <h3 className="ns-empty-title">No notes yet</h3>
               <p className="ns-empty-subtitle">
-                Click the compose button to create your first note.
+                Click New note to write your first note.
               </p>
             </div>
           ) : sortedNotes.length === 0 ? (
@@ -516,7 +516,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
               <p className="cs-no-results-subtitle">
                 {search.trim() ? (
                   <>
-                    Nothing matches &ldquo;{search.trim()}&rdquo;
+                    Nothing matches &quot;{search.trim()}&quot;
                     {nf.filterNames.length > 0 ? (
                       <> with {nf.filterNames.join(", ")}</>
                     ) : null}

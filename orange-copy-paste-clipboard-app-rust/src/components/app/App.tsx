@@ -188,7 +188,7 @@ function storeGroups(next: string[]): string[] {
 
 /** Pinning past the limit is rejected by Rust, from a card or a bulk bar. */
 function showPinLimit(): void {
-  showToast("Max pins reached (10)", "info", {
+  showToast("You can pin up to 10 items. Unpin one first.", "info", {
     duration: 3000,
     key: "pin-limit",
     glyph: "pin",
@@ -358,7 +358,7 @@ const App: React.FC = () => {
       .then((notice) => {
         if (!cancelled && notice)
           showToast(
-            `Could not read your ${notice} file. It is safe on disk and untouched; restart the app to try again`,
+            `Could not read your ${notice} file. It is safe on disk and untouched. Restart the app to try again.`,
             "error",
             { duration: 0, key: "sealed", glyph: "warning" },
           );
@@ -845,7 +845,7 @@ const App: React.FC = () => {
           skipBurstRef.current === 1
             ? {
                 label: event.payload.label || "Item",
-                reason: event.payload.reason || "could not be synced",
+                reason: event.payload.reason || "It could not be synced.",
               }
             : {
                 label: `${skipBurstRef.current} items`,
@@ -1039,7 +1039,7 @@ const App: React.FC = () => {
       const proceed = () => {
         setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
         deferDestructive(
-          `${snapshot.length} entries deleted`,
+          `${snapshot.length} ${snapshot.length === 1 ? "entry" : "entries"} deleted`,
           async () => {
             await invoke("bulk_delete_entries", { ids });
           },
@@ -1079,7 +1079,7 @@ const App: React.FC = () => {
           { key: "bulk-copy" },
         );
       } else {
-        showToast("Could not copy the selection", "error", { key: "bulk-copy" });
+        showToast("Could not copy the selection. Try again.", "error", { key: "bulk-copy" });
       }
     } catch (e) {
       toastError("Could not copy the selection", e);
@@ -1262,7 +1262,7 @@ const App: React.FC = () => {
       const proceed = () => {
         setNotes((prev) => prev.filter((n) => !idSet.has(n.id)));
         deferDestructive(
-          `${snapshot.length} notes deleted`,
+          `${snapshot.length} ${snapshot.length === 1 ? "note" : "notes"} deleted`,
           async () => {
             for (const id of ids) await invoke("delete_note", { id });
           },
