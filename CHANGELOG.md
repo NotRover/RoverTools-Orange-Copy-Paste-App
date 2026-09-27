@@ -5,6 +5,19 @@ per-release files in [`changelog/`](changelog/) by
 `.github/scripts/gen-changelog.sh` on each release. Do not edit by hand; edit the
 source file in `changelog/` instead.
 
+## 0.4.2 (patch, stable) - 2026-09-27
+
+This release makes the app's errors and labels say plainly what happened and what to do.
+
+### Improved
+- Errors now say what went wrong in plain words, such as "Sign in on the Account screen first." or "Confirm your email address first.", instead of raw server codes.
+- A failed image or file upload now tells you to try again later instead of showing a technical error.
+- Removing items you did not share yourself now explains that other members shared them, instead of saying there is nothing to remove.
+- Sign-in and recovery buttons now say what they do: "Continue" and "Use the recovery code" replace the old "Unlock" buttons.
+- Settings descriptions no longer mention Windows on Linux, and the copy and paste notification options describe the action rather than a key combination.
+
+---
+
 ## 0.4.1 (patch, stable) - 2026-09-26
 
 This release updates the libraries the app is built on to fix known security issues.
