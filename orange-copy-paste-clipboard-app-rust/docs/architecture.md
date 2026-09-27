@@ -1,9 +1,9 @@
-# RoverTools' Orange Copy Paste — Client Architecture
+# RoverTools' Orange Copy Paste - Client Architecture
 
 A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
 
 **Owns:** how this app works inside. Windows and runtime, app state, Tauri commands and
-events, local persistence, the capture pipeline, and the client half of the sync engine —
+events, local persistence, the capture pipeline, and the client half of the sync engine -
 what it does with what it receives.
 **Not here:** the wire contract itself. Routes, payloads, DDL, socket-event shapes and the
 crypto envelope live in `orange-copy-paste-clipboard-backend/docs/architecture.md`;
@@ -52,7 +52,7 @@ flowchart TB
     classDef ext fill:#141414,stroke:#4d4d4d,stroke-dasharray:5 3,color:#cfcfcf
 ```
 
-The app runs as a single Tauri process with three webview windows. The Rust backend owns all clipboard operations, history storage, and OS integrations. The React frontends communicate via Tauri commands (request/response) and events (push notifications). The `SyncClient` runs in a dedicated background Tokio runtime and is entirely optional — the app is fully functional without it.
+The app runs as a single Tauri process with five webview windows: main, splash, and the three popups in the diagram (see section 5.1). The Rust backend owns all clipboard operations, history storage and OS integrations. The React frontends call Tauri commands (request/response) and listen for events (push notifications). The `SyncClient` runs in a dedicated background Tokio runtime and is optional: the app works fully without it.
 
 ---
 
@@ -66,25 +66,24 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | tauri-plugin-global-shortcut | 2       | Ctrl+Shift+C / Ctrl+Shift+V                                                    |
 | tauri-plugin-autostart       | 2       | Launch on OS startup                                                           |
 | arboard                      | 3       | Cross-platform clipboard (text + images); bypassed on Windows for image writes |
-| windows-sys                  | 0.59    | Win32 APIs (clipboard formats, key simulation, monitors) — Windows only        |
+| windows-sys                  | 0.59    | Win32 APIs (clipboard formats, key simulation, monitors) - Windows only        |
 | image                        | 0.25    | PNG encode/decode for clipboard images                                         |
 | base64                       | 0.22    | Data-URL encoding                                                              |
 | parking_lot                  | 0.12    | Mutex without poisoning                                                        |
 | serde + serde_json           | 1       | Serialization for IPC and settings persistence                                 |
 | rmp-serde                    | 1       | MessagePack binary serialization for history persistence                       |
-| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) — **sync module only**     |
-| tokio-tungstenite            | 0.24    | Async WebSocket client for realtime events — **sync module only**                  |
-| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) — **sync module only**           |
-| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption — **sync module only**                   |
-| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and space key wrapping — **sync module only** |
-| keyring                      | 2       | OS credential store for the device private key and cached Supabase session — **sync module only** |
+| reqwest                      | 0.12    | Async HTTP client for sync push/pull (rustls TLS, JSON) - **sync module only**     |
+| tokio-tungstenite            | 0.24    | Async WebSocket client for realtime events - **sync module only**                  |
+| argon2                       | 0.5     | Argon2id key derivation for User Master Key (UMK) - **sync module only**           |
+| aes-gcm                      | 0.10    | AES-256-GCM content encryption/decryption - **sync module only**                   |
+| x25519-dalek                 | 2       | X25519 ECDH for multi-device key exchange and space key wrapping - **sync module only** |
+| keyring                      | 2       | OS credential store for the device private key and cached Supabase session - **sync module only** |
 
-> **Auth is delegated to Supabase.** The backend moved to **Supabase Auth (GoTrue) +
-> Supabase Postgres**. The client performs sign-up / login / refresh / email
-> verification / password reset against Supabase directly, then attaches the Supabase
-> access token to backend calls. There is no backend-issued JWT and no
-> `/auth/login` or `/auth/refresh` on our server. A Supabase auth client (GoTrue REST
-> or an SDK) is required in the sync module.
+> **Auth is delegated to Supabase.** The backend runs on **Supabase Auth (GoTrue) +
+> Supabase Postgres**. The client runs sign-up, login, refresh, email verification and
+> password reset against Supabase directly. It then attaches the Supabase access token
+> to backend calls. The backend issues no JWT and has no `/auth/login` or
+> `/auth/refresh` route. The sync module talks to GoTrue over REST (`sync/supabase.rs`).
 
 ### 2.2 Frontend
 
@@ -94,7 +93,7 @@ The app runs as a single Tauri process with three webview windows. The Rust back
 | TypeScript      | 5.8     | Type safety                         |
 | Vite            | 7       | Build tool (multi-page)             |
 | @tauri-apps/api | 2       | IPC (commands + events)             |
-| Vanilla CSS     | —       | Styling (CSS variables for theming) |
+| Vanilla CSS     | - | Styling (CSS variables for theming) |
 
 ---
 
@@ -211,14 +210,14 @@ src/
 
 ### 4.1 Entry Point & Setup
 
-**`main.rs`** — Minimal entry: calls `lib::run()`.
+**`main.rs`** - Minimal entry: calls `lib::run()`.
 
-**`lib.rs`** — Orchestrates the entire startup sequence:
+**`lib.rs`** - Orchestrates the entire startup sequence:
 
-1. **`kill_previous_instance()`** — Terminates any existing app process so global hotkeys are released. On Windows uses `tasklist`/`taskkill`; on Linux uses `pgrep`/`kill -9`. It waits first: see [Shutdown and the rotation window](#shutdown-and-the-rotation-window).
-2. **`create_shared_history()`** — Creates `Arc<Mutex<ClipboardHistory>>`.
-3. **`app_state_from_history()`** — Builds `AppState` from the shared history and suppress flag.
-4. **`setup_runtime()`** — Called inside `tauri::Builder::setup`:
+1. **`kill_previous_instance()`** - Terminates a running copy so its global hotkeys are released. It runs only in a debug build or on the app's own restart (update or health recovery). A plain relaunch or a `--trigger`/deep-link launch is forwarded to the running instance by the single-instance plugin instead. On Windows it uses `tasklist`/`taskkill`; on Linux, `pgrep`/`kill -9`. It waits first: see [Shutdown and the rotation window](#shutdown-and-the-rotation-window).
+2. **`create_shared_history()`** - Creates `Arc<Mutex<ClipboardHistory>>`.
+3. **`AppState { .. }`** - `run()` builds `AppState` inline from the shared history and suppress flag.
+4. **`setup_runtime()`** - Called inside `tauri::Builder::setup`:
    - Configures the images directory (`{app_data}/images/`) for on-disk image storage
    - Loads history from `{app_data}/history.bin` (MessagePack binary) + `{app_data}/images/`
    - Loads pinned entries from `{app_data}/pinned_entries.bin` (fallback on first run)
@@ -230,46 +229,49 @@ src/
    - Restores saved window geometry
    - Starts window move/resize tracking
    - Starts cloud sync, if it was enabled when the app last quit, through
-     `sync::commands::get_or_create_client_with` — the same helper the commands
-     use. Not a second construction: building a `SyncClient` is only half of
-     starting sync, and the other half (the passive-pull and reminder loops)
-     could never be repaired later, because every command that would have
-     started them returns the client this path already installed.
+     `sync::commands::get_or_create_client_with`, the same helper the commands
+     use. **Why:** building a `SyncClient` is only half of starting sync; the
+     other half is the passive-pull and reminder loops. A second construction
+     path could skip those loops, and nothing would start them later: every
+     command that would returns the client this path already installed.
 5. Registers all Tauri command handlers.
 6. Hooks `WindowEvent::Destroyed` on the main window to `exit(0)` the entire process.
 
 #### Shutdown and the rotation window
 
-GoTrue revokes a refresh token the instant it is presented. Between that request
-and the keychain write, the account's only live credential exists nowhere but
-memory, and a process that ends inside that window leaves the keychain holding a
-token the server has already thrown away — which the next launch cannot tell
-apart from a session that was genuinely revoked. So every way this process can
-end has to know about that window.
+The **rotation window** is the gap between spending a refresh token and writing its
+replacement to the keychain. GoTrue revokes a refresh token the moment it is presented,
+so during that gap the account's only live credential exists in memory alone.
 
-`sync::client::RotationGuard` marks it. It is entered in the two places a token
-is spent (`refresh_access_token`, and the restore path in `sync/mod.rs`, which
-bypasses `refresh_lock` entirely), and it does two things: increments a
-process-wide count, and writes a marker file naming this pid under the temp
-directory.
+`sync::client::RotationGuard` marks the window. Two places enter it, the two places a
+token is spent: `refresh_access_token`, and the restore path in `sync/mod.rs`, which
+bypasses `refresh_lock` entirely. The guard increments a process-wide count and writes a
+marker file naming this pid under the temp directory.
 
 | Exit path | What it does |
 |---|---|
-| Tray quit, window close, any `AppHandle::exit` | `RunEvent::ExitRequested` prevents the exit once, drains on a worker thread, then re-issues it. Two latches — one for "the drain is running", one for "this exit is ours" — because there are two independent sources of the event and the drain re-issues it; collapsing them gives either a skipped drain or an app that cannot be quit. |
-| `health_restart_app` | Drains inline. A restart carries its own exit code and the runtime ignores an objection to it, so there is nothing to prevent — same reason the flush is inline here. Blocks the main thread for the budget. |
+| Tray quit, window close, any `AppHandle::exit` | `RunEvent::ExitRequested` prevents the exit once, drains on a worker thread, then re-issues it. Two latches - one for "the drain is running", one for "this exit is ours" - because there are two independent sources of the event and the drain re-issues it; collapsing them gives either a skipped drain or an app that cannot be quit. |
+| `health_restart_app` | Drains inline. A restart carries its own exit code and the runtime ignores an objection to it, so there is nothing to prevent - same reason the flush is inline here. Blocks the main thread for the budget. |
 | `updater_install` | Flushes and drains **before** `install()`. On Windows the plugin ends this process from inside that call, so anything after it never runs. |
 | Being force-killed by a relaunch | The victim gets no say, so the *killer* waits: `wait_out_rotation` polls the marker file and holds off while it names a process it is about to kill. A marker abandoned by a crash names a pid that is not a victim, so it costs one file read rather than the wait. |
 
-`EXIT_DRAIN_MS` (3s) bounds all four. It is sized from the keychain write's own
-retry ladder, so a rotation that is going to succeed is not cut off one step from
-the end. A timeout is recorded in `crash.log` and never enforced: an app that
-cannot be quit is a worse bug than a session that has to be signed into.
+`EXIT_DRAIN_MS` (3s) bounds all four paths. It is sized from the keychain write's own
+retry ladder. On a timeout the exit goes ahead, and `crash.log` records it.
 
-The window cannot be closed completely. It opens the moment GoTrue commits, which
-is inside an await no exit hook can reach — if the process dies while the response
-is in flight, the replacement token never existed locally. Only a write-ahead
-marker closes that part, and it would change what the next launch may conclude
-from a rejected token.
+**Limit.** Part of the window stays open. It opens the moment GoTrue commits, inside an
+await that no exit hook can reach. If the process dies while the response is in flight,
+the replacement token never existed locally. Only a write-ahead marker would close that
+part, and it would change what the next launch may conclude from a rejected token.
+
+**Why:**
+
+- A process that ends inside the window leaves the keychain holding a token the server
+  has already thrown away. The next launch cannot tell that apart from a session that was
+  genuinely revoked, so every way the process can end has to know about the window.
+- The 3s budget follows the keychain retry ladder so that a rotation about to succeed is
+  not cut off one step from the end.
+- A timeout never holds the exit: an app that cannot be quit is a worse bug than a
+  session the user has to sign into again.
 
 ### 4.2 State Management
 
@@ -280,46 +282,56 @@ AppState
 ├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting (~1ns check)
 ├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.bin
 ├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
+├── os_notifications: Arc<AtomicBool>       ← may also raise an OS toast while unfocused
 ├── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
 ├── notification_enabled: Arc<AtomicBool>   ← master toggle for copy/paste notifications
 ├── notif_copy: Arc<AtomicBool>             ← show notification on copy action
 ├── notif_paste: Arc<AtomicBool>            ← show notification on paste action
 ├── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries
+├── show_splash: Arc<AtomicBool>            ← show the startup splash on launch
+├── splash_updating: Arc<AtomicBool>        ← splash is mid auto-update; holds its close timer
 ├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
 ├── notes: Arc<Mutex<NoteStore>>            ← shared notes store
 ├── notes_dirty: Arc<AtomicBool>            ← triggers periodic flush to notes.bin
 ├── notifications: Arc<Mutex<NotificationStore>> ← notification centre feed
 ├── notifications_dirty: Arc<AtomicBool>    ← triggers periodic flush to notifications.bin
-└── sync_client: Option<Arc<SyncClient>>   ← None when sync disabled or not yet authed
+├── sync_client: Mutex<Option<Arc<SyncClient>>> ← None when sync disabled or not yet authed
+└── ui_view: Arc<Mutex<UiView>>             ← the screen and space the user is looking at
 ```
 
 **`AppState`** is managed by Tauri and injected into every command handler via `State<'_, AppState>`. The same `Arc` references are also held by the clipboard watcher thread and the hotkey handler closures.
 
-**Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture — preventing duplicate entries.
+**Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture - preventing duplicate entries.
 
 **Entry size** is capped as well as entry count. `MAX_TEXT_BYTES` (4 MiB) bounds one
-text, rich-text or file-list entry; image content is a path to a file on disk and is
-exempt. The cap exists because an entry is duplicated several times over on its way
-to the user - into the store, into each webview that shows it, into MessagePack on
-every flush, and into ciphertext when sync pushes it - so an unbounded entry is an
-unbounded multiple. It is enforced at the three places an entry can enter memory:
-`read_clipboard_capture` at capture (measuring the OS handle first on Windows, so an
-oversized payload is never decoded into the process), `upsert_synced` on the sync
-merge, and `drop_oversized` on load, which prunes a history file written before the
-cap existed. A refused capture always shows the app's own toast, whatever the
-notification preferences say, because the only other sign of it is the item's
-absence.
+text, rich-text or file-list entry. Image content is a path to a file on disk and is
+exempt.
 
-`MAX_TEXT_BYTES` is deliberately well above what the server will store - see
-`MAX_INLINE_SYNC_BYTES` in the sync section. What this app holds locally and what a
-cloud row may weigh are different questions, and history is useful without sync; an
-entry between the two is kept and marked local-only.
+- **Where it is enforced.** At the three places an entry can enter memory:
+  - `read_clipboard_capture` at capture. On Windows it measures the OS handle first, so
+    an oversized payload is never decoded into the process.
+  - `upsert_synced` on the sync merge.
+  - `drop_oversized` on load, which prunes a history file written before the cap existed.
+- **A refused capture always shows the app's own toast,** whatever the notification
+  preferences say.
+- **The cap sits well above the sync limit** (`MAX_INLINE_SYNC_BYTES` in `sync/mod.rs`).
+  An entry between the two is kept locally and marked local-only.
+
+**Why:**
+
+- An entry is copied several times on its way to the user: into the store, into each
+  webview that shows it, into MessagePack on every flush, and into ciphertext when sync
+  pushes it. An unbounded entry is an unbounded multiple.
+- The toast ignores preferences because the only other sign of a refused capture is the
+  item's absence.
+- What this app holds locally and what a cloud row may weigh are different questions,
+  and history is useful without sync.
 
 **History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.bin` (MessagePack binary) every 2 seconds when dirty. Image data is externalised to individual files in the `images/` directory.
 
 ### 4.3 Clipboard Module
 
-#### `history.rs` — In-Memory History Store
+#### `history.rs` - In-Memory History Store
 
 ```
 ClipboardEntry {
@@ -364,7 +376,7 @@ ClipboardEntry {
 | `save_all_to_file(path)`            | Flush full history to disk, clean orphaned image files    |
 | `load_all_from_file(path)`          | Load full history from MessagePack binary                 |
 
-#### `commands.rs` — Tauri Command Handlers
+#### `commands.rs` - Tauri Command Handlers
 
 > The `generate_handler!` / `invoke_handler` block in `src-tauri/src/lib.rs` is
 > the authoritative registry of every Tauri command. The command tables in this
@@ -373,67 +385,67 @@ ClipboardEntry {
 
 | Command                    | Signature                     | Description                                                                                          |
 | -------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `get_history`              | `() → Vec<ClipboardEntry>`    | Return full history (most-recent first)                                                              |
-| `delete_entry`             | `(id) → bool`                 | Remove entry, emit `clipboard:entry-deleted`                                                         |
-| `clear_history`            | `() → bool`                   | Remove all unpinned entries                                                                          |
-| `pin_entry`                | `(id) → bool`                 | Pin entry (max 10), auto-save to disk                                                                |
-| `unpin_entry`              | `(id) → bool`                 | Unpin entry, auto-save to disk                                                                       |
-| `copy_entry`               | `(id) → bool`                 | Write entry to OS clipboard, set suppress flag, update active clipboard ID, show copy notification   |
-| `copy_entries`            | `(ids) → bool`               | Copy a multi-entry selection as one clipboard payload (text block or one file drop) |
-| `paste_entry`              | `(id) → bool`                 | Write to clipboard, hide popup, simulate Ctrl+V, update active clipboard ID, show paste notification |
-| `save_history`             | `() → bool`                   | Flush full history to disk (on first enable)                                                         |
-| `get_active_clipboard_id`  | `() → String`                 | Return ID of entry currently in the OS clipboard                                                     |
-| `set_entry_groups`         | `(id, groups) → bool`         | Set group tags for an entry, auto-save                                                               |
-| `purge_group_from_entries` | `(group) → bool`              | Remove a group tag from all entries                                                                  |
-| `rename_group_in_entries`  | `(old_name, new_name) → bool` | Rename a group tag across all entries                                                                |
-| `bulk_delete_entries`      | `(ids) → u32`                 | Delete multiple entries, returns count removed                                                       |
-| `bulk_pin_entries`         | `(ids, pin) → u32`            | Pin/unpin multiple entries (respects MAX_PINNED)                                                     |
-| `bulk_add_group`           | `(ids, group) → u32`          | Add a group to multiple entries                                                                      |
-| `bulk_remove_group`        | `(ids, group) → u32`          | Remove a group from multiple entries                                                                 |
-| `get_setting`              | `(key) → Option<Value>`       | Read a setting from `settings.json`                                                                  |
-| `set_setting`              | `(key, value) → bool`         | Write a setting; syncs in-memory caches for known keys (`sync_enabled`, `sync_server_url` included)  |
-| `get_image_file_preview`   | `(path) → Option<String>`     | Read image file → data-URL (max 12 MB)                                                               |
-| `check_missing_files`      | `(paths) → Vec<String>`       | Returns paths that do not exist (used by paste popup before paste)                                   |
-| `stat_files`             | `(paths) → Vec<FileStat>`     | Per-path facts for a multi-file card: is-dir, size, item count, missing (batched)                    |
+| `get_history`              | `() -> Vec<ClipboardEntry>`    | Return full history (most-recent first)                                                              |
+| `delete_entry`             | `(id) -> bool`                 | Remove entry, emit `clipboard:entry-deleted`                                                         |
+| `clear_history`            | `() -> bool`                   | Remove all unpinned entries                                                                          |
+| `pin_entry`                | `(id) -> bool`                 | Pin entry (max 10), auto-save to disk                                                                |
+| `unpin_entry`              | `(id) -> bool`                 | Unpin entry, auto-save to disk                                                                       |
+| `copy_entry`               | `(id) -> bool`                 | Write entry to OS clipboard, set suppress flag, update active clipboard ID, show copy notification   |
+| `copy_entries`            | `(ids) -> bool`               | Copy a multi-entry selection as one clipboard payload (text block or one file drop) |
+| `paste_entry`              | `(id) -> bool`                 | Write to clipboard, hide popup, simulate Ctrl+V, update active clipboard ID, show paste notification |
+| `save_history`             | `() -> bool`                   | Flush full history to disk (on first enable)                                                         |
+| `get_active_clipboard_id`  | `() -> String`                 | Return ID of entry currently in the OS clipboard                                                     |
+| `set_entry_groups`         | `(id, groups) -> bool`         | Set group tags for an entry, auto-save                                                               |
+| `purge_group_from_entries` | `(group) -> bool`              | Remove a group tag from all entries                                                                  |
+| `rename_group_in_entries`  | `(old_name, new_name) -> bool` | Rename a group tag across all entries                                                                |
+| `bulk_delete_entries`      | `(ids) -> u32`                 | Delete multiple entries, returns count removed                                                       |
+| `bulk_pin_entries`         | `(ids, pin) -> u32`            | Pin/unpin multiple entries (respects MAX_PINNED)                                                     |
+| `bulk_add_group`           | `(ids, group) -> u32`          | Add a group to multiple entries                                                                      |
+| `bulk_remove_group`        | `(ids, group) -> u32`          | Remove a group from multiple entries                                                                 |
+| `get_setting`              | `(key) -> Option<Value>`       | Read a setting from `settings.json`                                                                  |
+| `set_setting`              | `(key, value) -> bool`         | Write a setting; syncs in-memory caches for known keys (`sync_enabled`, `sync_server_url` included)  |
+| `get_image_file_preview`   | `(path) -> Option<String>`     | Read image file -> data-URL (max 12 MB)                                                               |
+| `check_missing_files`      | `(paths) -> Vec<String>`       | Returns paths that do not exist (used by paste popup before paste)                                   |
+| `stat_files`             | `(paths) -> Vec<FileStat>`     | Per-path facts for a multi-file card: is-dir, size, item count, missing (batched)                    |
 
 `get_image_file_preview` results are served from a bounded in-process **LRU cache**
-(~32 MB, keyed by path + mtime + length) so repeated previews across the grid and the
-copy/paste popups don't re-read the file — see `src-tauri/src/clipboard/commands.rs`.
+(32 MB, keyed by path + mtime + length), so repeated previews across the grid and the
+copy/paste popups do not re-read the file. See `src-tauri/src/clipboard/commands.rs`.
 
-#### `notes/commands.rs` — Notes Command Handlers
+#### `notes/commands.rs` - Notes Command Handlers
 
 | Command                  | Signature                     | Description                     |
 | ------------------------ | ----------------------------- | ------------------------------- |
-| `get_notes`              | `() → Vec<Note>`              | Return all notes                |
-| `create_note`            | `() → Note`                   | Create a new blank note         |
-| `update_note`            | `(id, title, content) → bool` | Update note content/title       |
-| `delete_note`            | `(id) → bool`                 | Delete a note by ID             |
-| `pin_note`               | `(id) → bool`                 | Pin a note                      |
-| `unpin_note`             | `(id) → bool`                 | Unpin a note                    |
-| `set_note_groups`        | `(id, groups) → bool`         | Replace note groups             |
-| `purge_group_from_notes` | `(group) → ()`                | Remove a group from all notes   |
-| `rename_group_in_notes`  | `(old_name, new_name) → ()`   | Rename a group across all notes |
-| `save_note_image`        | `(bytes, ext) → String`       | Save an image attachment; returns its stored path |
-| `save_note_file`         | `(bytes, name) → String`      | Save a file attachment; returns its stored path |
-| `get_note_attachments_dirs` | `() → NoteAttachmentDirs`  | Return the note image/file attachment directories |
-| `export_note_text`       | `(text, filename) → String`   | Export a note's plain text to a file |
+| `get_notes`              | `() -> Vec<Note>`              | Return all notes                |
+| `create_note`            | `() -> Note`                   | Create a new blank note         |
+| `update_note`            | `(id, title, content) -> bool` | Update note content/title       |
+| `delete_note`            | `(id) -> bool`                 | Delete a note by ID             |
+| `pin_note`               | `(id) -> bool`                 | Pin a note                      |
+| `unpin_note`             | `(id) -> bool`                 | Unpin a note                    |
+| `set_note_groups`        | `(id, groups) -> bool`         | Replace note groups             |
+| `purge_group_from_notes` | `(group) -> ()`                | Remove a group from all notes   |
+| `rename_group_in_notes`  | `(old_name, new_name) -> ()`   | Rename a group across all notes |
+| `save_note_image`        | `(bytes, ext) -> String`       | Save an image attachment; returns its stored path |
+| `save_note_file`         | `(bytes, name) -> String`      | Save a file attachment; returns its stored path |
+| `get_note_attachments_dirs` | `() -> NoteAttachmentDirs`  | Return the note image/file attachment directories |
+| `export_note_text`       | `(text, filename) -> String`   | Export a note's plain text to a file |
 
 **Internal helpers:**
 
-- `read_clipboard_entry()` — Reads current OS clipboard in priority order: files (CF_HDROP) → HTML (CF_HTML) → text → images (CF_PNG, registered formats, CF_DIB fallback). Returns `Option<ClipboardEntry>`.
-- `write_entry_to_clipboard(entry)` — Writes a `ClipboardEntry` back to the OS clipboard. Text via arboard (with retry), files via CF_HDROP. **Images**: on Windows uses direct Win32 API (`write_image_to_clipboard`) bypassing arboard entirely; on Linux/other uses arboard RGBA fallback.
-- `open_clipboard_with_retry()` — Opens an arboard `Clipboard` handle with up to 6 retries (50ms delay between each) to handle contention with the watcher thread or external apps.
-- `set_active_clipboard_id(app, id)` — Updates the `active_clipboard_id` in `AppState` and emits the `clipboard:active-id` event to the frontend. Called from `copy_entry`, `paste_entry`, clipboard watcher, and copy shortcut handler.
+- `read_clipboard_capture()` - Reads the OS clipboard in priority order: files (CF_HDROP) -> HTML (CF_HTML) -> text -> images (CF_PNG, registered formats, CF_DIB fallback). Returns a `Capture`: `Entry`, `TooLarge` (over `MAX_TEXT_BYTES`) or `Nothing`. Every capture path goes through it.
+- `write_entry_to_clipboard(entry)` - Writes a `ClipboardEntry` back to the OS clipboard. Text goes via arboard (with retry), files via CF_HDROP. **Images**: on Windows it uses the Win32 API directly (`write_image_to_clipboard`) and bypasses arboard; on Linux and other platforms it uses the arboard RGBA path.
+- `open_clipboard_with_retry()` - Opens an arboard `Clipboard` handle in up to 6 attempts, 50ms apart, to ride out contention with the watcher thread or other apps.
+- `set_active_clipboard_id(app, id)` - Updates `active_clipboard_id` in `AppState` and emits `clipboard:active-id` to the frontend. Called from `copy_entry`, `paste_entry`, the clipboard watcher and the copy shortcut handler.
 
-#### `files.rs` — Windows File Clipboard (CF_HDROP)
+#### `files.rs` - Windows File Clipboard (CF_HDROP)
 
 Reads and writes file lists via `CF_HDROP` clipboard format using Win32 APIs:
 
-- **Read**: `OpenClipboard` → `GetClipboardData(CF_HDROP)` → `DragQueryFileW` to extract paths.
-- **Write**: Build `DROPFILES` struct + UTF-16 filename block → `GlobalAlloc` → `SetClipboardData(CF_HDROP)`.
+- **Read**: `OpenClipboard` -> `GetClipboardData(CF_HDROP)` -> `DragQueryFileW` to extract paths.
+- **Write**: Build `DROPFILES` struct + UTF-16 filename block -> `GlobalAlloc` -> `SetClipboardData(CF_HDROP)`.
 - **Serialization**: File paths stored as newline-delimited strings in `ClipboardEntry.content`.
 
-#### `html.rs` — Rich Text Clipboard (CF_HTML)
+#### `html.rs` - Rich Text Clipboard (CF_HTML)
 
 Reads and writes HTML content via the `CF_HTML` registered clipboard format:
 
@@ -441,30 +453,32 @@ Reads and writes HTML content via the `CF_HTML` registered clipboard format:
 - **Write**: Constructs a `CF_HTML` header with proper byte offsets and writes the fragment via Win32 APIs.
 - HTML entries store both the HTML fragment and a plain-text fallback separated by `\n---PLAINTEXT---\n`.
 
-#### `image.rs` — Multi-Format Image Clipboard
+#### `image.rs` - Multi-Format Image Clipboard
 
-**Reading** — tries formats in priority order:
+**Reading** - tries formats in priority order:
 
-1. **Registered custom formats**: `"PNG"`, `"image/png"`, `"image/jpeg"`, `"image/webp"`, `"image/bmp"`, `"JFIF"` — covers browsers, Snipping Tool, etc.
-2. **CF_HDROP** — image file exposed as a shell file-drop.
-3. **arboard fallback** — `CF_DIB`/`CF_DIBV5` for screenshots and classic Win32 apps.
+1. **Registered custom formats**: `"PNG"`, `"image/png"`, `"image/jpeg"`, `"image/webp"`, `"image/bmp"`, `"JFIF"` - covers browsers, Snipping Tool, etc.
+2. **CF_HDROP** - image file exposed as a shell file-drop.
+3. **arboard fallback** - `CF_DIB`/`CF_DIBV5` for screenshots and classic Win32 apps.
 
-Image data is initially encoded as `data:<mime>;base64,...` URLs. On push to history, images are externalised to individual files in the `images/` directory (named `{id}_{label}.{ext}`). The `content` field is replaced with the absolute file path. The frontend uses Tauri's `convertFileSrc()` asset protocol to display file-backed images.
+Image data is first encoded as a `data:<mime>;base64,...` URL. On push to history, the image is written to its own file in the `images/` directory (named `{id}_{label}.{ext}`), and `content` becomes the absolute file path. The frontend displays file-backed images through Tauri's `convertFileSrc()` asset protocol.
 
-**Writing (Windows)** — `write_image_to_clipboard(data_url)`:
+**Writing (Windows)** - `write_image_to_clipboard(data_url)`:
 
-Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal proxy-thread racing with the clipboard watcher. Uses direct Win32 API:
+Uses the Win32 API directly and bypasses arboard:
 
-1. Decode base64 → image → RGBA pixels **before** opening the clipboard.
-2. `OpenClipboard` with up to 10 retries (50ms delay).
-3. `EmptyClipboard` → write **CF_DIB** (BITMAPINFOHEADER + BGRA bottom-up pixel data) + registered **"PNG"** format.
+1. Decode base64 -> image -> RGBA pixels **before** opening the clipboard.
+2. `OpenClipboard` in up to 10 attempts, 50ms apart.
+3. `EmptyClipboard` -> write **CF_DIB** (BITMAPINFOHEADER + BGRA bottom-up pixel data) + registered **"PNG"** format.
 4. `CloseClipboard`.
 
-**Writing (Linux/other)** — uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()` (which works reliably on non-Windows platforms).
+**Why:** arboard's internal proxy thread races the clipboard watcher on Windows and fails with OS error 1418.
+
+**Writing (Linux/other)** - uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()`, which does not have that race off Windows.
 
 ### 4.4 Notes Module
 
-#### `store.rs` — Note Model and Storage
+#### `store.rs` - Note Model and Storage
 
 `NoteStore` keeps notes in-memory as `Vec<Note>` and persists them to `{app_data}/notes.bin` using MessagePack.
 
@@ -475,9 +489,9 @@ Bypasses arboard entirely to avoid OS error 1418 caused by arboard's internal pr
 - `pinned`
 - `groups`
 
-Notes are sorted by `updated_at` descending, and a monotonic in-process counter is advanced on load to avoid ID collisions.
+Notes are sorted by `updated_at` descending. A new note gets a UUIDv4 id. On load, a legacy numeric id counter is still advanced past any numeric ids in the file.
 
-As with clipboard entries, per-note sync state is not a field on the note — it lives in `id_map.json`/the pending queue and is read via `sync_get_entry_states` (`useEntrySyncStates()`).
+As with clipboard entries, per-note sync state is not a field on the note. It lives in `id_map.json` and the pending queue, and the UI reads it through `sync_get_entry_states` (`useEntrySyncStates()`).
 
 #### Persistence Behavior
 
@@ -489,23 +503,26 @@ As with clipboard entries, per-note sync state is not a field on the note — it
 
 ### 4.5 Notification Centre
 
-One surface for everything the app has to tell the user, reached from the bell in
-the sidebar bottom. It ships with space invites; `NotificationKind` is the seam
-new sources arrive through (`space_activity`, `sync_warning`, `reminder`).
+One surface for everything the app has to tell the user, reached from the bell at
+the bottom of the sidebar. `NotificationKind` has five values: `space_invite`,
+`space_activity`, `sync_warning`, `announcement` and `reminder`. A new source adds
+rows through one of them.
 
-**The store records what the user was told, not the thing itself.** An invite
-lives on the server and can be answered on another device, revoked, or expire
-while this one is closed. So a `space_invite` notification carries the
-`invite_id` in its opaque `data` map, and `notifications_refresh` re-reads
-`GET /api/v1/invites` and retires any row that is no longer pending
-(`resolved: "Joined" | "Declined" | "No longer available"` — the row stays as
-history and drops its buttons). Signed out, refresh is a no-op rather than an
-emptying: the feed is whatever the last sign-in left.
+**The store records what the user was told, not the thing itself.**
 
-Ids are derived from the source (`invite:<invite_id>`), so ingesting the same
-server row on every reconnect updates one record instead of stacking copies, and
-`upsert` preserves the existing `read` flag and `created_at` — a refresh must
-never push a row the user has already seen back to the top as if it were new.
+- A `space_invite` notification carries the `invite_id` in its opaque `data` map.
+- `notifications_refresh` re-reads the server's invite list and retires any row that
+  is no longer pending: `resolved` becomes `"Joined"`, `"Declined"` or
+  `"No longer available"`. The row stays as history and drops its buttons.
+- Signed out, refresh does nothing and empties nothing: the feed is whatever the last
+  sign-in left.
+- Ids derive from the source (`invite:<invite_id>`), so the same server row ingested on
+  every reconnect updates one record instead of stacking copies.
+- `upsert` preserves the existing `read` flag and `created_at`.
+
+**Why:** an invite lives on the server, and can be answered on another device, revoked,
+or expire while this one is closed. A refresh must never push a row the user has already
+seen back to the top as if it were new.
 
 | Command | Purpose |
 |---------|---------|
@@ -516,9 +533,9 @@ never push a row the user has already seen back to the top as if it were new.
 | `notifications_dismiss` / `notifications_clear_read` | Removal |
 
 Event `notifications:changed` (no payload) fires on every real change, so the
-badge and an open popout re-read together. Read rows age out after 30 days and
-the feed is capped at 500; unread rows are exempt from the age sweep. Signing in
-as a different account clears the feed in `finalize_session` — invites are
+badge and an open popout re-read together. Read rows age out after 30 days, and
+unread rows are exempt from that sweep. The feed is capped at 500 rows. Signing in
+as a different account clears the feed in `finalize_session`, because invites are
 addressed to a person.
 
 **What raises a notification**
@@ -540,46 +557,45 @@ addressed to a person.
 Four rules the sources follow:
 
 - **Your own actions are not news.** `note_membership_change` drops events whose
-  actor is this user — you watched the screen change. Losing your *own*
-  membership is the exception, and the reason the case exists: the payload
-  cannot separate being removed from leaving, and missing a removal is worse
-  than a redundant line after a deliberate leave.
+  actor is this user, who watched the screen change. Losing your *own* membership
+  is the exception, and the reason the case exists. The payload cannot separate
+  being removed from leaving, and missing a removal is worse than a redundant line
+  after a deliberate leave.
 - **Ids decide whether a row stacks or replaces.** A membership change is a
   distinct occurrence, so its id carries `now_ms()`. Everything else is keyed on
   the thing it is about (`invite-answered:<id>`, `space-removed:<space>:<type>:<client_id>`)
   so a replayed event cannot report it twice.
 - **Bursts collapse to one row.** `record_skip` can fire hundreds of times in a
-  single push, so it uses `raise_rolling` on the fixed id `sync-skipped`: one
-  line carrying the count, back to unread whenever the count moves.
-  `clear_skipped` dismisses it, or the centre would keep quoting a number the
-  Account screen no longer shows.
+  single push, so it uses `raise_rolling` on the fixed id `sync-skipped`. The one
+  row carries the count and goes back to unread whenever the count moves.
+  `clear_skipped` dismisses it; otherwise the centre would keep quoting a number
+  the Account screen no longer shows.
 - **Reminders describe a state, not an event,** so they are true on every sweep
-  and would nag. `reminder_id` folds the current day into the id, which hands
-  the rate limiting to the store's own idempotence: repeats inside a day land on
-  the row that is already there (and `upsert` refreshes its count without
-  re-alerting), while tomorrow gets a fresh row if the state still holds.
+  and would nag. `reminder_id` folds the current day into the id, so the store's
+  own idempotence does the rate limiting. Repeats inside a day land on the
+  existing row, and `upsert` refreshes its count without re-alerting. Tomorrow
+  gets a fresh row if the state still holds.
 
 **Server-authored announcements** are the one notification the app does not
 raise itself. They are also the one payload in the sync contract that arrives as
-plaintext, and only because they are the *service's* words - a maintenance
-window, a note to one account - never anything quoting content the server would
-have had to decrypt to write.
+plaintext. They are the *service's* words, such as a maintenance window or a note
+to one account, and never quote content the server would have had to decrypt.
 
-Delivery is doubled, because the interesting case is a user who is not looking:
-a connected socket gets `announcement:new` now, and `pull_announcements` hands
-the same rows to a device that was closed. Both key on `announcement:<id>`, so
-both landing is a no-op.
+- **Delivery is doubled.** A connected socket gets `announcement:new` at once, and
+  `pull_announcements` hands the same rows to a device that was closed. Both key
+  on `announcement:<id>`, so a second landing changes nothing. **Why:** the case
+  that matters is a user who is not looking.
+- **`SyncState::announcements_cursor` makes dismissing one stick.** The server
+  keeps no per-user read state; it answers "what is newer than this". Asking for
+  the same window twice would hand back rows the user had already cleared.
+- **The cursor advances only *after* the rows are in the store,** so a crash
+  between the two repeats a message rather than losing one.
 
-`SyncState::announcements_cursor` is what makes dismissing one stick. The server
-keeps no per-user read state - it answers "what is newer than this" - so asking
-for the same window twice would hand back rows the user had already cleared. The
-cursor advances only *after* the rows are in the store, so a crash between the
-two repeats a message rather than losing one.
-
-Membership names come from the cached space list, which is stale until
-`reconcile_spaces` has run — so `handle_membership_changed` owns the reconcile
-and reads names on *both* sides of it: a joiner is not cached yet, and a space
-that was left or deleted is gone afterwards. The fresher answer wins.
+**Membership names** come from the cached space list, which is stale until
+`reconcile_spaces` has run. So `handle_membership_changed` owns the reconcile and
+reads names on *both* sides of it, and the fresher answer wins. **Why:** a joiner
+is not cached yet before the reconcile, and a space that was left or deleted is
+gone after it.
 
 **Popout behaviour** (`components/app/notifications/NotificationsPopout.tsx`):
 
@@ -588,57 +604,60 @@ that was left or deleted is gone afterwards. The fresher answer wins.
 - Rows render 15 at a time behind a "Show more" button; the count resets when
   the filter changes or the popout reopens.
 - Filter chips only appear once more than one category is present.
-- Unread rows are marked read on the *close* edge, not on click — so the list
-  does not reflow under the cursor, and every route out (bell, click-outside,
-  Escape, a parent closing it) counts exactly once.
-- The outside-click handler ignores `[data-notif-bell]`, or the bell would close
-  the popout and then immediately reopen it with its own click.
+- Unread rows are marked read on the *close* edge, not on click. The list does not
+  reflow under the cursor, and every route out (bell, click-outside, Escape, a
+  parent closing it) counts exactly once.
+- The outside-click handler ignores `[data-notif-bell]`. Otherwise the bell would
+  close the popout and then reopen it with its own click.
 - A row carrying `space_id` in its `data` opens the Spaces screen on click or
-  Enter. Invites awaiting an answer are excluded — answering must not be a side
-  effect of trying to read the row. It lands on Spaces generally, not on the
+  Enter. Invites awaiting an answer are excluded, because answering must not be a
+  side effect of trying to read the row. The row opens the Spaces screen, not the
   space itself; per-space deep linking would need a selection prop on
   `SpacesScreen`.
 
-**Sound and the OS toast** are the same feed heard rather than read, so they hang
-off `raise` instead of off each caller. `raise_cued` captures title, body and cue
-*before* the store takes ownership of the row, then acts only if `upsert`
-reported a real change — `notifications_refresh` re-reads the server's invites on
-every panel open, and a sound per re-read would be unbearable.
+**Sound and the OS toast** hang off `raise` instead of off each caller: they are
+the same feed, heard rather than read. `raise_cued` captures title, body and cue
+*before* the store takes ownership of the row. It then acts only if `upsert`
+reported a real change. **Why:** `notifications_refresh` re-reads the server's
+invites on every panel open, and a sound per re-read would be unbearable.
 
-- **A `Cue` is a family, not an event.** Six of them (`copy`, `paste`, `arrived`,
-  `knock`, `unlocked`, `refused`) cover every source above, because the point is
-  a set the user can learn: rising means something came, falling means something
-  was refused, lower and slower means a person rather than a thing.
-  `Cue::for_kind` maps a `NotificationKind` to one, and `raise_cued` lets a
-  caller override where the kind is too broad — a space becoming readable and a
-  join being approved are both `space_activity` and both want `unlocked`.
-- **Rust decides when, the webview decides what it sounds like.** `notifications::cue`
-  emits `ui:cue` with the name; `src/sounds.ts` synthesizes the tone in WebAudio
-  and caches a buffer per cue. Nothing ships as an audio file and no audio
-  backend is linked into the binary. The main window is the only listener, so a
-  cue is heard once even though the popups are separate webviews — and it
-  outlives every popup, since closing it either hides it or exits the app.
+- **A `Cue` is a family, not an event.** Six cues (`copy`, `paste`, `arrived`,
+  `knock`, `unlocked`, `refused`) cover every source above. Rising means something
+  came, falling means something was refused, and lower and slower means a person
+  rather than a thing. `Cue::for_kind` maps a `NotificationKind` to one cue.
+  `raise_cued` lets a caller override it where the kind is too broad: a space
+  becoming readable and a join being approved are both `space_activity`, and both
+  want `unlocked`. **Why:** a small set is one the user can learn.
+- **Rust decides when, the webview decides what it sounds like.**
+  `notifications::cue` emits `ui:cue` with the name. `src/sounds.ts` synthesizes
+  the tone in WebAudio and caches a buffer per cue. Nothing ships as an audio file,
+  and no audio backend is linked into the binary. The main window is the only
+  listener, so a cue plays once even though the popups are separate webviews. The
+  main window also outlives every popup, since closing it either hides it or
+  exits the app.
 - **Copy and paste are cued at the two command call sites**
-  (`clipboard::commands`), never inside `runtime::notifications::notify_if_enabled` —
-  the clipboard watcher calls that same helper on every capture, so a cue there
-  would fire on every copy anywhere in the OS. They are also the two cues that
-  default to *off* (`sound_copy`, `sound_paste`), for the same reason.
+  (`clipboard::commands`), never inside `runtime::notifications::notify_if_enabled`.
+  They are also the two cues that default to *off* (`sound_copy`, `sound_paste`).
+  **Why:** the clipboard watcher calls that helper on every capture, so a cue
+  there would fire on every copy anywhere in the OS.
 - **The OS toast only fires while the app is not focused**
-  (`runtime::os_notify`). A toast for something the user is looking at is the
-  same sentence twice. A hidden window reports no focus, which is the answer we
-  want, so the visible-and-focused test collapses into one check; an error from
-  either question reads as "not focused", because a toast nobody needed costs
-  less than dropping the only sign that something happened.
+  (`runtime::os_notify`). The check asks whether the main window is both visible
+  and focused, and an error from either question reads as "not focused".
+  **Why:** a toast for something the user is looking at says the same thing twice.
+  A toast nobody needed costs less than dropping the only sign that something
+  happened.
 
 Settings, all device-local: `sound` (master), `sound_copy`, `sound_paste`,
-`os_notifications`. There is deliberately no volume control - one level, chosen
-to sit under whatever else is playing, beats a slider nobody moves twice. The
-Settings screen previews the four cues the user cannot fire on demand
-(`arrived`, `knock`, `unlocked`, `refused`) through the frontend's own
-`playCue(cue, true)`, which ignores the per-cue settings - you
-have to be able to hear one to decide whether to turn it on. The frontend module holds them in memory and
-the Settings screen calls `configureSounds` directly as well as writing them, so
-a change takes effect on the next cue rather than the next launch.
+`os_notifications`. There is no volume control. The Settings screen previews the
+four cues the user cannot fire on demand (`arrived`, `knock`, `unlocked`,
+`refused`) through the frontend's `playCue(cue, true)`, which ignores the per-cue
+settings. The frontend module holds the settings in memory. The Settings screen
+calls `configureSounds` directly as well as writing them, so a change takes effect
+on the next cue rather than the next launch.
+
+**Why:** one level, chosen to sit under whatever else is playing, beats a slider
+nobody moves twice. The preview ignores the per-cue settings because the user has
+to hear a cue to decide whether to turn it on.
 
 ---
 
@@ -649,37 +668,39 @@ a change takes effect on the next cue rather than the next launch.
 > **Location:** `src-tauri/src/sync/` (UI in `src/components/app/account-screen/`
 > and `spaces-screen/`)
 >
-> **Auth path as built:** identity comes from **Supabase Auth** (`sync/supabase.rs`
-> — password login, signup, refresh, recovery, and PKCE for Google via
-> `sync/oauth.rs`), not from a backend login route; the backend verifies the Supabase
+> **Auth path as built:** identity comes from **Supabase Auth**, not from a backend
+> login route. `sync/supabase.rs` handles password login, signup, refresh and
+> recovery; `sync/oauth.rs` adds PKCE for Google. The backend verifies the Supabase
 > token and never issues one. The exact routes, headers, payloads and socket events
 > are the wire contract: see
 > `orange-copy-paste-clipboard-backend/docs/architecture.md`.
 
 #### Google sign-in (two phases, and why)
 
-The provider handshake does not use the `orange://` deep link. `sync/oauth.rs`
-binds a loopback server on the first free port of `127.0.0.1:53170-53172`, uses
-that bare origin as the PKCE `redirect_to`, opens the system browser, and reads
-the `code` off the request line of the single request that comes back. Each of
-those three ports has to be in the Supabase redirect allow-list.
+The provider handshake does not use the `orange://` deep link. `sync/oauth.rs`:
 
-Then it stops, because the session alone cannot decrypt anything - the account
-password is the E2E secret and only the user has it:
+- binds a loopback server on the first free port of `127.0.0.1:53170-53172`;
+- uses that bare origin as the PKCE `redirect_to`, and opens the system browser;
+- reads the `code` off the request line of the single request that comes back.
 
-1. `begin_oauth` finishes the handshake, probes `bootstrap` to learn whether the
-   account already has an envelope (`is_new`), and stashes the session in
-   `pending_oauth`. It returns `OAuthBegin` *and* emits `sync:oauth-ready`, since
-   the command's reply is lost if the window was hidden or reloaded during the
-   browser hop; `sync_oauth_pending` lets a freshly mounted UI pick the step back
-   up.
+All three ports must be in the Supabase redirect allow-list.
+
+Sign-in then stops before finalizing. **Why:** the session alone cannot decrypt
+anything. The account password is the E2E secret, and only the user has it.
+
+1. `begin_oauth` finishes the handshake and probes `bootstrap` to learn whether the
+   account already has an envelope (`is_new`). It stashes the session in
+   `pending_oauth`, returns `OAuthBegin` *and* emits `sync:oauth-ready`.
+   `sync_oauth_pending` lets a freshly mounted UI pick the step back up. The event
+   exists because the command's reply is lost if the window was hidden or reloaded
+   during the browser hop.
 2. `complete_oauth` takes the password, writes the envelope, and finalizes.
 
-Three rules in phase 2, each of which was once broken - see bugs #9 and #10 in
-`docs/bugfix-history.md`:
+Three rules apply in phase 2. Each was once broken; see bugs #9 and #10 in
+`docs/bugfix-history.md`.
 
 - The stash is **cloned**, not taken, and cleared only on success. A wrong
-  password has to leave a retry possible, or the only way to guess again is
+  password must leave a retry possible; otherwise the only way to guess again is
   another trip through the browser.
 - For a new account the **envelope is written before** the Supabase credential.
   The other order can leave an account that signs in and cannot decrypt.
@@ -693,43 +714,45 @@ sign-in screen, linking `orange://` as a manual way back.
 #### Deep links
 
 One scheme, `orange`, declared under `plugins.deep-link.desktop.schemes` in
-`tauri.conf.json`. Two ingress routes, because a URL opened while the app is
-already running arrives as argv rather than through the plugin: the plugin
-callback in `setup`, and the single-instance handler, which also marks the launch
-as a trigger so the running instance is not replaced.
+`tauri.conf.json`. A link arrives by one of two routes:
 
-`dispatch_deep_link` raises the window **first**, then parses. That order is what
-makes a bare `orange://` a usable "come to the front" link, which is what the
-OAuth result page uses. `parse_deep_link` then returns one of two shapes, keyed on
-the host:
+- the plugin callback in `setup`;
+- the single-instance handler, for a URL opened while the app is already running,
+  which arrives as argv rather than through the plugin. The handler also marks the
+  launch as a trigger, so the running instance is not replaced.
+
+`dispatch_deep_link` raises the window **first**, then parses. That order makes a
+bare `orange://` a usable "come to the front" link, which the OAuth result page
+uses. `parse_deep_link` then returns one of two shapes, keyed on the host:
 
 | URL | Event | Consumed by |
 | --- | --- | --- |
 | `orange://join?code=<CODE>` | `spaces:join-code` | `SpacesScreen`, which joins |
 | `orange://reset?code=<CODE>` | `sync:password-reset` | `AccountScreen`, which sets the new password |
 
-Anything other than `reset` that carries a code is a join, host ignored - so
-`orange://anything?code=` still works. Kept deliberately: invite links already
-sent out rely on it and cannot be re-sent.
+Any host other than `reset` that carries a code is a join, so
+`orange://anything?code=` still works. **Why:** invite links already sent out rely
+on it and cannot be re-sent.
 
-Both events are held by `App`, not by the screen that uses them, because neither
-screen is usually mounted when the link arrives. `App` stores the code and
+`App` holds both events, not the screen that uses them. `App` stores the code and
 switches screens; the screen reads it as a prop and calls back when it is done
-with it.
+with it. **Why:** neither screen is usually mounted when the link arrives.
 
 #### Password reset, and change password
 
-The password is only a wrapping key (see `orange-copy-paste-clipboard-backend/docs/architecture.md`, section 7.1),
-so a reset that mints a new one would leave everything already synced unreadable.
-Both flows therefore re-wrap the **same** UMK.
+Both flows re-wrap the **same** UMK under the new password. **Why:** the password is
+only a wrapping key (see `orange-copy-paste-clipboard-backend/docs/architecture.md`,
+section 7.1), so a reset that minted a new UMK would leave everything already synced
+unreadable.
 
-The emailed link is PKCE, not the implicit flow: `recover()` sends
-`redirect_to = reset_page_url` plus an S256 challenge, and the verifier goes
-into the **OS keychain** - install-scoped, because a reset is requested while
-signed out, and the two halves are usually separated by an app restart. The link
-lands on a static page, which hands the code to `orange://reset?code=`. The
-code alone is useless: redeeming it needs the verifier, which never left the
-machine that asked.
+The emailed link is PKCE, not the implicit flow:
+
+- `recover()` sends `redirect_to = reset_page_url` plus an S256 challenge.
+- The verifier goes into the **OS keychain**, install-scoped. A reset is requested
+  while signed out, and an app restart usually separates the two halves.
+- The link lands on a static page, which hands the code to `orange://reset?code=`.
+- The code alone is useless: redeeming it needs the verifier, which never left the
+  machine that asked.
 
 `complete_password_reset` then recovers the UMK from the first source that has it:
 
@@ -740,53 +763,55 @@ machine that asked.
 | Recovery code | the code the user saved | the only source that works on a machine which has never signed in |
 | Start over | nothing | last resort, and loses access to everything synced under the old key |
 
-A supplied recovery code is tried first and its failure is returned rather than
-falling through, so a typo reads as a typo instead of "this device has never held
-your key".
+A supplied recovery code is tried first. If it fails, that failure is returned
+rather than falling through, so a typo reads as a typo instead of "this device has
+never held your key".
 
-**Finishing a reset takes more than one attempt, by design.** The recovery field
-and the start-over button only appear once the plain attempt has failed and said
-why, so the second attempt is the normal case rather than the exception. The
-emailed code cannot be exchanged twice, so the session from the first exchange is
-held in `SyncClient::pending_reset` and reused - dropped on success, and by
-`sync_cancel_password_reset` when the panel closes, because it is a live
-credential for the account. The device id is set on the reset's HTTP client
-before the wrap is fetched; without it the device-wrap source silently cannot
-apply (bug #15 in `docs/bugfix-history.md`).
+**Finishing a reset takes more than one attempt, by design.**
+
+- The recovery field and the start-over button appear only once the plain attempt
+  has failed and said why. The second attempt is the normal case, not the
+  exception.
+- The emailed code cannot be exchanged twice, so `SyncClient::pending_reset` holds
+  the session from the first exchange for reuse.
+- That session is dropped on success, and by `sync_cancel_password_reset` when the
+  panel closes, because it is a live credential for the account.
+- The device id is set on the reset's HTTP client before the wrap is fetched.
+  Without it, the device-wrap source silently cannot apply (bug #15 in
+  `docs/bugfix-history.md`).
 
 #### Recovery code
 
 A second account-wide envelope holding the same UMK, wrapped under a secret the
-user keeps rather than one they remember. 30 characters in six groups of five -
-150 bits - from a 32-symbol alphabet with `O`, `0`, `I` and `1` removed. Exactly 32
-symbols so each character is 5 unbiased bits from one random byte.
+user keeps rather than one they remember.
 
-The same Argon2id step and the account's own `kdf_salt` are reused; only the secret
-and the AAD differ (`umk-recovery-v1` against `umk-envelope-v2`, or `-v1` before the
-split). Sharing the salt is deliberate, and the distinct AAD is what makes feeding
-one envelope to the other's unwrap fail loudly rather than half-work - there is a
-test for exactly that. The code is never sent anywhere, so unlike the password it
-is not split into a credential half.
+- **Format.** 30 characters in six groups of five (150 bits), from a 32-symbol
+  alphabet with `O`, `0`, `I` and `1` removed. Exactly 32 symbols, so each
+  character is 5 unbiased bits from one random byte.
+- **Wrapping.** The same Argon2id step and the account's own `kdf_salt` are
+  reused; only the secret and the AAD differ (`umk-recovery-v1` against
+  `umk-envelope-v2`, or `-v1` before the split). Sharing the salt is deliberate.
+  The distinct AAD makes feeding one envelope to the other's unwrap fail loudly
+  rather than half-work, and a test covers exactly that.
+- **No credential half.** The code is never sent anywhere, so unlike the password
+  it is not split into one.
+- **Returned once, stored nowhere.** The code is generated in Rust and only its
+  envelope goes to the server. The envelope is uploaded **before** the code is
+  handed to the UI, so a code the user saves always opens something.
+- **One live at a time.** Regenerating replaces the envelope, which is what
+  revokes the previous code.
+- **Forced at the next sign-in** when `bootstrap` reports
+  `recovery_wrapped_umk: null`, which is true of every account predating this.
+  The panel blocks **only the account screen**; clipboard, notes and capture keep
+  working. Continue needs the "I saved my recovery code" box ticked. "Save as
+  file" reuses `export_note_text`, which writes to Downloads. **Why:** a modal
+  that stops the product is a worse failure than an unsaved code.
+- **Starting over with a new key clears the envelope**
+  (`DELETE /auth/umk/recovery`). Clearing it is also what makes the panel ask for
+  a fresh code. **Why:** the envelope holds the key being abandoned. Left in
+  place, it would hand a later recovery a key that decrypts nothing.
 
-The code is generated in Rust and returned once. It is not stored anywhere: only
-its envelope goes to the server, and the envelope is uploaded **before** the code
-is handed to the UI, so a code the user saves always opens something. Regenerating
-replaces the envelope, which is what revokes the previous code - one is live at a
-time.
-
-Forced at the next sign-in when `bootstrap` reports `recovery_wrapped_umk: null`,
-which is true of every account predating this. The panel blocks **only the account
-screen**; clipboard, notes and capture keep working, because a modal that stops the
-product is a worse failure than an unsaved code. Continue needs the "I saved my
-recovery code" box ticked, and "Save as file" reuses `export_note_text`, which
-writes to Downloads.
-
-Starting over with a new key **clears** the envelope
-(`DELETE /auth/umk/recovery`): it holds the key being abandoned, and left in place
-it would hand a later recovery a key that decrypts nothing. Clearing it is also
-what makes the panel ask for a fresh code.
-
-Two ordering rules, both learned the hard way in the OAuth flow:
+Two ordering rules, both learned in the OAuth flow:
 
 - The **envelope goes up before the password changes**. The other order can leave
   an account whose password opens nothing.
@@ -794,213 +819,230 @@ Two ordering rules, both learned the hard way in the OAuth flow:
   registration, key registration and the device wrap all run through the single
   path that owns them.
 
-`change_password` is the same thing minus the code exchange, for a user who is
-already signed in - nothing has to be recovered, so nothing can be lost. It is
-what the account screen offers, and why the reset link is the fallback rather than
-the route.
+`change_password` is the same flow minus the code exchange, for a user who is
+already signed in. Nothing has to be recovered, so nothing can be lost. The account
+screen offers it, which is why the reset link is the fallback rather than the route.
 
 **Requires a dashboard entry:** `reset_page_url` must be in Supabase
 Authentication -> URL Configuration -> Redirect URLs, character for character.
-Without it GoTrue ignores the redirect and falls back to the Site URL, which is
-how this used to mail a localhost link, and how it broke again when the backend
-changed hostname.
 
-An older release sends its own compiled-in value, and no later release can change
-that, so every value ever shipped has to stay listed until those installs have
-aged out. Releases up to 0.2.2 send `{server_url}/reset`, which the backend now
-answers with a 302 to the static page.
+- Without it, GoTrue ignores the redirect and falls back to the Site URL. That is
+  how this used to mail a localhost link, and how it broke again when the backend
+  changed hostname.
+- An older release sends its own compiled-in value, and no later release can
+  change that. Every value ever shipped has to stay listed until those installs
+  have aged out.
+- Releases up to 0.2.2 send `{server_url}/reset`, which the backend now answers
+  with a 302 to the static page.
 
 #### Overview
 
-The sync module runs entirely in a dedicated background Tokio runtime (separate from Tauri's internal runtime) so it can never block clipboard capture or the UI.
+The sync module runs entirely in a dedicated background Tokio runtime, separate from Tauri's internal runtime, so it cannot block clipboard capture or the UI.
 
-```mermaid
-flowchart TB
-    rust[["Rust Backend"]]:::src
-    rust ==> newe["clipboard:new-entry"]:::evt
-    rust ==> dele["clipboard:entry-deleted"]:::evt
-    rust ==> active["clipboard:active-id"]:::evt
-    newe ==> prepend["prepend to entries[]"]:::act
-    dele ==> filter["filter out by id"]:::act
-    active ==> updateid["update activeClipboardId"]:::act
-    filter ==> focus["tauri://focus<br/>(main window)"]:::act
-    focus ==> refetch["re-fetch get_history()<br/>merge with existing"]:::act
-    prepend ==> rerender(["React re-render"]):::out
-    updateid ==> rerender
-    refetch ==> rerender
+#### `mod.rs` - SyncClient
 
-    classDef src fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
-    classDef evt fill:#141414,stroke:#6f6f6f,color:#e4e4e4
-    classDef act fill:#1b1b1b,stroke:#9a9a9a,stroke-width:1.5px,color:#fafafa
-    classDef out fill:#20140f,stroke:#ff3e1c,stroke-width:2px,color:#fafafa
-```
+`SyncClient` is the public handle held in `AppState`. Its main entry points:
 
-#### `mod.rs` — SyncClient
+- `on_new_clipboard_entry(entry)` / `on_new_note(note)` - called after a new entry
+  or note is stored
+- `on_update_clipboard_entry(entry)` / `on_update_note(note)` - called from the
+  pin, group and edit commands
+- `on_delete_clipboard_entry(client_id, entry_ts)` / `on_delete_note(note_id, entry_ts)` -
+  called from the delete commands; queues a tombstone
+- `on_manual_push_clipboard_entry(entry)` / `on_manual_push_note(note)` - "Upload to
+  cloud" on a picked item, which goes out even in manual mode
+- `flush_and_pull()` - flush the offline queue, then pull the delta (`sync_now`)
+- `start_ws_listener()` / `stop_ws_listener()` - WebSocket lifecycle (private)
 
-`SyncClient` is the public handle held in `AppState`. It exposes:
+On startup, when sync is enabled and a Supabase session can be restored:
 
-- `on_new_entry(entry)` — called after every successful history push
-- `on_delete_entry(id)` — called from `delete_entry` command
-- `on_update_entry(entry)` — called from pin/group mutation commands
-- `flush_pending()` — manually trigger offline queue flush
-- `connect_ws()` / `disconnect_ws()` — WebSocket lifecycle
+1. Restore the Supabase session. On first login, bootstrap the account (fetch
+   `kdf_salt`, unwrap the UMK) and register the device (obtain `device_id`).
+2. Flush `sync_pending.json`, then pull the delta after `last_server_ts`, page by
+   page (`flush_and_pull`).
+3. Decrypt and merge remote entries into the local store.
+4. Open the WebSocket connection.
 
-On startup (when sync is enabled and a Supabase session can be restored):
+The routes, query parameters and headers for each step are the wire contract: see
+`orange-copy-paste-clipboard-backend/docs/architecture.md`.
 
-1. Restore the Supabase session (the Supabase client manages token refresh). On first
-   login: `POST /auth/bootstrap` (fetch `kdf_salt`, derive UMK) and `POST /auth/devices`
-   (obtain `device_id`)
+**`sync_restore_session` does not wait for the restore.**
 
-**`sync_restore_session` does not wait for the restore.** It answers whether a session
-is *coming back*, from local state only, and then hands the attempt to
-`SyncClient::spawn_session_restore`; the outcome arrives on `sync:session-restored` or
-`sync:restore-gave-up`. The command therefore returns in milliseconds, and
-`RestoreOutcome.restoring` is true from the first instant rather than only after a
-transient failure. The UI has nothing else to go on: while it awaited this command it
-drew a sign-in form over a live session, and users signed in again — see bug #17 in
-[bugfix-history.md](docs/bugfix-history.md). Three local questions decide the answer, none of
-them touching the network:
+- It answers whether a session is *coming back*, from local state only.
+- It then hands the attempt to `SyncClient::spawn_session_restore`. The outcome
+  arrives on `sync:session-restored` or `sync:restore-gave-up`.
+- The command returns in milliseconds, and `RestoreOutcome.restoring` is true from
+  the first instant rather than only after a transient failure.
+
+**Why:** the UI has nothing else to go on. While it awaited this command, it drew a
+sign-in form over a live session, and users signed in again (bug #17 in
+`docs/bugfix-history.md`).
+
+Three local questions decide the answer, none of them touching the network:
 
 | Question | Source | Answer |
 |---|---|---|
-| Is a client already built for this launch? | `AppState.sync_client` | Yes → use it, and do not re-read `settings.json`. |
+| Is a client already built for this launch? | `AppState.sync_client` | Yes -> use it, and do not re-read `settings.json`. |
 | Did the user turn sync off? | `SyncConfig::enabled` **and** `enabled_known` | Off only counts when the file actually said so; a `settings.json` that would not open is not a sign-out. |
 | Is there anything to restore? | `SyncClient::has_stored_session` | Keychain refresh token plus a user id from `sync_state.json` or the install session pointer. A store that will not answer counts as yes. |
-2. Pull delta: `GET /sync/pull?after_ts={last_cursor}` (paginated), with `X-Device-Id`
-3. Decrypt and merge remote entries into local store
-4. Flush `sync_pending.json`
-5. Open WebSocket connection (`/ws?token=<supabase jwt>&device_id=…`)
 
-#### `client.rs` — HTTP Client
+#### `client.rs` - HTTP Client
 
-- Wraps `reqwest::Client` with base URL, the `Authorization: Bearer <supabase access token>` header, and the `X-Device-Id` header on device-scoped calls
-- Token refresh is owned by the Supabase auth client; on 401 the client refreshes the Supabase session and retries the original request transparently
-- All requests have a 10s timeout
-- Connection errors → logged, backed off (1s → 2s → 4s → max 60s exponential)
+- Wraps `reqwest::Client` with the base URL, the `Authorization: Bearer` header
+  (Supabase access token), and the `X-Device-Id` header on device-scoped calls.
+- On a 401, the client refreshes the Supabase session once and retries the original
+  request. A 401 whose detail is `device_revoked` ends the session instead.
+- Requests time out after 10s (`REQUEST_TIMEOUT_SECS`); blob transfers use their own
+  longer timeout.
+- A timeout or connect failure is retried twice, after 3s and then 8s
+  (`TRANSPORT_RETRY_DELAYS`).
+- A 429, 502, 503 or 504 is retried up to 3 times (`SERVER_RETRY_ATTEMPTS`). Each
+  wait is the server's `Retry-After`, capped at 30s, or else 1s, 2s, 4s.
 
-#### `ws_listener.rs` — WebSocket Listener
+#### `ws_listener.rs` - WebSocket Listener
 
-Maintains a persistent `tokio-tungstenite` WebSocket connection to `wss://{server}/ws?token=<supabase access token>&device_id=<device_id>`.
+Maintains a persistent `tokio-tungstenite` WebSocket connection to the backend's `/ws`
+endpoint. The connection handshake is part of the wire contract.
 
 On each received message, dispatches to:
 
 | Event                              | Action                                                                                                                                                        |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync:entry`                       | Unwrap the CEK (`personal` under UMK, else a carried space id through that space's keyring) → decrypt → insert or update in history/notes → emit `sync:history-merged` or `sync:notes-merged`. Personal entries are skipped in passive mode; space entries always apply, and may auto-copy. Deletes arrive as tombstones on this event. |
+| `sync:entry`                       | Unwrap the CEK (`personal` under UMK, else a carried space id through that space's keyring) -> decrypt -> insert or update in history/notes -> emit `sync:history-merged` or `sync:notes-merged`. Personal entries are skipped in passive mode; space entries always apply, and may auto-copy. Deletes arrive as tombstones on this event. |
 | `device:online` / `device:offline` | Update sync status indicator via Tauri event                                                                                                                  |
 | `space:membership_changed`         | Refresh spaces, emit `space:membership-changed`; an owner whose members lost their keys mints a new space key and redistributes                                |
 | `space:rekey`                      | Reconcile: adopt the ring the server holds for us (checked against `key_fingerprint`), prepend a newly minted key if we own the space and one is owed, and wrap for any member who lacks one |
 | `ping`                             | Respond with `pong`; this refreshes the device's presence TTL server-side                                                                                     |
 
-Connection drop → automatic reconnect after 5s backoff, then exponential up to 60s.
+The table lists the main events. The full dispatch, including `user:presence`,
+`device:revoked`, `space:entry_removed`, `space:comment`, `space:history_opened`,
+`space:join_requested`, `space:join_decided`, `invite:received`, `invite:updated` and
+`announcement:new`, is the `match` in `ws_listener.rs`.
 
-#### `pending_queue.rs` — Offline Queue
+On a dropped connection the listener reconnects after 5s, doubling the wait up to 60s.
 
-`sync_pending.json` lives in `{app_data}/sync_pending.json` and stores an ordered list of operations that need to be pushed:
+#### `pending_queue.rs` - Offline Queue
+
+`{app_data}/sync_pending.json` stores an ordered list of operations waiting to be pushed:
 
 ```jsonc
 [
-  { "op": "push",       "entry": { ...encrypted_entry } },
-  { "op": "delete",     "client_id": "42", "entry_type": "clipboard" },
-  { "op": "update",     "entry": { ...encrypted_entry } },
-  { "op": "push_local", "client_id": "7b1", "entry_type": "clipboard" }
+  { "op": "push",       "entry_json": "<serialized encrypted push request>", "entry_type": "clipboard" },
+  { "op": "delete",     "client_id": "3f2a9c1e-7b4d-4e8a-9c2f-1d6b5e0a8f47", "entry_type": "clipboard" },
+  { "op": "update",     "entry_json": "<serialized encrypted push request>", "entry_type": "note" },
+  { "op": "push_local", "client_id": "b81e4d02-5c9a-4f3e-a716-2e9d0c4b7a13", "entry_type": "clipboard" }
 ]
 ```
 
-On reconnect, the queue is flushed in order before pulling the delta. This ensures local-device ordering is preserved in the LWW (last-write-wins) conflict resolution.
+On reconnect, the queue is flushed in order before the delta pull, so local-device
+ordering holds under last-write-wins (LWW) conflict resolution.
 
-`push`/`update` carry the finished ciphertext, ready to POST. `push_local` carries
-only an id: it is for the one push that cannot be pre-encrypted and parked — a
-blob-backed entry whose upload could not reach the server (an image, or a file
-entry's ZIP archive). The blob has to go up before the entry can, so there is
-nothing to serialize while offline; the flush re-reads the local entry and re-runs
-the whole push (blob included). Without it an image or file copied offline was
-reported "not sent" and dropped, so it never synced even once the connection came
-back. Only a *retryable* blob failure queues one — a genuine refusal (over the 5
-MB limit, or the account out of room) is still a recorded skip.
+**Op payloads.** `push`/`update` carry the finished ciphertext, ready to POST.
+`push_local` carries only an id. It is for the one push that cannot be
+pre-encrypted and parked:
 
-A flush moves its ops through `sync_pending.inflight.json` rather than clearing
-the queue file and hoping: `drain` writes them there before emptying the queue,
-`settle` requeues whatever did not send and only then removes the file, and
-`load` folds a leftover copy back in at the front. The asymmetry that makes this
-worth the extra write is between op kinds. A lost `Push` or `Update` is
-recovered — the server deduplicates by `client_id` and the entry is still on this
-device to send again. A lost `Delete` is not: the tombstone is the only record
-that the user deleted anything, so dropping it leaves the row on the server and
-the next pull hands the entry back.
+- It covers a blob-backed entry whose upload could not reach the server (an
+  image, or a file entry's ZIP archive). The blob has to go up before the entry
+  can, so there is nothing to serialize while offline.
+- The flush re-reads the local entry and re-runs the whole push, blob included.
+- Only a *retryable* blob failure queues one. A genuine refusal (over the 5 MB
+  limit, or the account out of room) is still a recorded skip.
+- **Why:** without it, an image or file copied offline was reported "not sent" and
+  dropped, so it never synced even once the connection came back.
 
-`settle` requeues what *could* not send, which is not the same as what *will* not.
-A 400, 413 or 422 (`ApiError::is_permanent_rejection`) means the server read the
-body and will refuse it identically on every flush from here on, so the op is
-dropped and recorded as a skip the user can read instead of being retried forever.
-The list is deliberately short: a 401 or 403 is equally non-transient but says the
-session is wrong rather than the payload, and dropping a queued entry for one of
-those would be data loss nobody asked for. Push size is also checked locally before
-a send (`refuses_inline_size`), so the ordinary oversized case never reaches this
-path or the network at all.
+**The in-flight file.** A flush moves its ops through
+`sync_pending.inflight.json` rather than clearing the queue file first:
 
-`flush_and_pull` is serialised on its own lock. Several things trigger it — manual
-Sync now, login, a socket reconnect, the background tick, a window refocus — and
-two at once start from the same cursor, walk the same pages, race each other
-writing `last_server_ts`, and re-download the same blobs off a metered quota.
+- `drain` writes them there before emptying the queue.
+- `settle` requeues whatever did not send, and only then removes the file.
+- `load` folds a leftover copy back in at the front.
 
-Two of those triggers exist so a device that syncs on its own keeps doing so while
-minimized to the tray, where the window never refocuses. On every WebSocket
-reconnect the listener runs a flush + delta pull (not just its spaces reconcile):
-the socket only carries what arrives after it comes up, so this is what recovers a
-push that queued during the gap and an entry another device sent while this one
-was down. And the 5-minute background loop runs in every non-manual mode, not only
-passive — a single delta pull from `last_server_ts` that returns nothing when the
-socket already kept up, but flushes a stuck queue that no socket event happened to
-trigger. Manual mode is the only one held back: it flushes solely on Sync now.
+**Why:** the extra write covers an asymmetry between op kinds.
 
-#### `crypto.rs` — Encryption Primitives
+- A lost `Push` or `Update` is recovered. The server deduplicates by `client_id`,
+  and the entry is still on this device to send again.
+- A lost `Delete` is not. The tombstone is the only record that the user deleted
+  anything, so dropping it leaves the row on the server and the next pull hands
+  the entry back.
 
-All cryptography is performed here. Nothing outside this module touches raw key material.
+**Permanent rejections.** `settle` requeues what *could* not send, which is not
+the same as what *will* not:
+
+- A 400, 413 or 422 (`ApiError::is_permanent_rejection`) means the server read
+  the body and will refuse it identically on every later flush. The op is dropped
+  and recorded as a skip the user can read, instead of being retried forever.
+- The list is deliberately short. A 401 or 403 is equally non-transient, but says
+  the session is wrong rather than the payload. Dropping a queued entry for one of
+  those would be data loss nobody asked for.
+- Push size is also checked locally before a send (`refuses_inline_size`), so the
+  ordinary oversized case never reaches this path or the network.
+
+**One flush at a time.** `flush_and_pull` is serialised on its own lock. Its
+triggers are manual Sync now, login, a socket reconnect, the background tick and a
+window refocus. **Why:** two runs at once start from the same cursor and walk the
+same pages. They race each other writing `last_server_ts`, and re-download the same
+blobs off a metered quota.
+
+**Triggers that work from the tray.** Two of those triggers keep a device syncing
+while it is minimized to the tray, where the window never refocuses:
+
+- **Every WebSocket reconnect** runs a flush + delta pull in the listener, as well
+  as its spaces reconcile. The socket only carries what arrives after it comes
+  up. The flush + pull recovers a push that queued during the gap, and an entry
+  another device sent while this one was down.
+- **The 5-minute background loop** runs in every non-manual mode, not only
+  passive. It is a single delta pull from `last_server_ts`. It returns nothing
+  when the socket already kept up, but flushes a stuck queue that no socket event
+  happened to trigger.
+- **Manual mode** is the only one held back: it flushes solely on Sync now.
+
+#### `crypto.rs` - Encryption Primitives
+
+All cryptography runs here. Nothing outside this module touches raw key material.
 
 | Function                                                | Description                                             |
 | ------------------------------------------------------- | ------------------------------------------------------- |
-| `derive_master(password, email) → [u8; 32]`             | One Argon2id pass over the password, salted with the normalized address; the exact parameters are the backend doc's (they must match cross-device or unwrap fails) |
-| `derive_auth_key(master) → String`                      | The HKDF half sent to Supabase as the account credential. The only password-derived value that leaves the device |
-| `derive_kek(master, kdf_salt) → [u8; 32]`               | The HKDF half that wraps the UMK; never leaves the device |
+| `derive_master(password, email) -> [u8; 32]`             | One Argon2id pass over the password, salted with the normalized address; the exact parameters are the backend doc's (they must match cross-device or unwrap fails) |
+| `derive_auth_key(master) -> String`                      | The HKDF half sent to Supabase as the account credential. The only password-derived value that leaves the device |
+| `derive_kek(master, kdf_salt) -> [u8; 32]`               | The HKDF half that wraps the UMK; never leaves the device |
 | `derive_legacy_kek(password, kdf_salt)` / `unwrap_umk_legacy` | Read-only path for an envelope written before the split (`umk-envelope-v1`), so `finalize_session` can re-wrap it |
-| `wrap_umk(kek, umk) → String` / `unwrap_umk(kek, b64)`  | Wrap/unwrap the random UMK envelope (`umk-envelope-v2`); unwrap fails ⇒ wrong password |
-| `encrypt(key, plaintext, aad) → String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
-| `decrypt(key, ciphertext_b64, aad) → String`            | Decode base64 → split nonce → AES-256-GCM decrypt       |
-| `generate_x25519_keypair() → (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |
-| `x25519_shared_secret(privkey, peer_pubkey) → [u8; 32]` | ECDH for device key handshake and space key wrapping     |
-| `space_key_fingerprint(key) → String`                   | Truncated hash the owner publishes so a member can tell a genuine keyring from one another member made up |
-| `random_key() → [u8; 32]`                               | Random key: the UMK, a space key, or a per-entry CEK     |
-| `wrap_key(wrapping_key, key) → String` / `unwrap_key(…)` | Wrap/unwrap a CEK or space key; failure means wrong key  |
-| `pkce_pair() → (verifier, challenge)`                   | S256 pair for an OAuth or password-reset hop             |
+| `wrap_umk(kek, umk) -> String` / `unwrap_umk(kek, b64)`  | Wrap/unwrap the random UMK envelope (`umk-envelope-v2`); unwrap fails => wrong password |
+| `encrypt(key, plaintext, aad) -> String`                 | `base64(nonce \|\| AES-256-GCM(key, plaintext, aad))`   |
+| `decrypt(key, ciphertext_b64, aad) -> String`            | Decode base64 -> split nonce -> AES-256-GCM decrypt       |
+| `generate_device_keypair() -> (privkey, pubkey)`         | Generates device keypair; privkey stored in OS keychain |
+| `x25519_shared_secret(privkey, peer_pubkey) -> [u8; 32]` | ECDH for device key handshake and space key wrapping     |
+| `space_key_fingerprint(key) -> String`                   | Truncated hash the owner publishes so a member can tell a genuine keyring from one another member made up |
+| `random_key() -> [u8; 32]`                               | Random key: the UMK, a space key, or a per-entry CEK     |
+| `wrap_key(wrapping_key, key) -> String` / `unwrap_key(...)` | Wrap/unwrap a CEK or space key; failure means wrong key  |
+| `pkce_pair() -> (verifier, challenge)`                   | S256 pair for an OAuth or password-reset hop             |
 | `store_reset_verifier` / `load_reset_verifier` / `clear_reset_verifier` | The reset verifier in the OS keychain, install-scoped - the two halves of a reset are usually separated by a restart |
-| `generate_recovery_code() → Zeroizing<String>`          | 150 bits, six groups of five, look-alike characters removed |
+| `generate_recovery_code() -> Zeroizing<String>`          | 150 bits, six groups of five, look-alike characters removed |
 | `normalize_recovery_code(input)`                        | Dashes and spaces out, uppercased - whatever the user types back derives the same key |
 | `wrap_umk_recovery` / `unwrap_umk_recovery`             | The recovery envelope: `Argon2id(code, kdf_salt)` with AAD `umk-recovery-v1` |
 
-**Encryption invariant:** The UMK is passed in at call time from the in-memory `SyncClient` state. It is never written to disk. `crypto.rs` receives it as a `&[u8; 32]` slice.
+**Encryption invariant:** callers pass the UMK in at call time from the in-memory `SyncClient` state. It is never written to disk. `crypto.rs` receives it as a `&[u8; 32]` reference.
 
-**AAD (additional authenticated data)** = `client_id` of the entry — binds each ciphertext to its specific entry, preventing ciphertext transplanting attacks.
+**AAD (additional authenticated data)** is the entry's `client_id`. It binds each ciphertext to its entry, which blocks moving a ciphertext onto another entry.
 
-#### `commands.rs` — New Tauri Commands
+#### `commands.rs` - New Tauri Commands
 
 | Command                | Signature                                           | Description                                                                              |
 | ---------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `sync_login`           | `(email, password, device_name) → Result<SyncUser>` | Sign in via **Supabase Auth**; `POST /auth/bootstrap` (derive UMK from `kdf_salt`); `POST /auth/devices` (register device); cache the Supabase session |
-| `sync_logout`          | `() → ()`                                           | Sign out of Supabase; clear UMK; optionally deactivate the device                        |
-| `sync_get_user`        | `() → Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
-| `sync_get_status`      | `() → SyncStatusInfo`                               | `{ connected, pending_count, skipped_count, last_synced_at }`                            |
-| `sync_now`             | `() → ()`                                           | Trigger immediate pull + queue flush                                                     |
-| `sync_set_enabled`     | `(enabled: bool) → ()`                              | Toggle sync; persists to `settings.json`                                                 |
-| `sync_set_mode`        | `(mode: String) → ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
-| `sync_get_mode`        | `() → String`                                       | Current cloud sync mode                                                                  |
-| `sync_pull_settings`          | `() → ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
-| `sync_receive_local_settings` | `(json: String) → ()`                                  | Receives `localStorage` settings from React in response to `sync:collect-settings` event; merged into the next `push_settings()` call |
-| `sync_reset_password`  | `(email: String) → Result<()>`                       | Mint a PKCE pair, keep the verifier in the keychain, ask Supabase to mail a link at `{server_url}/reset` |
-| `sync_complete_password_reset` | `(code, new_password, recovery_code?, device_name, start_over) → Result<SyncUser>` | Redeem the emailed code, recover the UMK, re-wrap it under the new password, then sign in. `start_over` mints a new key and gives up the old data |
-| `sync_change_password` | `(new_password: String) → Result<()>`                | Signed-in password change: re-wrap the in-memory UMK, then set the password. Cannot lose anything |
-| `sync_create_recovery_code` | `() → Result<String>`                           | Mint a code, wrap the UMK under it, store the envelope, return the code once. Also how regenerating works - storing revokes the previous code |
-| `sync_has_recovery_code` | `() → Result<Option<bool>>`                        | Whether the account has an envelope. `None` = not known (no session), which the UI must not read as "no" |
+| `sync_login`           | `(email, password, device_name) -> Result<SyncUser>` | Sign in via **Supabase Auth**; `POST /auth/bootstrap` (derive UMK from `kdf_salt`); `POST /auth/devices` (register device); cache the Supabase session |
+| `sync_logout`          | `() -> ()`                                           | Sign out of Supabase; clear UMK; optionally deactivate the device                        |
+| `sync_get_user`        | `() -> Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
+| `sync_get_status`      | `() -> SyncStatusInfo`                               | `{ connected, pending_count, skipped_count, skipped, last_synced_at }`                   |
+| `sync_now`             | `() -> ()`                                           | Trigger immediate pull + queue flush                                                     |
+| `sync_set_enabled`     | `(enabled: bool) -> ()`                              | Toggle sync; persists to `settings.json`                                                 |
+| `sync_set_mode`        | `(mode: String) -> ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
+| `sync_get_mode`        | `() -> String`                                       | Current cloud sync mode                                                                  |
+| `sync_pull_settings`          | `() -> ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
+| `sync_receive_local_settings` | `(json: String) -> ()`                                  | Receives `localStorage` settings from React in response to `sync:collect-settings` event; merged into the next `push_settings()` call |
+| `sync_reset_password`  | `(email: String) -> Result<()>`                       | Mint a PKCE pair, keep the verifier in the keychain, ask Supabase to mail a link to `reset_page_url` |
+| `sync_complete_password_reset` | `(code, new_password, recovery_code?, device_name, start_over) -> Result<SyncUser>` | Redeem the emailed code, recover the UMK, re-wrap it under the new password, then sign in. `start_over` mints a new key and gives up the old data |
+| `sync_change_password` | `(new_password: String) -> Result<()>`                | Signed-in password change: re-wrap the in-memory UMK, then set the password. Cannot lose anything |
+| `sync_create_recovery_code` | `() -> Result<String>`                           | Mint a code, wrap the UMK under it, store the envelope, return the code once. Also how regenerating works - storing revokes the previous code |
+| `sync_has_recovery_code` | `() -> Result<Option<bool>>`                        | Whether the account has an envelope. `None` = not known (no session), which the UI must not read as "no" |
 
 **More sync commands (summary).** Names and one-line purposes only; the full
 signatures live in `sync/commands.rs`.
@@ -1060,19 +1102,19 @@ _Devices and addressed invites:_
 
 | Command                   | Signature                                                       | Description                                                                                                              |
 | ------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `spaces_list`             | `() → Result<Vec<Space>>`                                        | Reconcile with the server: fetch spaces, recover or mint keys, prune spaces we were removed from. Does network + key work |
-| `spaces_cached`           | `() → Vec<Space>`                                                | The cached list, no network. What presence ticks and the share menu read                                                  |
-| `space_create`            | `(name: String, share_history: Option<bool>) → Result<Space>`     | Create a space, mint its first key, register the wrapped key for yourself                                                 |
-| `space_join`              | `(invite_code: String) → Result<()>`                             | Join by code (pasted links and casing are tolerated); the owner wraps a key for you on its next reconcile                 |
-| `space_leave`             | `(space_id: String) → Result<()>`                                | Leave; the server clears the remaining members' wrapped keys so the owner rekeys                                          |
-| `space_delete`            | `(space_id: String) → Result<()>`                                | Owner only; deletes the space for everyone                                                                               |
-| `space_remove_member`     | `(space_id: String, member_user_id: String) → Result<()>`         | Owner only; removal triggers the rekey path                                                                              |
-| `space_set_entry_shares`  | `(entry_id: String, entry_type: String, space_ids: Vec<String>) → Result<()>` | The explicit share gesture. Re-pushes the entry with the CEK wrapped for exactly these spaces                |
-| `sync_get_entry_shares`   | `() → HashMap<String, Vec<String>>`                              | Space ids per item, keyed `"clipboard:{id}"` / `"note:{id}"` — feeds the card indicators and share checklists             |
-| `sync_get_remote_entries` | `() → Vec<String>`                                               | Same keys, for items another member wrote (their CEK unwrapped through a space keyring, never `"personal"`) — the direction glyph on space rows |
-| `space_set_autocopy`      | `(space_id: String, enabled: bool) → Result<()>`                 | Per-space, per-device: write incoming space entries to the clipboard                                                      |
-| `space_set_send_filter`   | `(space_id: String, filter: SendFilter) → Result<()>`            | What of yours flows into that space automatically; stored in the synced settings blob                                    |
-| `space_get_send_filters`  | `() → HashMap<String, SendFilter>`                               | All send filters, by space id                                                                                            |
+| `spaces_list`             | `() -> Result<Vec<Space>>`                                        | Reconcile with the server: fetch spaces, recover or mint keys, prune spaces we were removed from. Does network + key work |
+| `spaces_cached`           | `() -> Vec<Space>`                                                | The cached list, no network. What presence ticks and the share menu read                                                  |
+| `space_create`            | `(name: String, share_history: Option<bool>) -> Result<Space>`     | Create a space, mint its first key, register the wrapped key for yourself                                                 |
+| `space_join`              | `(invite_code: String) -> Result<()>`                             | Join by code (pasted links and casing are tolerated); the owner wraps a key for you on its next reconcile                 |
+| `space_leave`             | `(space_id: String) -> Result<()>`                                | Leave; the server clears the remaining members' wrapped keys so the owner rekeys                                          |
+| `space_delete`            | `(space_id: String) -> Result<()>`                                | Owner only; deletes the space for everyone                                                                               |
+| `space_remove_member`     | `(space_id: String, member_user_id: String) -> Result<()>`         | Owner only; removal triggers the rekey path                                                                              |
+| `space_set_entry_shares`  | `(entry_id: String, entry_type: String, space_ids: Vec<String>) -> Result<()>` | The explicit share gesture. Re-pushes the entry with the CEK wrapped for exactly these spaces                |
+| `sync_get_entry_shares`   | `() -> HashMap<String, Vec<String>>`                              | Space ids per item, keyed `"clipboard:{id}"` / `"note:{id}"` - feeds the card indicators and share checklists             |
+| `sync_get_remote_entries` | `() -> Vec<String>`                                               | Same keys, for items another member wrote (their CEK unwrapped through a space keyring, never `"personal"`) - the direction glyph on space rows |
+| `space_set_autocopy`      | `(space_id: String, enabled: bool) -> Result<()>`                 | Per-space, per-device: write incoming space entries to the clipboard                                                      |
+| `space_set_send_filter`   | `(space_id: String, filter: SendFilter) -> Result<()>`            | What of yours flows into that space automatically; stored in the synced settings blob                                    |
+| `space_get_send_filters`  | `() -> HashMap<String, SendFilter>`                               | All send filters, by space id                                                                                            |
 
 **More space commands (summary):**
 
@@ -1094,8 +1136,8 @@ _Devices and addressed invites:_
 
 #### File and Video Sync (5 MB Limit)
 
-`kind: 'file'` entries captured from CF_HDROP sync exactly like an image — one blob
-per entry — except the blob is a **ZIP of everything the entry names**, so the
+`kind: 'file'` entries captured from CF_HDROP sync like an image, with one blob per
+entry. The difference: the blob is a **ZIP of everything the entry names**, so the
 single `blob_key`/`blob_size` columns carry any number of files and folders. This
 reuses the image blob path (`upload_files_blob` mirrors `upload_image_blob`); the
 crypto, quota, retry and skip handling are identical.
@@ -1103,74 +1145,74 @@ crypto, quota, retry and skip handling are identical.
 **Push** (`spawn_push_clipboard_entry`, the `File` arm):
 
 1. Sum the entry's input bytes, **recursing into folders** (a folder path's own
-   metadata length is not its contents). Over 5 MB → recorded skip, no upload.
+   metadata length is not its contents). Over 5 MB -> recorded skip, no upload.
 2. `zip_paths_to_bytes` packs each newline-separated path into one in-memory ZIP,
    preserving top-level names (disambiguated `name (2)` on a basename clash) and any
    folder structure. Empty/unreadable entries are skipped.
 3. Encrypt the archive with `encrypt_bytes` (same CEK as the entry's row), then
-   `request-upload` → pre-signed PUT → `confirm-upload`. A second, exact size gate
+   `request-upload` -> pre-signed PUT -> `confirm-upload`. A second, exact size gate
    rejects ciphertext over 5 MB.
 4. Inline `encrypted_content` is a tiny descriptor, `{"archive":"zip"}` (the ZIP is
    self-describing); `blob_key`/`blob_size` point at the object.
 
 A *retryable* upload failure (server unreachable) queues a `push_local` and lights
-the amber "waiting to upload" badge — same as an image. A genuine refusal (over 5
-MB, or the account out of room) is a recorded skip. Not signed in → skip.
+the amber "waiting to upload" badge, as for an image. A genuine refusal (over 5 MB,
+or the account out of room) is a recorded skip. Not signed in -> skip.
 
-**Receive** (`spawn_blob_files_merge`, mirroring `spawn_blob_image_merge`): download
-the blob, decrypt, and `extract_zip_to_dir` into `{app_data}/received-files/{client_id}/`
-(replacing any prior extraction; `enclosed_name` blocks zip-slip). `entry.content`
-becomes the extracted top-level paths, so the entry copies/pastes as a normal
-file-drop on the receiving device. A file entry from before this was wired has no
-`blob_key`; nothing is materialized and it stays local-only on the sender.
+**Receive** (`spawn_blob_files_merge`, mirroring `spawn_blob_image_merge`):
 
-The same flow applies to video files (CF_HDROP paths to `.mp4`, `.mov`, etc.). The 5
-MB check is per-clipboard-entry (recursive sum across that single clipboard event),
-not per file.
+- Download the blob, decrypt it, and `extract_zip_to_dir` into
+  `{app_data}/received-files/{client_id}/`. This replaces any prior extraction, and
+  `enclosed_name` blocks zip-slip.
+- `entry.content` becomes the extracted top-level paths, so the entry copies and
+  pastes as a normal file-drop on the receiving device.
+- A file entry from before this was wired has no `blob_key`. Nothing is
+  materialized, and it stays local-only on the sender.
 
-#### Spaces — Sync Module Integration
+The same flow applies to video files (CF_HDROP paths to `.mp4`, `.mov` and so on).
+The 5 MB check is per clipboard entry (the recursive sum across that one clipboard
+event), not per file.
 
-A **Space** is the only sharing primitive: persistent, live, many members, and a user can
-be in several at once. One entry can land in all of them, which is what the per-entry
-content key exists for.
+#### Spaces - Sync Module Integration
+
+A **Space** is the only sharing primitive: persistent, live, with any number of members,
+and a user can be in several at once. One entry can land in all of them, which is why each
+entry has its own content key.
 
 **Encryption envelope.** For every push the client mints a random 32-byte **CEK**,
 encrypts content and metadata once under it (AAD = `client_id`), then wraps the CEK:
 
-- once under the **UMK** — so your own devices can always read your own entry without
+- once under the **UMK** - so your own devices can always read your own entry without
   holding any space key;
 - once under `keyring[0]` of each target space.
 
-Receiving a shared entry means unwrapping the CEK with the first carried space id we hold
-a key for, trying that space's keyring in order (AES-GCM authentication failure is the
-signal to try the next key, so no epoch tracking is needed). The exact on-wire shape of
-the wrapped-key map and the routing array is the wire contract:
+To read a shared entry, the client unwraps the CEK with the first carried space id it
+holds a key for. It tries that space's keyring in order: an AES-GCM authentication
+failure means "try the next key", so no epoch tracking is needed. The exact on-wire
+shape of the wrapped-key map and the routing array is the wire contract:
 `orange-copy-paste-clipboard-backend/docs/architecture.md`.
 
 **Where an entry goes** is the union of two sources, evaluated on push:
 
-1. **Explicit shares** — the spaces the user picked from the card menu or bulk bar,
+1. **Explicit shares** - the spaces the user picked from the card menu or bulk bar,
    recorded in `id_map.json` under `entry_shares`. Authoritative for entries already
    pushed.
-2. **Send-filter matches** — every space whose `SendFilter { enabled, kinds, groups,
-   content }` matches, each evaluated independently. Default is `enabled: false`, so
-   nothing flows automatically until the user turns it on. Filters live in the encrypted
-   settings blob, so they roam between devices and the server never sees them. Editing a
-   filter affects future entries only; history is never mass-shared retroactively.
+2. **Send-filter matches** - every space whose
+   `SendFilter { enabled, kinds, groups, content }` matches, each evaluated
+   independently. The default is `enabled: false`, so nothing flows automatically
+   until the user turns it on. Filters live in the encrypted settings blob, so they
+   roam between devices and the server never sees them. Editing a filter affects
+   future entries only; history is never mass-shared retroactively.
 
-No matches means personal-only: one wrap, no `space_ids`. Local group tags no longer imply
-sharing — they are only filter inputs.
+No matches means personal-only: one wrap, no `space_ids`. Local group tags do not imply
+sharing; they are only filter inputs.
 
-**Space keys.** Each space has a keyring (`Vec<[u8; 32]>`, newest first) recovered from the
-server-side wrapped keyring, which is X25519-wrapped to a member's identity public key. New
-entries encrypt under `keyring[0]`.
+**Space keys.** Each space has a keyring (`Vec<[u8; 32]>`, newest first). The client
+recovers it from the server-side wrapped keyring, which is X25519-wrapped to a member's
+identity public key. New entries encrypt under `keyring[0]`.
 
 **Who hands a key over: any member holding it.** `reconcile_spaces` wraps the ring for every
-member who lacks one, whoever is running. It used to be the owner's job alone, and the cost
-was a blockage nobody could shorten: a member who joined while the owner's app was closed
-could neither read the space nor write to it until it opened. Nothing is given up, because
-every member already holds the key in memory and could pass it on by other means. Three
-pieces make it safe:
+member who lacks one, whichever member's app is running. Three pieces make it safe:
 
 - `SpaceOut.my_wrapped_by` says whose public key opens our wrap. Null means the owner, so
   rows written before this keep working.
@@ -1183,28 +1225,41 @@ pieces make it safe:
   non-owner also sits out a pending rekey rather than handing over a ring about to be
   replaced.
 
-**A new member usually has the key before they ask.** `attach_invite_key` wraps the ring for
-the invitee's identity key when the invite is sent and `PUT /invites/{id}/key` parks it on
-the invite; accepting moves it onto the membership. The invite route refuses an address with
-no account, so the invitee's key is registered by then. Best-effort: the invite is valid
-without it and the ordinary path still covers them.
+**Why:** handing over used to be the owner's job alone. A member who joined while the
+owner's app was closed could neither read the space nor write to it until the owner's app
+opened, and nobody could shorten that wait. Nothing is given up, because every member
+already holds the key in memory and could pass it on by other means.
+
+**A new member usually has the key before they ask.**
+
+- `attach_invite_key` wraps the ring for the invitee's identity key when the invite is sent,
+  and `PUT /invites/{id}/key` parks it on the invite. Accepting moves it onto the membership.
+- The invite route refuses an address with no account, so the invitee's key is registered
+  by then.
+- Best-effort: the invite is valid without it, and the ordinary path still covers them.
 
 **Rekey.** A member being removed (or leaving) clears the other members' wraps and sets
 `spaces.rekey_requested_at`; the owner's next reconcile prepends a fresh key and
-redistributes. Older keys stay in the ring, so old entries stay readable. The *owner's* wrap
-is deliberately left alone - see bug #13. Revocation is best-effort: the removed member
-keeps whatever it already pulled and simply never receives the new key.
+redistributes.
 
-**Sharing into a space with no key is queued, not refused.** `space_set_entry_shares`
-records the intent whichever way, `share_targets` drops a keyless space on the way out so
-nothing unreadable is pushed, and `flush_pending_shares` re-pushes those entries when
-`space:key-received` fires. The record in `id_map.json` *is* the queue, so it survives a
-restart and there is no second store to keep consistent. The UI shows it as a dimmed share
-chip and a "waiting" row in the share menus.
+- Older keys stay in the ring, so old entries stay readable.
+- The *owner's* wrap is deliberately left alone - see bug #13.
+- Revocation is best-effort: the removed member keeps whatever it already pulled, and never
+  receives the new key.
 
-**Three things reach the notification centre, not just a toast.** A toast fired while the
-window is hidden is a toast nobody saw, and all three of these happen precisely when the
-user is elsewhere.
+**Sharing into a space with no key is queued, not refused.**
+
+1. `space_set_entry_shares` records the intent whichever way.
+2. `share_targets` drops a keyless space on the way out, so nothing unreadable is pushed.
+3. `flush_pending_shares` re-pushes those entries when `space:key-received` fires.
+
+The record in `id_map.json` *is* the queue, so it survives a restart and there is no second
+store to keep consistent. The UI shows it as a dimmed share chip and a "waiting" row in the
+share menus.
+
+**Four things reach the notification centre, not only a toast.** **Why:** a toast fired
+while the window is hidden is a toast nobody saw, and all four happen when the user is
+usually elsewhere.
 
 | Raised by | Kind | Row |
 |---|---|---|
@@ -1213,46 +1268,53 @@ user is elsewhere.
 | `note_join_requested` / `note_join_approved` | `SpaceInvite` / `SpaceActivity` | Somebody asked to join a space this user may approve, and the answer to this user's own ask. Both are the same problem as the rows above: they land while the window is hidden, and the approver is the only thing standing between the joiner and a space. |
 | `note_space_key_rejected` | `SyncWarning` | A keyring failed the fingerprint check. A warning because the space stays unreadable and nothing the user does in the app changes that. |
 
-`note_comment` is deliberately narrow and deliberately textless. Two other members talking
-on a third person's item is conversation we are not in, so it is skipped; and the decrypted
-body is left out because the notification store outlives the entry it points at.
+`note_comment` is deliberately narrow and carries no comment text. It skips two other
+members talking on a third person's item, since this user is not in that conversation. It
+leaves the decrypted body out because the notification store outlives the entry it points
+at.
 
 **Auto-copy.** Per space and per device (`space_autocopy:{space_id}` in `settings.json`,
-deliberately not synced). Only WebSocket-delivered space entries can trigger it — never
+deliberately not synced). Only WebSocket-delivered space entries can trigger it, never
 personal cloud-sync entries and never a pull page, so a backfill cannot flood the
-clipboard. The write goes through the shared suppress-then-write helper so the watcher
+clipboard. The write goes through the shared suppress-then-write helper, so the watcher
 dedupe invariant holds and the active-clipboard id stays correct.
 
-**Passive cloud sync.** `sync_mode` is device-local. In `passive` the WebSocket stays
-connected (spaces, presence, invites and rekeys are always live), but personal entries
-arriving over WS are not applied; a 5-minute loop plus manual `Sync now` pulls them.
-Pushes are always immediate, so nothing is at risk of being lost. This is safe because
-`last_server_ts` only advances in the pull path, never on a WS-applied entry, so anything
-skipped live is guaranteed to arrive on the next pull.
+**Passive cloud sync.** `sync_mode` is device-local.
 
-#### Settings Sync — What Gets Synced
+- In `passive`, the WebSocket stays connected, so spaces, presence, invites and rekeys
+  stay live.
+- Personal entries arriving over the socket are not applied. The 5-minute loop and
+  manual `Sync now` pull them.
+- Pushes are always immediate.
 
-The sync module builds a plaintext settings JSON from two sources and encrypts the whole blob with UMK before pushing:
+**Why it is safe:** `last_server_ts` advances only in the pull path, never on a
+socket-applied entry. Anything skipped live is guaranteed to arrive on the next pull.
+
+#### Settings Sync - What Gets Synced
+
+The sync module builds a plaintext settings JSON from two sources and encrypts the whole blob under the UMK before pushing:
 
 **Synced (user preferences):**
 - From `localStorage`: `theme`, `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
-- From `settings.json`: `notifications_enabled`, `notif_copy`, `notif_paste`, `persist_history`, `close_to_tray`, `start_minimized`, `autosave`, `space_send_filters`
+- From `settings.json` (`SYNCED_JSON_KEYS` in `sync/commands.rs`): `keep_history`, `close_to_tray`, `start_minimized`, `notification`, `notif_copy`, `notif_paste`, `autosave`, `space_send_filters`
 
 Send filters ride in the blob so they roam between a user's devices; the server never sees
 the plaintext group names they reference.
 
-**Not synced (device-specific — never included in blob):**
-- `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:{space_id}` — each device decides independently
-- Window geometry, autostart, recent searches
+**Not synced (device-specific - never included in blob):**
+- `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:{space_id}` - each device decides independently
+- Window geometry, autostart, and every other `settings.json` key not listed above
 
-Push is debounced: after any synced setting changes, a 2-second timer starts. If another change arrives within that window, the timer resets. This prevents a push per keystroke in fields like the server URL.
+Push is debounced (`SETTINGS_DEBOUNCE_SECS`, 2s). Each synced setting change restarts the timer, so a burst of changes sends one push.
 
-On `settings:updated` WS event: call `sync_pull_settings()` automatically.  
-On pull: emit `sync:settings` Tauri event with decrypted JSON → React applies `localStorage` keys; Rust writes `settings.json` keys directly.
+- On the `settings:updated` socket event, the app calls `sync_pull_settings()`.
+- On pull, Rust emits `sync:settings` with the decrypted JSON. React applies the
+  `localStorage` keys; Rust writes the `settings.json` keys directly.
+- Settings are not pulled at sign-in. `sync_pull_settings` runs only on the
+  `settings:updated` socket event (`App.tsx`) or an explicit invoke, so a freshly
+  signed-in device keeps its local preferences until another device changes one.
 
-Settings are not pulled at sign-in: `sync_pull_settings` runs only on the `settings:updated` WebSocket event (App.tsx) or an explicit invoke, so a freshly signed-in device keeps its local preferences until another device changes one.
-
-#### `config.rs` — Sync Settings
+#### `config.rs` - Sync Settings
 
 Sync adds these keys to the existing `settings.json` store:
 
@@ -1260,35 +1322,35 @@ Sync adds these keys to the existing `settings.json` store:
 | ----------------- | ------ | ----------------------------------- | -------------------------------------------------------------------------- |
 | `sync_enabled`      | bool   | false                               | Master toggle for all sync behavior                                        |
 | `sync_server_url`   | string | `DEFAULT_SERVER_URL`                | Backend API base URL; set to override the compiled default (self-hosting)   |
-| `supabase_url`      | string | `DEFAULT_SUPABASE_URL`              | Supabase project URL — used for auth (GoTrue)                              |
-| `supabase_anon_key` | string | `DEFAULT_SUPABASE_ANON_KEY`         | Supabase anon (publishable) key — client-side auth only                    |
+| `supabase_url`      | string | `DEFAULT_SUPABASE_URL`              | Supabase project URL - used for auth (GoTrue)                              |
+| `supabase_anon_key` | string | `DEFAULT_SUPABASE_ANON_KEY`         | Supabase anon (publishable) key - client-side auth only                    |
 | `reset_page_url`    | string | `DEFAULT_RESET_PAGE_URL`            | Where a password-reset mail lands; must match a Supabase Redirect URLs entry exactly |
-
-The four `DEFAULT_*` values are compiled in from `src-tauri/src/sync/config.rs` — that file is
-the single source for which deployment a build ships against. A key present and non-empty in
-`settings.json` wins over the constant; absent or empty falls back to it.
-| `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` — how personal cloud-sync entries move on this device |
+| `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` - how personal cloud-sync entries move on this device |
 | `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
 | `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
 
+The four `DEFAULT_*` values are compiled in from `src-tauri/src/sync/config.rs`, the single
+source for which deployment a build ships against. A key present and non-empty in
+`settings.json` wins over its constant; an absent or empty key falls back to it.
+
 ### 4.7 Runtime Module
 
-#### `clipboard_watcher.rs` — Background Polling Thread
+#### `clipboard_watcher.rs` - Background Polling Thread
 
 - Dedicated thread with **220ms polling interval**.
 - **Windows**: Uses `GetClipboardSequenceNumber()` to detect changes cheaply via a change token.
-- **Linux**: No change token available — reads the clipboard every cycle and compares against the last captured content.
+- **Linux**: No change token available. The watcher reads the clipboard every cycle and compares it against the last captured content.
 - On change, calls `capture_clipboard_change()`:
   - Checks suppress flag (skips if set by user action).
-  - Reads clipboard via `read_clipboard_entry()`.
+  - Reads clipboard via `read_clipboard_capture()`.
   - Deduplicates against top history entry.
   - Pushes to history, emits `clipboard:new-entry` to all windows.
   - Updates `active_clipboard_id` and emits `clipboard:active-id`.
   - Shows copy notification if enabled.
-  - If `persist_history` is enabled, marks `history_dirty` for background flush.
-- Only advances the sequence token when capture succeeds — if the clipboard was locked, the next poll retries.
+  - If `keep_history` is enabled, marks `history_dirty` for background flush.
+- Advances the sequence token only when capture succeeds. If the clipboard was locked, the next poll retries.
 
-#### `hotkeys.rs` — Global Shortcut Handlers
+#### `hotkeys.rs` - Global Shortcut Handlers
 
 **Ctrl+Shift+C** (`handle_copy_shortcut`):
 
@@ -1296,9 +1358,9 @@ the single source for which deployment a build ships against. A key present and 
 2. Set suppress flag (prevents watcher race).
 3. Simulate Ctrl+C (with 120ms delays before/after).
 4. Read the clipboard.
-5. Push to history (deduplicated), emit `clipboard:new-entry`.
+5. Push to history (deduplicated).
 6. Update `active_clipboard_id`, emit `clipboard:active-id`.
-7. Show the copy popup with the entry preview.
+7. Only if step 5 inserted a new entry: emit `clipboard:new-entry` and show the copy popup with the entry preview.
 
 **Ctrl+Shift+V** (`handle_paste_shortcut`):
 
@@ -1306,59 +1368,59 @@ the single source for which deployment a build ships against. A key present and 
 2. Lock history, grab top 200 recent (`PASTE_HISTORY_CAP`) + all pinned (bounded by `MAX_PINNED`).
 3. Emit `paste-popup:entries` to paste popup, show it near cursor.
 
-#### `popup_windows.rs` — Multi-Window Management
+#### `popup_windows.rs` - Multi-Window Management
 
 Creates popup windows at startup (hidden, off-screen, frameless, transparent, always-on-top, skip-taskbar):
 
-- **copy-popup** (340×260) — Copy confirmation with preview.
-- **paste-popup** (360×540) — Quick paste list with keyboard shortcuts.
-- **notification** (320×104) — Brief "Copied"/"Pasted" toast at bottom-right of screen.
+- **copy-popup** (340x260) - Copy confirmation with preview.
+- **paste-popup** (360x540) - Quick paste list with keyboard shortcuts.
+- **notification** (320x104) - Brief "Copied"/"Pasted" toast at bottom-right of screen.
 
-**Hiding**: `hide_popup()` moves the window to `(-9999, -9999)` **before** calling `hide()`. This prevents the invisible-but-positioned window from intercepting mouse clicks on the content underneath.
+**Hiding**: `hide_popup()` moves the window to `(-9999, -9999)` **before** calling `hide()`. **Why:** an invisible window left in place would intercept mouse clicks on the content underneath.
 
-Also sets up a handler that hides all popups when the main window gains focus.
+The module also sets up a handler that hides all popups when the main window gains focus.
 
-#### `notifications.rs` — Copy/Paste Notifications
+#### `notifications.rs` - Copy/Paste Notifications
 
 Manages the "notification" popup window that appears briefly at the bottom-right of the screen:
 
-- `show_notification(app, entry, action)` — Positions the notification window and emits a `notification:show` event with a `NotificationPayload { kind, action }`.
-- `notify_if_enabled(app, entry)` — Shows a "Copied" notification if both the master toggle (`notification_enabled`) and per-type flag (`notif_copy`) are enabled.
-- `notify_paste_if_enabled(app, entry)` — Shows a "Pasted" notification if both `notification_enabled` and `notif_paste` are enabled.
+- `show_notification(app, entry, action)` - Positions the notification window and emits a `notification:show` event with a `NotificationPayload { kind, action }`.
+- `notify_if_enabled(app, entry)` - Shows a "Copied" notification if both the master toggle (`notification_enabled`) and per-type flag (`notif_copy`) are enabled.
+- `notify_paste_if_enabled(app, entry)` - Shows a "Pasted" notification if both `notification_enabled` and `notif_paste` are enabled.
 
 The frontend `Notification.tsx` component renders a dynamic label and icon (clipboard icon for "Copied", paste icon for "Pasted") based on the `action` field.
 
-#### `platform/` — OS Abstraction
+#### `platform/` - OS Abstraction
 
 `platform/mod.rs` selects the correct submodule at compile time via `#[cfg]` gates and re-exports a uniform API. It also contains the cross-platform `popup_position()` function.
 
 | Function                       | Windows (`platform/windows.rs`)                                  | Linux (`platform/linux.rs`)                                  |
 | ------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------ |
-| `simulate_copy()`              | Releases Shift/Ctrl, sends Ctrl↓ C↓ C↑ Ctrl↑ via `keybd_event`   | `xdotool key ctrl+c` (X11) or `wtype -M ctrl -k c` (Wayland) |
-| `simulate_paste()`             | Releases Shift/Ctrl, sends Ctrl↓ V↓ V↑ Ctrl↑ via `keybd_event`   | `xdotool key ctrl+v` (X11) or `wtype -M ctrl -k v` (Wayland) |
-| `popup_position(w, h)`         | _(cross-platform in mod.rs)_ — near cursor, clamped to work area | _(same)_                                                     |
-| `cursor_pos()`                 | `GetCursorPos()` → physical pixel coordinates                    | `xdotool getmouselocation` → parse x/y                       |
-| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `xdpyinfo` → parse `dimensions:` line                        |
-| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` → DPI scaling factor                          | Returns `1.0` (Wayland compositors handle scaling)           |
+| `simulate_copy()`              | Releases Shift/Ctrl, sends Ctrl down, C down, C up, Ctrl up via `keybd_event`   | `xdotool key --clearmodifiers ctrl+c` (X11) or `wtype -M ctrl -P c -p c -m ctrl` (Wayland); `ydotool` if that fails |
+| `simulate_paste()`             | Releases Shift/Ctrl, sends Ctrl down, V down, V up, Ctrl up via `keybd_event`   | `xdotool key --clearmodifiers ctrl+v` (X11) or `wtype -M ctrl -P v -p v -m ctrl` (Wayland); `ydotool` if that fails |
+| `popup_position(w, h)`         | _(cross-platform in mod.rs)_ - near cursor, clamped to work area | _(same)_                                                     |
+| `cursor_pos()`                 | `GetCursorPos()` -> physical pixel coordinates                    | `xdotool getmouselocation` -> parse x/y                       |
+| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `xdpyinfo` -> parse `dimensions:` line                        |
+| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` -> DPI scaling factor                          | Returns `1.0` (Wayland compositors handle scaling)           |
 
-**Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function explicitly releases Shift and Ctrl keys to prevent modifier corruption. Without this, if the user held Shift while triggering a paste, the OS would see Ctrl+Shift+V instead of Ctrl+V.
+**Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function releases Shift and Ctrl. **Why:** if the user still held Shift from the shortcut, the OS would otherwise see Ctrl+Shift+V instead of Ctrl+V.
 
-**Note on Linux**: `is_wayland()` checks the `WAYLAND_DISPLAY` environment variable. If set, uses `wtype`; otherwise falls back to `xdotool` (X11).
+**Note on Linux**: `is_wayland()` returns true when `WAYLAND_DISPLAY` is set and non-empty, or when `XDG_SESSION_TYPE` is `wayland`. On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`.
 
-#### `tray.rs` — System Tray
+#### `tray.rs` - System Tray
 
 Sets up a system tray icon with a context menu:
 
-- **Show Orange Copy Paste** — Shows/unminimizes the main window.
-- **Quit** — Exits the app.
+- **Show Orange Copy Paste** - Shows/unminimizes the main window.
+- **Quit** - Exits the app.
 
-Left-clicking the tray icon also shows the main window. Integrates with `close_to_tray` setting: when enabled, closing the main window hides it to the tray instead of quitting.
+Left-clicking the tray icon also shows the main window. With the `close_to_tray` setting on, closing the main window hides it to the tray instead of quitting.
 
-#### `window_state.rs` — Saved Window Geometry
+#### `window_state.rs` - Saved Window Geometry
 
-Saves window position, size, and maximized state to `{app_data}/window-state.json` on every move/resize. Restores on startup with guards: minimum 200×200 dimensions, re-center if position is off-screen.
+Tracks every move and resize, and saves position, size and maximized state to `{app_data}/window-state.json` shortly after. Restores on startup with guards: minimum 200x200 dimensions, and a re-center if the position is off-screen.
 
-#### `commands.rs` — Window-Control & Lifecycle Commands
+#### `commands.rs` - Window-Control & Lifecycle Commands
 
 Handlers for the popup and splash windows plus a few app-level toggles. The
 frontend drives popup sizing and reveal through these.
@@ -1434,6 +1496,7 @@ summarizes the emitted events; the code is authoritative.
 | `clock:offset-changed` | `sync/mod.rs` | The measured clock offset changed |
 | `sync:status-changed` | `sync/mod.rs`, `sync/ws_listener.rs` | Connection state changed |
 | `sync:signed-out` | `sync/mod.rs` | The session was cleared |
+| `sync:device-revoked` | `sync/mod.rs` | The server reported this device as revoked |
 | `sync:session-restored` / `sync:restore-gave-up` | `sync/mod.rs` | Outcome of a background session restore |
 | `sync:oauth-ready` | `sync/mod.rs` | The OAuth handshake landed; a password is needed |
 | `sync:history-merged` / `sync:notes-merged` | `sync/mod.rs` | Pulled/merged entries; the UI re-fetches |
@@ -1453,8 +1516,8 @@ summarizes the emitted events; the code is authoritative.
 | `space:key-received` / `space:key-rejected` | `sync/mod.rs` | A space keyring arrived / failed its fingerprint check |
 | `spaces:join-code` / `sync:password-reset` | `lib.rs` | A deep link routed to a screen (section 4.6) |
 
-Backend WebSocket messages (`device:online` / `device:offline`, `settings:updated`,
-`space:membership_changed`, `space:rekey`, `announcement:new`, `ping`) are received
+Backend WebSocket messages (such as `device:online`, `settings:updated`,
+`space:membership_changed`, `space:rekey`, `announcement:new` and `ping`) are received
 by `ws_listener.rs`, not emitted to the webview directly; see section 4.6.
 
 ---
@@ -1463,15 +1526,15 @@ by `ws_listener.rs`, not emitted to the webview directly; see section 4.6.
 
 ### 5.1 Build & Entry Points
 
-Vite is configured for a **multi-page build** (five separate HTML entry points → five separate JS bundles):
+Vite is configured for a **multi-page build** (five separate HTML entry points -> five separate JS bundles):
 
 | Window       | Entry HTML                                       | Entry Component    | Dimensions         |
 | ------------ | ------------------------------------------------ | ------------------ | ------------------ |
-| main         | `src/components/app/index.html`                  | `App.tsx`          | 920×560, resizable |
-| copy-popup   | `src/components/copy-popup/copy-popup.html`      | `CopyPopup.tsx`    | 340×260, frameless |
-| paste-popup  | `src/components/paste-popup/paste-popup.html`    | `PastePopup.tsx`   | 360×540, frameless |
-| notification | `src/components/notifications/notification.html` | `Notification.tsx` | 320×104, frameless |
-| splash       | `src/components/splash/splash.html`              | `SplashScreen.tsx` | 340×76, frameless  |
+| main         | `src/components/app/index.html`                  | `App.tsx`          | 920x560, resizable |
+| copy-popup   | `src/components/copy-popup/copy-popup.html`      | `CopyPopup.tsx`    | 340x260, frameless |
+| paste-popup  | `src/components/paste-popup/paste-popup.html`    | `PastePopup.tsx`   | 360x540, frameless |
+| notification | `src/components/notifications/notification.html` | `Notification.tsx` | 320x104, frameless |
+| splash       | `src/components/splash/splash.html`              | `SplashScreen.tsx` | 340x76, frameless  |
 
 Dev server runs on port 1420 (fixed for Tauri dev mode).
 
@@ -1506,19 +1569,19 @@ Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen 
 | `useMultiSelect` | Multi-select state (selected ids, toggle, range-select, clear) |
 | `useSelectionSummary` | Derived counts/metadata for the current selection |
 | `useRelativeTime` | Relative timestamps driven by one shared ticker (not a timer per card) |
-| `useLayoutTransition` | Animate the tiles ↔ list layout change |
+| `useLayoutTransition` | Animate the switch between the tiles and list layouts |
 | `useFileMeta` | Batched + cached file preview / missing-file lookups (dedupes IPC across cards and popups) |
 
 ### 5.4 Main App
 
 **`App.tsx`** is the root of the main window. It owns:
 
-- **`entries: ClipboardEntry[]`** — the full clipboard history state.
-- **`notes: Note[]`** — note collection used by the Notes screen.
-- **`screen: AppScreen`** — which screen is currently active.
-- **`theme: AppTheme`** — dark/light mode (persisted to `localStorage`).
-- **`undoSnapshot`** — snapshot for "undo clear history" (5-second window).
-- **`activeClipboardId: string`** — ID of the entry currently in the OS clipboard.
+- **`entries: ClipboardEntry[]`** - the full clipboard history state.
+- **`notes: Note[]`** - note collection used by the Notes screen.
+- **`screen: AppScreen`** - which screen is currently active.
+- **`theme: AppTheme`** - dark/light mode (persisted to `localStorage`).
+- **`undoSnapshot`** - snapshot for "undo clear history" (5-second window).
+- **`activeClipboardId: string`** - ID of the entry currently in the OS clipboard.
 
 **Initialization (on mount):**
 
@@ -1528,7 +1591,7 @@ Reusable React hooks under `src/hooks/`, extracted to de-duplicate cross-screen 
 4. Fetch `get_history` and `get_active_clipboard_id` from Rust, **merge** with any entries already received via events.
 
 **Focus resync:**
-Listens to `tauri://focus` on the main window. On focus, re-fetches full history from Rust to catch up with any events that may have been missed while the app was in the background.
+Listens to `tauri://focus` on the main window. On focus, it re-fetches the full history from Rust to catch up on events missed while the app was in the background.
 
 ### 5.5 Screens
 
@@ -1539,12 +1602,12 @@ The main history view. Entries are grouped by day ("Today", "Yesterday", "Mar 6"
 **Features:**
 
 - **Layout toggle**: Tiles (CSS grid, variable heights) or List (full-width rows). Persisted to `localStorage`.
-- **Sort**: Newest, Oldest, A→Z, Z→A, Type. Persisted to `localStorage`.
+- **Sort**: Newest, Oldest, A->Z, Z->A, Type. Persisted to `localStorage`.
 - **Day groups**: Collapsible with animated transitions.
 - **Toolbar**: Sort dropdown + layout toggle + clear-all button.
 - **Empty state**: Placeholder with Ctrl+Shift+C hint.
-- **Progressive rendering**: renders `RENDER_INITIAL_COUNT = 200` cards upfront and grows by `RENDER_PAGE_SIZE = 50` as the user scrolls (IntersectionObserver, ~600px `rootMargin`), so 1k+ histories stay responsive; a "You're all caught up" footer appears at the true end.
-- **Memoized cards**: `EntryCard` (and `NoteCard`) are wrapped in `React.memo`, so typing in search or toggling selection no longer re-renders the whole list.
+- **Progressive rendering**: renders `RENDER_INITIAL_COUNT = 200` cards up front and grows by `RENDER_PAGE_SIZE = 50` as the user scrolls (IntersectionObserver, 600px `rootMargin`). Histories of 1,000+ entries stay responsive. A "You're all caught up" footer appears at the true end.
+- **Memoized cards**: `EntryCard` (and `NoteCard`) are wrapped in `React.memo`, so typing in search or toggling selection does not re-render the whole list.
 
 #### Entry Card (`EntryCard.tsx`)
 
@@ -1561,29 +1624,31 @@ Renders a single `ClipboardEntry` with type-specific previews:
 
 **Interactions:**
 
-- Click → copy to clipboard, 1.5s "Copied!" feedback.
-- Right-click → context menu (Copy, Pin/Unpin, Save, Groups, Expand/Collapse, Delete) via `CardMenu`.
+- Click -> copy to clipboard, 1.5s "Copied!" feedback.
+- Right-click -> context menu (Copy, Pin/Unpin, Save, Groups, Expand/Collapse, Delete) via `CardMenu`.
 - Relative timestamps update every 15 seconds.
-- **"In clipboard" indicator**: An accent-colored border and chip are shown on the entry that is currently in the OS clipboard. The `activeClipboardId` is tracked in `AppState` and pushed to the frontend via the `clipboard:active-id` event. Updated by `copy_entry`, `paste_entry`, clipboard watcher, and copy shortcut handler.
+- **"In clipboard" indicator**: The entry currently in the OS clipboard gets an accent-colored border and chip. `AppState` tracks the id (`active_clipboard_id`) and pushes it to the frontend with the `clipboard:active-id` event. `copy_entry`, `paste_entry`, the clipboard watcher and the copy shortcut handler update it.
 
-**Footer chip overflow**: The chip bar (type, pinned, saved, in-clipboard, user groups) uses `flex-wrap` for graceful line wrapping. A dynamic measurement algorithm calculates how many group chips fit on the first row and renders a "+N" overflow button for the rest. When all groups fit, no overflow button is shown.
+**Footer chip overflow**: The chip bar (type, pinned, saved, in-clipboard, user groups) uses `flex-wrap`. A measurement pass works out how many group chips fit on the first row and renders a "+N" overflow button for the rest. When all groups fit, no overflow button appears.
 
-**Cloud sync indicator**: A small cloud icon can be shown on each card. It is *not* a field on the entry — the per-entry state is fetched with the `sync_get_entry_states` command (`useEntrySyncStates()`) and the badge is gated by the `show_sync_badges` setting:
+**Cloud sync indicator**: Each card can show a small cloud icon. It is *not* a field on the entry: the `sync_get_entry_states` command (`useEntrySyncStates()`) supplies the per-entry state, and the `show_sync_badges` setting gates the badge:
 
-- Filled cloud — synced (a server id is mapped for this entry and it is up to date)
-- Outline cloud — pending (queued in the pending queue, not yet acknowledged)
-- No icon — local-only (sync disabled, badges off, or entry predates sync enrollment)
+- Filled cloud - synced (a server id is mapped for this entry and it is up to date)
+- Outline cloud - pending (queued in the pending queue, not yet acknowledged)
+- No icon - local-only (sync disabled, badges off, or entry predates sync enrollment)
 
 #### Settings Screen (`SettingsScreen.tsx`)
 
-- **Paste slots**: How many entries shown in the paste popup (3–10, default 3). Persisted to `localStorage.sc-paste-slots`.
-- **Persist history**: Save full clipboard history to disk (survives restarts). Stored in `settings.json`.
-- **Close to tray**: Hide to system tray on close instead of quitting. Stored in `settings.json`.
-- **Start minimized**: Launch hidden in tray. Stored in `settings.json`.
-- **Notifications**: Master toggle + individual checkboxes for copy and paste notifications. Stored in `settings.json`.
-- **Show sync badges**: Toggle for the per-entry cloud icon on cards. Stored in `settings.json`.
+Among its settings (the screen is the full list):
 
-> Cloud-sync auth (login/logout), the connected-devices list and presence, sync status, and the realtime/passive/manual mode control all live on the **Account screen** (`AccountScreen.tsx`), not here.
+- **`Number-key paste slots`**: how many entries the paste popup numbers (3-10, default 3). Persisted to `localStorage.sc-paste-slots`.
+- **`Keep history across app restarts`**: save the full clipboard history to disk. Setting `keep_history` in `settings.json`.
+- **`Close to system tray`**: hide to the system tray on close instead of quitting. Setting `close_to_tray`.
+- **`Start minimized`**: launch hidden in the tray. Setting `start_minimized`.
+- **`In-app popup`**: master toggle (`notification`) plus checkboxes for the copy and paste notifications (`notif_copy`, `notif_paste`).
+- **`Show sync badges on cards`**: toggle for the per-entry cloud icon on cards. Setting `show_sync_badges`.
+
+> Cloud-sync auth (login/logout), the connected-devices list and presence, sync status and the realtime/passive/manual mode control live on the **Account screen** (`AccountScreen.tsx`), not here.
 
 #### Notes Screen (`NotesScreen.tsx`)
 
@@ -1596,33 +1661,35 @@ Renders a single `ClipboardEntry` with type-specific previews:
 
 #### Spaces Screen (`spaces-screen/SpacesScreen.tsx`)
 
-A dedicated sidebar screen (`screen === "spaces"`) and the single home for sharing. Left
-pane is the feed of what is in the selected space, rendered with the same preview
-components as the clipboard screen (its own search, sort, and tiles/list layout); feed
-membership is server truth only, `entryShares["clipboard:{id}"].includes(space.id)`. Right
-rail lists the user's spaces with create and join forms, the received-invite strip
-(accept/decline), and sent invites with revoke.
+A dedicated sidebar screen (`screen === "spaces"`) and the single home for sharing.
+
+- The left pane is the feed of the selected space. It uses the same preview components
+  as the clipboard screen, with its own search, sort and tiles/list layout.
+- Feed membership is server truth only:
+  `entryShares["clipboard:{id}"].includes(space.id)`.
+- The right rail lists the user's spaces with create and join forms, the
+  received-invite strip (accept/decline), and sent invites with revoke.
 
 The selected space's header opens **Space settings**:
 
-- **Incoming** — auto-copy switch (`space_set_autocopy`).
-- **Outgoing** — auto-share master switch plus Content (clipboard / notes / both), Kinds,
+- **Incoming** - auto-copy switch (`space_set_autocopy`).
+- **Outgoing** - auto-share master switch plus Content (clipboard / notes / both), Kinds,
   and Groups selectors that build the `SendFilter` (`space_set_send_filter`). Off by
   default, so nothing flows without an explicit choice; the header badge shows how many
   rules are active.
-- **Members** — owner badge, `waiting for key` for members the owner has not wrapped a key
+- **Members** - owner badge, `waiting for key` for members the owner has not wrapped a key
   for yet, online dot, remove (owner only, which triggers the rekey).
-- **Invite** — invite code with copy code / copy link, and invite by email.
+- **Invite** - invite code with copy code / copy link, and invite by email.
 - **Leave** or **Delete** (armed two-click).
 
 It owns the live subscriptions `space:presence-changed` (re-reads `spaces_cached`, no
 network), `space:membership-changed`, `space:key-received`, and the invite events.
-Account-level sync management — login/logout, enable toggle, server URL, devices, storage,
-and the cloud sync mode — stays on the Account screen.
+Account-level sync management stays on the Account screen: login/logout, the enable
+toggle, server URL, devices, storage and the cloud sync mode.
 
 #### Shortcuts Screen (`ShortcutsScreen.tsx`)
 
-Read-only reference page showing all keyboard shortcuts organized by section (Global, Clipboard Cards, Search & Filter).
+Read-only reference page showing all keyboard shortcuts, organized by section: Global Shortcuts, Paste Popup, Copy Popup, Clipboard Cards, Pin & Save, Groups, System Groups, Search & Filter.
 
 ### 5.6 Popups
 
@@ -1642,7 +1709,7 @@ Listens to `clipboard:copied` event from Rust.
 Shown on Ctrl+Shift+V near the cursor. Displays:
 
 - **Tabs**: Recent / Pinned.
-- **Numbered slots** (1–9, 0): Press number key to instantly paste that entry.
+- **Numbered slots** (1-9, 0): Press number key to instantly paste that entry.
 - Arrow key navigation + Enter to paste selected.
 - Expandable file entries for multi-file items.
 - Dynamic resize via `invoke("resize_paste_popup", { width, height })`.
@@ -1654,7 +1721,7 @@ Listens to `paste-popup:entries` event from Rust. Auto-dismisses on blur or Esc.
 | Component           | Purpose                                                                                                                                                                                   |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Sidebar`           | Navigation (6 screens: clipboard, notes, spaces, shortcuts, account, settings) + notifications bell + theme toggle. Icon-based, fixed position.                                             |
-| `StatusPill`        | "N text · M img · K files · X total" summary bar.                                                                                                                                         |
+| `StatusPill`        | "N text - M img - K files - X total" summary bar.                                                                                                                                         |
 | `CardMenu`          | Right-click context menu (Copy, Pin/Unpin, Save, Groups, Expand/Collapse, Delete). Portal to body. Uses direct DOM positioning in `useLayoutEffect` to avoid first-render flash at (0,0). |
 | `ToastNotification` | Timed notification with progress bar + optional action (Undo).                                                                                                                            |
 | `Notification`      | Small bottom-right toast showing "Copied" or "Pasted" with dynamic icon. Separate webview window.                                                                                         |
@@ -1686,7 +1753,7 @@ flowchart TB
     refetch --> rerender
 ```
 
-### 6.2 Cloud Sync — Push (Local Capture → Server)
+### 6.2 Cloud Sync - Push (Local Capture -> Server)
 
 > Route, headers and response shape are the wire contract:
 > `orange-copy-paste-clipboard-backend/docs/architecture.md`.
@@ -1694,7 +1761,7 @@ flowchart TB
 ```
 capture_clipboard_change() → history.push(entry)
          │
-         └──► SyncClient.on_new_entry(entry)   [background runtime]
+         └──► SyncClient.on_new_clipboard_entry(entry)   [background runtime]
                     │
                     ├─ cek = crypto::random_key()
                     ├─ crypto::encrypt(cek, content, aad=client_id)
@@ -1709,7 +1776,7 @@ capture_clipboard_change() → history.push(entry)
                                   sync_status stays Pending
 ```
 
-### 6.3 Cloud Sync — Pull (Server → Local)
+### 6.3 Cloud Sync - Pull (Server -> Local)
 
 ```
 On startup / reconnect:
@@ -1730,7 +1797,7 @@ On startup / reconnect:
          ├─ client_id already in local store?
          │     └─ Yes → compare server_ts; apply if newer (LWW)
          │     └─ No  → insert as new entry
-         │              assign local id, record in id_map.json
+         │              keep client_id as its id, record in id_map.json
          │
          ├─ emit sync:history-merged (or sync:notes-merged) → React re-render
          └─ advance the server cursor to last_server_ts (see wire contract)
@@ -1741,7 +1808,7 @@ On startup / reconnect:
 Repeat until next_cursor = null
 ```
 
-### 6.4 Cloud Sync — Realtime (WebSocket → Local)
+### 6.4 Cloud Sync - Realtime (WebSocket -> Local)
 
 ```
 WebSocket entry event received (event/payload shape: see wire contract)
@@ -1766,10 +1833,10 @@ WebSocket entry event received (event/payload shape: see wire contract)
 
 History and pinned entries use a **MessagePack binary format** for fast, compact disk storage:
 
-1. **Metadata** (`history.bin`, `pinned_entries.bin`) — Entry metadata serialized with **MessagePack** (`rmp-serde`) and written directly to disk (no compression). Image entries store an absolute file path instead of inline base64 data.
-2. **Image store** (`images/`) — Raw image bytes (PNG, JPEG, WebP, etc.) written to individual files named `{id}_{label}.{ext}`. On `push()`, data-URL images are immediately externalised to this directory, keeping in-memory footprint small.
-3. **On load** — File-path image entries are served to the frontend via Tauri's `convertFileSrc()` asset protocol. Old inline data-URLs from previous sessions are automatically externalised on load.
-4. **Orphan cleanup** — `save_all_to_file` removes image files in `images/` that no longer correspond to any history entry.
+1. **Metadata** (`history.bin`, `pinned_entries.bin`) - Entry metadata serialized with **MessagePack** (`rmp-serde`) and written directly to disk (no compression). Image entries store an absolute file path instead of inline base64 data.
+2. **Image store** (`images/`) - Raw image bytes (PNG, JPEG, WebP, etc.) written to individual files named `{id}_{label}.{ext}`. On `push()`, data-URL images are immediately externalised to this directory, keeping in-memory footprint small.
+3. **On load** - File-path image entries are served to the frontend via Tauri's `convertFileSrc()` asset protocol. Old inline data-URLs from previous sessions are automatically externalised on load.
+4. **Orphan cleanup** - `save_all_to_file` removes image files in `images/` that no longer correspond to any history entry.
 
 ### 7.2 Storage Locations
 
@@ -1788,24 +1855,39 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Theme preference   | `localStorage.sc-theme`                | `"dark"` or `"light"`                                            | On toggle                | On mount           |
 | Layout preference  | `localStorage.sc-layout`               | `"tiles"` or `"list"`                                            | On change                | On mount           |
 | Sort preference    | `localStorage.sc-sort`                 | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"`           | On change                | On mount           |
-| Paste slot count   | `localStorage.sc-paste-slots`          | `"3"` – `"10"`                                                   | On change                | On popup show      |
+| Paste slot count   | `localStorage.sc-paste-slots`          | `"3"` - `"10"`                                                   | On change                | On popup show      |
 | Group names        | `localStorage.sc-groups`               | JSON string array                                                | On group edits           | On mount           |
 | Group colors       | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                           | On color change          | On mount           |
-| Recent searches    | `localStorage.sc-recent-searches`      | JSON string array (max 8)                                        | On search                | On mount           |
-| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, settings_updated_at }`    | After each pull/settings push | On sync init  |
+| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, announcements_cursor, clock_offset_ms, ... }` | After each pull/settings push | On sync init  |
 | Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update/push_local ops (encrypted content, except push_local which is an id) | On mutation when offline | On reconnect       |
-| ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", … }` plus `entry_shares`        | After each push          | On sync init       |
+| ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", ... }` plus `entry_shares`        | After each push          | On sync init       |
 | Staged local settings | `{app_data}/sync_settings_local.json` | JSON object of `localStorage` values handed down for the next settings push | On `sync_receive_local_settings` | Merged into the blob on settings push (`push_settings`) |
 
-**Note**: When `persist_history` is disabled (default), unpinned clipboard history is in-memory only and lost on app restart. Only pinned entries survive. When enabled via Settings, the full history is flushed to `history.bin` every 2 seconds.
+**Note**: When `keep_history` is off (the default), unpinned clipboard history is in memory only and lost on restart. Only pinned and saved entries survive. When it is on, the full history is flushed to `history.bin` every 2 seconds.
 
-**Sync note**: `sync_pending.json` and `id_map.json` are safe to delete — loss triggers a re-sync (duplicate entries are deduped on next push). `sync_state.json` loss causes a full re-pull from the server on next startup.
+**Sync note**: `sync_pending.json` and `id_map.json` are safe to delete. Losing them triggers a re-sync, and the server dedupes duplicate entries on the next push. Losing `sync_state.json` causes a full re-pull from the server on the next startup.
 
 ### 7.3 `{app_data}` location and the identifier-rename migration
 
 Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: on Windows `%APPDATA%\<identifier>\`, on Linux `~/.local/share/<identifier>/`. The identifier is `io.github.notrover.orange-copy-paste`.
 
-**Temporary migration.** The identifier was previously `com.spect.orange-copy-paste`. Because `{app_data}` is keyed by the identifier, the rename alone would point a renamed build at an empty folder and the user's history, notes and settings would look wiped (the old files are orphaned, not gone). `migrate_legacy_app_data` in `lib.rs` handles this: on the first launch of a renamed build, before any store loads, it copies the old identifier's folder into the new one. It copies rather than moves (the old folder stays as a backup), and it runs only when the new folder is still empty, so it no-ops on every later launch. The OS keychain is **not** keyed by the identifier, so sign-in state carries over on its own. Install directory, autostart entry and the uninstall registry key are keyed by `productName` ("Orange Copy Paste", unchanged), so an update upgrades in place with no duplicate entries. This shim is temporary and is meant to be removed a few stable releases after the rename has propagated, once no install still holds data under the old identifier.
+**Temporary migration.** The identifier was previously `com.spect.orange-copy-paste`.
+
+- `migrate_legacy_app_data` in `lib.rs` runs on the first launch of a renamed build,
+  before any store loads. It copies the old identifier's folder into the new one.
+- It copies rather than moves, so the old folder stays as a backup. It runs only
+  while the new folder is still empty, so it does nothing on every later launch.
+- The OS keychain is **not** keyed by the identifier, so sign-in state carries over
+  on its own.
+- The install directory, autostart entry and uninstall registry key are keyed by
+  `productName` ("Orange Copy Paste", unchanged). An update upgrades in place with no
+  duplicate entries.
+- The shim is temporary. It is meant to be removed a few stable releases after the
+  rename, once no install still holds data under the old identifier.
+
+**Why:** `{app_data}` is keyed by the identifier. The rename alone would point a
+renamed build at an empty folder, and the user's history, notes and settings would
+look wiped. The old files would be orphaned, not gone.
 
 ---
 
@@ -1817,33 +1899,35 @@ Only `main` and `splash` are declared in `tauri.conf.json`. The three popups (co
 
 | Window       | Size    | Properties                                                                                              |
 | ------------ | ------- | ------------------------------------------------------------------------------------------------------- |
-| main         | 920×560 | Resizable (min 640×440), frameless, initially hidden (shown by window-state restore), dark bg `#0e0e0e` |
-| splash       | 340×76  | Frameless, transparent, no shadow, always-on-top, skip taskbar, not focusable, initially hidden (`tauri.conf.json`) |
-| copy-popup   | 340×260 | Frameless, transparent, no shadow, always-on-top, skip taskbar, not resizable                           |
-| paste-popup  | 360×540 | Same as copy-popup                                                                                      |
-| notification | 320×104 | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
+| main         | 920x560 | Resizable (min 640x440), frameless, initially hidden (shown by window-state restore), dark bg `#0e0e0e` |
+| splash       | 340x76  | Frameless, transparent, no shadow, always-on-top, skip taskbar, not focusable, initially hidden (`tauri.conf.json`) |
+| copy-popup   | 340x260 | Frameless, transparent, no shadow, always-on-top, skip taskbar, not resizable                           |
+| paste-popup  | 360x540 | Same as copy-popup                                                                                      |
+| notification | 320x104 | Same as copy-popup, plus `ignore_cursor_events`, positioned at bottom-right of screen                   |
 
 ### 8.2 Permissions (capabilities/default.json)
 
-Applied to all three windows:
+Applied to four windows: `main`, `copy-popup`, `paste-popup` and `notification` (not `splash`):
 
-- `core:default` — basic Tauri runtime
-- `core:window:allow-show`, `allow-hide`, `allow-set-position`, `allow-set-focus`, `allow-minimize`, `allow-maximize`, etc.
-- `core:event:default` — emit/listen for custom events
-- `global-shortcut:default` — register/unregister global keyboard shortcuts
+- `core:default` - basic Tauri runtime
+- `core:window:allow-show`, `allow-hide`, `allow-close`, `allow-set-position`, `allow-start-dragging`, `allow-minimize`, `allow-maximize`, `allow-unmaximize`, and the `is-visible`/`is-maximized` queries
+- `core:event:allow-listen`, `core:event:allow-unlisten` - listen for custom events
+- `global-shortcut:allow-register`, `allow-unregister`, `allow-is-registered` - global keyboard shortcuts
+- `autostart:allow-enable`, `allow-disable`, `allow-is-enabled` - run on startup
+- `updater:default`, `notification:default` - self-update and OS notifications
 
 ### 8.3 Build
 
-- **Dev**: `bun run dev` → Vite on `localhost:1420`
-- **Prod**: `bun run build` → `tsc && vite build` → `dist/`
-- **Bundle**: NSIS installer (Windows)
+- **Dev**: `bun run dev` -> Vite on `localhost:1420`
+- **Prod**: `bun run build` -> `tsc && vite build` -> `dist/`
+- **Bundle**: `tauri.conf.json` targets `nsis`, `deb`, `rpm` and `appimage`. Which of them a release builds and publishes is in `docs/releasing.md` at the workspace root.
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped symbols
 
 ---
 
 ## 9. Cross-System Invariants
 
-The following constraints span both this app and the backend. Violating any of them breaks either correctness, security, or the offline-first guarantee.
+These constraints span both this app and the backend. Breaking one breaks correctness, security or the offline-first guarantee.
 
 The **promises** are the workspace root `docs/architecture.md` (Cross-Component Invariants) - that is where they are stated and where a new one is added. What only this file can say is the second column: which function, which file, and what has to be called to keep each one. Rows without a root counterpart (7, 8, 17, 18) are this app's alone.
 
@@ -1852,19 +1936,21 @@ The **promises** are the workspace root `docs/architecture.md` (Cross-Component 
 | 1   | **Local store is always plaintext**            | `history.bin` and `notes.bin` must never be encrypted. Encryption boundary = network only.                                                                            |
 | 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                           |
 | 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                      |
-| 4   | **UMK never leaves the device**                | `derive_umk()` output is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.         |
-| 5   | **Tombstones always propagate**                | `delete_entry` command must call `SyncClient.on_delete_entry(id)` even when offline. The delete must be queued in `sync_pending.json`.                                |
-| 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_entry` call happens after `history.push()`, as a post-commit side-effect.               |
-| 7   | **Suppress flag is respected**                 | `SyncClient.on_new_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                    |
-| 8   | **Sync runtime never blocks the main runtime** | All `SyncClient` methods are `async` and run in the dedicated background Tokio runtime. Use `Handle::current().spawn()` — never `block_on` from the Tauri runtime.    |
+| 4   | **UMK never leaves the device**                | The UMK (from `unwrap_umk`) is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.         |
+| 5   | **Tombstones always propagate**                | `delete_entry` command must call `SyncClient.on_delete_clipboard_entry(client_id, entry_ts)` even when offline. The delete must be queued in `sync_pending.json`.                                |
+| 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_clipboard_entry` call happens after `history.push()`, as a post-commit side-effect.               |
+| 7   | **Suppress flag is respected**                 | `SyncClient.on_new_clipboard_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                    |
+
+| 8   | **Sync runtime never blocks the main runtime** | `SyncClient` work runs in its dedicated background Tokio runtime. Entry points such as `on_new_clipboard_entry` are synchronous and spawn onto it through the stored `handle` - never `block_on` from the Tauri runtime. |
 | 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                  |
-| 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable — the server deduplicates by `client_id`.   |
+| 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable - the server deduplicates by `client_id`.   |
 | 11  | **Sharing is always opt-in**                   | An entry gets a `space_id` only from an explicit share or an enabled send filter that matches it. Send filters default to off, and local group tags never share by themselves. |
 | 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:entry-skipped` to the UI; do not silently drop.                                           |
 | 13  | **A space key is never lost while entries reference it** | Space keyrings keep every key we have held, newest first, and are recovered from the server-side wrapped keyring on reconnect. A rekey prepends; it never replaces. |
 | 14  | **Settings blob is encrypted**                 | `crypto::encrypt(UMK, settings_json)` must be called before `PUT /settings`. Never send plaintext preferences over the network.                                       |
 | 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:*`, autostart, and window geometry must be excluded from the settings blob at the call site in `push_settings()`. |
-| 16  | **Settings push is debounced**                 | `schedule_settings_push()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation — always go through the debounce path.                        |
-| 17  | **Auto-copy cannot flood the clipboard**       | Only WebSocket-delivered space entries may auto-copy — never a pull page, never a personal entry — and the write sets the suppress flag before touching the clipboard. |
+| 16  | **Settings push is debounced**                 | `schedule_settings_push()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation - always go through the debounce path.                        |
+| 17  | **Auto-copy cannot flood the clipboard**       | Only WebSocket-delivered space entries may auto-copy - never a pull page, never a personal entry - and the write sets the suppress flag before touching the clipboard. |
 | 18  | **Passive mode never loses an entry**          | `last_server_ts` advances only in the pull path. An entry skipped live in passive mode must still arrive on the next interval or manual pull.                          |
 
+Related: the wire contract is `orange-copy-paste-clipboard-backend/docs/architecture.md`; who may do what is the root `docs/permissions.md`; past regressions and their root causes are in `docs/bugfix-history.md`.

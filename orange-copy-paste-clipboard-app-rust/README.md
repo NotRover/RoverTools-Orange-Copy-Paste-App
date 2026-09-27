@@ -136,7 +136,7 @@ Fedora and Arch have equivalents; see the Tauri prerequisites.
 
 **At runtime** the app types keystrokes with `xdotool` on X11, `wtype` on wlroots compositors, or `ydotool` on GNOME and KDE Wayland, and stores sync keys in GNOME Keyring or KWallet. The full package list, the Wayland hotkey setup, and what does not work on Linux yet are in the [Linux notes](https://orange-copy-paste-app.pages.dev/docs/linux/).
 
-**Packaging:** `bun run tauri build` makes `.deb`, `.rpm` and AppImage on Linux, and the NSIS installer on Windows. Linux bundles cannot be built from Windows: use a Linux machine, a VM, WSL, or the **Build Linux (manual)** workflow in the Actions tab, whose `rovertools-linux` artifact is for testing only.
+**Packaging:** `bun run tauri build` makes `.deb`, `.rpm` and AppImage on Linux, and the NSIS installer on Windows. Releases publish only the `.deb` and AppImage. Linux bundles cannot be built from Windows: use a Linux machine, a VM, WSL, or the **Build Linux (manual)** workflow in the Actions tab, whose `rovertools-linux` artifact is for testing only.
 
 ## Releases and updates
 
