@@ -539,7 +539,7 @@ pub fn start_stall_watchdog(app: tauri::AppHandle) {
                 }),
                 (None, Some(true)) => Some(Trouble {
                     kind: "stalled",
-                    reason: format!("saving has not completed a pass in {}s", age / 1000),
+                    reason: format!("Saving has not finished in {} seconds", age / 1000),
                 }),
                 (None, Some(false)) => None,
                 // No verdict this round (frozen process, or no first pass yet) and
@@ -728,7 +728,7 @@ pub fn install_panic_hook(app: tauri::AppHandle) {
             .location()
             .map(|l| format!("{}:{}", l.file(), l.line()))
             .unwrap_or_else(|| "unknown".into());
-        mark_degraded(format!("internal error at {location}"));
+        mark_degraded("Something inside the app failed");
 
         // Then the log, before the emit below — appending to a file touches
         // nothing else in the process, while emitting re-enters Tauri's event
@@ -976,7 +976,7 @@ mod tests {
     fn stalled_for(secs: u64) -> Option<Trouble> {
         Some(Trouble {
             kind: "stalled",
-            reason: format!("saving has not completed a pass in {secs}s"),
+            reason: format!("Saving has not finished in {secs} seconds"),
         })
     }
 

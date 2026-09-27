@@ -55,7 +55,7 @@ pub(crate) fn notify_capture_skipped(app: &tauri::AppHandle, bytes: usize) {
     show_toast(
         app,
         "text",
-        "Too large",
+        "Too large for history",
         Some(crate::sync::format_bytes(bytes as u64)),
         // The distinction the toast has to land in one read: the copy worked,
         // Windows has it, and pasting is unaffected. Only this app's history
