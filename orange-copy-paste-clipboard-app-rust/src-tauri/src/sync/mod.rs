@@ -362,7 +362,7 @@ pub const MIN_PASSWORD_CHARS: usize = 8;
 
 fn check_password_length(password: &str) -> Result<(), String> {
     if password.chars().count() < MIN_PASSWORD_CHARS {
-        return Err(format!("Password must be at least {MIN_PASSWORD_CHARS} characters."));
+        return Err(format!("Use at least {MIN_PASSWORD_CHARS} characters for your password."));
     }
     Ok(())
 }
@@ -908,7 +908,7 @@ impl SyncClient {
                     .await
             }
             SignUpOutcome::ConfirmationRequired => {
-                Err("Account created. Check your email to confirm it, then log in.".into())
+                Err("Account created. Check your email to confirm it, then sign in.".into())
             }
         }
     }
@@ -999,7 +999,7 @@ impl SyncClient {
             .pending_oauth
             .lock()
             .clone()
-            .ok_or("no pending sign-in, start again")?;
+            .ok_or("This sign-in has expired. Start again with Continue with Google.")?;
 
         if pending.is_new {
             check_password_length(&password)?;
@@ -1098,7 +1098,7 @@ impl SyncClient {
             Some(session) => session,
             None => {
                 let verifier = crypto::load_reset_verifier().ok_or(
-                    "this reset link was already used, or it was requested from a different                      install of the app. Ask for a new one from this app.",
+                    "This reset link was already used, or it was sent to a different install of the app. Ask for a new one from this app.",
                 )?;
                 let session = self.supabase.exchange_code_pkce(&code, &verifier).await;
                 // The code cannot be exchanged twice, so the verifier is spent
@@ -1130,7 +1130,7 @@ impl SyncClient {
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
-            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+            .map_err(|_| "The server sent a reply the app could not read. Try again.".to_string())?;
 
         // A supplied recovery code is checked first and its failure is returned:
         // the user typed something specific, and silently falling through to
@@ -1141,7 +1141,7 @@ impl SyncClient {
                 let envelope = boot
                     .recovery_wrapped_umk
                     .as_deref()
-                    .ok_or("no recovery code was ever saved for this account")?;
+                    .ok_or("This account has no recovery code. Sign in on a device you have used, or start over with a new key.")?;
                 (crypto::unwrap_umk_recovery(recovery, &kdf_salt, envelope)?, false)
             }
             None => match self.recover_umk_for_reset(&user_id, &http).await {
@@ -1153,7 +1153,7 @@ impl SyncClient {
                 None if start_over => (crypto::random_key(), true),
                 None => {
                     return Err(
-                        "this device has never held your encryption key, so a new password cannot                          unlock what you synced before. Enter your recovery code, sign in on a                          device you have used, or start over with a new key."
+                        "This device has never held your encryption key, so a new password cannot open what you synced before. Enter your recovery code, sign in on a device you have used, or start over with a new key."
                             .into(),
                     )
                 }
@@ -1227,7 +1227,7 @@ impl SyncClient {
         let access_token = http.current_access_token().ok_or("not signed in")?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
-            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+            .map_err(|_| "The server sent a reply the app could not read. Try again.".to_string())?;
 
         let email = self.current_user().map(|u| u.email).ok_or("not signed in")?;
         let umk = self.verify_password_against_envelope(&current_password, &email, &boot, &kdf_salt)?;
@@ -1257,7 +1257,7 @@ impl SyncClient {
         let wrapped = boot
             .wrapped_umk
             .as_deref()
-            .ok_or("this account has no encryption key yet, sign in again")?;
+            .ok_or("This account is not set up yet. Sign out and sign in again.")?;
         let keys = PasswordKeys::derive(password, email);
         let kek = crypto::derive_kek(&keys.master, kdf_salt);
         if let Ok(umk) = crypto::unwrap_umk(&kek, wrapped) {
@@ -1265,7 +1265,7 @@ impl SyncClient {
         }
         let legacy = crypto::derive_legacy_kek(&keys.password, kdf_salt);
         crypto::unwrap_umk_legacy(&legacy, wrapped)
-            .map_err(|_| "the current password is wrong".to_string())
+            .map_err(|_| "The current password is wrong.".to_string())
     }
 
     /// Remember that Supabase holds this account's auth key, so sign-in never
@@ -1315,7 +1315,7 @@ impl SyncClient {
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
-            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+            .map_err(|_| "The server sent a reply the app could not read. Try again.".to_string())?;
         let email = self.current_user().map(|u| u.email).ok_or("not signed in")?;
         let umk = self.verify_password_against_envelope(&password, &email, &boot, &kdf_salt)?;
         http.set_umk_proof(&umk);
@@ -1407,7 +1407,7 @@ impl SyncClient {
         let boot = http.bootstrap(None).await?;
         let kdf_salt = B64
             .decode(&boot.kdf_salt)
-            .map_err(|e| format!("kdf_salt b64: {e}"))?;
+            .map_err(|_| "The server sent a reply the app could not read. Try again.".to_string())?;
         let kek = crypto::derive_kek(&keys.master, &kdf_salt);
 
         // 4. Establish the User Master Key (envelope model).
@@ -2341,7 +2341,7 @@ impl SyncClient {
                         &entry.id,
                         &skip_label,
                         format!(
-                            "{} is over the 5 MB limit for synced files",
+                            "{} is over the 5 MB limit for synced files. It stays on this device.",
                             format_bytes(total_bytes)
                         ),
                     );
@@ -2368,7 +2368,7 @@ impl SyncClient {
                             &ctx,
                             &entry.id,
                             &skip_label,
-                            format!("Not signed in to sync when this {noun} was copied"),
+                            format!("You were not signed in when this {noun} was copied. Sign in, then choose Upload to cloud on it."),
                         );
                         return; // blob sync needs connectivity — nothing to queue
                     };
@@ -3173,7 +3173,7 @@ impl SyncClient {
                                 &self.push_ctx(),
                                 &client_id,
                                 what,
-                                format!("The server refused this ({e}). It stays on this device."),
+                                "The server refused this item. It stays on this device.".to_string(),
                             );
                         }
                         Err(e) => {
@@ -4194,7 +4194,7 @@ impl SyncClient {
                 crate::notifications::NotificationKind::Reminder,
                 format!("Storage is {}% full", (used * 100.0).round() as u64),
             )
-            .with_body("Images stop syncing once it fills. Deleting shared images frees the most."),
+            .with_body("Images and files stop syncing once it fills. Deleting synced images and files frees the most."),
         );
     }
 
@@ -5478,10 +5478,10 @@ fn read_image_bytes(content: &str) -> Result<(Vec<u8>, String), String> {
         let mime = content.get(5..pos).unwrap_or("image/png").to_string();
         let raw = B64
             .decode(&content[pos + 8..])
-            .map_err(|e| format!("image b64: {e}"))?;
+            .map_err(|_| "The image could not be read. Try copying it again.".to_string())?;
         Ok((raw, mime))
     } else {
-        let bytes = std::fs::read(content).map_err(|e| format!("read image file: {e}"))?;
+        let bytes = std::fs::read(content).map_err(|_| "The file could not be read. It may have been moved or deleted.".to_string())?;
         Ok((bytes, mime_from_path(content)))
     }
 }
@@ -5727,7 +5727,7 @@ async fn upload_image_blob(
     // reads a raw error for something we could have measured before sending.
     if size > BLOB_SIZE_LIMIT {
         return Err(BlobUploadFailed::permanent(format!(
-            "{} is over the 5 MB limit for synced images",
+            "{} is over the 5 MB limit for synced images. It stays on this device.",
             format_bytes(size)
         )));
     }
@@ -5736,7 +5736,7 @@ async fn upload_image_blob(
     if let Some(remaining) = *budget.lock() {
         if size > remaining {
             return Err(BlobUploadFailed::permanent(format!(
-                "Cloud storage is full - {} free, this image needs {}",
+                "Cloud storage is full. {} is free and this image needs {}.",
                 format_bytes(remaining),
                 format_bytes(size)
             )));
@@ -5757,13 +5757,14 @@ async fn upload_image_blob(
                 // the user frees space, so it is a skip, not a retry.
                 *budget.lock() = Some(0);
                 BlobUploadFailed::permanent(
-                    "Cloud storage is full - remove some synced images to make room".to_string(),
+                    "Cloud storage is full. Remove some synced images or files to make room.".to_string(),
                 )
             } else {
                 // A transport failure (no host, no route) carries no status and
                 // reads as transient - that is the offline case this recovers.
+                eprintln!("[sync] image upload request failed: {e}");
                 BlobUploadFailed {
-                    message: format!("Image upload failed: {e}"),
+                    message: "Image upload failed. Try again later.".to_string(),
                     retryable: e.is_transient(),
                 }
             }
@@ -5773,15 +5774,21 @@ async fn upload_image_blob(
     // another try rather than a "not sent".
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, &mime)
         .await
-        .map_err(|e| BlobUploadFailed {
-            message: format!("Image upload failed: {e}"),
-            retryable: true,
+        .map_err(|e| {
+            eprintln!("[sync] image upload failed: {e}");
+            BlobUploadFailed {
+                message: "Image upload failed. Try again later.".to_string(),
+                retryable: true,
+            }
         })?;
     http.confirm_blob_upload(&up.blob_key)
         .await
-        .map_err(|e| BlobUploadFailed {
-            message: format!("Image upload failed: {e}"),
-            retryable: true,
+        .map_err(|e| {
+            eprintln!("[sync] image upload failed: {e}");
+            BlobUploadFailed {
+                message: "Image upload failed. Try again later.".to_string(),
+                retryable: true,
+            }
         })?;
     if let Some(remaining) = budget.lock().as_mut() {
         *remaining = remaining.saturating_sub(size);
@@ -5835,7 +5842,7 @@ async fn upload_files_blob(
     let size = ciphertext.len() as u64;
     if size > BLOB_SIZE_LIMIT {
         return Err(BlobUploadFailed::permanent(format!(
-            "{} is over the 5 MB limit for synced files",
+            "{} is over the 5 MB limit for synced files. It stays on this device.",
             format_bytes(size)
         )));
     }
@@ -5845,7 +5852,7 @@ async fn upload_files_blob(
     if let Some(remaining) = budget_left {
         if size > remaining {
             return Err(BlobUploadFailed::permanent(format!(
-                "Cloud storage is full - {} free, these files need {}",
+                "Cloud storage is full. {} is free and these files need {}.",
                 format_bytes(remaining),
                 format_bytes(size)
             )));
@@ -5865,26 +5872,33 @@ async fn upload_files_blob(
             if e.status == Some(402) {
                 *budget.lock() = Some(0);
                 BlobUploadFailed::permanent(
-                    "Cloud storage is full - remove some synced items to make room".to_string(),
+                    "Cloud storage is full. Remove some synced images or files to make room.".to_string(),
                 )
             } else {
+                eprintln!("[sync] file upload request failed: {e}");
                 BlobUploadFailed {
-                    message: format!("File upload failed: {e}"),
+                    message: "File upload failed. Try again later.".to_string(),
                     retryable: e.is_transient(),
                 }
             }
         })?;
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, MIME)
         .await
-        .map_err(|e| BlobUploadFailed {
-            message: format!("File upload failed: {e}"),
-            retryable: true,
+        .map_err(|e| {
+            eprintln!("[sync] file upload failed: {e}");
+            BlobUploadFailed {
+                message: "File upload failed. Try again later.".to_string(),
+                retryable: true,
+            }
         })?;
     http.confirm_blob_upload(&up.blob_key)
         .await
-        .map_err(|e| BlobUploadFailed {
-            message: format!("File upload failed: {e}"),
-            retryable: true,
+        .map_err(|e| {
+            eprintln!("[sync] file upload failed: {e}");
+            BlobUploadFailed {
+                message: "File upload failed. Try again later.".to_string(),
+                retryable: true,
+            }
         })?;
     if let Some(remaining) = budget.lock().as_mut() {
         *remaining = remaining.saturating_sub(size);
@@ -5943,7 +5957,7 @@ fn zip_paths_to_bytes(content: &str) -> Result<Vec<u8>, String> {
             };
             if meta.is_file() {
                 let data =
-                    std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+                    std::fs::read(path).map_err(|_| "The file could not be read. It may have been moved or deleted.".to_string())?;
                 zip.start_file(top, opts).map_err(|e| e.to_string())?;
                 zip.write_all(&data).map_err(|e| e.to_string())?;
                 wrote += 1;
@@ -5952,7 +5966,7 @@ fn zip_paths_to_bytes(content: &str) -> Result<Vec<u8>, String> {
             }
         }
         if wrote == 0 {
-            return Err("no readable files to sync".to_string());
+            return Err("The file could not be read. It may have been moved or deleted.".to_string());
         }
         zip.finish().map_err(|e| e.to_string())?;
     }
@@ -5971,7 +5985,7 @@ fn zip_dir_into<W: std::io::Write + std::io::Seek>(
     let mut wrote = 0usize;
     zip.add_directory(format!("{prefix}/"), opts)
         .map_err(|e| e.to_string())?;
-    let rd = std::fs::read_dir(dir).map_err(|e| format!("read dir {}: {e}", dir.display()))?;
+    let rd = std::fs::read_dir(dir).map_err(|_| "The file could not be read. It may have been moved or deleted.".to_string())?;
     for entry in rd.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
@@ -5980,7 +5994,7 @@ fn zip_dir_into<W: std::io::Write + std::io::Seek>(
             continue;
         };
         if meta.is_file() {
-            let data = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+            let data = std::fs::read(&path).map_err(|_| "The file could not be read. It may have been moved or deleted.".to_string())?;
             zip.start_file(child, opts).map_err(|e| e.to_string())?;
             zip.write_all(&data).map_err(|e| e.to_string())?;
             wrote += 1;
@@ -6305,7 +6319,7 @@ async fn push_entry_task(
                         // Not worth a row in the list: the newer copy is the one
                         // the user wants, and it is already there.
                         "stale_update" => String::new(),
-                        other => format!("The server refused this ({other})."),
+                        _ => "The server refused this item. It stays on this device.".to_string(),
                     };
                     if !told.is_empty() {
                         record_skip(&ctx, &client_id, what, told);
@@ -6323,7 +6337,7 @@ async fn push_entry_task(
                     &ctx,
                     &client_id,
                     what,
-                    format!("The server refused this ({e}). It stays on this device."),
+                    "The server refused this item. It stays on this device.".to_string(),
                 );
                 return;
             }

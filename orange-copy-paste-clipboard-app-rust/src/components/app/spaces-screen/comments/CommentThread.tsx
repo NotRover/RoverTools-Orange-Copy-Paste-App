@@ -13,6 +13,7 @@ import { TrashIcon } from "../../../icons";
 
 import type { SpaceComment, SpaceMember } from "../../../../types";
 import { timeAgo } from "../../../../types";
+import { userError } from "../../../../userError";
 import { UserAvatar } from "../../../UserAvatar";
 import { deferDestructive, toastError } from "../../toast/toastBus";
 import { usePendingRemovals } from "../../../../hooks/pendingRemoval";
@@ -492,7 +493,7 @@ const CommentThread: React.FC<{
       .catch((e) => {
         // A failed refresh of a thread already on screen is not worth
         // replacing that thread with an error.
-        if (live && !cache.has(key)) setError(String(e));
+        if (live && !cache.has(key)) setError(userError(e, "Could not load the comments. Try again."));
       })
       .finally(() => {
         if (live) setLoading(false);

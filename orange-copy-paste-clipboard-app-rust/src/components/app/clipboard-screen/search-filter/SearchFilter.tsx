@@ -711,7 +711,7 @@ export const NoResults: React.FC<NoResultsProps> = ({ sf }) => {
       <p className="cs-no-results-subtitle">
         {sf.searchQuery.trim() ? (
           <>
-            Nothing matches &ldquo;{sf.searchQuery.trim()}&rdquo;
+            Nothing matches &quot;{sf.searchQuery.trim()}&quot;
             {names ? <> with {names}</> : null}.
           </>
         ) : (

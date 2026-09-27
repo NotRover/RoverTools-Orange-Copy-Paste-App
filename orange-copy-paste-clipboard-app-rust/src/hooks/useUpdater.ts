@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { userError } from "../userError";
 
 /** Mirrors `UpdateInfo` in `src-tauri/src/updater.rs`. */
 interface UpdateInfo {
@@ -129,7 +130,7 @@ export function useUpdater(): Updater {
         setStage("idle");
       }
     } catch (e) {
-      setError(String(e));
+      setError(userError(e, "Could not check for updates. Check your connection and try again."));
       setStage("error");
     }
   }, []);
@@ -142,7 +143,7 @@ export function useUpdater(): Updater {
       setInfo(await invoke<UpdateInfo>("updater_download"));
       setStage("ready");
     } catch (e) {
-      setError(String(e));
+      setError(userError(e, "The download failed. Try again."));
       setStage("error");
     }
   }, []);
@@ -156,7 +157,7 @@ export function useUpdater(): Updater {
       // below is a meaningful outcome.
       await invoke("updater_install");
     } catch (e) {
-      setError(String(e));
+      setError(userError(e, "The update could not be installed. Try again, or download it from the website."));
       setStage("error");
     }
   }, []);

@@ -108,6 +108,7 @@ import {
   toastError,
 } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
+import { userError } from "../../../userError";
 import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
 import {
   shouldConfirmSpaceRemove,
@@ -2487,16 +2488,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   // Tauri commands reject with the Rust error string, which reads like
   // `create space 401: {...}`. Translate the cases a user can act on and let
   // the caller's fallback cover the rest - never show the raw string.
-  const errMsg = (e: unknown, fallback: string) => {
-    const raw = typeof e === "string" ? e : "";
-    if (raw.includes("not authenticated"))
-      return "Sign in on the Account screen first.";
-    if (/\b401\b/.test(raw))
-      return "Your session expired. Sign in again on the Account screen.";
-    if (/\b403\b/.test(raw))
-      return "This account does not have access to that.";
-    return fallback;
-  };
+  const errMsg = (e: unknown, fallback: string) => userError(e, fallback);
 
   /* A content item is ours when its key never arrived from anyone else, which
      is the same test the cards use to draw the direction badge. A placeholder
@@ -2634,7 +2626,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 entryType,
               });
             } catch (e) {
-              setSpaceError(String(e));
+              setSpaceError(errMsg(e, "Could not remove it from the space."));
               throw e;
             } finally {
               // Re-read before returning: the hint is released the moment this
@@ -3119,7 +3111,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
               });
             }
           } catch (e) {
-            setSpaceError(String(e));
+            setSpaceError(errMsg(e, "Could not remove it from the space."));
             throw e;
           } finally {
             // Re-read before returning: the hints are released the moment this
@@ -3285,7 +3277,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         refreshPendingJoins();
         reloadSpaces();
       } catch (e) {
-        setListError(errMsg(e, "Could not use that code."));
+        setListError(errMsg(e, "That code did not work. Check it, or ask for a new invite link."));
       } finally {
         setFormLoading(false);
       }
@@ -3437,8 +3429,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         setSpaces(next);
         showToast(
           enabled
-            ? "Everyone here can now read earlier items"
-            : "New members will only see items from after they join",
+            ? "Everyone here can now read earlier items."
+            : "New members will only see items from after they join.",
           "info",
         );
       } catch (e) {
@@ -3511,12 +3503,12 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   const handleRevokeInvite = useCallback(
     (inviteId: string) => {
       deferDestructive(
-        "Invite revoked",
+        "Invite withdrawn",
         async () => {
           try {
             await invoke("sync_revoke_invite", { inviteId });
           } catch (e) {
-            setSpaceError(errMsg(e, "Could not revoke the invite."));
+            setSpaceError(errMsg(e, "Could not withdraw the invite."));
             throw e;
           } finally {
             await refreshInvites();
@@ -3525,7 +3517,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         {
           key: "space-invite",
           hides: [`invite:${inviteId}`],
-          errorPrefix: "Could not revoke the invite",
+          errorPrefix: "Could not withdraw the invite",
         },
       );
     },

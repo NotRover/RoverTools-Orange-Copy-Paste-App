@@ -1566,7 +1566,7 @@ pub async fn space_comment_add(
 ) -> Result<SpaceComment, String> {
     let body = body.trim();
     if body.is_empty() {
-        return Err("Write something first".into());
+        return Err("Write something first.".into());
     }
     let sync = sync_client(&state)?;
     sync.add_space_comment(&space_id, &client_id, &entry_type, body)
@@ -1639,7 +1639,7 @@ pub async fn sync_revoke_device(
     let (sync, http) = sync_http(&state)?;
     // Refuse to revoke the device we're running on — sign out is the way.
     if sync.device_id().as_deref() == Some(device_id.as_str()) {
-        return Err("can't remove this device while signed in on it. Sign out instead".into());
+        return Err("You cannot remove the device you are using. Sign out instead.".into());
     }
     http.revoke_device(&device_id).await
 }
@@ -1695,7 +1695,7 @@ fn invite_refusal(err: crate::sync::client::ApiError) -> String {
         Some(403) => "Only the owner can invite people to this space.".to_string(),
         Some(401) => "Your session expired. Sign in again on the Account screen.".to_string(),
         Some(429) => "Too many invites just now. Try again in a moment.".to_string(),
-        _ => format!("Could not send the invite. {detail}"),
+        _ => "Could not send the invite. Check the email address and your connection, then try again.".to_string(),
     }
 }
 
