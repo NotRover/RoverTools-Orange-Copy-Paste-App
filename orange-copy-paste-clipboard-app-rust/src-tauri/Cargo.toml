@@ -84,7 +84,7 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["r
 # Futures utilities (Stream/Sink combinators for the WS listener)
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # Argon2id — User Master Key derivation
-argon2 = "0.5"
+argon2 = "0.6"
 # AES-256-GCM — symmetric content encryption
 aes-gcm = "0.10"
 # SHA-256 — blob checksum for the upload contract
