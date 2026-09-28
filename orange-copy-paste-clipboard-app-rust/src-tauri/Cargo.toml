@@ -80,7 +80,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Async runtime for the sync module's dedicated background thread pool
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
 # Async WebSocket client (rustls TLS with bundled WebPKI certificate roots)
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 # Futures utilities (Stream/Sink combinators for the WS listener)
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # Argon2id — User Master Key derivation
