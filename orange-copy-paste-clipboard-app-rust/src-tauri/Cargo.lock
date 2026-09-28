@@ -3013,7 +3013,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
  "winreg 0.55.0",
  "x25519-dalek",
  "zeroize",
@@ -4348,7 +4348,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
