@@ -3,8 +3,10 @@
 //! Maps `"clipboard:{client_id}"` → `server_uuid` and
 //!      `"note:{client_id}"`      → `server_uuid`.
 //!
-//! Losing this file is safe — the server deduplicates by `client_id` on the
-//! next push, so nothing is lost permanently.
+//! It is also this device's record of which clipboard entries are in the
+//! cloud or a space, which is what keeps them across a restart with Keep
+//! history off. So a file that will not read is never taken for an empty one:
+//! see [`IdMap::unreadable`].
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -139,12 +141,41 @@ const PLACEHOLDER_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub struct IdMap {
     data: IdMapData,
     path: PathBuf,
+    /// The file existed at load and would not read or parse.
+    unreadable: bool,
 }
 
 impl IdMap {
+    /// Load the map. A file that is there and will not read loads as an empty
+    /// map with [`Self::unreadable`] set; the file is then never written this session.
     pub fn load(path: PathBuf) -> Self {
-        let data = crate::sync::persist::load_json(&path);
-        let mut map = Self { data, path };
+        let (data, unreadable) = crate::sync::persist::load_json_checked(&path);
+        let mut map = Self::with_data(data, path);
+        map.unreadable = unreadable;
+        map
+    }
+
+    /// Whether the file failed to load. The map then says nothing about which
+    /// entries are in the cloud or a space, so nothing may be dropped on its
+    /// word this session.
+    pub fn unreadable(&self) -> bool {
+        self.unreadable
+    }
+
+    /// Like [`Self::load`], but a file that exists and will not read or parse
+    /// is an error rather than an empty map. For the callers that write the map
+    /// back with sync off: the offline markers are state the server cannot
+    /// rebuild, so an empty map saved over a briefly locked file loses them.
+    pub fn try_load(path: PathBuf) -> Result<Self, String> {
+        let data = match crate::health::read_state(&path)? {
+            None => IdMapData::default(),
+            Some(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+        };
+        Ok(Self::with_data(data, path))
+    }
+
+    fn with_data(data: IdMapData, path: PathBuf) -> Self {
+        let mut map = Self { data, path, unreadable: false };
         // Also on startup, not only when the next removal arrives: an install
         // that stops removing things would otherwise keep its last batch for
         // good.
@@ -156,7 +187,7 @@ impl IdMap {
         map
     }
 
-    fn persist(&self) {
+    pub(crate) fn persist(&self) {
         crate::sync::persist::save_json(&self.path, &self.data);
     }
 
@@ -192,12 +223,26 @@ impl IdMap {
         self.data.entries.keys().cloned().collect()
     }
 
+    /// Keys of every entry any part of this record names: acknowledged by the
+    /// server, shared into a space (a share still waiting for its space key has
+    /// no server row yet), or received from another member. What the exit flush
+    /// keeps with Keep history off. A received item from a space the user has
+    /// since left is on no server this device can reach any more, so every
+    /// field that names it counts, not only the server id.
+    pub fn keep_keys(&self) -> HashSet<String> {
+        self.data
+            .entries
+            .keys()
+            .chain(self.data.entry_shares.keys())
+            .chain(self.data.remote_entries.iter())
+            .cloned()
+            .collect()
+    }
+
     pub fn remove_entry(&mut self, client_id: &str) {
-        self.data.entries.remove(client_id);
-        self.data.entry_shares.remove(client_id);
+        self.drop_copy(client_id);
         self.data.remote_entries.remove(client_id);
         self.data.entry_owners.remove(client_id);
-        self.data.entry_arrivals.remove(client_id);
         self.persist();
     }
 
@@ -210,10 +255,53 @@ impl IdMap {
     /// "Upload" looks for, so the next bulk upload would publish someone else's
     /// item under this account and hand every member a rival copy.
     pub fn forget_received_copy(&mut self, client_id: &str) {
+        self.drop_copy(client_id);
+        self.persist();
+    }
+
+    /// What both removals above drop: the server id and this device's view of
+    /// the copy. Authorship is left to the caller.
+    fn drop_copy(&mut self, client_id: &str) {
         self.data.entries.remove(client_id);
         self.data.entry_shares.remove(client_id);
         self.data.entry_arrivals.remove(client_id);
-        self.persist();
+    }
+
+    /// Record a delete made while sync is off, so the row does not come back
+    /// when sync returns.
+    ///
+    /// No tombstone is ever sent for it: queued with no client, it would
+    /// replay under whichever account signs in next. So the item stays on the
+    /// server and on other devices, and this marker is what keeps it off this
+    /// one. `local_only` exempts it from pruning, since the server keeps
+    /// offering the row for good. An item this device has no record of in the
+    /// cloud changes nothing.
+    ///
+    /// Memory only, so a Clear all writes the file once: returns whether the
+    /// map changed, and the caller persists.
+    pub fn mark_removed_offline(&mut self, key: &str, entry_ts: Option<u64>, queued: bool) -> bool {
+        let remote = self.data.remote_entries.contains(key);
+        if !(self.data.entries.contains_key(key) || remote || queued) {
+            return false;
+        }
+        let marker = DeletedMarker {
+            space_ids: self.shares_for(key),
+            owner_id: self.owner_of(key),
+            deleted_at: crate::sync::now_ms(),
+            by_author: !remote,
+            content_gone: true,
+            local_only: true,
+            entry_ts,
+            removed_by: None,
+        };
+        self.data.deleted_markers.insert(key.to_string(), marker);
+        // Like `forget_received_copy` for a received item, which keeps who
+        // wrote it, and like `remove_entry` otherwise.
+        self.drop_copy(key);
+        if !remote {
+            self.data.entry_owners.remove(key);
+        }
+        true
     }
 
     // ── Direction ─────────────────────────────────────────────────
@@ -493,9 +581,117 @@ mod tests {
     /// A map backed by a path in a temp dir, so `persist` is exercised rather
     /// than stubbed.
     fn map() -> IdMap {
-        let dir = std::env::temp_dir().join(format!("id_map_test_{}", crate::sync::now_ms()));
+        let dir = std::env::temp_dir().join(format!("id_map_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         IdMap::load(dir.join("id_map.json"))
+    }
+
+    /// A share into a space whose key has not arrived has no server row, and a
+    /// received item may have lost its row: both still name the entry.
+    #[test]
+    fn keep_keys_cover_shares_and_received_items() {
+        let mut m = map();
+        m.set_entry("clipboard:a", "srv-1");
+        m.set_entry_shares("clipboard:b", &["space-1".to_string()]);
+        m.mark_entry_remote("clipboard:c");
+        let keys = m.keep_keys();
+        for k in ["clipboard:a", "clipboard:b", "clipboard:c"] {
+            assert!(keys.contains(k), "{k}");
+        }
+    }
+
+    #[test]
+    fn an_unreadable_map_is_flagged_not_empty() {
+        let dir = std::env::temp_dir().join(format!("id_map_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("id_map.json");
+        std::fs::write(&path, b"{\"entries\": {").unwrap();
+        assert!(IdMap::load(path).unreadable());
+        assert!(!map().unreadable());
+    }
+
+    /// A delete made with sync off: the row is forgotten and a marker that is
+    /// never pruned blocks the server copy from merging back.
+    #[test]
+    fn an_offline_delete_blocks_the_row_coming_back() {
+        let mut m = map();
+        m.set_entry("clipboard:a", "srv-1");
+        m.set_entry_shares("clipboard:a", &["space-1".to_string()]);
+
+        assert!(m.mark_removed_offline("clipboard:a", Some(42), false));
+        m.persist();
+
+        assert!(m.get_server_id("clipboard:a").is_none());
+        assert!(m.shares_for("clipboard:a").is_empty());
+        let marker = m.deleted_marker("clipboard:a").expect("marker written");
+        assert!(marker.local_only && marker.content_gone && marker.by_author);
+        assert_eq!(marker.space_ids, vec!["space-1".to_string()]);
+        assert_eq!(marker.entry_ts, Some(42));
+        let reloaded = IdMap::load(m.path.clone());
+        assert!(reloaded.deleted_marker("clipboard:a").is_some());
+        assert!(reloaded.get_server_id("clipboard:a").is_none());
+    }
+
+    #[test]
+    fn an_offline_delete_of_a_received_item_keeps_its_author() {
+        let mut m = map();
+        m.set_entry("clipboard:theirs", "srv-1");
+        m.mark_entry_remote("clipboard:theirs");
+        m.set_entry_owner("clipboard:theirs", "hasan");
+
+        assert!(m.mark_removed_offline("clipboard:theirs", None, false));
+
+        assert!(m.get_server_id("clipboard:theirs").is_none());
+        assert!(m.is_remote("clipboard:theirs"));
+        assert_eq!(m.owner_of("clipboard:theirs").as_deref(), Some("hasan"));
+        let marker = m.deleted_marker("clipboard:theirs").expect("marker written");
+        assert!(!marker.by_author);
+        assert_eq!(marker.owner_id.as_deref(), Some("hasan"));
+    }
+
+    #[test]
+    fn an_offline_delete_of_an_unknown_item_writes_nothing() {
+        let mut m = map();
+        assert!(
+            !m.mark_removed_offline("clipboard:never-synced", Some(1), false),
+            "nothing changed, so the caller writes no file for it"
+        );
+        assert!(m.deleted_marker("clipboard:never-synced").is_none());
+        assert!(!m.path.exists());
+    }
+
+    /// Queued for upload but not acknowledged yet: the push still goes out when
+    /// sync returns, so the marker has to be there to keep it off this device.
+    #[test]
+    fn an_offline_delete_of_a_queued_only_item_is_remembered() {
+        let mut m = map();
+        assert!(m.mark_removed_offline("note:queued", None, true));
+        assert!(m.deleted_marker("note:queued").is_some_and(|d| d.local_only));
+    }
+
+    #[test]
+    fn an_offline_marker_survives_pruning() {
+        let mut m = map();
+        m.set_entry("clipboard:a", "srv-1");
+        m.mark_removed_offline("clipboard:a", None, false);
+
+        // A removal far in the future makes every ordinary marker expire.
+        let far = crate::sync::now_ms() + 10 * PLACEHOLDER_TTL_MS;
+        m.mark_deleted(
+            "clipboard:b",
+            DeletedMarker {
+                space_ids: vec!["space-1".to_string()],
+                owner_id: None,
+                deleted_at: far,
+                by_author: true,
+                content_gone: true,
+                local_only: false,
+                entry_ts: None,
+                removed_by: None,
+            },
+        );
+
+        assert!(m.deleted_marker("clipboard:a").is_some());
     }
 
     /// The rule an account-wide sweep depends on. `entries` holds what this

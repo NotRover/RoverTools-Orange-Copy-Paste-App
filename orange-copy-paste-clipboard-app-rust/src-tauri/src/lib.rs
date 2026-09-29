@@ -36,6 +36,78 @@ const EXIT_DRAIN_MS: u64 = 3000;
 
 const DRAIN_POLL_MS: u64 = 25;
 
+/// How long a quit or a restart waits, in all, for sync work already running
+/// (uploads and blob downloads) and then for a token rotation. What is still
+/// running after it is on disk in the pending-work record and finishes on the
+/// next launch.
+const SYNC_DRAIN_MS: u64 = 10_000;
+
+/// Set while a sync drain has the main window hidden, so a restart that fails
+/// can put it back.
+static DRAIN_HID_WINDOW: AtomicBool = AtomicBool::new(false);
+
+/// Set once the runtime has been asked for a restart. The exit that follows
+/// writes everything, like the flush before it, instead of dropping entries.
+static RESTARTING: AtomicBool = AtomicBool::new(false);
+
+/// Set while a quit waits for sync work. Opening the app again meanwhile sets
+/// [`QUIT_CANCELLED`], and the app stays instead of closing on the user.
+static QUIT_DRAINING: AtomicBool = AtomicBool::new(false);
+static QUIT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Stop new sync work and wait for what is running, then return what is left
+/// of [`SYNC_DRAIN_MS`] for the rotation drain.
+///
+/// Returns at once when nothing is running. Otherwise the main window hides
+/// and a notice, which stays up until the app exits, says why it has not gone
+/// yet. A timeout is recorded, never enforced, as with [`drain_token_rotation`]:
+/// the work left over is named in the pending-work record, so the next launch
+/// runs it and the exit flush keeps its entry. Called from a plain thread,
+/// never the main one: the notice needs the event loop running to show.
+pub(crate) fn drain_sync_work(app: &tauri::AppHandle, restarting: bool) -> u64 {
+    let start = std::time::Instant::now();
+    let left = || SYNC_DRAIN_MS.saturating_sub(start.elapsed().as_millis() as u64);
+    let Some(sync) = app.state::<AppState>().sync_client.lock().clone() else {
+        return SYNC_DRAIN_MS;
+    };
+    sync.begin_quit();
+    if !sync.work_running() {
+        return SYNC_DRAIN_MS;
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        if w.is_visible().unwrap_or(false) && w.hide().is_ok() {
+            DRAIN_HID_WINDOW.store(true, Ordering::SeqCst);
+        }
+    }
+    crate::runtime::notifications::notify_finishing_sync(app, restarting);
+    QUIT_DRAINING.store(!restarting, Ordering::SeqCst);
+    while sync.work_running() && left() > 0 && !QUIT_CANCELLED.load(Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(DRAIN_POLL_MS));
+    }
+    QUIT_DRAINING.store(false, Ordering::SeqCst);
+    if sync.work_running() && !QUIT_CANCELLED.load(Ordering::SeqCst) {
+        crate::health::note(
+            "exit: sync work did not finish",
+            "the process is leaving with uploads or downloads running; the next launch runs them",
+        );
+    }
+    left()
+}
+
+/// A quit or restart that was asked for did not happen (the user opened the
+/// app again, or an update failed to install): sync starts again, and the
+/// window a drain hid comes back.
+pub(crate) fn resume_after_failed_restart(app: &tauri::AppHandle) {
+    let sync = app.state::<AppState>().sync_client.lock().clone();
+    if let Some(sync) = sync {
+        sync.end_quit();
+    }
+    crate::runtime::popup_windows::hide_popup(app, "notification");
+    if DRAIN_HID_WINDOW.swap(false, Ordering::SeqCst) {
+        crate::runtime::tray::show_main_window(app);
+    }
+}
+
 /// Wait, up to `budget_ms`, for this process to finish spending a refresh token.
 ///
 /// GoTrue revokes a refresh token the instant it is presented, so between that
@@ -70,32 +142,52 @@ pub(crate) fn drain_token_rotation(budget_ms: u64) -> bool {
     false
 }
 
-/// System boot timestamp (seconds since UNIX epoch) for detecting reboots.
-#[cfg(windows)]
-fn system_boot_epoch_secs() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let uptime = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000;
-    now.saturating_sub(uptime)
+/// Fold a sealed session's leftover for `file` into its store, and discard it
+/// only once a save holding it has landed. `merge` and `save` each take the
+/// store's lock themselves, so the merge's guard is gone before the save locks
+/// again (holding it across both deadlocked).
+fn adopt_leftover(
+    file: &std::path::Path,
+    merge: impl FnOnce(&[u8]) -> Option<usize>,
+    save: impl FnOnce() -> bool,
+) {
+    let Some(bytes) = crate::health::sealed_leftover(file) else {
+        return;
+    };
+    let landed = match merge(&bytes) {
+        Some(0) => true,
+        Some(_) => save(),
+        None => false,
+    };
+    if landed {
+        crate::health::discard_sealed_leftover(file);
+    }
 }
 
-#[cfg(not(windows))]
-fn system_boot_epoch_secs() -> u64 {
-    // Read /proc/stat for btime (boot time in epoch seconds).
-    // Available on all Linux kernels.  Falls back to 0 on other Unixes.
-    if let Ok(stat) = std::fs::read_to_string("/proc/stat") {
-        for line in stat.lines() {
-            if let Some(rest) = line.strip_prefix("btime ") {
-                if let Ok(v) = rest.trim().parse::<u64>() {
-                    return v;
-                }
-            }
-        }
-    }
-    0
+/// The drain and flush a self-restart runs before it asks for the restart: the
+/// runtime ignores an objection to a restart's exit, so nothing can wait there.
+/// Sync work goes first, so what it lands is in the writes. Flushed on both
+/// sides of the rotation drain: the second, forced write keeps whatever landed
+/// while it finished. Blocks for up to [`SYNC_DRAIN_MS`], so the callers run it
+/// off the main thread.
+pub(crate) fn flush_for_restart(app: &tauri::AppHandle) {
+    let left = drain_sync_work(app, true);
+    flush_dirty_stores(app, Flush::Dirty);
+    drain_token_rotation(left.min(EXIT_DRAIN_MS));
+    flush_dirty_stores(app, Flush::Forced);
+}
+
+/// What a [`flush_dirty_stores`] call is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Flush {
+    /// Write what is dirty: the timer, and a pull page before its cursor moves.
+    Dirty,
+    /// Write history too, dirty or not, before a self-restart. An update
+    /// install can fail and hand back the running app, so nothing is dropped.
+    Forced,
+    /// The last write the process makes, forced. With Keep history off, the
+    /// entries it leaves out are gone with the process, so their files go too.
+    Exit,
 }
 
 /// Write every dirty store to disk, once.
@@ -110,21 +202,85 @@ fn system_boot_epoch_secs() -> u64 {
 /// write, so overlapping callers do the work once. Every save funnels through
 /// `health::write_state`, so degraded and sealed files stay protected here the
 /// same as everywhere else.
-pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle) {
+///
+/// Any `mode` but `Flush::Dirty` forces the history write, so the last one
+/// before the process goes holds everything, dirty flag or not.
+///
+/// Saved entries are always written. With Keep history off, so are entries in
+/// the cloud or a space, queued, or with an upload or download under way, all
+/// of which this device's sync records name; the rest stay in memory only, and
+/// at `Flush::Exit` their files go once the write lands - unless the system
+/// clipboard still points at one. A record that would not read keeps
+/// everything.
+///
+/// Never call this while holding `sync_client`, `history`, or any lock that
+/// `SyncClient::keep_keys` takes. It takes those while holding `history`, so no
+/// code may take `history` while holding one of them.
+pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle, mode: Flush) {
     use tauri::Manager;
+    // A second caller waits for the write in progress instead of racing it.
+    static FLUSH: Mutex<()> = Mutex::new(());
+    let _one = FLUSH.lock();
     let Ok(app_data) = app.path().app_data_dir() else {
         return;
     };
     let state: tauri::State<'_, AppState> = app.state();
 
-    if state.keep_history.load(Ordering::Relaxed)
-        && state.history_dirty.swap(false, Ordering::Relaxed)
-    {
-        let _ = state.history.lock().save_all_to_file(&app_data.join("history.bin"));
-        let _ = state
-            .history
-            .lock()
-            .save_saved_to_file(&app_data.join("pinned_entries.bin"));
+    if mode != Flush::Dirty {
+        state.history_dirty.store(true, Ordering::Relaxed);
+    }
+    if state.history_dirty.swap(false, Ordering::Relaxed) {
+        let keep_history = state.keep_history.load(Ordering::Relaxed);
+        // What the system clipboard holds as files, read before the history
+        // lock: an OS call, and only the exit deletes anything. A clipboard
+        // that will not read may hold any file, so it deletes nothing.
+        let clipboard_refs = if mode == Flush::Exit && !keep_history {
+            crate::clipboard::files::clipboard_file_paths()
+        } else {
+            Some(Vec::new())
+        };
+        // The client, cloned out of the slot so the slot is not held across
+        // the history lock. With sync off, this device's records on disk still
+        // name what is in the cloud or a space; read under the slot, so no
+        // client is built over these files meanwhile.
+        let (client, on_disk) = if keep_history {
+            (None, None)
+        } else {
+            let slot = state.sync_client.lock();
+            match slot.clone() {
+                Some(s) => (Some(s), None),
+                None => (None, Some(keep_keys_on_disk(&app_data))),
+            }
+        };
+        let mut history = state.history.lock();
+        // Read while the history lock is held: an entry that lands in history
+        // is named by its sync record before it lands (see `merge_pulled`), so
+        // none can arrive between this read and the write it feeds.
+        let kept: Option<std::collections::HashSet<String>> = if keep_history {
+            None
+        } else {
+            match (&client, on_disk) {
+                (Some(s), _) => s.keep_keys(),
+                (None, Some(keys)) => keys,
+                (None, None) => None,
+            }
+        }
+        .map(|keys| {
+            keys.into_iter()
+                .filter_map(|k| k.strip_prefix("clipboard:").map(str::to_owned))
+                .collect()
+        });
+        let keep_all = kept.is_none();
+        let keep = |id: &str| keep_all || kept.as_ref().is_some_and(|k| k.contains(id));
+        // After the exit prune, what is left is exactly what stays.
+        let mut pruned = false;
+        if mode == Flush::Exit && !keep_all {
+            if let Some(refs) = &clipboard_refs {
+                history.drop_unkept(keep, refs);
+                pruned = true;
+            }
+        }
+        let _ = history.save_to_file(&app_data.join("history.bin"), |id| pruned || keep(id));
     }
     if state.notes_dirty.swap(false, Ordering::Relaxed) {
         let _ = state.notes.lock().save_to_file(&app_data.join("notes.bin"));
@@ -137,16 +293,41 @@ pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle) {
     }
 }
 
+/// Every entry key this device's sync records on disk name, for the flush
+/// with sync off: the id map's keep set, the queue, and the pending-work
+/// record. `None` when any of them is there and will not read, which keeps
+/// everything this time rather than nothing.
+fn keep_keys_on_disk(app_data: &std::path::Path) -> Option<std::collections::HashSet<String>> {
+    let mut keys = crate::sync::id_map::IdMap::try_load(crate::sync::id_map::id_map_path(app_data))
+        .ok()?
+        .keep_keys();
+    keys.extend(
+        crate::sync::pending_queue::PendingQueue::try_keys(
+            &crate::sync::pending_queue::pending_queue_path(app_data),
+        )
+        .ok()?,
+    );
+    keys.extend(
+        crate::sync::pending_work::PendingWork::try_keys(
+            &crate::sync::pending_work::pending_work_path(app_data),
+        )
+        .ok()?,
+    );
+    Some(keys)
+}
+
 /// The bundle identifier before the 2026 rename that dropped a personal handle
 /// (`com.spect.*`). Kept only so an existing install's data can be carried across
 /// the rename once; safe to delete a few releases after the renamed build ships.
 const LEGACY_APP_DATA_IDENTIFIER: &str = "com.spect.orange-copy-paste";
 
 /// TEMPORARY (added with the 2026 `com.spect.*` -> `io.github.notrover.*` identifier
-/// rename). Delete this function, `copy_dir_recursive`, `LEGACY_APP_DATA_IDENTIFIER`
-/// and the call in `setup` once every install has run a renamed build at least once -
-/// a few stable releases after the rename ships. At that point no install still keeps
-/// its data under the old identifier, so this only ever no-ops.
+/// rename). Delete this function and `migrate_legacy_webview_storage` together, with
+/// `copy_dir_recursive`, `LEGACY_APP_DATA_IDENTIFIER`, their calls in `run` and
+/// `setup`, the webview tests and the Windows `dirs` dependency, once every install has
+/// run a renamed build at least once - a few stable releases after the rename ships.
+/// At that point no install still keeps its data under the old identifier, so both
+/// only ever no-op.
 ///
 /// Copy the previous identifier's app-data folder into the current one, once.
 ///
@@ -158,16 +339,16 @@ const LEGACY_APP_DATA_IDENTIFIER: &str = "com.spect.orange-copy-paste";
 /// runs only when the new folder holds nothing yet, so it never clobbers a real
 /// install and is a no-op on every later launch. The OS keychain is not keyed by
 /// the identifier, so sign-in state carries over without any help here.
-fn migrate_legacy_app_data(app: &tauri::AppHandle) {
+///
+/// Returns the line for `crash.log`, which has no directory yet when this runs.
+fn migrate_legacy_app_data(app: &tauri::AppHandle) -> Option<(&'static str, String)> {
     use tauri::Manager;
     let Ok(new_dir) = app.path().app_data_dir() else {
-        return;
+        return None;
     };
-    let Some(old_dir) = new_dir.parent().map(|b| b.join(LEGACY_APP_DATA_IDENTIFIER)) else {
-        return;
-    };
+    let old_dir = new_dir.parent()?.join(LEGACY_APP_DATA_IDENTIFIER);
     if old_dir == new_dir || !old_dir.is_dir() {
-        return;
+        return None;
     }
     // Skip when the new location already holds data: an install that has run
     // before, or a migration that already happened.
@@ -175,32 +356,82 @@ fn migrate_legacy_app_data(app: &tauri::AppHandle) {
         .map(|mut it| it.next().is_some())
         .unwrap_or(false);
     if new_has_data {
-        return;
+        return None;
     }
-    match copy_dir_recursive(&old_dir, &new_dir) {
-        Ok(()) => eprintln!(
-            "[migrate] carried app-data across the identifier rename: {} -> {}",
-            old_dir.display(),
-            new_dir.display()
-        ),
-        Err(e) => eprintln!(
-            "[migrate] app-data copy {} -> {} failed: {e}",
-            old_dir.display(),
-            new_dir.display()
-        ),
-    }
+    let paths = format!("{} -> {}", old_dir.display(), new_dir.display());
+    Some(match copy_dir_recursive(&old_dir, &new_dir, &[]) {
+        Ok(()) => ("migrate: carried app-data across the identifier rename", paths),
+        Err(e) => ("migrate: app-data copy failed", format!("{paths}: {e}")),
+    })
 }
 
-/// Recursively copy a directory tree. Used once by `migrate_legacy_app_data`.
-fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+/// TEMPORARY - goes with `migrate_legacy_app_data`; its note says when.
+///
+/// Copy the previous identifier's WebView2 `localStorage` into the current
+/// profile, once. The roots are the WebView2 user data folders tauri picks,
+/// `%LOCALAPPDATA%\<identifier>`, for the old and the current identifier.
+///
+/// The profile is keyed by the identifier too, but it lives under local app
+/// data rather than `app_data_dir`, so the app-data copy never reached it and
+/// the rename reset every preference React keeps in `localStorage`: theme,
+/// layouts, sort orders, groups, filters, pane widths. `Local Storage` is the
+/// only part that holds user data - the app keeps nothing in IndexedDB, cookies
+/// or caches - and the leveldb `LOCK` file is left behind; leveldb makes its own.
+///
+/// Runs only while the new profile has no `Local Storage`, so it never merges
+/// into or overwrites a store WebView2 already made. The copy lands in a sibling
+/// named for this process and is renamed into place, so a failure leaves no
+/// half-copied store that looks complete, and WebView2 starts an empty one as it
+/// would have without this. A sibling a killed launch left is removed once the
+/// store is in place. The old profile is left as it was.
+///
+/// `None` when there was nothing to do.
+#[cfg(windows)]
+fn migrate_legacy_webview_storage(
+    old_root: &std::path::Path,
+    new_root: &std::path::Path,
+) -> Option<std::io::Result<()>> {
+    let store = std::path::Path::new("EBWebView")
+        .join("Default")
+        .join("Local Storage");
+    let (from, to) = (old_root.join(&store), new_root.join(&store));
+    if old_root == new_root || !from.is_dir() || to.exists() {
+        return None;
+    }
+    let staging = to.with_file_name(format!("Local Storage.migrating-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staging);
+    let copied = copy_dir_recursive(&from, &staging, &["LOCK"])
+        .and_then(|()| std::fs::rename(&staging, &to));
+    if copied.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    } else if let Some(Ok(siblings)) = to.parent().map(std::fs::read_dir) {
+        // A launch killed mid-copy leaves its sibling behind. Cleared only once
+        // the store is in place: before, it could be another first launch's copy
+        // in progress, and none can be renamed over the store now.
+        for e in siblings.flatten() {
+            if e.file_name().to_string_lossy().starts_with("Local Storage.migrating-") {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    Some(copied)
+}
+
+/// Recursively copy a directory tree, leaving out files named in `skip`. Used
+/// once by each of the identifier-rename migrations.
+fn copy_dir_recursive(
+    from: &std::path::Path,
+    to: &std::path::Path,
+    skip: &[&str],
+) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let src = entry.path();
         let dst = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&src, &dst)?;
-        } else {
+            copy_dir_recursive(&src, &dst, skip)?;
+        } else if !skip.iter().any(|s| entry.file_name() == *s) {
             std::fs::copy(&src, &dst)?;
         }
     }
@@ -402,7 +633,6 @@ fn setup_runtime(
     let images_dir = path("images");
     let received_files_dir = path("received-files");
     let settings_file = path("settings.json");
-    let boot_file = path("boot_id.txt");
     let notes_file = path("notes.bin");
     let notifications_file = path("notifications.bin");
 
@@ -410,8 +640,8 @@ fn setup_runtime(
     if let Some(ref dir) = images_dir {
         history.lock().set_images_dir(dir.clone());
     }
-    // And the dir where synced file entries are extracted, so a full save can
-    // prune the subdirs of entries that have since been deleted.
+    // And the dir where synced file entries are extracted, so a save can
+    // delete the subdir of an entry that was removed.
     if let Some(ref dir) = received_files_dir {
         history.lock().set_received_files_dir(dir.clone());
     }
@@ -431,7 +661,7 @@ fn setup_runtime(
             }
         }
     });
-    let keep_enabled = bool_setting(settings.as_ref(), "keep_history", false);
+    let keep_enabled = bool_setting(settings.as_ref(), "keep_history", true);
 
     // Adopt anything a degraded session had to set aside before its restart, so
     // what the user captured after the fault is not stranded on disk. A file-level
@@ -447,53 +677,17 @@ fn setup_runtime(
         }
     }
 
-    // Load history: full restore if same boot + keep enabled, saved-only otherwise.
-    if keep_enabled {
-        if let (Some(hf), Some(pf), Some(bf)) = (&history_file, &saved_file, &boot_file) {
-            let current_boot = system_boot_epoch_secs();
-            // A marker that is absent is a first run; a marker that is there and
-            // will not read is a fault, and the two must not decide the same
-            // thing. Reading it as "no previous boot" makes `same_boot` false and
-            // sends the restore down the branch that strips every unsaved entry -
-            // so one refused read costs the user their history on what was an
-            // ordinary restart. When it cannot be read, keep what is on disk.
-            let marker = crate::health::read_state(bf);
-            let previous_boot: u64 = match &marker {
-                Ok(Some(raw)) => String::from_utf8_lossy(raw)
-                    .trim()
-                    .parse()
-                    .unwrap_or(0),
-                _ => 0,
-            };
-            let marker_unreadable = marker.is_err();
-
-            let same_boot = current_boot.abs_diff(previous_boot) < 5;
-
-            if (same_boot || marker_unreadable) && hf.exists() {
-                // Same boot session — restore everything. Also the safe branch
-                // when the marker is unreadable: keeping entries the user may
-                // have expected to be dropped is recoverable, dropping entries
-                // they expected to keep is not.
-                let _ = history.lock().load_all_from_file(hf);
-            } else if hf.exists() {
-                // New boot — load full history then strip unsaved entries. Only
-                // reached when the load succeeded, since a sealed history is
-                // empty for reasons that have nothing to do with the boot.
-                let loaded = history.lock().load_all_from_file(hf).is_ok();
-                if loaded {
-                    history.lock().clear();
-                }
-            } else {
-                // Fallback: first run with keep enabled.
-                let _ = history.lock().load_saved_from_file(pf);
-            }
-
-            // Boot marker decides whether history survives a reboot, so a
-            // half-written value must not be readable as a valid timestamp.
-            let _ = crate::health::write_atomic(bf, current_boot.to_string().as_bytes());
-        }
-    } else if let Some(pf) = &saved_file {
-        let _ = history.lock().load_saved_from_file(pf);
+    // Load history. An older build defaulted Keep history to off and, when off,
+    // never read history.bin, so a stale copy there must not come back. Settings
+    // that are absent or unreadable keep it: dropping what the user expected to
+    // keep cannot be undone, keeping extra entries can.
+    if let (Some(hf), Some(pf)) = (&history_file, &saved_file) {
+        let legacy_keep = settings.as_ref().is_none_or(|m| {
+            m.get("keep_history")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        });
+        history.lock().load_from_disk(hf, pf, legacy_keep);
     }
 
     // Load notes from disk.
@@ -514,52 +708,33 @@ fn setup_runtime(
     // file existed but would not read. Merged by id after the normal loads, so
     // the main file wins any overlap; the leftover is only discarded once a
     // save that includes it has landed, and a still-sealed file refuses that
-    // save, so nothing here can lose either copy.
+    // save, so nothing here can lose either copy. Each merge result is bound
+    // before the save locks the store again.
     {
         let state_ref: tauri::State<'_, AppState> = app.state();
         if let Some(hf) = &history_file {
-            if let Some(bytes) = crate::health::sealed_leftover(hf) {
-                match state_ref.history.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(hf),
-                    Some(_) if state_ref.history.lock().save_all_to_file(hf).is_ok() => {
-                        crate::health::discard_sealed_leftover(hf)
-                    }
-                    _ => {}
-                }
-            }
-        }
-        if let Some(pf) = &saved_file {
-            if let Some(bytes) = crate::health::sealed_leftover(pf) {
-                match state_ref.history.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(pf),
-                    Some(_) if state_ref.history.lock().save_saved_to_file(pf).is_ok() => {
-                        crate::health::discard_sealed_leftover(pf)
-                    }
-                    _ => {}
-                }
+            // A pinned_entries.bin leftover lands in history.bin, its only file now.
+            for file in std::iter::once(hf).chain(saved_file.as_ref()) {
+                adopt_leftover(
+                    file,
+                    |b| state_ref.history.lock().merge_leftover(b),
+                    || state_ref.history.lock().save_to_file(hf, |_| true).is_ok(),
+                );
             }
         }
         if let Some(nf) = &notes_file {
-            if let Some(bytes) = crate::health::sealed_leftover(nf) {
-                match state_ref.notes.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(nf),
-                    Some(_) if state_ref.notes.lock().save_to_file(nf).is_ok() => {
-                        crate::health::discard_sealed_leftover(nf)
-                    }
-                    _ => {}
-                }
-            }
+            adopt_leftover(
+                nf,
+                |b| state_ref.notes.lock().merge_leftover(b),
+                || state_ref.notes.lock().save_to_file(nf).is_ok(),
+            );
         }
         if let Some(nf) = &notifications_file {
-            if let Some(bytes) = crate::health::sealed_leftover(nf) {
-                match state_ref.notifications.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(nf),
-                    Some(_) if state_ref.notifications.lock().save_to_file(nf).is_ok() => {
-                        crate::health::discard_sealed_leftover(nf)
-                    }
-                    _ => {}
-                }
-            }
+            adopt_leftover(
+                nf,
+                |b| state_ref.notifications.lock().merge_leftover(b),
+                || state_ref.notifications.lock().save_to_file(nf).is_ok(),
+            );
         }
     }
 
@@ -585,7 +760,7 @@ fn setup_runtime(
         ("close_to_tray", &state_ref.close_to_tray, false),
         ("os_notifications", &state_ref.os_notifications, true),
         ("start_minimized", &state_ref.start_minimized, false),
-        ("autosave", &state_ref.autosave, false),
+        ("autosave", &state_ref.autosave, true),
         ("show_splash", &state_ref.show_splash, true),
         // notification defaults to true when the key is absent from settings.json.
         // Operation-based notification flags also default to true.
@@ -606,7 +781,7 @@ fn setup_runtime(
         let handle = app.handle().clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
-            flush_dirty_stores(&handle);
+            flush_dirty_stores(&handle, Flush::Dirty);
             // Reached only by taking and releasing every state lock above, so it
             // doubles as proof that none of them are wedged. The watchdog warns
             // the user if these stop arriving.
@@ -782,13 +957,29 @@ pub fn run() {
         kill_previous_instance();
     }
 
+    let context = tauri::generate_context!();
+    // Here rather than in `setup`: tauri builds the tauri.conf.json windows, and
+    // WebView2 its profile with them, before `setup` runs. Logged from `setup`,
+    // once the diag log has a directory. TEMPORARY - remove with
+    // migrate_legacy_webview_storage.
+    #[cfg(windows)]
+    let webview_migration = dirs::data_local_dir().and_then(|local| {
+        let old = local.join(LEGACY_APP_DATA_IDENTIFIER);
+        let new = local.join(&context.config().identifier);
+        let paths = format!("{} -> {}", old.display(), new.display());
+        Some(match migrate_legacy_webview_storage(&old, &new)? {
+            Ok(()) => ("migrate: carried webview storage across the identifier rename", paths),
+            Err(e) => ("migrate: webview storage copy failed", format!("{paths}: {e}")),
+        })
+    });
+
     let history = create_shared_history();
     let suppress: SuppressFlag = Arc::new(AtomicBool::new(false));
 
     let app_state = AppState {
         history: Arc::clone(&history),
         suppress_next_capture: Arc::clone(&suppress),
-        keep_history: Arc::new(AtomicBool::new(false)),
+        keep_history: Arc::new(AtomicBool::new(true)),
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         os_notifications: Arc::new(AtomicBool::new(true)),
@@ -796,7 +987,7 @@ pub fn run() {
         notification_enabled: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
         notif_paste: Arc::new(AtomicBool::new(true)),
-        autosave: Arc::new(AtomicBool::new(false)),
+        autosave: Arc::new(AtomicBool::new(true)),
         show_splash: Arc::new(AtomicBool::new(true)),
         splash_updating: Arc::new(AtomicBool::new(false)),
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
@@ -826,6 +1017,12 @@ pub fn run() {
             // deep-link plugin's own callback.
             if let Some(url) = argv.iter().find(|a| a.starts_with("orange://")) {
                 dispatch_deep_link(app, url);
+            }
+            // Opened again while a quit waits for sync: the user wants the app,
+            // so the quit is called off and the drain puts the window back.
+            if QUIT_DRAINING.load(Ordering::SeqCst) {
+                QUIT_CANCELLED.store(true, Ordering::SeqCst);
+                return;
             }
             // Surface the already-running window the same way the tray does -
             // show, unminimize, and force to the foreground past the Windows
@@ -861,7 +1058,6 @@ pub fn run() {
             crate::clipboard::commands::stat_files,
             crate::clipboard::commands::get_setting,
             crate::clipboard::commands::set_setting,
-            crate::clipboard::commands::save_history,
             crate::clipboard::commands::set_entry_groups,
             crate::clipboard::commands::purge_group_from_entries,
             crate::clipboard::commands::rename_group_in_entries,
@@ -946,11 +1142,13 @@ pub fn run() {
             crate::sync::commands::space_clear_removed,
             crate::sync::commands::sync_get_entry_states,
             crate::sync::commands::sync_now,
+            crate::sync::commands::sync_restore_from_cloud,
             crate::sync::commands::sync_catch_up,
             crate::sync::commands::sync_set_enabled,
             crate::sync::commands::sync_get_connection,
-            crate::sync::commands::sync_receive_local_settings,
-            crate::sync::commands::sync_pull_settings,
+            crate::sync::commands::sync_schedule_settings,
+            crate::sync::commands::sync_settings,
+            crate::sync::commands::sync_settings_refused,
             crate::sync::commands::spaces_list,
             crate::sync::commands::spaces_cached,
             crate::sync::commands::space_create,
@@ -1013,11 +1211,20 @@ pub fn run() {
             // so the diag dir and every store below resolve to the migrated
             // folder rather than a fresh empty one. TEMPORARY - remove this line
             // with migrate_legacy_app_data once the rename has propagated.
-            migrate_legacy_app_data(app.handle());
+            let app_data_migration = migrate_legacy_app_data(app.handle());
             // Installed before any other setup work, so a panic inside it lands
             // in the log too.
             crate::health::set_diag_dir(app.path().app_data_dir().ok());
             crate::health::install_panic_hook(app.handle().clone());
+            // Both migrations ran before the log had a directory. TEMPORARY -
+            // remove with them.
+            if let Some((headline, detail)) = app_data_migration {
+                crate::health::note(headline, &detail);
+            }
+            #[cfg(windows)]
+            if let Some((headline, detail)) = webview_migration {
+                crate::health::note(headline, &detail);
+            }
             setup_runtime(app, &history, &suppress)?;
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -1079,15 +1286,16 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while running tauri application")
         .run(|app, event| match event {
-            // Quitting mid-rotation is the one shutdown that costs the user
-            // their session, so it is the one worth delaying. Everything else
-            // about this arm is arranged to leave the ordinary quit untouched:
-            // the check is an atomic read, and when nothing is rotating the
-            // handler returns before allocating a thread or preventing anything.
-            tauri::RunEvent::ExitRequested { api, .. } => {
+            // Two things are worth delaying a quit for: a refresh-token rotation
+            // caught mid-flight (it costs the user their session), and sync work
+            // already running (it costs them the upload or download). Everything
+            // else about this arm leaves the ordinary quit untouched: with
+            // neither running, the handler returns before allocating a thread or
+            // preventing anything.
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
                 // Two flags, because there are two independent ways to arrive
                 // here - the last window being destroyed, and an explicit
                 // `exit` - and the drain re-issues the exit itself. One flag
@@ -1099,7 +1307,19 @@ pub fn run() {
                 if EXIT_REISSUED.load(Ordering::SeqCst) {
                     return;
                 }
-                if !crate::sync::client::rotation_in_flight() {
+                // A restart: the runtime ignores `prevent_exit` for it, and the
+                // command that asked has drained and flushed already.
+                if code == Some(tauri::RESTART_EXIT_CODE) {
+                    RESTARTING.store(true, Ordering::SeqCst);
+                    return;
+                }
+                // Nothing new starts from here, waited for or not.
+                let sync = app.state::<AppState>().sync_client.lock().clone();
+                if let Some(sync) = &sync {
+                    sync.begin_quit();
+                }
+                let syncing = sync.as_ref().is_some_and(|s| s.work_running());
+                if !syncing && !crate::sync::client::rotation_in_flight() {
                     return;
                 }
                 api.prevent_exit();
@@ -1107,18 +1327,28 @@ pub fn run() {
                     return;
                 }
                 // Off the main thread: the event loop has to keep running for
-                // the re-issued exit to be delivered at all.
+                // the toast to show and the re-issued exit to be delivered.
                 let handle = app.clone();
                 std::thread::spawn(move || {
-                    drain_token_rotation(EXIT_DRAIN_MS);
+                    let left = drain_sync_work(&handle, false);
+                    if QUIT_CANCELLED.swap(false, Ordering::SeqCst) {
+                        DRAIN_STARTED.store(false, Ordering::SeqCst);
+                        resume_after_failed_restart(&handle);
+                        return;
+                    }
+                    drain_token_rotation(left.min(EXIT_DRAIN_MS));
                     EXIT_REISSUED.store(true, Ordering::SeqCst);
                     handle.exit(0);
                 });
             }
             // The last thing the process does with user data. `app.exit(0)` on
-            // window destroy lands here too; only `app.restart()` bypasses the
-            // event loop, and both restart sites flush for themselves.
-            tauri::RunEvent::Exit => flush_dirty_stores(app),
+            // window destroy lands here too, and so does a restart the two
+            // restart commands asked for off the main thread; that one keeps
+            // everything, since it may be an update that hands the app back.
+            tauri::RunEvent::Exit => {
+                let mode = if RESTARTING.load(Ordering::SeqCst) { Flush::Forced } else { Flush::Exit };
+                flush_dirty_stores(app, mode);
+            }
             _ => {}
         });
 }
@@ -1168,5 +1398,72 @@ mod tests {
             parse_deep_link("orange://reset?type=recovery&code=abc123"),
             Some(DeepLink::Reset("abc123".into()))
         );
+    }
+
+    /// TEMPORARY - goes with `migrate_legacy_webview_storage`.
+    #[cfg(windows)]
+    #[test]
+    fn legacy_webview_storage_is_copied_once_and_never_over_a_store() {
+        use super::migrate_legacy_webview_storage as migrate;
+        let dir = std::env::temp_dir().join(format!("rovertools-webview-{}", uuid::Uuid::new_v4()));
+        let (old, new) = (dir.join("old"), dir.join("new"));
+        let store = std::path::Path::new("EBWebView/Default/Local Storage/leveldb");
+
+        // No old profile: nothing to do.
+        assert!(migrate(&old, &new).is_none());
+
+        std::fs::create_dir_all(old.join(store)).unwrap();
+        std::fs::write(old.join(store).join("000003.log"), b"sc-theme").unwrap();
+        std::fs::write(old.join(store).join("LOCK"), b"").unwrap();
+        std::fs::create_dir_all(old.join("EBWebView/Default/Cache")).unwrap();
+        // What a launch killed mid-copy leaves behind.
+        std::fs::create_dir_all(new.join("EBWebView/Default/Local Storage.migrating-1")).unwrap();
+        assert!(matches!(migrate(&old, &new), Some(Ok(()))));
+        assert_eq!(std::fs::read(new.join(store).join("000003.log")).unwrap(), b"sc-theme");
+        assert!(!new.join(store).join("LOCK").exists());
+        assert!(!new.join("EBWebView/Default/Cache").exists());
+        let default = std::fs::read_dir(new.join("EBWebView/Default")).unwrap().count();
+        assert_eq!(default, 1, "only Local Storage lands, no staging folder is left");
+
+        // The new profile has a store now: never merged into or overwritten.
+        std::fs::write(old.join(store).join("000003.log"), b"changed").unwrap();
+        assert!(migrate(&old, &new).is_none());
+        assert_eq!(std::fs::read(new.join(store).join("000003.log")).unwrap(), b"sc-theme");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TEMPORARY - goes with `migrate_legacy_webview_storage`.
+    #[cfg(windows)]
+    #[test]
+    fn a_failed_webview_storage_copy_leaves_no_partial_store() {
+        use super::migrate_legacy_webview_storage as migrate;
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("rovertools-webview-{}", uuid::Uuid::new_v4()));
+        let (old, new) = (dir.join("old"), dir.join("new"));
+        let store = std::path::Path::new("EBWebView/Default/Local Storage/leveldb");
+        std::fs::create_dir_all(old.join(store)).unwrap();
+        std::fs::write(old.join(store).join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(old.join(store).join("MANIFEST-000001"), b"manifest").unwrap();
+
+        // A file the old app's webview still holds fails the copy partway,
+        // after CURRENT has already been copied.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(old.join(store).join("MANIFEST-000001"))
+            .unwrap();
+        assert!(matches!(migrate(&old, &new), Some(Err(_))));
+        let default = std::fs::read_dir(new.join("EBWebView/Default")).unwrap().count();
+        assert_eq!(default, 0, "neither a store nor a staging folder is left");
+
+        // Nothing left blocks a later copy. In the app that later copy happens
+        // only if WebView2 made no store of its own in between, and it usually
+        // makes one on the same launch.
+        drop(held);
+        assert!(matches!(migrate(&old, &new), Some(Ok(()))));
+        assert_eq!(std::fs::read(new.join(store).join("MANIFEST-000001")).unwrap(), b"manifest");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

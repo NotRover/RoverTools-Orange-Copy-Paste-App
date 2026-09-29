@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::Ordering;
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
@@ -19,6 +19,7 @@ use crate::clipboard::history::{ClipboardEntry, MAX_TEXT_BYTES};
 use crate::runtime::platform::simulate_paste;
 use crate::runtime::popup_windows::hide_popup;
 use crate::state::AppState;
+use crate::sync::types::EntryType;
 
 #[cfg(not(windows))]
 use crate::clipboard::image::data_url_to_rgba;
@@ -104,54 +105,28 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
         let _ = app.emit("clipboard:entry-deleted", &id);
         auto_save_history(&app);
         // Tombstone must propagate to sync even when offline (invariant #5)
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            s.on_delete_clipboard_entry(id, entry_ts);
-        }
+        crate::sync::forward_deletes(&app, EntryType::Clipboard, vec![(id, entry_ts)]);
     }
     removed
 }
 
 #[tauri::command]
 pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    // Capture IDs of the entries clear() will actually drop, so tombstones
-    // propagate for exactly those (invariant #5). Must match clear()'s
-    // retention (`is_saved` = pinned OR in the "Saved" group): a saved-but-
-    // unpinned entry is kept locally, so pushing a delete for it would wipe it
-    // from the cloud and other devices while this one keeps it.
-    let deleted: Vec<(String, u64)> = state
-        .history
-        .lock()
-        .all()
-        .iter()
-        .filter(|e| !e.is_saved())
-        .map(|e| (e.id.clone(), e.timestamp))
-        .collect();
-
-    state.history.lock().clear();
+    // clear() returns exactly the entries it dropped, so tombstones propagate
+    // for those and no others (invariant #5): a saved entry is kept locally,
+    // and a delete for it would wipe it from the cloud and other devices.
+    let deleted = state.history.lock().clear();
     auto_save_history(&app);
-
-    if !deleted.is_empty() {
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for (id, entry_ts) in deleted {
-                s.on_delete_clipboard_entry(id, Some(entry_ts));
-            }
-        }
-    }
+    crate::sync::forward_deletes(
+        &app,
+        EntryType::Clipboard,
+        deleted.into_iter().map(|(id, ts)| (id, Some(ts))).collect(),
+    );
     true
 }
 
 fn app_data_file(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBuf> {
     Some(app.path().app_data_dir().ok()?.join(name))
-}
-
-fn get_saved_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app_data_file(app, "pinned_entries.bin")
-}
-
-pub(crate) fn get_history_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app_data_file(app, "history.bin")
 }
 
 fn get_settings_file_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
@@ -229,6 +204,21 @@ pub(crate) fn read_bool_setting(app: &tauri::AppHandle, key: &str, default: bool
         .unwrap_or(default)
 }
 
+/// The in-memory copy of a boolean preference, for the keys that have one.
+pub(crate) fn setting_flag<'a>(state: &'a AppState, key: &str) -> Option<&'a Arc<AtomicBool>> {
+    match key {
+        "keep_history" => Some(&state.keep_history),
+        "close_to_tray" => Some(&state.close_to_tray),
+        "os_notifications" => Some(&state.os_notifications),
+        "start_minimized" => Some(&state.start_minimized),
+        "notification" => Some(&state.notification_enabled),
+        "notif_copy" => Some(&state.notif_copy),
+        "notif_paste" => Some(&state.notif_paste),
+        "autosave" => Some(&state.autosave),
+        _ => None,
+    }
+}
+
 /// Write a user setting to `settings.json`.
 #[tauri::command]
 pub fn set_setting(
@@ -245,63 +235,23 @@ pub fn set_setting(
         return false;
     }
     // Keep the in-memory cache in sync when boolean flags change.
-    let flag = match key.as_str() {
-        "keep_history" => Some(&state.keep_history),
-        "close_to_tray" => Some(&state.close_to_tray),
-        "os_notifications" => Some(&state.os_notifications),
-        "start_minimized" => Some(&state.start_minimized),
-        "notification" => Some(&state.notification_enabled),
-        "notif_copy" => Some(&state.notif_copy),
-        "notif_paste" => Some(&state.notif_paste),
-        "autosave" => Some(&state.autosave),
-        _ => None,
-    };
-    if let Some(flag) = flag {
+    if let Some(flag) = setting_flag(&state, &key) {
         flag.store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
     }
+    // What the next flush writes depends on it: turning it off prunes the file,
+    // turning it on writes everything held.
+    if key == "keep_history" {
+        state.history_dirty.store(true, Ordering::Relaxed);
+    }
 
-    let Some(path) = get_settings_file_path(&app) else {
-        return false;
-    };
-    // Read-modify-write of the whole file, so a failed read must not become an
-    // empty map: writing that back erases every other preference, sync_enabled
-    // included. Only a genuinely absent file starts from empty.
-    let mut map = match crate::settings_file::read_map(&path) {
-        Ok(map) => map,
-        Err(crate::settings_file::ReadError::Absent) => crate::settings_file::Map::new(),
-        Err(crate::settings_file::ReadError::Unreadable(e))
-        | Err(crate::settings_file::ReadError::Malformed(e)) => {
-            crate::health::note(
-                "settings write skipped: settings.json could not be read",
-                &format!("{e} - refusing to overwrite it with a blank file"),
-            );
-            return false;
-        }
-    };
-    map.insert(key.clone(), value);
-    // Read-modify-write of the whole preferences file, so a torn write loses
-    // every setting rather than one key.
-    let written = crate::health::write_atomic(
-        &path,
-        serde_json::to_string_pretty(&map).unwrap_or_default().as_bytes(),
-    )
-    .is_ok();
-
-    // Schedule a settings sync push when a synced key changes
-    const SYNCED_KEYS: &[&str] = &[
-        "keep_history",
-        "close_to_tray",
-        "os_notifications",
-        "start_minimized",
-        "notification",
-        "notif_copy",
-        "notif_paste",
-        "autosave",
-    ];
-    if written && SYNCED_KEYS.contains(&key.as_str()) {
+    let roams = crate::sync::commands::ROAMING_JSON_KEYS.contains(&key.as_str());
+    let written = crate::sync::commands::update_settings(&app, |m| {
+        m.insert(key, value);
+    });
+    if written && roams {
         let sync = state.sync_client.lock().clone();
         if let Some(s) = sync {
-            s.schedule_settings_push();
+            s.schedule_settings_sync();
         }
     }
 
@@ -312,17 +262,8 @@ pub fn set_setting(
 
 /// Shared tail of the bulk update commands: persist, then propagate the
 /// updated entries to sync.
-fn finish_bulk_update(
-    app: &tauri::AppHandle,
-    state: &State<'_, AppState>,
-    ids: &[String],
-    group_change: bool,
-) {
-    if group_change {
-        save_after_group_change(app, state);
-    } else {
-        auto_save_history(app);
-    }
+fn finish_bulk_update(app: &tauri::AppHandle, state: &State<'_, AppState>, ids: &[String]) {
+    auto_save_history(app);
     let sync = state.sync_client.lock().clone();
     if let Some(s) = sync {
         for id in ids {
@@ -358,7 +299,7 @@ fn bulk_modify_groups(
     }
     drop(hist);
     if changed > 0 {
-        finish_bulk_update(app, state, ids, true);
+        finish_bulk_update(app, state, ids);
     }
     changed
 }
@@ -386,12 +327,7 @@ pub fn bulk_delete_entries(
     drop(hist);
     if removed > 0 {
         auto_save_history(&app);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync {
-            for (id, entry_ts) in deleted_ids {
-                s.on_delete_clipboard_entry(id, entry_ts);
-            }
-        }
+        crate::sync::forward_deletes(&app, EntryType::Clipboard, deleted_ids);
     }
     removed
 }
@@ -432,7 +368,7 @@ pub fn bulk_pin_entries(
 
     drop(hist);
     if changed > 0 {
-        finish_bulk_update(&app, &state, &ids, false);
+        finish_bulk_update(&app, &state, &ids);
     }
     changed
 }
@@ -461,16 +397,6 @@ pub fn bulk_remove_group(
     bulk_modify_groups(&ids, &state, &app, |hist, id| hist.remove_group(id, &group))
 }
 
-/// Trigger an immediate flush of the full history to disk.
-/// Called from the frontend when the user first enables keep_history.
-#[tauri::command]
-pub fn save_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool {
-    match get_history_file_path(&app) {
-        Some(p) => state.history.lock().save_all_to_file(&p).is_ok(),
-        _ => false,
-    }
-}
-
 /// Set the groups for a clipboard entry.
 #[tauri::command]
 pub fn set_entry_groups(
@@ -481,7 +407,7 @@ pub fn set_entry_groups(
 ) -> bool {
     let success = state.history.lock().set_groups(&id, groups.clone());
     if success {
-        save_after_group_change(&app, &state);
+        auto_save_history(&app);
         let _ = app.emit(
             "clipboard:entry-groups-changed",
             serde_json::json!({ "id": id, "groups": groups }),
@@ -503,7 +429,7 @@ pub fn purge_group_from_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().purge_group(&group);
-    save_after_group_change(&app, &state);
+    auto_save_history(&app);
     true
 }
 
@@ -516,25 +442,17 @@ pub fn rename_group_in_entries(
     app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().rename_group(&old_name, &new_name);
-    save_after_group_change(&app, &state);
+    auto_save_history(&app);
     true
 }
 
-fn save_after_group_change(app: &tauri::AppHandle, state: &State<'_, AppState>) {
-    if let Some(path) = get_saved_file_path(app) {
-        let _ = state.history.lock().save_saved_to_file(&path);
-    }
-    auto_save_history(app);
-}
-
-/// Mark the history as needing a flush to disk.  The actual I/O happens on
-/// a background timer (~2 s) so rapid clipboard changes are coalesced into a
-/// single write.  Cost: one atomic load + one atomic store (≈2 ns total).
+/// Mark the history as needing a flush to disk, whatever Keep history says:
+/// saved entries are always written, and the flush decides what else is. The
+/// actual I/O happens on a background timer (~2 s) so rapid clipboard changes
+/// are coalesced into a single write.  Cost: one atomic store.
 pub(crate) fn auto_save_history(app: &tauri::AppHandle) {
     let state: tauri::State<'_, AppState> = app.state();
-    if state.keep_history.load(Ordering::Relaxed) {
-        state.history_dirty.store(true, Ordering::Relaxed);
-    }
+    state.history_dirty.store(true, Ordering::Relaxed);
 }
 
 /// Write an entry to the clipboard on the app's own behalf (a manual copy, or

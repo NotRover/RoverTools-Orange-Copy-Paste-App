@@ -24,7 +24,7 @@ fn a_panic_costs_nothing_across_the_restart() {
     history.push(ClipboardEntry::new_text("first".into()));
     history.push(ClipboardEntry::new_text("second".into()));
     history
-        .save_all_to_file(&history_file)
+        .save_to_file(&history_file, |_| true)
         .expect("healthy flush");
 
     let good_bytes = std::fs::read(&history_file).expect("history written");
@@ -42,7 +42,7 @@ fn a_panic_costs_nothing_across_the_restart() {
     assert_eq!(history.all().len(), 3);
 
     // But the flush must fail rather than overwrite the good file.
-    let flush = history.save_all_to_file(&history_file);
+    let flush = history.save_to_file(&history_file, |_| true);
     assert!(flush.is_err(), "degraded flush reported success");
     assert_eq!(
         std::fs::read(&history_file).unwrap(),
@@ -67,7 +67,7 @@ fn a_panic_costs_nothing_across_the_restart() {
     // first snapshot is the least useful one to have kept, since every later one
     // holds the same suspect state plus whatever was captured since.
     history.push(ClipboardEntry::new_text("captured later still".into()));
-    assert!(history.save_all_to_file(&history_file).is_err());
+    assert!(history.save_to_file(&history_file, |_| true).is_err());
     let quarantined_later =
         std::fs::read(quarantine_of(&history_file)).expect("quarantine rewritten");
     assert!(
@@ -85,10 +85,12 @@ fn a_panic_costs_nothing_across_the_restart() {
     // The pre-panic file is still loadable — which is what makes "restart to
     // recover" safe advice.
     let mut restored = ClipboardHistory::new();
-    restored
-        .load_all_from_file(&history_file)
-        .expect("pre-panic history still parses");
-    assert_eq!(restored.all().len(), 2);
+    restored.load_from_disk(&history_file, &dir.join("pinned_entries.bin"), true);
+    assert_eq!(
+        restored.all().len(),
+        2,
+        "pre-panic history no longer parses"
+    );
 
     // ── What the restart the banner asks for actually does ──────────
     //
@@ -112,10 +114,12 @@ fn a_panic_costs_nothing_across_the_restart() {
     // All four captures are back: the two from before the fault and the two the
     // degraded session could not write.
     let mut after_restart = ClipboardHistory::new();
-    after_restart
-        .load_all_from_file(&history_file)
-        .expect("adopted history parses");
-    assert_eq!(after_restart.all().len(), 4);
+    after_restart.load_from_disk(&history_file, &dir.join("pinned_entries.bin"), true);
+    assert_eq!(
+        after_restart.all().len(),
+        4,
+        "adopted history does not parse"
+    );
     let contents: Vec<&str> = after_restart
         .all()
         .iter()

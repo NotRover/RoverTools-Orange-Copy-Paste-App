@@ -613,6 +613,10 @@
   color: var(--text-muted, #909090);
 }
 
+/* The Restore from cloud card's result line. */
+.acct-card-desc--ok { color: var(--acct-ok); }
+.acct-card-desc--warn { color: var(--acct-warn); }
+
 /* Text buttons, not chrome: these are used once per account, and two more
    bordered buttons up here is what made the row unusable in the first place. */
 .acct-link {

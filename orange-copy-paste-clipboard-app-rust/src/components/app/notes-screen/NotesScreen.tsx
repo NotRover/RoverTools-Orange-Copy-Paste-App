@@ -7,13 +7,13 @@ import React, {
 } from "react";
 import type { Note, ClipboardEntry } from "../../../types";
 
-import type { SortMode } from "../sort-options";
+import { isSortMode, type SortMode } from "../sort-options";
 import Topbar, {
   SortDropdown,
   LayoutSegment,
   GroupsButton,
 } from "../topbar/Topbar";
-import type { ClipboardLayout } from "../topbar/Topbar";
+import { CLIPBOARD_LAYOUTS, type ClipboardLayout } from "../topbar/Topbar";
 import {
   NotesIcon,
   PlusIcon,
@@ -130,11 +130,12 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   const nf = useNotesFilter(notes, search, cloudFilterContext);
 
   const [sort, setSort] = useState<SortMode>(() => {
-    return (localStorage.getItem("ns-sort") as SortMode) ?? "newest";
+    const v = localStorage.getItem("ns-sort");
+    return isSortMode(v) ? v : "newest";
   });
   const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
     "ns-layout",
-    "tiles",
+    CLIPBOARD_LAYOUTS,
   );
   const [collapsedSections, setCollapsedSections] = useSticky(
     "ns-collapsed-sections",

@@ -1126,3 +1126,404 @@ What the fix cannot undo: a database backup taken before an account migrated sti
 holds the bcrypt hash of its raw password. Migration replaces the live hash, not the
 history, so a weak password that was set before the fix is only truly protected by
 changing it.
+
+---
+
+## #31 - A new PC lost its whole history on the first restart, and signing in again never brought it back
+
+**Symptom.** Reported 2026-09-29, on a fresh install on a second Windows PC signed in on
+Realtime. Before any restart, the layout slider sat on tiles while the list rendered in
+2 columns. After a quit and restart, the clipboard history (1,445 synced entries) and the
+Spaces feed were empty, while the Spaces and Account screens still showed item counts.
+Signing out and in, and restarting again, brought nothing back. The same account on the
+first PC still had everything. This is the third history-loss incident. The first two,
+#32 and #33, sit below it because they were written up later.
+
+The counts were the trap. Spaces counts come from this device's `id_map.json` share
+records and the Account numbers from the server, while the feed is the local entries
+that those records name. So both screens said the data existed while nothing was in
+memory. The affected PC's app data folder had no `history.bin` and no
+`pinned_entries.bin` at all, a `settings.json` with no `keep_history` key, and an
+`id_map.json` listing 1,445 clipboard entries.
+
+**Cause.** Three faults, each enough on its own to lose or keep out the history.
+
+*Nothing unsaved was ever written.* `keep_history`, the setting then labelled
+`Keep history across app restarts`, defaulted to off, in `lib.rs`
+(`bool_setting(.., "keep_history", false)` and the `AppState` init) and in
+`SettingsScreen.tsx`. With it off, `flush_dirty_stores` skipped the history block and
+`auto_save_history` did not even set `history_dirty`, so nothing was written: not
+`history.bin`, and not `pinned_entries.bin` for a pin change either (only group changes
+wrote it, through `save_after_group_change`). Startup with it off read only
+`pinned_entries.bin` (`load_saved_from_file`). A quit lost everything the session had
+pulled.
+
+*Sync never downloaded it again.* A pull asks only for rows newer than
+`last_server_ts`, the limit #7 already met. The cursor and `id_map.json` persist whatever
+Keep history says, so after the restart this device's record listed 1,445 entries it no
+longer held. Sign-out reset neither, and `finalize_session` calls
+`reset_for_new_account` only when a *different* account signs in, so signing back in
+kept the cursor. A pull from zero would still have skipped most rows: `merge_pulled`
+drops rows stamped with this device's id, and the backend stamps the last writer. The one
+full sweep, `backfill_pull`, ran only for spaces this user does not own.
+
+*The new PC overwrote the account's settings.* Nothing pulled settings at sign-in; the
+only pull was the `settings:updated` socket event. The first push (`push_settings`) sent
+a whole blob built from this PC's `settings.json` plus React's localStorage values,
+where an unset key went as `""` (`localStorage.getItem("sc-layout") ?? ""` in
+`App.tsx`), stamped with the current time. The backend keeps the newest whole blob, so a
+fresh PC replaced the account's settings, and `keep_history: true` from the first PC
+could never arrive. Applying the blob back stored `""` as the layout.
+`useLayoutTransition` kept it, since only `null` fell back to the default; the Topbar
+slider fell through to the tiles position and `ClipboardScreen` fell through to the list
+branch, which is 2 columns. `sync_pull_settings` also wrote `settings.json` without
+updating the in-memory flags.
+
+**Also found, same class.** Each one dropped or hid data the user expected to keep:
+
+- `MAX_HISTORY` made every `push` drop unsaved entries past the newest 100, synced ones
+  included, with no sign.
+- With Keep history on, a new OS boot (`GetTickCount64` against `boot_id.txt`, 5 s
+  tolerance) ran `clear()` and kept only pinned and Saved entries. A clock step read as a
+  reboot did the same.
+- `save_all_to_file` deleted every file in `images/` and every folder in
+  `received-files/` that no in-memory entry named, so a save from a store that was short
+  of entries deleted the files of the ones it lacked.
+- `health::load_state` refreshed `.bak` from any file that parsed, however small, so a
+  loss replaced its own backup on the next launch.
+- Turning Keep history on called `save_history`, which wrote what memory held over
+  `history.bin` and then pruned as above.
+- `flush_and_pull` persisted the cursor at once while the merged rows waited up to 2 s
+  for the flush timer. A crash in between lost that page for good, since the next pull
+  starts after it.
+- `updater_install` flushed, drained token rotation for up to `EXIT_DRAIN_MS`, and
+  exited. Anything merged during the drain never reached disk.
+
+**Fix.** In three parts.
+
+*Persistence.*
+
+- `history.bin` is the only history file, and
+  `ClipboardHistory::save_to_file(path, also_keep)` is its only writer: saved entries
+  always, plus every entry `also_keep` names. `flush_dirty_stores(app, mode)` keeps
+  every entry with Keep history on and, with it off, the cloud and space entries this
+  device's record names (read from disk when sync is off; a record that will not read
+  keeps everything). Any `mode` but `Flush::Dirty` forces the last write.
+- `Keep history across restarts` and `Auto-save copied entries` default to on, in Rust
+  and React, and apply to this PC only. `MAX_HISTORY` and the boot check are gone; the
+  4 MiB cap of #22 stays.
+- `note_gone` queues a removed entry's file. A save deletes it only after the write
+  lands, and never for an id that is live again.
+- `load_from_disk` upgrades once. It folds `pinned_entries.bin` into `history.bin` and
+  retires it, and when the old build had Keep history off it moves the stale
+  `history.bin` to `history.bin.pre-upgrade` instead of loading it.
+- `load_state` moves `.bak` to `.bak.prev` when the new file is under a quarter of its
+  size, so `.bak` still follows a real Clear all and the big copy stays recoverable by
+  hand.
+- The cursor moves only after a `flush_dirty_stores`. `flush_for_restart` (flush, drain,
+  forced flush) serves both `updater_install` and `health_restart_app`.
+- The sealed-leftover adoption from #33 deadlocked when a leftover held new entries,
+  because the `match x.lock()` guard lived on into the arm's `x.lock()`. It is now
+  `adopt_leftover`, which binds the merge result before the save locks again.
+
+*Restore.* `sweep_locked` walks the account from the start and merges only rows missing
+here (`MergeSource::Sweep`). It lifts the same-device skip for those rows only and never
+moves the cursor. A sweep is owed (`restore_owed` in `sync_state.json`) after every
+sign-in, when a space row arrives before its key, when a blob download does not finish
+(`BlobClaim`), and on a space's first key arrival. `restore_if_owed` runs after the
+startup pull and on `Refresh` (`sync_now`), and also sweeps when `restore_counts` finds
+more rows missing than at the last sweep (`restore_mark`): record entries with no local
+copy, or own live rows on the server (`/sync/breakdown`) beyond the own ones held here.
+Manual mode waits for `Refresh` or the button. `Restore from cloud` on the Account screen
+calls `sync_restore_from_cloud`, which flushes the queue and then sweeps. An install
+already hit needs only the update: the sweep runs at the next start, or from that
+button.
+
+A restore must never bring back a delete. The sweep skips keys that are queued, in flight
+(`restore_keep_out`) or removed this run (`removed_this_run`), and checks again just
+before the insert; a blob task drops a download that a removal overtook
+(`removed_since`). `spawn_deletes` writes every Delete to the queue (`push_many`) before
+any tombstone leaves, and an accepted push drops a queued Delete for the same key
+(`supersede_delete`). With no sync client, `forward_deletes` writes a permanent
+`local_only` marker (`IdMap::mark_removed_offline`), which blocks the row from merging
+back. Restored rows are never pushed, because a live push over a tombstone revives it on
+the server.
+
+*Settings.* `start_ws_listener` ends with `schedule_settings_sync`, and every
+`sync_settings` round starts with a GET, so at sign-in and session restore the account's
+values land before any push. `merge_settings` is a three-way merge against
+`settings_base`, this PC's values at its last round: a key changed here keeps this PC's
+value, every other key takes the account's, and the round pushes only when the result
+differs from the server. Applied values reach `settings.json` and the in-memory flags
+(`setting_flag`). `is_unset` stops `null`, `""`, `"[]"` and `"{}"` from roaming in
+either direction. `keep_history` and `autosave` pass through the blob untouched
+(`NO_LONGER_ROAMING`). React checks each stored value (`ROAMING_STORAGE`,
+`isClipboardLayout`, `isSortMode`, the allowed list in `useLayoutTransition`) and removes
+an invalid one at load, so `""` reads as the default.
+
+**How a regression is caught.**
+
+- `clipboard/history.rs`: `history_has_no_entry_cap`,
+  `clear_returns_what_it_dropped_and_keeps_saved`, `saved_entries_are_always_written`,
+  `also_keep_names_extra_entries`, `a_save_deletes_files_only_for_removed_entries`,
+  `a_removed_then_restored_entry_keeps_its_file`,
+  `a_refused_save_keeps_the_file_delete_pending`,
+  `a_deleted_entry_stays_deleted_after_restart`,
+  `upgrade_with_keep_on_folds_both_files_and_retires_pinned_entries_bin`,
+  `upgrade_with_keep_off_ignores_a_stale_history_bin`,
+  `an_unreadable_legacy_file_upgrades_once`, `after_upgrade_only_history_bin_is_read`.
+- `health.rs`: `a_far_smaller_good_file_sets_the_old_backup_aside`,
+  `a_similar_size_file_just_refreshes_the_backup`.
+- `sync/mod.rs`: `a_sweep_never_touches_a_local_copy`,
+  `a_sweep_skips_queued_and_in_flight_keys`, `a_sweep_skips_what_was_removed_this_run`,
+  `a_download_started_before_a_removal_is_dropped`,
+  `a_removal_before_a_download_started_does_not_block_a_reshare`, `owed_always_sweeps`,
+  `a_count_above_the_mark_sweeps`, `counts_at_or_below_the_mark_do_not`,
+  `an_unknown_gap_never_triggers`.
+- `sync/pending_queue.rs`: `a_write_ahead_delete_survives_a_restart`,
+  `a_landed_delete_drops_only_its_own_op`, `push_many_keeps_order`,
+  `an_accepted_push_supersedes_a_queued_delete_on_disk`.
+- `sync/id_map.rs`: `an_offline_delete_blocks_the_row_coming_back`,
+  `an_offline_delete_of_a_received_item_keeps_its_author`,
+  `an_offline_delete_of_an_unknown_item_writes_nothing`,
+  `an_offline_delete_of_a_queued_only_item_is_remembered`,
+  `an_offline_marker_survives_pruning`.
+- `sync/commands.rs`: `the_first_sync_takes_the_account_values`,
+  `only_keys_changed_here_are_pushed`,
+  `server_changes_apply_only_to_keys_not_changed_here`,
+  `empty_values_are_never_pushed_or_applied`, `a_value_emptied_here_is_not_put_back`,
+  `an_absent_key_takes_the_account_value`,
+  `keep_history_and_autosave_pass_through_and_never_apply`,
+  `nothing_changed_means_merged_equals_server`.
+- `sync/sync_state.rs`: `a_new_account_starts_with_a_clean_restore_mark`,
+  `a_new_account_clears_the_settings_base`.
+
+`merge_pulled` needs an `AppHandle`, so its wiring is covered only through these seams,
+not by a test of its own.
+
+**Known gaps**:
+
+- Two PCs whose settings rounds overlap between the GET and the PUT: the later push
+  replaces a blob it never saw. Closing it needs a conditional PUT on the backend.
+- A delete that lands between the store dropping its copy and `spawn_deletes`
+  registering it can still race a sweep. The window is narrowed, not closed.
+- An item deleted while sync is off is hidden on this PC and stays in the cloud and on
+  other devices.
+- The first launch after the update can bring back entries the old cap or the reboot
+  clear dropped, and deletes whose tombstone never left. For a long-time user that can be
+  thousands of entries.
+- History is unbounded, and every save rewrites all of `history.bin`.
+
+**Invariant to keep**: **"not on this PC" is not "gone".** This is the class that ties
+#31, #32 and #33. Each time, the app could not tell "empty" from "failed to fill", and
+took the branch that loses data: a busy `settings.json` read as no settings (#32), a
+busy state file read as an empty store and an unreadable boot marker read as a reboot
+(#33), and a history that was never written read as nothing left to download (#31). So a
+default or fallback on any path that decides what to keep has to fall to keep. The cursor
+and `id_map.json` record what this device *pulled*, never what it *holds*. A device that
+holds less than its record says goes back to the server for the rest. Only a recorded
+delete removes anything.
+
+---
+
+## #32 - A briefly locked settings file reset every preference, and history with it
+
+**Symptom.** Fixed 2026-08-18 in `1f7e33c`, shipped in 0.1.8, and recorded late, after
+#31. The first of three history-loss incidents; see #31 for the class. On some launches
+the app came up with default preferences: only pinned and Saved entries in the
+clipboard history, and the sign-in screen for a user who was signed in. Now and then
+every preference was gone for good.
+
+**Cause.** Every reader of `settings.json` treated a failed read as a missing file. On
+Windows a scanner or the search indexer can hold a short-lived handle on a file that was
+just replaced atomically, the same sharing violation the write path in `health.rs`
+already retried around.
+
+- `read_bool_setting` in `lib.rs` called `read_to_string(path).ok()` once per flag, nine
+  reads per startup, and any refusal gave the default. `keep_history` defaulted to off, so
+  that launch loaded only `pinned_entries.bin` and wrote no history at all.
+- `SyncConfig` loading fell back to its defaults the same way, reporting sync as off, so
+  the sign-in screen came up with no retry until the next launch.
+- `set_setting` read the whole file with `.unwrap_or_default()` before writing it back.
+  A refused read at that moment wrote a file holding only the changed key, which erased
+  every other preference, `sync_enabled` and `keep_history` included, for every later
+  launch.
+
+**Fix.** `settings_file::read_map` is the one reader. It retries a refused read 3 times,
+40 ms apart, and returns `ReadError::Absent`, `Unreadable` or `Malformed`, so a caller
+can tell no file from a fault. Startup reads the file once for every flag (`bool_setting`
+over one map). `set_setting` refuses to write over a file it could not read, and
+`get_setting` and `SyncConfig` record the fault instead of passing it off as defaults.
+Each fault goes to `crash.log` through the new `health::note`, because the release build
+is a Windows GUI app and `eprintln!` goes nowhere. No test was added with the fix.
+
+**Not fixed then.** A file that stays unreadable still leaves every flag at its default
+for that launch, and the `keep_history` default was still off, so that fallback still
+lost history. #31 changed the default to on, so an unreadable file now keeps it.
+
+**Invariant to keep**: **a file that will not open is not a file that is not there.**
+Only `NotFound` may mean "no settings"; every other failure is a fault that must not be
+acted on as an empty state, and above all not written back. The wider rule is #31's.
+
+---
+
+## #33 - A briefly locked state file read as empty, and a blank history was saved over it
+
+**Symptom.** Fixed 2026-08-19 in `059e6f0`, shipped in 0.1.12, and recorded late, after
+#31. The second of three history-loss incidents, a day after #32; see #31 for the class.
+After an ordinary restart the clipboard history came up empty, and it stayed empty,
+because the file on disk now held the empty history too. Separately, with Keep history
+on, an ordinary restart could drop every unsaved entry as if the PC had rebooted.
+
+**Cause.** Two reads that could not tell failure from absence.
+
+- `load_entries_binary` in `history.rs`, and the notes and notification loaders beside
+  it, read their file once. An antivirus or indexer handle made that read fail, the error
+  was discarded, and the store came up empty, which looks exactly like a store that really
+  is empty. The next flush (`save_all_to_file`) wrote that empty store over the file, and
+  the same save deleted every file in `images/`, since no entry named one any more.
+- The boot marker `boot_id.txt` was read with `.ok()` and `unwrap_or(0)`. A marker that
+  would not read gave a previous boot of 0, so `same_boot` came out false and startup
+  took the new-boot branch, which loads history and runs `clear()`, keeping only pinned
+  and Saved entries.
+- Nothing flushed on the way out, so whatever changed in the last flush interval before a
+  quit (up to 2 s) was lost.
+
+**Fix.** `health::read_state` retries a refused read (3 attempts, 40 ms apart) and keeps
+absent (`Ok(None)`) apart from unreadable (`Err`). `health::load_state` is the shared
+read contract: a good parse refreshes `<name>.bak`; a file that exists but will not read
+or parse is sealed for the session (`seal`) and its `.bak` copy is shown instead. A sealed
+path's writes go to `<name>.sealed.quarantine`, never over the file, and the next launch
+folds them back in by id (`merge_leftover`) once the file reads. The app says
+`Could not read your clipboard history file. It is safe on disk and untouched. Restart the app to try again.`
+An unreadable boot marker now keeps history. `flush_dirty_stores` became the single flush,
+run by the timer, on `RunEvent::Exit`, and before `health_restart_app` and
+`updater_install` restart.
+
+**How a regression is caught.** `health.rs`:
+`a_sealed_path_is_never_overwritten_but_still_quarantines`,
+`load_state_falls_back_to_the_last_known_good_copy`,
+`read_state_separates_absent_from_unreadable`.
+
+**Not fixed then.** #31 found what this fix left: `load_state` refreshed `.bak` from any
+file that parsed, however small; the leftover adoption could deadlock; the exit flush
+still skipped history with Keep history off; the update path exited before rows merged
+during its drain were written; and a real reboot still cleared unsaved entries.
+
+**Invariant to keep**: **an empty store is a fact only if its read succeeded.** A store
+that failed to fill must never be written back as if it were the user's data, and every
+destructive decision taken at startup (clear, prune, overwrite) has to check that the
+load it rests on really happened. The wider rule is #31's.
+
+---
+
+## #34 - The identifier rename reset every on-screen preference
+
+**Symptom.** Shipped in v0.3.8 (2026-09-21), fixed 2026-09-29, not yet released. On
+Windows, the first launch after updating from v0.3.7 or earlier came up with its
+on-screen preferences at their defaults. The theme followed the system again, the
+clipboard and notes layouts, sort orders, filters and pane widths were reset, group
+colors were gone, and so was any group no entry used. History, notes, settings and
+sign-in all carried over, so only what React keeps in `localStorage` was lost.
+
+**Cause.** v0.3.8 renamed the bundle identifier from `com.spect.orange-copy-paste` to
+`io.github.notrover.orange-copy-paste`. `migrate_legacy_app_data` copied the old
+`{app_data}` folder (roaming `%APPDATA%`) forward, but WebView2 keeps its profile under
+`%LOCALAPPDATA%\<identifier>\EBWebView\`, also keyed by the identifier. Nothing copied
+it, so the renamed build opened an empty profile, and `localStorage` with it. Copying
+it inside `setup` would have been too late: tauri builds the `tauri.conf.json` windows,
+and WebView2 creates the profile, before the `setup` hook runs.
+
+**Fix.** `migrate_legacy_webview_storage` in `lib.rs` runs in `run()` before the tauri
+Builder. It copies the old profile's `Default\Local Storage` into the new profile, only
+while the new one has none, into a staging folder that is renamed into place, so a
+failure leaves nothing that looks complete. Both migrations now write their outcome to
+`crash.log`. `migrate_legacy_app_data` used `eprintln!`, which a release build drops.
+Section 7.3 of `docs/architecture.md` has the details.
+
+**How a regression is caught.** `lib.rs`:
+`legacy_webview_storage_is_copied_once_and_never_over_a_store`,
+`a_failed_webview_storage_copy_leaves_no_partial_store`.
+
+**Not fixed.** An install that already ran v0.3.8 or later has a new profile, and the
+copy never writes over one, so its per-device preferences, such as the notes layout and
+sort order, stay reset. The roaming ones (theme, clipboard layout and sort order,
+"Number-key paste slots", groups and group colors) came back in v0.3.8 to v0.4.2 only
+when another device pushed settings, the one time those builds pulled. For a signed-in
+user they come back at this build's first settings round, unless a settings push from
+the reset PC got there first: those builds sent `""`, `"[]"` and `"{}"` for every unset
+roaming key, so the push wrote the reset over the account, and the user's other PCs on
+those builds applied it too. The account then has nothing to bring back. A failed copy
+is retried only if the webview did not create its own store in the meantime, which it
+usually does on the same launch. On Linux the webview data is keyed by the identifier
+too, and it is not covered.
+
+**Invariant to keep**: **anything keyed by the bundle identifier moves with it.** Before
+changing the identifier, list every folder and store the old one keys, including the
+webview profile, and carry each one before anything opens it.
+
+---
+
+## #35 - Quitting during an upload or download could lose the entry
+
+**Symptom.** Found 2026-09-29, fixed the same day, not yet released. With Keep history
+off, an item copied just before a quit, a restart or an update could be missing on the
+next launch, from this PC and from the cloud. So could an item that was still arriving
+from another device or a space. A file pasted from the app after quitting could fail
+because its folder was already gone.
+
+**Cause.** The exit flush keeps what this device's sync record names, and several
+moments left an entry named nowhere:
+
+- An upload named its entry only once the server answered, and a quit did not wait for
+  it. The entry was in no record, so the exit dropped it, and the upload died with the
+  process.
+- A queue flush took its ops out of the queue before sending them. A flush that
+  overlapped the exit left those keys out of the keep set.
+- A text merge added the entry to history before it wrote the id_map row, and a blob
+  merge did the same after its download. The keep set was also read before the history
+  lock, so a merge could land between the two.
+- An `id_map.json` or `sync_pending.json` that would not read loaded as an empty record,
+  and the exit then dropped every cloud and space entry, and the next write replaced the
+  file.
+- The exit deleted a dropped entry's files even while the system clipboard still held
+  them.
+- A received file re-download emptied the entry's folder before extracting, so a failure
+  or a quit half way left a broken tree.
+- Settings: a failed `settings.json` write held the `localStorage` values that did land
+  out of the base, and a round queued behind another pushed a snapshot taken before that
+  round applied its values.
+- The restore check ran only when the launch's first flush succeeded, and a sweep's gap
+  mark counted its own running downloads as missing, so a later loss of that size never
+  triggered a sweep.
+
+**Fix.** A write-ahead record, `sync_pending_work.json`, names an entry before its
+transfer touches the network and clears only when the work is done or queued. The keep
+set now includes it, the ops a flush holds, shares waiting for a space key and received
+items, and it is read under the history lock. Merges write the id_map row first. A quit
+or restart stops new sync work, hides the window, shows a toast and waits up to 10 s for
+what is running; the rest is re-driven after the next launch's first successful sync. An
+unreadable record keeps everything for the session and is never written that session. An
+entry whose files the clipboard still holds stays.
+Received files extract into a staging folder and are renamed into place, and an entry
+whose files are all present is not downloaded again. Section 4.1 (Shutdown), section 4.2
+and section 4.6 of `docs/architecture.md` have the details.
+
+**How a regression is caught.** `pending_work.rs`: all five tests. `pending_queue.rs`:
+`drained_ops_stay_pending_until_the_settle`, `an_unreadable_queue_file_is_flagged`.
+`persist.rs`: `an_unreadable_file_is_flagged_and_never_overwritten`. `id_map.rs`:
+`keep_keys_cover_shares_and_received_items`, `an_unreadable_map_is_flagged_not_empty`.
+`history.rs`: `an_entry_whose_file_is_on_the_clipboard_is_kept`. `sync/mod.rs`:
+`downloads_in_progress_are_not_part_of_the_gap`, `a_re_extract_swaps_the_folder_in_whole`.
+`sync/commands.rs`: `a_failed_file_write_keeps_only_the_file_keys_out_of_the_base`,
+`a_snapshot_from_before_the_last_round_is_stale`.
+
+**Not fixed.** Work still running after 10 s is cut off; it restarts from the beginning
+at the next launch. A forced shutdown or a crash gets no wait at all, only the record. A
+received row whose id_map row was lost is rebuilt only when it arrives again through a
+merge; until then an unreadable map keeps it, a merely empty one does not. Between the
+two renames of a re-extract, the entry's folder is briefly absent.
+
+**Invariant to keep**: **every entry in history is named by something on disk before the
+work that could lose it starts.** Write the record first, then act, then clear it; never
+the other way round.

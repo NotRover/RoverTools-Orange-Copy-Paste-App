@@ -60,8 +60,10 @@ const Notification: React.FC = () => {
       requestAnimationFrame(() => setVisible(true));
 
       // Auto-dismiss. A toast that carries a sentence needs longer on screen
-      // than one that reads "Copied - Text".
+      // than one that reads "Copied - Text". The closing notice stays until
+      // the app exits or the quit is called off.
       if (timer.current) clearTimeout(timer.current);
+      if (event.payload.kind === "closing") return;
       timer.current = setTimeout(() => {
         setVisible(false);
         // Wait for fade-out transition before hiding the window

@@ -9,7 +9,7 @@ their own copy.
 `CLAUDE.md`. The banned-words and ASCII rules for copy are the "User-Facing Copy: No AI
 Slop" section of `CLAUDE.md`. This guide adds to both and repeats neither.
 
-Product details used as examples below (the 100-entry history, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>
+Product details used as examples below (the 10-pin limit, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>
 for quick paste) are real as of writing. Check them against the code before copying one
 into a page.
 
@@ -218,7 +218,7 @@ be exact. It is organized by the product, not by what the reader is trying to do
   their homes for this reason.
 - **Rules of thumb:** if it is boring and unmemorable, it is probably reference. Lists and
   tables of things are almost always reference.
-- **Language:** "History keeps the last 100 entries."; "The options are: a, b, c.";
+- **Language:** "You can pin up to 10 entries."; "The options are: a, b, c.";
   "You must do a. Never do b. Do not use c unless d."
 
 ### Explanation
@@ -348,8 +348,8 @@ The No AI Slop rules in `CLAUDE.md` still apply. These rules add to them:
   as it appears on screen, set in code style. If the UI changes, the docs change with it.
 - **Respect the reader.** Explain simple things without talking down. A reader should
   never feel stupid, and never feel lectured.
-- **Be specific.** Give the number, the path, the shortcut. "Keeps the last 100
-  entries" beats "keeps a lot of history".
+- **Be specific.** Give the number, the path, the shortcut. "Pin up to 10
+  entries" beats "pin a few entries".
 - **Use active voice and the imperative in steps.** "Open Settings." "Press
   <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>."
 - **One job per element.** A heading labels. An example demonstrates. A callout warns.

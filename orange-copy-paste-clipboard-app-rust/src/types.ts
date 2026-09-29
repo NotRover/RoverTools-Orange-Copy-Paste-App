@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { sharedNow } from "./clock";
 
 //  Shared types and utilities
@@ -231,6 +232,14 @@ export interface SyncInviteList {
   received: SyncInvite[];
 }
 
+/** Mirrors the Rust `sync::types::RestoreOutcome` from `sync_restore_from_cloud`. */
+export interface RestoreOutcome {
+  /** Items merged into this device's history or notes. */
+  restored: number;
+  /** Images and files whose download started; they appear as each one lands. */
+  downloading: number;
+}
+
 /** What raised a notification. Drives its icon and which chip it sits under. */
 export type NotificationKind =
   | "space_invite"
@@ -363,6 +372,7 @@ export function setGroupColorIndex(name: string, index: number): void {
     const map = readGroupColorMap();
     map[name] = normalizeColorIndex(index);
     localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    scheduleSettingsSync();
   } catch {
     // Ignore storage failures so the UI does not crash.
   }
@@ -373,6 +383,7 @@ export function removeGroupColor(name: string): void {
     const map = readGroupColorMap();
     delete map[name];
     localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    scheduleSettingsSync();
   } catch {
     // Ignore storage failures so the UI does not crash.
   }
@@ -388,12 +399,40 @@ export function renameGroupColor(oldName: string, newName: string): void {
     map[newName] = normalizeColorIndex(idx);
     delete map[oldName];
     localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    scheduleSettingsSync();
   } catch {
     // Ignore storage failures so the UI does not crash.
   }
 }
 
 //  Helpers
+
+/**
+ * Ask Rust for a settings round (`sync_schedule_settings`), right after a user
+ * edit to a roaming localStorage key (`ROAMING_STORAGE` in App.tsx). Rust
+ * debounces, so a burst of edits makes one round. Not for a value a round
+ * applied, or for any write the app makes on its own: neither is an edit here.
+ */
+export function scheduleSettingsSync(): void {
+  invoke("sync_schedule_settings").catch(console.error);
+}
+
+/**
+ * Collapses a burst of calls into one call `ms` after the first. The call runs
+ * after the burst, so it reads the newest state. For event-driven re-reads over
+ * IPC: a sync sweep or a large Clear all fires one event per page, blob or
+ * item, and a full re-read per event is the bug #26 failure class.
+ */
+export function coalesce(fn: () => void, ms = 200): () => void {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    if (t) return;
+    t = setTimeout(() => {
+      t = undefined;
+      fn();
+    }, ms);
+  };
+}
 
 export function timeAgo(ts: number): string {
   // `sharedNow`, not `Date.now`: the stored time was corrected against the

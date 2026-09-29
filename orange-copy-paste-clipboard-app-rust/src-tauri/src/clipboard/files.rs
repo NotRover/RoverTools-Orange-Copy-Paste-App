@@ -72,6 +72,27 @@ pub fn read_files_from_clipboard() -> Option<Vec<String>> {
     None
 }
 
+/// Every path the system clipboard holds as files right now, for the exit
+/// cleanup. Empty when it holds no files. `None` when it holds files that
+/// could not be read (another program has the clipboard open): the caller then
+/// has to assume any file may be on it.
+pub fn clipboard_file_paths() -> Option<Vec<std::path::PathBuf>> {
+    if !any_file_format_available() {
+        return Some(Vec::new());
+    }
+    // The clipboard is one lock for the whole desktop, and a program that
+    // just wrote to it may still hold it for a moment.
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        if let Some(paths) = read_files_from_clipboard() {
+            return Some(paths.into_iter().map(std::path::PathBuf::from).collect());
+        }
+    }
+    None
+}
+
 pub fn files_to_content(paths: &[String]) -> String {
     paths.join("\n")
 }

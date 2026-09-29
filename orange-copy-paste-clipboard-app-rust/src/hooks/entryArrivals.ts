@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { coalesce } from "../types";
 
 /**
  * When each received entry reached this device, keyed `"clipboard:{id}"` /
@@ -59,7 +60,9 @@ function start(): void {
   if (started) return;
   started = true;
   refresh();
-  for (const event of REFRESH_ON) listen(event, refresh);
+  // One read per burst: a restore merges once per page and per blob.
+  const refreshSoon = coalesce(refresh);
+  for (const event of REFRESH_ON) listen(event, refreshSoon);
 }
 
 export function subscribeArrivals(cb: () => void): () => void {

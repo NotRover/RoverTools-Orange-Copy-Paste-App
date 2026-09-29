@@ -2991,6 +2991,7 @@ dependencies = [
  "arboard",
  "argon2",
  "base64 0.22.1",
+ "dirs 6.0.0",
  "futures-util",
  "hkdf",
  "image",

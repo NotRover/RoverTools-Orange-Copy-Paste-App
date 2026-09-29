@@ -12,26 +12,25 @@ import type { Space } from "./types";
 /** Persisted preference: ask before deleting a synced item. Absent = ask. */
 export const CONFIRM_SYNC_DELETE_KEY = "confirm_sync_delete";
 
-/** Whether the confirmation is still switched on (default true when unset). */
-async function syncDeleteConfirmEnabled(): Promise<boolean> {
+/** Whether the confirmation under `key` is still on (default true when unset). */
+async function confirmEnabled(key: string): Promise<boolean> {
   try {
-    const v = await invoke<boolean | null>("get_setting", {
-      key: CONFIRM_SYNC_DELETE_KEY,
-    });
-    return v !== false;
+    return (await invoke<boolean | null>("get_setting", { key })) !== false;
   } catch {
     return true;
   }
 }
 
-/** Turn the confirmation off (the "Don't ask again" checkbox). */
-export async function disableSyncDeleteConfirm(): Promise<void> {
+/** Turn the confirmation under `key` off (the "Don't ask again" checkbox). */
+async function disableConfirm(key: string): Promise<void> {
   try {
-    await invoke("set_setting", { key: CONFIRM_SYNC_DELETE_KEY, value: false });
+    await invoke("set_setting", { key, value: false });
   } catch {
     /* a failed write just means the prompt shows again next time */
   }
 }
+
+export const disableSyncDeleteConfirm = () => disableConfirm(CONFIRM_SYNC_DELETE_KEY);
 
 /** Persisted preference: ask before removing a shared item from a space.
  *  Absent = ask. Kept separate from the delete confirmation on purpose - one is
@@ -39,38 +38,21 @@ export async function disableSyncDeleteConfirm(): Promise<void> {
  *  turning one off must not silently turn the other off. */
 export const CONFIRM_SPACE_REMOVE_KEY = "confirm_space_remove";
 
-/** Whether the remove-from-space confirmation is still on (default true). */
-async function spaceRemoveConfirmEnabled(): Promise<boolean> {
-  try {
-    const v = await invoke<boolean | null>("get_setting", {
-      key: CONFIRM_SPACE_REMOVE_KEY,
-    });
-    return v !== false;
-  } catch {
-    return true;
-  }
-}
-
-/** Turn the remove-from-space confirmation off (the "Don't ask again" box). */
-export async function disableSpaceRemoveConfirm(): Promise<void> {
-  try {
-    await invoke("set_setting", {
-      key: CONFIRM_SPACE_REMOVE_KEY,
-      value: false,
-    });
-  } catch {
-    /* a failed write just means the prompt shows again next time */
-  }
-}
+export const disableSpaceRemoveConfirm = () => disableConfirm(CONFIRM_SPACE_REMOVE_KEY);
 
 /**
  * Whether a remove-from-space should be confirmed first. Unlike a delete, there
  * is no synced-or-not test: an item in a space is shared by definition, and
  * removing it takes it out for everyone, so the only gate is the preference.
  */
-export async function shouldConfirmSpaceRemove(): Promise<boolean> {
-  return spaceRemoveConfirmEnabled();
-}
+export const shouldConfirmSpaceRemove = () => confirmEnabled(CONFIRM_SPACE_REMOVE_KEY);
+
+/** Persisted preference: ask before "Remove from cloud" takes every item off
+ *  the server. Separate from the delete confirmation for the same reason as the
+ *  space one: turning off a per-item prompt must not skip this one. */
+export const CONFIRM_CLOUD_REMOVE_KEY = "confirm_cloud_remove";
+export const shouldConfirmCloudRemove = () => confirmEnabled(CONFIRM_CLOUD_REMOVE_KEY);
+export const disableCloudRemoveConfirm = () => disableConfirm(CONFIRM_CLOUD_REMOVE_KEY);
 
 /**
  * Whether any of these entry keys (`clipboard:{id}` / `note:{id}`) has a cloud
@@ -93,7 +75,7 @@ async function anyEntrySynced(keys: string[]): Promise<boolean> {
  * and happen on the click, so no state has to be threaded through the UI.
  */
 export async function shouldConfirmDelete(keys: string[]): Promise<boolean> {
-  if (!(await syncDeleteConfirmEnabled())) return false;
+  if (!(await confirmEnabled(CONFIRM_SYNC_DELETE_KEY))) return false;
   return anyEntrySynced(keys);
 }
 

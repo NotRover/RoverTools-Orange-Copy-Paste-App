@@ -219,15 +219,18 @@ pub fn update_note(state: State<'_, AppState>, id: String, title: String, conten
 }
 
 #[tauri::command]
-pub fn delete_note(state: State<'_, AppState>, id: String) -> bool {
+pub fn delete_note(state: State<'_, AppState>, app: tauri::AppHandle, id: String) -> bool {
     // Read before the delete: a note shared into a space leaves a placeholder,
     // and the placeholder sits where the note sat.
     let entry_ts = state.notes.lock().find(&id).map(|n| n.updated_at);
     let ok = state.notes.lock().delete(&id);
     if ok {
         state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
-        let sync = state.sync_client.lock().clone();
-        if let Some(s) = sync { s.on_delete_note(id.clone(), entry_ts); }
+        crate::sync::forward_deletes(
+            &app,
+            crate::sync::types::EntryType::Notes,
+            vec![(id, entry_ts)],
+        );
     }
     ok
 }

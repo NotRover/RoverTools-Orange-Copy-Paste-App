@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import type { ClipboardEntry } from "../../../types";
+import { scheduleSettingsSync } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import {
   useSearchFilter,
@@ -33,13 +34,13 @@ import BulkActionsBar from "./bulk-actions/BulkActionsBar";
 import EntryViewer from "./entry-viewer/EntryViewer";
 import { useCardClickAction } from "../../../hooks/useCardClickAction";
 import { sortableText } from "../sort-options";
-import type { SortMode } from "../sort-options";
+import { isSortMode, type SortMode } from "../sort-options";
 import Topbar, {
   SortDropdown,
   LayoutSegment,
   GroupsButton,
 } from "../topbar/Topbar";
-import type { ClipboardLayout } from "../topbar/Topbar";
+import { CLIPBOARD_LAYOUTS, type ClipboardLayout } from "../topbar/Topbar";
 import {
   ClipboardIcon,
   ChevronDownIcon,
@@ -188,10 +189,12 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
 }) => {
   const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
     "sc-layout",
-    "tiles",
+    CLIPBOARD_LAYOUTS,
+    scheduleSettingsSync,
   );
   const [sort, setSort] = useState<SortMode>(() => {
-    return (localStorage.getItem("sc-sort") as SortMode) ?? "newest";
+    const v = localStorage.getItem("sc-sort");
+    return isSortMode(v) ? v : "newest";
   });
   // Which day sections are rolled up, kept across screen switches.
   const [collapsed, setCollapsed] = useStickySet("sc-collapsed-days");
@@ -502,6 +505,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
               onSortChange={(s) => {
                 setSort(s);
                 localStorage.setItem("sc-sort", s);
+                scheduleSettingsSync();
               }}
             />
             <FilterDropdown sf={sf} availableGroups={availableGroups} />

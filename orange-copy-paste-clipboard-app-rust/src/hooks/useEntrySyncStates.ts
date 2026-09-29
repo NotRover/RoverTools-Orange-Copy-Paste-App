@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { usePendingRemovals } from "./pendingRemoval";
+import { coalesce } from "../types";
 
 export type EntrySyncState = "synced" | "pending";
 
@@ -72,10 +73,13 @@ export function useEntrySyncStates(): Record<string, EntrySyncState> {
 
   useEffect(() => {
     refresh();
+    // One read per burst: a large Clear all queues one entry-queued event per
+    // item, and a restore merges once per page and per blob.
+    const refreshSoon = coalesce(refresh);
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
     for (const event of REFRESH_ON) {
-      listen(event, refresh).then((fn) => {
+      listen(event, refreshSoon).then((fn) => {
         if (cancelled) fn();
         else unlisteners.push(fn);
       });

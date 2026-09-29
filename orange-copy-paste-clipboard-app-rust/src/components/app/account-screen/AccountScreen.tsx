@@ -20,6 +20,7 @@ import type {
   SyncMode,
   SyncQuota,
   SyncServerBreakdown,
+  RestoreOutcome,
 } from "../../../types";
 import { deriveDisplayKind } from "../../../types";
 import { userError } from "../../../userError";
@@ -51,6 +52,8 @@ import {
   NETWORK_REFOCUS_MS,
   useWindowRefocus,
 } from "../../../hooks/useWindowRefocus";
+import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
+import { disableCloudRemoveConfirm, shouldConfirmCloudRemove } from "../../../confirmDelete";
 import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
@@ -102,6 +105,19 @@ function formatBytes(bytes: number): string {
   const mb = kb / 1024;
   if (mb < 1024) return `${mb.toFixed(1)} MB`;
   return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** The result line after Restore from cloud. Downloads land after the command
+ *  returns, so they are counted apart from what is already back. */
+function restoreText({ restored, downloading }: RestoreOutcome): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  const items = (v: number) => `${n(v)} item${v === 1 ? "" : "s"}`;
+  const verb = (v: number) => (v === 1 ? "is" : "are");
+  if (restored === 0 && downloading === 0) return "Nothing to restore.";
+  if (restored === 0) return `${items(downloading)} ${verb(downloading)} downloading.`;
+  const more =
+    downloading > 0 ? ` ${n(downloading)} more ${verb(downloading)} downloading.` : "";
+  return `Restored ${items(restored)}.${more}`;
 }
 
 /** Pick a device glyph from the reported platform string. */
@@ -268,6 +284,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   // Sync actions
   const [syncNowLoading, setSyncNowLoading] = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreNote, setRestoreNote] = useState<{
+    text: string;
+    warn: boolean;
+  } | null>(null);
 
   const refreshQuota = useCallback(() => {
     invoke<SyncQuota>("sync_get_quota")
@@ -780,19 +801,49 @@ Keep this. It is the only way back into your synced items if you forget your pas
     }
   };
 
+  // What a finished sync changes on this screen: status, last sync, the
+  // quota, and the account's item counts.
+  const afterSync = async () => {
+    const s = await invoke<SyncStatusInfo>("sync_get_status");
+    setSyncStatus(s);
+    setLastSynced(Date.now());
+    refreshQuota();
+    refreshCloudCount(true);
+  };
+
   const handleSyncNow = async () => {
     setSyncNowLoading(true);
+    // A restore's result describes that moment only; a refresh supersedes it.
+    setRestoreNote(null);
     try {
       await invoke("sync_now");
-      const s = await invoke<SyncStatusInfo>("sync_get_status");
-      setSyncStatus(s);
-      setLastSynced(Date.now());
-      refreshQuota();
-      refreshCloudCount(true);
+      await afterSync();
     } catch (e) {
       console.error("sync_now failed", e);
     } finally {
       setSyncNowLoading(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    setRestoreNote(null);
+    try {
+      const r = await invoke<RestoreOutcome>("sync_restore_from_cloud");
+      setRestoreNote({ text: restoreText(r), warn: false });
+      // Not awaited into the catch below: a failed status read must not turn
+      // a restore that worked into an error line.
+      afterSync().catch((e) => console.error("sync_get_status failed", e));
+    } catch (e) {
+      setRestoreNote({
+        text: userError(
+          e,
+          "Could not restore from the cloud. Check your connection and try again.",
+        ),
+        warn: true,
+      });
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -1177,17 +1228,12 @@ Keep this. It is the only way back into your synced items if you forget your pas
     void startUpload();
   };
 
-  // Two clicks: this is a delete on the server, so the other devices lose
-  // their copies too. Arming beats a dialog for something this small.
+  // Confirmed in the delete dialog until the user turns it off: this is a
+  // delete on the server, so the other devices lose their copies too.
   const [unpushing, setUnpushing] = useState(false);
-  const [unpushArmed, setUnpushArmed] = useState(false);
+  const [unpushConfirm, setUnpushConfirm] = useState(false);
   const handleUnpushAll = async () => {
-    if (!unpushArmed) {
-      setUnpushArmed(true);
-      setTimeout(() => setUnpushArmed(false), 3000);
-      return;
-    }
-    setUnpushArmed(false);
+    setUnpushConfirm(false);
     setUnpushing(true);
     setBulkResult(null);
     try {
@@ -1888,7 +1934,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     type="button"
                     className="acct-btn"
                     onClick={handleSyncNow}
-                    disabled={syncNowLoading}
+                    disabled={syncNowLoading || restoring}
                   >
                     {syncNowLoading ? "Refreshing..." : "Refresh"}
                   </button>
@@ -2068,15 +2114,27 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     <button
                       type="button"
                       className="acct-btn acct-btn--sm acct-btn--quiet acct-btn--danger"
-                      onClick={handleUnpushAll}
+                      onClick={async () => {
+                        if (await shouldConfirmCloudRemove()) setUnpushConfirm(true);
+                        else void handleUnpushAll();
+                      }}
                       disabled={pushingOld || unpushing || progress !== null}
                     >
                       {progress?.mode === "remove" || unpushing
                         ? "Removing..."
-                        : unpushArmed
-                          ? "Confirm?"
-                          : "Remove from cloud"}
+                        : "Remove from cloud"}
                     </button>
+                    <ConfirmDeleteDialog
+                      open={unpushConfirm}
+                      title="Remove everything from the cloud?"
+                      message="Your items leave the server and your other devices. Only this device keeps them."
+                      confirmLabel="Remove from cloud"
+                      onCancel={() => setUnpushConfirm(false)}
+                      onConfirm={(dontAsk) => {
+                        if (dontAsk) void disableCloudRemoveConfirm();
+                        void handleUnpushAll();
+                      }}
+                    />
                   </div>
                 </div>
                 {plan ? (
@@ -2148,6 +2206,29 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     upload keeps going.
                   </p>
                 )}
+              </div>
+
+              {/* Says what it does, because the button alone reads like it could
+                  bring back deletes, and turns into the result once it has run. */}
+              <div className="acct-card acct-mode">
+                <div className="acct-mode-head">
+                  <span className="acct-row-name">Restore from cloud</span>
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--sm"
+                    onClick={handleRestore}
+                    disabled={restoring || syncNowLoading}
+                  >
+                    {restoring ? "Restoring..." : "Restore"}
+                  </button>
+                </div>
+                <p
+                  className={`acct-card-desc${restoreNote ? ` acct-card-desc--${restoreNote.warn ? "warn" : "ok"}` : ""}`}
+                  role="status"
+                >
+                  {restoreNote?.text ??
+                    "Downloads anything your account holds that is missing on this PC. Deleted items stay deleted."}
+                </p>
               </div>
             </section>
 

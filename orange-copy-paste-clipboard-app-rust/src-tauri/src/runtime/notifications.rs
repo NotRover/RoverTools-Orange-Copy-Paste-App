@@ -64,6 +64,23 @@ pub(crate) fn notify_capture_skipped(app: &tauri::AppHandle, bytes: usize) {
     );
 }
 
+/// Tell the user the app is waiting for sync work before it closes or
+/// restarts - always, whatever the notification preferences say.
+///
+/// The window is already hidden by then, so without this the app has simply
+/// not closed yet, and the obvious next move is to end it from Task Manager:
+/// the one thing that loses the upload the wait is for.
+pub(crate) fn notify_finishing_sync(app: &tauri::AppHandle, restarting: bool) {
+    let then = if restarting { "restart" } else { "close" };
+    show_toast(
+        app,
+        "closing",
+        "Finishing sync",
+        Some("Cloud sync".into()),
+        Some(format!("Orange Copy Paste will {then} in a few seconds.")),
+    );
+}
+
 /// Show a copy notification if the user has the feature enabled
 /// and copy operations are not muted.
 pub(crate) fn notify_if_enabled(app: &tauri::AppHandle, entry: &ClipboardEntry) {

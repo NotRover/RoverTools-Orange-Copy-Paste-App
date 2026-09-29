@@ -170,7 +170,9 @@ export function useNotesFilter(
 
   const sectionCounts = useMemo(
     () => ({
-      quick: (pinnedOnly ? 1 : 0) + (ownerFilter !== "any" ? 1 : 0),
+      quick:
+        (pinnedOnly ? 1 : 0) +
+        (cloud?.signedIn && ownerFilter !== "any" ? 1 : 0),
       cloud: cloud?.signedIn
         ? (cloudFilter !== "any" ? 1 : 0) +
           (shareFilter !== "any" ? 1 : 0) +
@@ -218,7 +220,9 @@ export function useNotesFilter(
         const [from, to] = dateWindow(datePreset, dateAfter, dateBefore);
         if (n.updated_at < from || n.updated_at > to) return false;
       }
-      if (cloud) {
+      // Signed out none of it applies, the clipboard screen's rule (see
+      // `CloudFilterContext.signedIn` in SearchFilter.tsx).
+      if (cloud?.signedIn) {
         const key = `note:${n.id}`;
         if (skip !== "cloud" && cloudFilter !== "any") {
           if (!!cloud.syncStates[key] !== (cloudFilter === "in")) return false;
@@ -314,9 +318,9 @@ export function useNotesFilter(
   const filterNames = useMemo(() => {
     const out: string[] = [];
     if (pinnedOnly) out.push("Pinned");
-    if (ownerFilter === "mine") out.push("Mine");
-    else if (ownerFilter === "others") out.push("From others");
     if (cloud?.signedIn) {
+      if (ownerFilter === "mine") out.push("Mine");
+      else if (ownerFilter === "others") out.push("From others");
       if (cloudFilter !== "any") {
         out.push(cloudFilter === "in" ? "In cloud" : "Local only");
       }
