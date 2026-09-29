@@ -108,6 +108,10 @@ open = "5"
 # Already in the tree transitively and builds on the same windows-sys 0.59
 # below, so this promotes an existing crate rather than adding one.
 winreg = "0.55"
+# Finds local app data before the tauri Builder exists, the same way tauri places
+# the WebView2 profile, for the identifier-rename migration in lib.rs. TEMPORARY -
+# goes with that migration. Already in the tree as tauri's own path resolver.
+dirs = "6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",

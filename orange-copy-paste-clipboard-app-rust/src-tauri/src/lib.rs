@@ -211,10 +211,12 @@ pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle, mode: Flush) {
 const LEGACY_APP_DATA_IDENTIFIER: &str = "com.spect.orange-copy-paste";
 
 /// TEMPORARY (added with the 2026 `com.spect.*` -> `io.github.notrover.*` identifier
-/// rename). Delete this function, `copy_dir_recursive`, `LEGACY_APP_DATA_IDENTIFIER`
-/// and the call in `setup` once every install has run a renamed build at least once -
-/// a few stable releases after the rename ships. At that point no install still keeps
-/// its data under the old identifier, so this only ever no-ops.
+/// rename). Delete this function and `migrate_legacy_webview_storage` together, with
+/// `copy_dir_recursive`, `LEGACY_APP_DATA_IDENTIFIER`, their calls in `run` and
+/// `setup`, the webview tests and the Windows `dirs` dependency, once every install has
+/// run a renamed build at least once - a few stable releases after the rename ships.
+/// At that point no install still keeps its data under the old identifier, so both
+/// only ever no-op.
 ///
 /// Copy the previous identifier's app-data folder into the current one, once.
 ///
@@ -226,16 +228,16 @@ const LEGACY_APP_DATA_IDENTIFIER: &str = "com.spect.orange-copy-paste";
 /// runs only when the new folder holds nothing yet, so it never clobbers a real
 /// install and is a no-op on every later launch. The OS keychain is not keyed by
 /// the identifier, so sign-in state carries over without any help here.
-fn migrate_legacy_app_data(app: &tauri::AppHandle) {
+///
+/// Returns the line for `crash.log`, which has no directory yet when this runs.
+fn migrate_legacy_app_data(app: &tauri::AppHandle) -> Option<(&'static str, String)> {
     use tauri::Manager;
     let Ok(new_dir) = app.path().app_data_dir() else {
-        return;
+        return None;
     };
-    let Some(old_dir) = new_dir.parent().map(|b| b.join(LEGACY_APP_DATA_IDENTIFIER)) else {
-        return;
-    };
+    let old_dir = new_dir.parent()?.join(LEGACY_APP_DATA_IDENTIFIER);
     if old_dir == new_dir || !old_dir.is_dir() {
-        return;
+        return None;
     }
     // Skip when the new location already holds data: an install that has run
     // before, or a migration that already happened.
@@ -243,32 +245,82 @@ fn migrate_legacy_app_data(app: &tauri::AppHandle) {
         .map(|mut it| it.next().is_some())
         .unwrap_or(false);
     if new_has_data {
-        return;
+        return None;
     }
-    match copy_dir_recursive(&old_dir, &new_dir) {
-        Ok(()) => eprintln!(
-            "[migrate] carried app-data across the identifier rename: {} -> {}",
-            old_dir.display(),
-            new_dir.display()
-        ),
-        Err(e) => eprintln!(
-            "[migrate] app-data copy {} -> {} failed: {e}",
-            old_dir.display(),
-            new_dir.display()
-        ),
-    }
+    let paths = format!("{} -> {}", old_dir.display(), new_dir.display());
+    Some(match copy_dir_recursive(&old_dir, &new_dir, &[]) {
+        Ok(()) => ("migrate: carried app-data across the identifier rename", paths),
+        Err(e) => ("migrate: app-data copy failed", format!("{paths}: {e}")),
+    })
 }
 
-/// Recursively copy a directory tree. Used once by `migrate_legacy_app_data`.
-fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+/// TEMPORARY - goes with `migrate_legacy_app_data`; its note says when.
+///
+/// Copy the previous identifier's WebView2 `localStorage` into the current
+/// profile, once. The roots are the WebView2 user data folders tauri picks,
+/// `%LOCALAPPDATA%\<identifier>`, for the old and the current identifier.
+///
+/// The profile is keyed by the identifier too, but it lives under local app
+/// data rather than `app_data_dir`, so the app-data copy never reached it and
+/// the rename reset every preference React keeps in `localStorage`: theme,
+/// layouts, sort orders, groups, filters, pane widths. `Local Storage` is the
+/// only part that holds user data - the app keeps nothing in IndexedDB, cookies
+/// or caches - and the leveldb `LOCK` file is left behind; leveldb makes its own.
+///
+/// Runs only while the new profile has no `Local Storage`, so it never merges
+/// into or overwrites a store WebView2 already made. The copy lands in a sibling
+/// named for this process and is renamed into place, so a failure leaves no
+/// half-copied store that looks complete, and WebView2 starts an empty one as it
+/// would have without this. A sibling a killed launch left is removed once the
+/// store is in place. The old profile is left as it was.
+///
+/// `None` when there was nothing to do.
+#[cfg(windows)]
+fn migrate_legacy_webview_storage(
+    old_root: &std::path::Path,
+    new_root: &std::path::Path,
+) -> Option<std::io::Result<()>> {
+    let store = std::path::Path::new("EBWebView")
+        .join("Default")
+        .join("Local Storage");
+    let (from, to) = (old_root.join(&store), new_root.join(&store));
+    if old_root == new_root || !from.is_dir() || to.exists() {
+        return None;
+    }
+    let staging = to.with_file_name(format!("Local Storage.migrating-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staging);
+    let copied = copy_dir_recursive(&from, &staging, &["LOCK"])
+        .and_then(|()| std::fs::rename(&staging, &to));
+    if copied.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    } else if let Some(Ok(siblings)) = to.parent().map(std::fs::read_dir) {
+        // A launch killed mid-copy leaves its sibling behind. Cleared only once
+        // the store is in place: before, it could be another first launch's copy
+        // in progress, and none can be renamed over the store now.
+        for e in siblings.flatten() {
+            if e.file_name().to_string_lossy().starts_with("Local Storage.migrating-") {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    Some(copied)
+}
+
+/// Recursively copy a directory tree, leaving out files named in `skip`. Used
+/// once by each of the identifier-rename migrations.
+fn copy_dir_recursive(
+    from: &std::path::Path,
+    to: &std::path::Path,
+    skip: &[&str],
+) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let src = entry.path();
         let dst = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&src, &dst)?;
-        } else {
+            copy_dir_recursive(&src, &dst, skip)?;
+        } else if !skip.iter().any(|s| entry.file_name() == *s) {
             std::fs::copy(&src, &dst)?;
         }
     }
@@ -794,6 +846,22 @@ pub fn run() {
         kill_previous_instance();
     }
 
+    let context = tauri::generate_context!();
+    // Here rather than in `setup`: tauri builds the tauri.conf.json windows, and
+    // WebView2 its profile with them, before `setup` runs. Logged from `setup`,
+    // once the diag log has a directory. TEMPORARY - remove with
+    // migrate_legacy_webview_storage.
+    #[cfg(windows)]
+    let webview_migration = dirs::data_local_dir().and_then(|local| {
+        let old = local.join(LEGACY_APP_DATA_IDENTIFIER);
+        let new = local.join(&context.config().identifier);
+        let paths = format!("{} -> {}", old.display(), new.display());
+        Some(match migrate_legacy_webview_storage(&old, &new)? {
+            Ok(()) => ("migrate: carried webview storage across the identifier rename", paths),
+            Err(e) => ("migrate: webview storage copy failed", format!("{paths}: {e}")),
+        })
+    });
+
     let history = create_shared_history();
     let suppress: SuppressFlag = Arc::new(AtomicBool::new(false));
 
@@ -1026,11 +1094,20 @@ pub fn run() {
             // so the diag dir and every store below resolve to the migrated
             // folder rather than a fresh empty one. TEMPORARY - remove this line
             // with migrate_legacy_app_data once the rename has propagated.
-            migrate_legacy_app_data(app.handle());
+            let app_data_migration = migrate_legacy_app_data(app.handle());
             // Installed before any other setup work, so a panic inside it lands
             // in the log too.
             crate::health::set_diag_dir(app.path().app_data_dir().ok());
             crate::health::install_panic_hook(app.handle().clone());
+            // Both migrations ran before the log had a directory. TEMPORARY -
+            // remove with them.
+            if let Some((headline, detail)) = app_data_migration {
+                crate::health::note(headline, &detail);
+            }
+            #[cfg(windows)]
+            if let Some((headline, detail)) = webview_migration {
+                crate::health::note(headline, &detail);
+            }
             setup_runtime(app, &history, &suppress)?;
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -1092,7 +1169,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while running tauri application")
         .run(|app, event| match event {
             // Quitting mid-rotation is the one shutdown that costs the user
@@ -1181,5 +1258,72 @@ mod tests {
             parse_deep_link("orange://reset?type=recovery&code=abc123"),
             Some(DeepLink::Reset("abc123".into()))
         );
+    }
+
+    /// TEMPORARY - goes with `migrate_legacy_webview_storage`.
+    #[cfg(windows)]
+    #[test]
+    fn legacy_webview_storage_is_copied_once_and_never_over_a_store() {
+        use super::migrate_legacy_webview_storage as migrate;
+        let dir = std::env::temp_dir().join(format!("rovertools-webview-{}", uuid::Uuid::new_v4()));
+        let (old, new) = (dir.join("old"), dir.join("new"));
+        let store = std::path::Path::new("EBWebView/Default/Local Storage/leveldb");
+
+        // No old profile: nothing to do.
+        assert!(migrate(&old, &new).is_none());
+
+        std::fs::create_dir_all(old.join(store)).unwrap();
+        std::fs::write(old.join(store).join("000003.log"), b"sc-theme").unwrap();
+        std::fs::write(old.join(store).join("LOCK"), b"").unwrap();
+        std::fs::create_dir_all(old.join("EBWebView/Default/Cache")).unwrap();
+        // What a launch killed mid-copy leaves behind.
+        std::fs::create_dir_all(new.join("EBWebView/Default/Local Storage.migrating-1")).unwrap();
+        assert!(matches!(migrate(&old, &new), Some(Ok(()))));
+        assert_eq!(std::fs::read(new.join(store).join("000003.log")).unwrap(), b"sc-theme");
+        assert!(!new.join(store).join("LOCK").exists());
+        assert!(!new.join("EBWebView/Default/Cache").exists());
+        let default = std::fs::read_dir(new.join("EBWebView/Default")).unwrap().count();
+        assert_eq!(default, 1, "only Local Storage lands, no staging folder is left");
+
+        // The new profile has a store now: never merged into or overwritten.
+        std::fs::write(old.join(store).join("000003.log"), b"changed").unwrap();
+        assert!(migrate(&old, &new).is_none());
+        assert_eq!(std::fs::read(new.join(store).join("000003.log")).unwrap(), b"sc-theme");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// TEMPORARY - goes with `migrate_legacy_webview_storage`.
+    #[cfg(windows)]
+    #[test]
+    fn a_failed_webview_storage_copy_leaves_no_partial_store() {
+        use super::migrate_legacy_webview_storage as migrate;
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = std::env::temp_dir().join(format!("rovertools-webview-{}", uuid::Uuid::new_v4()));
+        let (old, new) = (dir.join("old"), dir.join("new"));
+        let store = std::path::Path::new("EBWebView/Default/Local Storage/leveldb");
+        std::fs::create_dir_all(old.join(store)).unwrap();
+        std::fs::write(old.join(store).join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(old.join(store).join("MANIFEST-000001"), b"manifest").unwrap();
+
+        // A file the old app's webview still holds fails the copy partway,
+        // after CURRENT has already been copied.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(old.join(store).join("MANIFEST-000001"))
+            .unwrap();
+        assert!(matches!(migrate(&old, &new), Some(Err(_))));
+        let default = std::fs::read_dir(new.join("EBWebView/Default")).unwrap().count();
+        assert_eq!(default, 0, "neither a store nor a staging folder is left");
+
+        // Nothing left blocks a later copy. In the app that later copy happens
+        // only if WebView2 made no store of its own in between, and it usually
+        // makes one on the same launch.
+        drop(held);
+        assert!(matches!(migrate(&old, &new), Some(Ok(()))));
+        assert_eq!(std::fs::read(new.join(store).join("MANIFEST-000001")).unwrap(), b"manifest");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

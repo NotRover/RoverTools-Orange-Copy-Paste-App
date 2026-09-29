@@ -2069,23 +2069,42 @@ Losing `sync_state.json` causes a full re-pull from the server on the next start
 
 Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: on Windows `%APPDATA%\<identifier>\`, on Linux `~/.local/share/<identifier>/`. The identifier is `io.github.notrover.orange-copy-paste`.
 
-**Temporary migration.** The identifier was previously `com.spect.orange-copy-paste`.
+**Temporary migration.** The identifier was `com.spect.orange-copy-paste` up to v0.3.7;
+v0.3.8 renamed it.
 
 - `migrate_legacy_app_data` in `lib.rs` runs on the first launch of a renamed build,
   before any store loads. It copies the old identifier's folder into the new one.
 - It copies rather than moves, so the old folder stays as a backup. It runs only
   while the new folder is still empty, so it does nothing on every later launch.
+- `migrate_legacy_webview_storage` (Windows only) does the same for `localStorage`.
+  WebView2 keeps its profile outside `{app_data}`, in
+  `%LOCALAPPDATA%\<identifier>\EBWebView\`, and only `Default\Local Storage` in it
+  holds user data. It copies that folder, without leveldb's `LOCK` file, and only
+  while the new profile has no `Local Storage`, so it never overwrites or merges.
+- It runs in `run()` before the tauri Builder, not in `setup`: tauri creates the
+  `tauri.conf.json` windows, and WebView2 its profile with them, before `setup`
+  runs. It copies into a staging folder beside the target and renames it into place,
+  so a failed copy leaves no partial store.
+- Both write their outcome to `crash.log` once `setup` has set the diag directory.
+- Installs that ran v0.3.8 or later already have a new profile, so the
+  `localStorage` copy skips them by design. For a signed-in user the roaming
+  `localStorage` keys (see Settings Sync) come back at the first settings round,
+  unless an older build's settings push from the reset PC wrote its empty values
+  over the account; the per-device ones, such as the notes layout and sort order,
+  stay at their defaults.
 - The OS keychain is **not** keyed by the identifier, so sign-in state carries over
   on its own.
 - The install directory, autostart entry and uninstall registry key are keyed by
   `productName` ("Orange Copy Paste", unchanged). An update upgrades in place with no
   duplicate entries.
-- The shim is temporary. It is meant to be removed a few stable releases after the
-  rename, once no install still holds data under the old identifier.
+- Both shims are temporary and go together. They are meant to be removed a few
+  stable releases after the rename, once no install still holds data under the old
+  identifier.
 
-**Why:** `{app_data}` is keyed by the identifier. The rename alone would point a
-renamed build at an empty folder, and the user's history, notes and settings would
-look wiped. The old files would be orphaned, not gone.
+**Why:** `{app_data}` and the WebView2 profile are both keyed by the identifier. The
+rename alone would point a renamed build at an empty folder and an empty profile, and
+the user's history, notes, settings and on-screen preferences would look wiped. The
+old files would be orphaned, not gone.
 
 ---
 

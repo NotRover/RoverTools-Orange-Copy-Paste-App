@@ -1414,3 +1414,50 @@ during its drain were written; and a real reboot still cleared unsaved entries.
 that failed to fill must never be written back as if it were the user's data, and every
 destructive decision taken at startup (clear, prune, overwrite) has to check that the
 load it rests on really happened. The wider rule is #31's.
+
+---
+
+## #34 - The identifier rename reset every on-screen preference
+
+**Symptom.** Shipped in v0.3.8 (2026-09-21), fixed 2026-09-29, not yet released. On
+Windows, the first launch after updating from v0.3.7 or earlier came up with its
+on-screen preferences at their defaults. The theme followed the system again, the
+clipboard and notes layouts, sort orders, filters and pane widths were reset, group
+colors were gone, and so was any group no entry used. History, notes, settings and
+sign-in all carried over, so only what React keeps in `localStorage` was lost.
+
+**Cause.** v0.3.8 renamed the bundle identifier from `com.spect.orange-copy-paste` to
+`io.github.notrover.orange-copy-paste`. `migrate_legacy_app_data` copied the old
+`{app_data}` folder (roaming `%APPDATA%`) forward, but WebView2 keeps its profile under
+`%LOCALAPPDATA%\<identifier>\EBWebView\`, also keyed by the identifier. Nothing copied
+it, so the renamed build opened an empty profile, and `localStorage` with it. Copying
+it inside `setup` would have been too late: tauri builds the `tauri.conf.json` windows,
+and WebView2 creates the profile, before the `setup` hook runs.
+
+**Fix.** `migrate_legacy_webview_storage` in `lib.rs` runs in `run()` before the tauri
+Builder. It copies the old profile's `Default\Local Storage` into the new profile, only
+while the new one has none, into a staging folder that is renamed into place, so a
+failure leaves nothing that looks complete. Both migrations now write their outcome to
+`crash.log`. `migrate_legacy_app_data` used `eprintln!`, which a release build drops.
+Section 7.3 of `docs/architecture.md` has the details.
+
+**How a regression is caught.** `lib.rs`:
+`legacy_webview_storage_is_copied_once_and_never_over_a_store`,
+`a_failed_webview_storage_copy_leaves_no_partial_store`.
+
+**Not fixed.** An install that already ran v0.3.8 or later has a new profile, and the
+copy never writes over one, so its per-device preferences, such as the notes layout and
+sort order, stay reset. The roaming ones (theme, clipboard layout and sort order,
+"Number-key paste slots", groups and group colors) came back in v0.3.8 to v0.4.2 only
+when another device pushed settings, the one time those builds pulled. For a signed-in
+user they come back at this build's first settings round, unless a settings push from
+the reset PC got there first: those builds sent `""`, `"[]"` and `"{}"` for every unset
+roaming key, so the push wrote the reset over the account, and the user's other PCs on
+those builds applied it too. The account then has nothing to bring back. A failed copy
+is retried only if the webview did not create its own store in the meantime, which it
+usually does on the same launch. On Linux the webview data is keyed by the identifier
+too, and it is not covered.
+
+**Invariant to keep**: **anything keyed by the bundle identifier moves with it.** Before
+changing the identifier, list every folder and store the old one keys, including the
+webview profile, and carry each one before anything opens it.
