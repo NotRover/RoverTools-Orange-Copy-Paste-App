@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import type { ClipboardEntry } from "../../../types";
+import { scheduleSettingsSync } from "../../../types";
 import { EntryCard } from "./entry-card/EntryCard";
 import {
   useSearchFilter,
@@ -189,6 +190,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
     "sc-layout",
     CLIPBOARD_LAYOUTS,
+    scheduleSettingsSync,
   );
   const [sort, setSort] = useState<SortMode>(() => {
     const v = localStorage.getItem("sc-sort");
@@ -503,6 +505,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
               onSortChange={(s) => {
                 setSort(s);
                 localStorage.setItem("sc-sort", s);
+                scheduleSettingsSync();
               }}
             />
             <FilterDropdown sf={sf} availableGroups={availableGroups} />

@@ -1141,6 +1141,7 @@ All cryptography runs here. Nothing outside this module touches raw key material
 | `sync_set_enabled`     | `(enabled: bool) -> ()`                              | Toggle sync; persists to `settings.json`                                                 |
 | `sync_set_mode`        | `(mode: String) -> ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
 | `sync_get_mode`        | `() -> String`                                       | Current cloud sync mode                                                                  |
+| `sync_schedule_settings` | `() -> ()`                                         | Schedule a settings round after a user edit to a `ROAMING_STORAGE` key (see Settings Sync); nothing to do without a `SyncClient` |
 | `sync_settings`        | `(json: String) -> ()`                               | One settings round (see Settings Sync). React invokes it on `sync:collect-settings`; `json` is its `localStorage` part |
 | `sync_settings_refused` | `(json: String) -> ()`                              | React refused values a newer build wrote; resets their base so the next round does not push over them |
 | `sync_reset_password`  | `(email: String) -> Result<()>`                       | Mint a PKCE pair, keep the verifier in the keychain, ask Supabase to mail a link to `reset_page_url` |
@@ -1416,8 +1417,9 @@ the plaintext group names they reference.
 
 **One settings round** (`sync_settings`, one at a time on `settings_lock`):
 
-1. `schedule_settings_sync` waits out the debounce (`SETTINGS_DEBOUNCE_SECS`, 2s), then
-   emits `sync:collect-settings`. React answers with its `localStorage` part.
+1. `schedule_settings_sync` waits out the debounce (`SETTINGS_DEBOUNCE_SECS`, 2s after
+   the latest call, so a burst of calls makes one round), then emits
+   `sync:collect-settings`. React answers with its `localStorage` part.
 2. Pull the blob. One this device cannot decrypt ends the round with no push: it may be
    the account's only copy.
 3. Merge (`merge_settings`) the account's values, this device's, and `settings_base`,
@@ -1427,9 +1429,18 @@ the plaintext group names they reference.
    and local values only fill keys it lacks.
 4. Apply what the account changed. `settings.json` keys are written and stored into
    their in-memory flags at once; the `localStorage` keys go to React as
-   `sync:settings`.
+   `sync:settings`. Unless the `settings.json` write failed, and when a base exists, the
+   base takes the applied values at once, before any push, so a round that ends before
+   step 6 (the push failed, another push won, or the app closed mid-push) does not leave
+   them reading as changes made here. A first round has no base to add them to.
 5. Push only when the merge differs from the account's blob, stamped later than the
-   pulled one. If the server reports that another push won, schedule another round.
+   pulled one. The push names the pulled blob's own `updated_at` (0 when there was none)
+   as `base_updated_at`, so the server stores it only over the blob it was merged from
+   (the rule: `orange-copy-paste-clipboard-backend/docs/architecture.md`, section 5.3).
+   If the server reports that another push won, nothing was stored: the base does not
+   move to the merge but keeps what step 4 gave it, and another round merges against the
+   newer blob. Rounds repeat this way only while another device keeps storing a blob
+   between this device's pull and push.
 6. Move the base to the merged blob, unless the `settings.json` write failed.
 
 **Empty values never roam.** `is_unset` reads `null`, `""`, `"[]"` and `"{}"` as no
@@ -1441,14 +1452,23 @@ round does not read this device's value as a change and push it over.
 
 **Triggers:** sign-in and session restore (`start_ws_listener`), the `settings:updated`
 socket event (including the echo of this device's own push), `set_setting` for a
-roaming key, and a send-filter change. A `localStorage` change on its own schedules no
-round; it rides the next one.
+roaming key, a send-filter change, and a user edit to a `ROAMING_STORAGE` key, which
+React reports right after the write through `scheduleSettingsSync` in `types.ts` (the
+`sync_schedule_settings` command). That command is gated like `set_setting`: it schedules
+whenever a `SyncClient` exists, in any sync mode, and a round while signed out ends
+before its pull. Nothing else that writes those keys schedules: a value a round
+applied, the load-time cleanup of values an older build roamed, and the startup group
+recovery are not edits made here.
 
 **Why:** a fresh install used to push its whole blob, defaults and blanks included,
 minutes after sign-in, over the account's (bug #31 in `docs/bugfix-history.md`).
 
-**Limit.** Two devices that change settings in the same moment can lose one change. The
-server keeps whichever push is stamped later and has no conditional write.
+**Limit.** Two devices that change the same key in the same moment end on the value
+stored last. Changes to different keys both survive, but only on a server that honors
+`base_updated_at`. A server that predates it ignores the field (its request model does
+not forbid unknown fields), so this build still syncs with one as last-write-wins: that
+server keeps whichever push is stamped later, and a change another device makes in the
+same moment can be lost.
 
 #### `config.rs` - Sync Settings
 

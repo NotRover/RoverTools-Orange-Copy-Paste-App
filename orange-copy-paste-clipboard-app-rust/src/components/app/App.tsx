@@ -17,6 +17,7 @@ import {
   coalesce,
   removeGroupColor,
   renameGroupColor,
+  scheduleSettingsSync,
 } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
@@ -98,6 +99,7 @@ const parse = (v: string): unknown => {
 // what counts as a value worth keeping. Checked on read, collect and apply.
 // `empty` is this PC's explicit "none" for a key the user can empty: it is
 // kept and collected (so Rust sees it was emptied here), never applied.
+// Every user edit to one of these keys is followed by scheduleSettingsSync().
 const ROAMING_STORAGE: Record<
   string,
   { key: string; valid: (v: string) => boolean; empty?: string }
@@ -349,6 +351,7 @@ const App: React.FC = () => {
       localStorage.setItem("sc-theme", next);
       return next;
     });
+    scheduleSettingsSync();
   }, []);
 
   useEffect(() => {
@@ -1045,6 +1048,7 @@ const App: React.FC = () => {
       localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
+    scheduleSettingsSync();
   }, []);
 
   const handleDeleteGroup = useCallback(
@@ -1053,6 +1057,7 @@ const App: React.FC = () => {
         entries.filter((e) => e.groups.includes(name)).map((e) => e.id),
       );
       setAvailableGroups((prev) => storeGroups(prev.filter((g) => g !== name)));
+      scheduleSettingsSync();
       setEntries((prev) =>
         prev.map((e) =>
           e.groups.includes(name)
@@ -1077,6 +1082,7 @@ const App: React.FC = () => {
           key: "group-delete",
           onUndo: () => {
             setAvailableGroups((prev) => storeGroups(mergeGroups(prev, [name])));
+            scheduleSettingsSync();
             setEntries((prev) =>
               prev.map((e) =>
                 affectedIds.has(e.id) && !e.groups.includes(name)
@@ -1099,6 +1105,7 @@ const App: React.FC = () => {
         localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(next));
         return next;
       });
+      scheduleSettingsSync();
       renameGroupColor(oldName, newName);
       await invoke("rename_group_in_entries", { oldName, newName });
       await invoke("rename_group_in_notes", { oldName, newName });

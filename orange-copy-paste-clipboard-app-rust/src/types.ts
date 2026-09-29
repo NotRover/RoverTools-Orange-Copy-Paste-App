@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { sharedNow } from "./clock";
 
 //  Shared types and utilities
@@ -371,6 +372,7 @@ export function setGroupColorIndex(name: string, index: number): void {
     const map = readGroupColorMap();
     map[name] = normalizeColorIndex(index);
     localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    scheduleSettingsSync();
   } catch {
     // Ignore storage failures so the UI does not crash.
   }
@@ -381,6 +383,7 @@ export function removeGroupColor(name: string): void {
     const map = readGroupColorMap();
     delete map[name];
     localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    scheduleSettingsSync();
   } catch {
     // Ignore storage failures so the UI does not crash.
   }
@@ -396,12 +399,23 @@ export function renameGroupColor(oldName: string, newName: string): void {
     map[newName] = normalizeColorIndex(idx);
     delete map[oldName];
     localStorage.setItem(GROUP_COLORS_STORAGE_KEY, JSON.stringify(map));
+    scheduleSettingsSync();
   } catch {
     // Ignore storage failures so the UI does not crash.
   }
 }
 
 //  Helpers
+
+/**
+ * Ask Rust for a settings round (`sync_schedule_settings`), right after a user
+ * edit to a roaming localStorage key (`ROAMING_STORAGE` in App.tsx). Rust
+ * debounces, so a burst of edits makes one round. Not for a value a round
+ * applied, or for any write the app makes on its own: neither is an edit here.
+ */
+export function scheduleSettingsSync(): void {
+  invoke("sync_schedule_settings").catch(console.error);
+}
 
 /**
  * Collapses a burst of calls into one call `ms` after the first. The call runs

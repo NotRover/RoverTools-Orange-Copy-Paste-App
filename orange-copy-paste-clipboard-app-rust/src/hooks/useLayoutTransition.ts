@@ -4,11 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * Layout toggle with a cross-fade: `selectLayout` flips `fading` on, then swaps
  * the layout (and persists it to localStorage) after `fadeMs`. Shared by the
  * clipboard and notes screens, which had identical copies of this logic.
- * A stored value outside `allowed` reads as `allowed[0]`.
+ * A stored value outside `allowed` reads as `allowed[0]`. `onPersist` runs
+ * right after each write, for a caller whose key roams.
  */
 export function useLayoutTransition<T extends string>(
   storageKey: string,
   allowed: readonly T[],
+  onPersist?: () => void,
   fadeMs = 160,
 ): { layout: T; fading: boolean; selectLayout: (l: T) => void } {
   const [layout, setLayout] = useState<T>(() => {
@@ -28,10 +30,11 @@ export function useLayoutTransition<T extends string>(
       timerRef.current = setTimeout(() => {
         setLayout(l);
         localStorage.setItem(storageKey, l);
+        onPersist?.();
         setFading(false);
       }, fadeMs);
     },
-    [storageKey, fadeMs],
+    [storageKey, onPersist, fadeMs],
   );
 
   useEffect(

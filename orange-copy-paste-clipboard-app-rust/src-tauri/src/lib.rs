@@ -961,6 +961,7 @@ pub fn run() {
             crate::sync::commands::sync_catch_up,
             crate::sync::commands::sync_set_enabled,
             crate::sync::commands::sync_get_connection,
+            crate::sync::commands::sync_schedule_settings,
             crate::sync::commands::sync_settings,
             crate::sync::commands::sync_settings_refused,
             crate::sync::commands::spaces_list,

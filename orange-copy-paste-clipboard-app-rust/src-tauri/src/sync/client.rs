@@ -471,6 +471,11 @@ pub struct BreakdownResponse {
 pub struct SettingsPushRequest {
     pub encrypted_blob: String,
     pub updated_at: u64,
+    /// `updated_at` of the blob this one was merged from, 0 when there was
+    /// none. The server stores the push only over that blob; left out, the PUT
+    /// is last-write-wins. A server that predates the field ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_updated_at: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1985,5 +1990,32 @@ impl SyncHttpClient {
             self.authed(Method::DELETE, &format!("/api/v1/invites/{invite_id}"))
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The precondition goes out as `base_updated_at`, 0 included (no blob
+    /// stored yet). Unset, the field is left out, which the server reads as a
+    /// last-write-wins PUT.
+    #[test]
+    fn a_settings_push_carries_the_blob_it_was_merged_from() {
+        let body = |base_updated_at| {
+            serde_json::to_value(SettingsPushRequest {
+                encrypted_blob: "blob".into(),
+                updated_at: 7,
+                base_updated_at,
+            })
+            .expect("the push body serializes")
+        };
+
+        assert_eq!(
+            body(Some(0)),
+            json!({ "encrypted_blob": "blob", "updated_at": 7, "base_updated_at": 0 })
+        );
+        assert_eq!(body(None), json!({ "encrypted_blob": "blob", "updated_at": 7 }));
     }
 }

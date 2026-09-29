@@ -1873,6 +1873,19 @@ fn apply_pulled_settings(
     landed
 }
 
+/// Schedule a settings round for a user edit to React's localStorage part of
+/// the roaming settings, which `set_setting` never sees. Gated like
+/// `set_setting`'s roaming path: only on the client existing. With none there
+/// is nothing to sync, which is not an error.
+#[tauri::command]
+pub fn sync_schedule_settings(state: State<'_, AppState>) -> Result<(), String> {
+    let sync = state.sync_client.lock().clone();
+    if let Some(s) = sync {
+        s.schedule_settings_sync();
+    }
+    Ok(())
+}
+
 /// One settings round: pull the account's blob, merge it with this PC's values,
 /// apply what the account changed, and push only when the merge differs from it.
 ///
@@ -1935,7 +1948,17 @@ pub async fn sync_settings(
 
     let base = sync.settings_base();
     let (merged, apply) = merge_settings(&server, &local, base.as_ref());
+    let landed = apply.clone();
     let applied = apply.is_empty() || apply_pulled_settings(&app, &sync, apply);
+    // The applied values landed here, so the base takes them now, before the
+    // push. A push that fails, loses to another device's push or never
+    // finishes would otherwise leave them reading as changes made here, and the next round would push
+    // them back over another device's newer ones. With no base yet (first
+    // sync) there is nothing to add them to.
+    if let (true, Some(mut base)) = (applied, base) {
+        base.extend(landed);
+        sync.set_settings_base(base);
+    }
 
     if merged != server {
         let blob = serde_json::Value::Object(merged.clone()).to_string();
@@ -1949,6 +1972,9 @@ pub async fn sync_settings(
             .push_settings(crate::sync::client::SettingsPushRequest {
                 encrypted_blob: encrypted,
                 updated_at,
+                // The pulled blob's own stamp, so the server stores this
+                // push only over the blob it was merged from.
+                base_updated_at: Some(server_ts),
             })
             .await
         {
@@ -1958,8 +1984,9 @@ pub async fn sync_settings(
                 return Ok(());
             }
         };
-        // Another device pushed between the pull and this push. Merge again
-        // against its blob; the base stays, so this PC's changes still count.
+        // Another device pushed between the pull and this push, and nothing
+        // was stored. Merge again against its blob. The base keeps this PC's
+        // changes counting, and already holds what the apply above gave it.
         if resp.winner == "server" {
             sync.schedule_settings_sync();
             return Ok(());
@@ -2106,6 +2133,36 @@ mod tests {
         }
         let (merged, _) = merge_settings(&crate::settings_file::Map::new(), &local, Some(&local));
         assert!(merged.is_empty(), "a per-device key never enters the blob from here");
+    }
+
+    /// A push the server refused because another PC stored a blob first, or one
+    /// that failed (offline, an HTTP error). The round applied that PC's theme
+    /// here and keeps the base it had, plus the applied values; the next round
+    /// merges against the newer blob.
+    /// This PC's layout still counts as its change, and the theme a third PC
+    /// set meanwhile is taken rather than pushed over with the applied one.
+    /// This checks the next merge given that base. That `sync_settings` writes
+    /// the base before its push is not covered: it needs an `AppHandle` and a
+    /// live push.
+    #[test]
+    fn a_refused_push_keeps_both_changes_on_the_next_round() {
+        let base = map(json!({ "theme": "light", "layout": "tiles" }));
+        let pulled = map(json!({ "theme": "dark", "layout": "tiles" }));
+        let mut local = map(json!({ "theme": "light", "layout": "list" }));
+
+        let (_, apply) = merge_settings(&pulled, &local, Some(&base));
+        assert_eq!(apply, map(json!({ "theme": "dark" })));
+        local.extend(apply.clone());
+        let mut kept = base.clone();
+        kept.extend(apply);
+
+        let stored = map(json!({ "theme": "blue", "layout": "tiles" }));
+        let (merged, apply) = merge_settings(&stored, &local, Some(&kept));
+        assert_eq!(merged, map(json!({ "theme": "blue", "layout": "list" })));
+        assert_eq!(apply, map(json!({ "theme": "blue" })));
+
+        let (stale, _) = merge_settings(&stored, &local, Some(&base));
+        assert_eq!(stale["theme"], "dark", "the old base reads the applied theme as a change here");
     }
 
     #[test]

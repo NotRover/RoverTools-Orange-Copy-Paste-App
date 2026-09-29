@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { invoke } from "@tauri-apps/api/core";
-import { readSlots } from "../../../types";
+import { readSlots, scheduleSettingsSync } from "../../../types";
 import {
   CaretDown,
   Check,
@@ -189,6 +189,7 @@ const SettingsScreen: React.FC = () => {
   const handleSlotsChange = (val: number) => {
     setPasteSlots(val);
     localStorage.setItem("sc-paste-slots", String(val));
+    scheduleSettingsSync();
   };
 
   const toggleBoolSetting = (
