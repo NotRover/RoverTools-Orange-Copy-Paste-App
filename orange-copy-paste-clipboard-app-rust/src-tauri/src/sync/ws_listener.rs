@@ -283,18 +283,24 @@ impl WsListener {
         match msg.event.as_str() {
             // Entry fan-out: only Rust holds the keys, so decrypt + merge here
             // (tombstones — deleted_at set — are handled inside merge_pulled).
-            // `live = true`: this is the WS path, where passive mode and
+            // `Live`: this is the WS path, where passive mode and
             // auto-copy apply.
             "sync:entry" => {
                 if let Ok(entry) = serde_json::from_value::<PulledEntry>(msg.payload.clone()) {
                     if let Some(sync) = self.sync_client() {
-                        sync.merge_pulled(std::slice::from_ref(&entry), true);
+                        sync.merge_pulled(
+                            std::slice::from_ref(&entry),
+                            crate::sync::MergeSource::Live,
+                        );
                     }
                 }
             }
-            // Another device changed settings — ask the frontend to re-pull.
+            // The account's settings changed (possibly by this device's own
+            // push): sync them, which pulls first.
             "settings:updated" => {
-                let _ = self.app.emit("sync:settings-updated", &msg.payload);
+                if let Some(sync) = self.sync_client() {
+                    sync.schedule_settings_sync();
+                }
             }
             "device:online" => {
                 let _ = self.app.emit(

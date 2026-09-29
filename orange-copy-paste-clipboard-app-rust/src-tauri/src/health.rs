@@ -315,6 +315,14 @@ pub fn load_state<T>(
     };
     match parse(&data) {
         Ok(value) => {
+            // A file far smaller than its backup may be a real Clear all or a
+            // loss. Keep the big copy aside as `.bak.prev`, never read
+            // automatically, so `.bak` still tracks the last good file and a
+            // cleared history cannot come back through a recovery.
+            let bak_len = std::fs::metadata(&bak).map(|m| m.len()).unwrap_or(0);
+            if (data.len() as u64) < bak_len / 4 {
+                let _ = std::fs::rename(&bak, sibling(path, ".bak.prev"));
+            }
             // Refresh the last-known-good copy with the exact bytes that just
             // parsed. Unflushed on purpose: it is a second chance, not the
             // primary, and a torn backup simply fails to parse when tried.
@@ -803,8 +811,7 @@ pub fn health_restart_app(app: tauri::AppHandle) {
     // This blocks the main thread for up to the drain budget, so the window
     // freezes for that long. It cannot deadlock: `SyncClient` owns its own
     // runtime, and nothing in the sync module ever waits on this thread.
-    crate::flush_dirty_stores(&app);
-    crate::drain_token_rotation(crate::EXIT_DRAIN_MS);
+    crate::flush_for_restart(&app);
     // A relaunch surfaces a running copy by default; this is a self-restart that
     // must instead take over, so mark it before the replacement launches.
     crate::mark_self_restart();
@@ -1151,6 +1158,50 @@ mod tests {
         assert!(is_sealed(&orphan));
         assert_eq!(std::fs::read(&orphan).unwrap(), b"garbage");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file that shrank to under a quarter of its backup keeps the big copy
+    /// aside, so a loss is recoverable by hand, while `.bak` still follows the
+    /// new file, so a real Clear all is not undone by the next recovery.
+    #[test]
+    fn a_far_smaller_good_file_sets_the_old_backup_aside() {
+        let dir = scratch_dir("bak-prev");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("data.bin");
+        let parse = |b: &[u8]| -> Result<Vec<u8>, String> { Ok(b.to_vec()) };
+
+        std::fs::write(&target, vec![b'a'; 1000]).unwrap();
+        load_state(&target, &parse).unwrap();
+        std::fs::write(&target, b"small").unwrap();
+        load_state(&target, &parse).unwrap();
+
+        assert_eq!(
+            std::fs::read(sibling(&target, ".bak.prev")).unwrap(),
+            vec![b'a'; 1000]
+        );
+        assert_eq!(std::fs::read(sibling(&target, ".bak")).unwrap(), b"small");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ordinary churn just refreshes the backup, with nothing set aside.
+    #[test]
+    fn a_similar_size_file_just_refreshes_the_backup() {
+        let dir = scratch_dir("bak-similar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("data.bin");
+        let parse = |b: &[u8]| -> Result<Vec<u8>, String> { Ok(b.to_vec()) };
+
+        std::fs::write(&target, vec![b'a'; 1000]).unwrap();
+        load_state(&target, &parse).unwrap();
+        std::fs::write(&target, vec![b'b'; 900]).unwrap();
+        load_state(&target, &parse).unwrap();
+
+        assert!(!sibling(&target, ".bak.prev").exists());
+        assert_eq!(
+            std::fs::read(sibling(&target, ".bak")).unwrap(),
+            vec![b'b'; 900]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -31,11 +31,12 @@ pub struct AppState {
     /// (used to suppress re-adding an entry that was written back to the
     /// clipboard by `copy_entry` / `paste_entry`).
     pub suppress_next_capture: Arc<AtomicBool>,
-    /// Cached mirror of the `keep_history` setting.  Checked on every
-    /// clipboard mutation — an atomic load is ~1 ns vs ~0.5 ms for a disk read.
+    /// Cached mirror of the `keep_history` setting (default on).  Read at each
+    /// history flush: when off, only saved entries and entries in the cloud or
+    /// a space are written.
     pub keep_history: Arc<AtomicBool>,
     /// Set to `true` whenever the in-memory history diverges from the on-disk
-    /// `history.json`.  A background thread periodically flushes when dirty.
+    /// `history.bin`.  A background thread periodically flushes when dirty.
     pub history_dirty: Arc<AtomicBool>,
     /// When `true`, closing the main window hides it to the system tray
     /// instead of quitting the app.
@@ -53,8 +54,8 @@ pub struct AppState {
     pub notif_copy: Arc<AtomicBool>,
     /// When `true`, show notifications for paste operations.
     pub notif_paste: Arc<AtomicBool>,
-    /// When `true`, every new clipboard entry is automatically added to the
-    /// "Saved" group so it persists across restarts.
+    /// When `true` (the default), every new clipboard entry is automatically
+    /// added to the "Saved" group so it persists across restarts.
     pub autosave: Arc<AtomicBool>,
     /// When `true`, show the startup splash screen on launch.
     pub show_splash: Arc<AtomicBool>,

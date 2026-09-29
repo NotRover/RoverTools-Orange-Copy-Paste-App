@@ -115,14 +115,14 @@ const ToggleRow: React.FC<{
 const SettingsScreen: React.FC = () => {
   // ── General settings ───────────────────────────────────────────
   const [pasteSlots, setPasteSlots] = useState(readSlots);
-  const [keepHistory, setKeepHistory] = useState(false);
+  const [keepHistory, setKeepHistory] = useState(true);
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [notifCopy, setNotifCopy] = useState(true);
   const [notifPaste, setNotifPaste] = useState(true);
-  const [autosave, setAutosave] = useState(false);
+  const [autosave, setAutosave] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
   const [confirmSyncDelete, setConfirmSyncDelete] = useState(true);
@@ -157,13 +157,13 @@ const SettingsScreen: React.FC = () => {
         setter(v === true ? true : v === false ? false : fallback);
       });
 
-    loadBool("keep_history", setKeepHistory, false);
+    loadBool("keep_history", setKeepHistory, true);
     loadBool("close_to_tray", setCloseToTray, false);
     loadBool("start_minimized", setStartMinimized, false);
     loadBool("notification", setNotificationEnabled, true);
     loadBool("notif_copy", setNotifCopy, true);
     loadBool("notif_paste", setNotifPaste, true);
-    loadBool("autosave", setAutosave, false);
+    loadBool("autosave", setAutosave, true);
     loadBool("paste_keep_open_after_copy", setPasteKeepOpenAfterCopy, true);
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
@@ -199,7 +199,6 @@ const SettingsScreen: React.FC = () => {
     const next = !current;
     setter(next);
     invoke("set_setting", { key, value: next });
-    if (key === "keep_history" && next) invoke("save_history");
   };
 
   const handleKeepToggle = () => toggleBoolSetting(keepHistory, setKeepHistory, "keep_history");
@@ -575,8 +574,8 @@ const SettingsScreen: React.FC = () => {
           </div>
           <div className="set-group">
             <ToggleRow
-              label="Keep history across app restarts"
-              desc="Clipboard history is preserved when the app restarts (cleared after reboot)."
+              label="Keep history across restarts"
+              desc="Unsaved entries stay when the app or PC restarts. Pinned and Saved entries, and anything in the cloud or a space, are always kept. Applies to this PC only."
               active={keepHistory}
               onToggle={handleKeepToggle}
             />
@@ -600,7 +599,7 @@ const SettingsScreen: React.FC = () => {
             />
             <ToggleRow
               label="Auto-save copied entries"
-              desc="Automatically add every new clipboard entry to the Saved group."
+              desc="Automatically add every new clipboard entry to the Saved group. Applies to this PC only."
               active={autosave}
               onToggle={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
             />

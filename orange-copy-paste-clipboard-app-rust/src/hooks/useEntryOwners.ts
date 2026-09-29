@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Space } from "../types";
+import { coalesce, type Space } from "../types";
 
 /** Who an entry came from, resolved to something showable on a card. */
 export interface EntryOwner {
@@ -85,10 +85,12 @@ export function useEntryOwners(): Record<string, EntryOwner> {
 
   useEffect(() => {
     refresh();
+    // One read per burst: a restore merges once per page and per blob.
+    const refreshSoon = coalesce(refresh);
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
     for (const event of REFRESH_ON) {
-      listen(event, refresh).then((fn) => {
+      listen(event, refreshSoon).then((fn) => {
         if (cancelled) fn();
         else unlisteners.push(fn);
       });

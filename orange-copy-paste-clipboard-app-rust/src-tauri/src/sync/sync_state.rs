@@ -55,6 +55,22 @@ pub struct SyncState {
     /// Supabase for it again; see `SyncClient::perform_login`.
     #[serde(default)]
     pub auth_v2_seen: Vec<String>,
+    /// Whether this device owes itself a restore sweep: set by every sign-in,
+    /// by a blob download from a pull or live row that did not land, and by a
+    /// space row that arrived before its key. Cleared once a sweep finishes.
+    #[serde(default)]
+    pub restore_owed: bool,
+    /// `(missing, gap)` as counted right after the last sweep. A later count
+    /// above either one means something went missing since, and sweeps again;
+    /// counts that never come down (rows that cannot return) do not.
+    #[serde(default)]
+    pub restore_mark: (usize, usize),
+    /// The roaming settings as they stood after this device's last settings
+    /// sync. A key whose local value differs from this was changed here since,
+    /// and wins over the account's copy; any other key takes the account's.
+    /// `None` until the first sync, which therefore takes the account's values.
+    #[serde(default)]
+    pub settings_base: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// The address as it is recorded: hashed, so the state file names no account.
@@ -154,6 +170,27 @@ impl SyncStateStore {
         self.data.history_backfilled.iter().any(|s| s == space_id)
     }
 
+    pub fn set_restore_owed(&mut self, owed: bool) {
+        if self.data.restore_owed != owed {
+            self.data.restore_owed = owed;
+            self.save();
+        }
+    }
+
+    pub fn set_restore_mark(&mut self, mark: (usize, usize)) {
+        if self.data.restore_mark != mark {
+            self.data.restore_mark = mark;
+            self.save();
+        }
+    }
+
+    pub fn set_settings_base(&mut self, base: serde_json::Map<String, serde_json::Value>) {
+        if self.data.settings_base.as_ref() != Some(&base) {
+            self.data.settings_base = Some(base);
+            self.save();
+        }
+    }
+
     pub fn set_device_id(&mut self, id: &str) {
         self.data.device_id = id.to_string();
         self.save();
@@ -170,13 +207,17 @@ impl SyncStateStore {
     /// the account being signed into inherits a mark set roughly "now" and pulls
     /// only what is created from here on. Its whole back catalogue is older than
     /// that, so it silently never arrives. The backfill list is the same mistake
-    /// in smaller form.
+    /// in smaller form, and so is the restore mark: it counts the previous
+    /// account's rows. The settings base is dropped too, so the new account's
+    /// first settings sync takes its own blob instead of pushing this one's.
     ///
     /// `device_id` and `user_id` are left to the caller — it is about to write
     /// both for the account signing in.
     pub fn reset_for_new_account(&mut self) {
         self.data.last_server_ts = None;
         self.data.history_backfilled.clear();
+        self.data.restore_mark = (0, 0);
+        self.data.settings_base = None;
         self.save();
     }
 
@@ -225,6 +266,9 @@ mod tests {
         assert_eq!(state.announcements_cursor, 7);
         assert_eq!(state.spaces_announced, vec!["space-b".to_string()]);
         assert!(state.authorship_repaired);
+        assert!(!state.restore_owed);
+        assert_eq!(state.restore_mark, (0, 0));
+        assert_eq!(state.settings_base, None);
     }
 
     /// The fields a fresh install has never written must also be optional, so a
@@ -239,5 +283,40 @@ mod tests {
         assert_eq!(state.user_id, "u");
         assert!(state.history_backfilled.is_empty());
         assert!(!state.authorship_repaired);
+        assert!(!state.restore_owed);
+        assert_eq!(state.restore_mark, (0, 0));
+        assert_eq!(state.settings_base, None);
+    }
+
+    /// The mark counts one account's rows; carried into another it would hold
+    /// back the sweep the new account's first gap should trigger.
+    #[test]
+    fn a_new_account_starts_with_a_clean_restore_mark() {
+        let dir = std::env::temp_dir().join(format!("rovertools-state-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let mut store = SyncStateStore::load(state_path(&dir));
+        store.set_restore_mark((12, 40));
+
+        store.reset_for_new_account();
+
+        assert_eq!(store.data.restore_mark, (0, 0));
+        assert_eq!(SyncStateStore::load(state_path(&dir)).data.restore_mark, (0, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_new_account_clears_the_settings_base() {
+        let dir = std::env::temp_dir().join(format!("rovertools-state-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let mut store = SyncStateStore::load(state_path(&dir));
+        let mut base = serde_json::Map::new();
+        base.insert("theme".into(), serde_json::Value::from("dark"));
+        store.set_settings_base(base);
+
+        store.reset_for_new_account();
+
+        assert_eq!(store.data.settings_base, None);
+        assert_eq!(SyncStateStore::load(state_path(&dir)).data.settings_base, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

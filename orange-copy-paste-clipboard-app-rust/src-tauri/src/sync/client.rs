@@ -1436,7 +1436,7 @@ impl SyncHttpClient {
 
     // Note: there is no dedicated delete route. Deletions are propagated as
     // tombstones — a normal `push` with `deleted_at` set (keyed by client_id +
-    // entry_type). See `SyncClient::spawn_delete_entry`.
+    // entry_type). See `SyncClient::spawn_deletes`.
 
     // ── Settings ──────────────────────────────────────────────────
 

@@ -70,32 +70,48 @@ pub(crate) fn drain_token_rotation(budget_ms: u64) -> bool {
     false
 }
 
-/// System boot timestamp (seconds since UNIX epoch) for detecting reboots.
-#[cfg(windows)]
-fn system_boot_epoch_secs() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let uptime = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000;
-    now.saturating_sub(uptime)
+/// Fold a sealed session's leftover for `file` into its store, and discard it
+/// only once a save holding it has landed. `merge` and `save` each take the
+/// store's lock themselves, so the merge's guard is gone before the save locks
+/// again (holding it across both deadlocked).
+fn adopt_leftover(
+    file: &std::path::Path,
+    merge: impl FnOnce(&[u8]) -> Option<usize>,
+    save: impl FnOnce() -> bool,
+) {
+    let Some(bytes) = crate::health::sealed_leftover(file) else {
+        return;
+    };
+    let landed = match merge(&bytes) {
+        Some(0) => true,
+        Some(_) => save(),
+        None => false,
+    };
+    if landed {
+        crate::health::discard_sealed_leftover(file);
+    }
 }
 
-#[cfg(not(windows))]
-fn system_boot_epoch_secs() -> u64 {
-    // Read /proc/stat for btime (boot time in epoch seconds).
-    // Available on all Linux kernels.  Falls back to 0 on other Unixes.
-    if let Ok(stat) = std::fs::read_to_string("/proc/stat") {
-        for line in stat.lines() {
-            if let Some(rest) = line.strip_prefix("btime ") {
-                if let Ok(v) = rest.trim().parse::<u64>() {
-                    return v;
-                }
-            }
-        }
-    }
-    0
+/// The flush a self-restart runs inline, since `restart` bypasses the event
+/// loop and so the exit-time flush. Flushed on both sides of the rotation
+/// drain: the second, forced write keeps whatever landed while it finished.
+pub(crate) fn flush_for_restart(app: &tauri::AppHandle) {
+    flush_dirty_stores(app, Flush::Dirty);
+    drain_token_rotation(EXIT_DRAIN_MS);
+    flush_dirty_stores(app, Flush::Forced);
+}
+
+/// What a [`flush_dirty_stores`] call is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Flush {
+    /// Write what is dirty: the timer, and a pull page before its cursor moves.
+    Dirty,
+    /// Write history too, dirty or not, before a self-restart. An update
+    /// install can fail and hand back the running app, so nothing is dropped.
+    Forced,
+    /// The last write the process makes, forced. With Keep history off, the
+    /// entries it leaves out are gone with the process, so their files go too.
+    Exit,
 }
 
 /// Write every dirty store to disk, once.
@@ -110,21 +126,73 @@ fn system_boot_epoch_secs() -> u64 {
 /// write, so overlapping callers do the work once. Every save funnels through
 /// `health::write_state`, so degraded and sealed files stay protected here the
 /// same as everywhere else.
-pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle) {
+///
+/// Any `mode` but `Flush::Dirty` forces the history write, so the last one
+/// before the process goes holds everything, dirty flag or not.
+///
+/// Saved entries are always written. With Keep history off, so are entries in
+/// the cloud or a space, which this device's sync record names; the rest stay
+/// in memory only, and at `Flush::Exit` their files go once the write lands.
+///
+/// Never call this while holding `sync_client`, `history`, or any lock that
+/// `SyncClient::entry_states` takes.
+pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle, mode: Flush) {
     use tauri::Manager;
+    // A second caller waits for the write in progress instead of racing it.
+    static FLUSH: Mutex<()> = Mutex::new(());
+    let _one = FLUSH.lock();
     let Ok(app_data) = app.path().app_data_dir() else {
         return;
     };
     let state: tauri::State<'_, AppState> = app.state();
 
-    if state.keep_history.load(Ordering::Relaxed)
-        && state.history_dirty.swap(false, Ordering::Relaxed)
-    {
-        let _ = state.history.lock().save_all_to_file(&app_data.join("history.bin"));
-        let _ = state
-            .history
-            .lock()
-            .save_saved_to_file(&app_data.join("pinned_entries.bin"));
+    if mode != Flush::Dirty {
+        state.history_dirty.store(true, Ordering::Relaxed);
+    }
+    if state.history_dirty.swap(false, Ordering::Relaxed) {
+        let mut keep_all = state.keep_history.load(Ordering::Relaxed);
+        let cloud: std::collections::HashSet<String> = if keep_all {
+            Default::default()
+        } else {
+            let slot = state.sync_client.lock();
+            let keys: Vec<String> = match slot.clone() {
+                Some(s) => {
+                    drop(slot);
+                    s.entry_states().into_keys().collect()
+                }
+                // Sync is off, but this device's record on disk still names what
+                // is in the cloud or a space. Read under the slot, so no client
+                // is built over these files meanwhile. A record that will not
+                // read keeps everything this time rather than nothing.
+                None => match crate::sync::id_map::IdMap::try_load(
+                    crate::sync::id_map::id_map_path(&app_data),
+                ) {
+                    Ok(map) => {
+                        let mut keys = map.entry_keys();
+                        keys.extend(
+                            crate::sync::pending_queue::PendingQueue::load(
+                                crate::sync::pending_queue::pending_queue_path(&app_data),
+                            )
+                            .pending_keys(),
+                        );
+                        keys
+                    }
+                    Err(_) => {
+                        keep_all = true;
+                        Vec::new()
+                    }
+                },
+            };
+            keys.into_iter()
+                .filter_map(|k| k.strip_prefix("clipboard:").map(str::to_owned))
+                .collect()
+        };
+        let keep = |id: &str| keep_all || cloud.contains(id);
+        let mut history = state.history.lock();
+        if mode == Flush::Exit && !keep_all {
+            history.drop_unkept(keep);
+        }
+        let _ = history.save_to_file(&app_data.join("history.bin"), keep);
     }
     if state.notes_dirty.swap(false, Ordering::Relaxed) {
         let _ = state.notes.lock().save_to_file(&app_data.join("notes.bin"));
@@ -402,7 +470,6 @@ fn setup_runtime(
     let images_dir = path("images");
     let received_files_dir = path("received-files");
     let settings_file = path("settings.json");
-    let boot_file = path("boot_id.txt");
     let notes_file = path("notes.bin");
     let notifications_file = path("notifications.bin");
 
@@ -410,8 +477,8 @@ fn setup_runtime(
     if let Some(ref dir) = images_dir {
         history.lock().set_images_dir(dir.clone());
     }
-    // And the dir where synced file entries are extracted, so a full save can
-    // prune the subdirs of entries that have since been deleted.
+    // And the dir where synced file entries are extracted, so a save can
+    // delete the subdir of an entry that was removed.
     if let Some(ref dir) = received_files_dir {
         history.lock().set_received_files_dir(dir.clone());
     }
@@ -431,7 +498,7 @@ fn setup_runtime(
             }
         }
     });
-    let keep_enabled = bool_setting(settings.as_ref(), "keep_history", false);
+    let keep_enabled = bool_setting(settings.as_ref(), "keep_history", true);
 
     // Adopt anything a degraded session had to set aside before its restart, so
     // what the user captured after the fault is not stranded on disk. A file-level
@@ -447,53 +514,17 @@ fn setup_runtime(
         }
     }
 
-    // Load history: full restore if same boot + keep enabled, saved-only otherwise.
-    if keep_enabled {
-        if let (Some(hf), Some(pf), Some(bf)) = (&history_file, &saved_file, &boot_file) {
-            let current_boot = system_boot_epoch_secs();
-            // A marker that is absent is a first run; a marker that is there and
-            // will not read is a fault, and the two must not decide the same
-            // thing. Reading it as "no previous boot" makes `same_boot` false and
-            // sends the restore down the branch that strips every unsaved entry -
-            // so one refused read costs the user their history on what was an
-            // ordinary restart. When it cannot be read, keep what is on disk.
-            let marker = crate::health::read_state(bf);
-            let previous_boot: u64 = match &marker {
-                Ok(Some(raw)) => String::from_utf8_lossy(raw)
-                    .trim()
-                    .parse()
-                    .unwrap_or(0),
-                _ => 0,
-            };
-            let marker_unreadable = marker.is_err();
-
-            let same_boot = current_boot.abs_diff(previous_boot) < 5;
-
-            if (same_boot || marker_unreadable) && hf.exists() {
-                // Same boot session — restore everything. Also the safe branch
-                // when the marker is unreadable: keeping entries the user may
-                // have expected to be dropped is recoverable, dropping entries
-                // they expected to keep is not.
-                let _ = history.lock().load_all_from_file(hf);
-            } else if hf.exists() {
-                // New boot — load full history then strip unsaved entries. Only
-                // reached when the load succeeded, since a sealed history is
-                // empty for reasons that have nothing to do with the boot.
-                let loaded = history.lock().load_all_from_file(hf).is_ok();
-                if loaded {
-                    history.lock().clear();
-                }
-            } else {
-                // Fallback: first run with keep enabled.
-                let _ = history.lock().load_saved_from_file(pf);
-            }
-
-            // Boot marker decides whether history survives a reboot, so a
-            // half-written value must not be readable as a valid timestamp.
-            let _ = crate::health::write_atomic(bf, current_boot.to_string().as_bytes());
-        }
-    } else if let Some(pf) = &saved_file {
-        let _ = history.lock().load_saved_from_file(pf);
+    // Load history. An older build defaulted Keep history to off and, when off,
+    // never read history.bin, so a stale copy there must not come back. Settings
+    // that are absent or unreadable keep it: dropping what the user expected to
+    // keep cannot be undone, keeping extra entries can.
+    if let (Some(hf), Some(pf)) = (&history_file, &saved_file) {
+        let legacy_keep = settings.as_ref().is_none_or(|m| {
+            m.get("keep_history")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        });
+        history.lock().load_from_disk(hf, pf, legacy_keep);
     }
 
     // Load notes from disk.
@@ -514,52 +545,33 @@ fn setup_runtime(
     // file existed but would not read. Merged by id after the normal loads, so
     // the main file wins any overlap; the leftover is only discarded once a
     // save that includes it has landed, and a still-sealed file refuses that
-    // save, so nothing here can lose either copy.
+    // save, so nothing here can lose either copy. Each merge result is bound
+    // before the save locks the store again.
     {
         let state_ref: tauri::State<'_, AppState> = app.state();
         if let Some(hf) = &history_file {
-            if let Some(bytes) = crate::health::sealed_leftover(hf) {
-                match state_ref.history.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(hf),
-                    Some(_) if state_ref.history.lock().save_all_to_file(hf).is_ok() => {
-                        crate::health::discard_sealed_leftover(hf)
-                    }
-                    _ => {}
-                }
-            }
-        }
-        if let Some(pf) = &saved_file {
-            if let Some(bytes) = crate::health::sealed_leftover(pf) {
-                match state_ref.history.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(pf),
-                    Some(_) if state_ref.history.lock().save_saved_to_file(pf).is_ok() => {
-                        crate::health::discard_sealed_leftover(pf)
-                    }
-                    _ => {}
-                }
+            // A pinned_entries.bin leftover lands in history.bin, its only file now.
+            for file in std::iter::once(hf).chain(saved_file.as_ref()) {
+                adopt_leftover(
+                    file,
+                    |b| state_ref.history.lock().merge_leftover(b),
+                    || state_ref.history.lock().save_to_file(hf, |_| true).is_ok(),
+                );
             }
         }
         if let Some(nf) = &notes_file {
-            if let Some(bytes) = crate::health::sealed_leftover(nf) {
-                match state_ref.notes.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(nf),
-                    Some(_) if state_ref.notes.lock().save_to_file(nf).is_ok() => {
-                        crate::health::discard_sealed_leftover(nf)
-                    }
-                    _ => {}
-                }
-            }
+            adopt_leftover(
+                nf,
+                |b| state_ref.notes.lock().merge_leftover(b),
+                || state_ref.notes.lock().save_to_file(nf).is_ok(),
+            );
         }
         if let Some(nf) = &notifications_file {
-            if let Some(bytes) = crate::health::sealed_leftover(nf) {
-                match state_ref.notifications.lock().merge_leftover(&bytes) {
-                    Some(0) => crate::health::discard_sealed_leftover(nf),
-                    Some(_) if state_ref.notifications.lock().save_to_file(nf).is_ok() => {
-                        crate::health::discard_sealed_leftover(nf)
-                    }
-                    _ => {}
-                }
-            }
+            adopt_leftover(
+                nf,
+                |b| state_ref.notifications.lock().merge_leftover(b),
+                || state_ref.notifications.lock().save_to_file(nf).is_ok(),
+            );
         }
     }
 
@@ -585,7 +597,7 @@ fn setup_runtime(
         ("close_to_tray", &state_ref.close_to_tray, false),
         ("os_notifications", &state_ref.os_notifications, true),
         ("start_minimized", &state_ref.start_minimized, false),
-        ("autosave", &state_ref.autosave, false),
+        ("autosave", &state_ref.autosave, true),
         ("show_splash", &state_ref.show_splash, true),
         // notification defaults to true when the key is absent from settings.json.
         // Operation-based notification flags also default to true.
@@ -606,7 +618,7 @@ fn setup_runtime(
         let handle = app.handle().clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
-            flush_dirty_stores(&handle);
+            flush_dirty_stores(&handle, Flush::Dirty);
             // Reached only by taking and releasing every state lock above, so it
             // doubles as proof that none of them are wedged. The watchdog warns
             // the user if these stop arriving.
@@ -788,7 +800,7 @@ pub fn run() {
     let app_state = AppState {
         history: Arc::clone(&history),
         suppress_next_capture: Arc::clone(&suppress),
-        keep_history: Arc::new(AtomicBool::new(false)),
+        keep_history: Arc::new(AtomicBool::new(true)),
         history_dirty: Arc::new(AtomicBool::new(false)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         os_notifications: Arc::new(AtomicBool::new(true)),
@@ -796,7 +808,7 @@ pub fn run() {
         notification_enabled: Arc::new(AtomicBool::new(true)),
         notif_copy: Arc::new(AtomicBool::new(true)),
         notif_paste: Arc::new(AtomicBool::new(true)),
-        autosave: Arc::new(AtomicBool::new(false)),
+        autosave: Arc::new(AtomicBool::new(true)),
         show_splash: Arc::new(AtomicBool::new(true)),
         splash_updating: Arc::new(AtomicBool::new(false)),
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
@@ -861,7 +873,6 @@ pub fn run() {
             crate::clipboard::commands::stat_files,
             crate::clipboard::commands::get_setting,
             crate::clipboard::commands::set_setting,
-            crate::clipboard::commands::save_history,
             crate::clipboard::commands::set_entry_groups,
             crate::clipboard::commands::purge_group_from_entries,
             crate::clipboard::commands::rename_group_in_entries,
@@ -946,11 +957,12 @@ pub fn run() {
             crate::sync::commands::space_clear_removed,
             crate::sync::commands::sync_get_entry_states,
             crate::sync::commands::sync_now,
+            crate::sync::commands::sync_restore_from_cloud,
             crate::sync::commands::sync_catch_up,
             crate::sync::commands::sync_set_enabled,
             crate::sync::commands::sync_get_connection,
-            crate::sync::commands::sync_receive_local_settings,
-            crate::sync::commands::sync_pull_settings,
+            crate::sync::commands::sync_settings,
+            crate::sync::commands::sync_settings_refused,
             crate::sync::commands::spaces_list,
             crate::sync::commands::spaces_cached,
             crate::sync::commands::space_create,
@@ -1118,7 +1130,7 @@ pub fn run() {
             // The last thing the process does with user data. `app.exit(0)` on
             // window destroy lands here too; only `app.restart()` bypasses the
             // event loop, and both restart sites flush for themselves.
-            tauri::RunEvent::Exit => flush_dirty_stores(app),
+            tauri::RunEvent::Exit => flush_dirty_stores(app, Flush::Exit),
             _ => {}
         });
 }

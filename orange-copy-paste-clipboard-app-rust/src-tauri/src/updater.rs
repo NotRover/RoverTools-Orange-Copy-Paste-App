@@ -416,8 +416,7 @@ pub fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     // Both are idempotent, which is what makes running them ahead of a call
     // that can still fail harmless: the flush writes stores that are already
     // clean, and the drain returns at once when nothing is rotating.
-    crate::flush_dirty_stores(&app);
-    crate::drain_token_rotation(crate::EXIT_DRAIN_MS);
+    crate::flush_for_restart(&app);
     // This process is about to be replaced by the updated build - the installer
     // relaunches it on Windows, `app.restart()` below on Linux. Mark it so that
     // replacement takes over rather than deferring to this dying process (a

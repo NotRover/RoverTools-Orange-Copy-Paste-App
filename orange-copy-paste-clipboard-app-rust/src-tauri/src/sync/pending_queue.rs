@@ -54,6 +54,8 @@ pub enum PendingOp {
 pub struct PendingQueue {
     ops: Vec<PendingOp>,
     path: PathBuf,
+    /// A landed Delete left memory but not yet the file.
+    unwritten: bool,
 }
 
 impl PendingQueue {
@@ -64,7 +66,7 @@ impl PendingQueue {
         let mut ops: Vec<PendingOp> = crate::sync::persist::load_json(&inflight_path);
         let recovered = ops.len();
         ops.extend(crate::sync::persist::load_json::<Vec<PendingOp>>(&path));
-        let queue = Self { ops, path };
+        let mut queue = Self { ops, path, unwritten: false };
         if recovered > 0 {
             // Fold the recovered ops into the main file first, so a crash in
             // the next second does not lose them a second time.
@@ -78,14 +80,49 @@ impl PendingQueue {
         queue
     }
 
-    fn persist(&self) {
+    /// Write the queue as it stands in memory.
+    pub fn persist(&mut self) {
         crate::sync::persist::save_json(&self.path, &self.ops);
+        self.unwritten = false;
     }
 
     /// Append an operation.  Immediately persisted to disk.
     pub fn push(&mut self, op: PendingOp) {
-        self.ops.push(op);
+        self.push_many(vec![op]);
+    }
+
+    /// Append several operations in order, with one write to disk.
+    pub fn push_many(&mut self, ops: Vec<PendingOp>) {
+        self.ops.extend(ops);
         self.persist();
+    }
+
+    /// Drop the queued `Delete` for one entry, once its tombstone has landed.
+    ///
+    /// Memory only. The next write of the queue carries it, and the delete
+    /// fan-out writes once when its last tombstone is answered. Persisting on
+    /// every landed delete made a large Clear all quadratic in disk writes. A
+    /// stale op replays as a repeat tombstone, harmless unless the entry was
+    /// uploaded again meanwhile, which [`Self::supersede_delete`] covers.
+    pub fn remove_delete(&mut self, entry_type: &str, client_id: &str) -> bool {
+        let before = self.ops.len();
+        self.ops.retain(|op| {
+            !matches!(op, PendingOp::Delete { client_id: c, entry_type: t }
+                if c == client_id && t == entry_type)
+        });
+        let removed = self.ops.len() != before;
+        self.unwritten |= removed;
+        removed
+    }
+
+    /// A push for this entry was accepted, so a Delete still queued for it is
+    /// older than the upload (Remove from cloud, then Upload) and must not
+    /// replay over it. Written at once when one was dropped, or when a landed
+    /// one (possibly this entry's) is still in the file.
+    pub fn supersede_delete(&mut self, entry_type: &str, client_id: &str) {
+        if self.remove_delete(entry_type, client_id) || self.unwritten {
+            self.persist();
+        }
     }
 
     /// Remove and return all pending operations in FIFO order.
@@ -213,6 +250,34 @@ mod tests {
         assert_eq!(ids(&recovered), vec!["a", "b"]);
     }
 
+    /// Remove from cloud, then Upload: the unpush tombstone still queued must
+    /// leave the file too, or the next launch replays it over the upload.
+    #[test]
+    fn an_accepted_push_supersedes_a_queued_delete_on_disk() {
+        let path = scratch_queue("superseded");
+        let mut queue = PendingQueue::load(path.clone());
+        queue.push(delete_op("a"));
+        queue.push(delete_op("b"));
+
+        queue.supersede_delete("clipboard", "a");
+
+        assert_eq!(ids(&PendingQueue::load(path)), vec!["b"]);
+    }
+
+    /// Its tombstone landed (memory only) while the rest of the batch is still
+    /// out, then it was uploaded again: the file must lose that Delete now.
+    #[test]
+    fn a_push_after_a_landed_delete_writes_it_out() {
+        let path = scratch_queue("landed-then-pushed");
+        let mut queue = PendingQueue::load(path.clone());
+        queue.push_many(vec![delete_op("a"), delete_op("b")]);
+        queue.remove_delete("clipboard", "a");
+
+        queue.supersede_delete("clipboard", "a");
+
+        assert_eq!(ids(&PendingQueue::load(path)), vec!["b"]);
+    }
+
     #[test]
     fn settling_keeps_what_did_not_send_and_drops_the_rest() {
         let path = scratch_queue("settled");
@@ -261,6 +326,53 @@ mod tests {
         let reloaded = PendingQueue::load(path);
         assert_eq!(reloaded.pending_keys(), vec!["clipboard:img-1"]);
         assert_eq!(reloaded.len(), 1);
+    }
+
+    /// A Clear all queues every tombstone before the first one leaves, so a
+    /// quit in the middle of the fan-out replays the rest instead of letting
+    /// those rows read as missing and come back in a restore.
+    #[test]
+    fn a_write_ahead_delete_survives_a_restart() {
+        let path = scratch_queue("write-ahead");
+        let mut queue = PendingQueue::load(path.clone());
+        queue.push_many(vec![delete_op("a"), delete_op("b")]);
+
+        let reloaded = PendingQueue::load(path);
+        assert_eq!(ids(&reloaded), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_landed_delete_drops_only_its_own_op() {
+        let path = scratch_queue("landed");
+        let mut queue = PendingQueue::load(path);
+        queue.push_many(vec![
+            PendingOp::Push {
+                entry_json: r#"{"client_id":"a"}"#.to_string(),
+                entry_type: "clipboard".to_string(),
+            },
+            delete_op("a"),
+            delete_op("b"),
+            PendingOp::Delete {
+                client_id: "a".to_string(),
+                entry_type: "note".to_string(),
+            },
+        ]);
+
+        queue.remove_delete("clipboard", "a");
+
+        assert_eq!(
+            queue.pending_keys(),
+            vec!["clipboard:a", "clipboard:b", "note:a"]
+        );
+    }
+
+    #[test]
+    fn push_many_keeps_order() {
+        let path = scratch_queue("push-many");
+        let mut queue = PendingQueue::load(path);
+        queue.push(delete_op("first"));
+        queue.push_many(vec![delete_op("second"), delete_op("third")]);
+        assert_eq!(ids(&queue), vec!["first", "second", "third"]);
     }
 
     #[test]

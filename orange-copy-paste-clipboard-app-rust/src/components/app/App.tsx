@@ -14,6 +14,7 @@ import type {
 } from "../../types";
 import {
   classifyFileEntry,
+  coalesce,
   removeGroupColor,
   renameGroupColor,
 } from "../../types";
@@ -35,6 +36,7 @@ import {
   APP_TOAST_DISMISS_EVENT,
   APP_TOAST_EVENT,
   deferDestructive,
+  dismissToast,
   showToast,
   toastError,
   type ToastGlyph,
@@ -61,6 +63,8 @@ import {
 } from "../icons";
 import "./App.css";
 import { installWebviewGuards } from "../../webview-guards";
+import { isClipboardLayout } from "./topbar/Topbar";
+import { isSortMode } from "./sort-options";
 
 const GROUPS_STORAGE_KEY = "sc-groups";
 const SYSTEM_GROUPS = ["pinned", "saved"];
@@ -80,6 +84,47 @@ function sanitizeGroups(input: unknown): string[] {
   }
 
   return out;
+}
+
+const parse = (v: string): unknown => {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return undefined;
+  }
+};
+
+// The localStorage half of the roaming settings: blob key -> storage key, and
+// what counts as a value worth keeping. Checked on read, collect and apply.
+// `empty` is this PC's explicit "none" for a key the user can empty: it is
+// kept and collected (so Rust sees it was emptied here), never applied.
+const ROAMING_STORAGE: Record<
+  string,
+  { key: string; valid: (v: string) => boolean; empty?: string }
+> = {
+  theme: { key: "sc-theme", valid: (v) => v === "dark" || v === "light" },
+  layout: { key: "sc-layout", valid: isClipboardLayout },
+  sort: { key: "sc-sort", valid: isSortMode },
+  paste_slots: { key: "sc-paste-slots", valid: (v) => /^\d+$/.test(v) && +v >= 3 && +v <= 10 },
+  group_names: {
+    key: GROUPS_STORAGE_KEY,
+    valid: (v) => sanitizeGroups(parse(v)).length > 0,
+    empty: "[]",
+  },
+  group_colors: {
+    key: "sc-group-colors",
+    valid: (v) => {
+      const o = parse(v);
+      return !!o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).length > 0;
+    },
+    empty: "{}",
+  },
+};
+// Values an older build roamed ("" layouts) are removed once, so every
+// reader - the theme readers included - falls back to its own default.
+for (const { key, valid, empty } of Object.values(ROAMING_STORAGE)) {
+  const v = localStorage.getItem(key);
+  if (v !== null && v !== empty && !valid(v)) localStorage.removeItem(key);
 }
 
 function readStoredGroups(): string[] {
@@ -195,6 +240,15 @@ function showPinLimit(): void {
   });
 }
 
+/** No read of the history has landed, from startup or a refocus. */
+function showHistoryLoadFailed(): void {
+  showToast(
+    "Could not load your clipboard history. Nothing was deleted. Restart the app to try again.",
+    "error",
+    { duration: 0, key: "history-load", glyph: "warning" },
+  );
+}
+
 /** The glyph a toast draws, by explicit choice or by tone. */
 function toastGlyph(glyph: ToastGlyph | undefined, tone?: string) {
   switch (glyph ?? (tone === "error" ? "warning" : tone === "danger" ? "trash" : "cloud")) {
@@ -220,6 +274,8 @@ const App: React.FC = () => {
       : "clipboard";
   });
   const didRecoverGroupsRef = useRef(false);
+  // Whether any history read has landed yet, or startup gave up without one.
+  const historyLoadRef = useRef<"loading" | "loaded" | "failed">("loading");
 
   // Tell Rust which screen is showing, so a space notification can skip its
   // desktop toast only when the user is actually on that space (os_notify reads
@@ -412,8 +468,9 @@ const App: React.FC = () => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
-    invoke<ClipboardEntry[]>("get_history").then((history) => {
+    const showHistory = (history: ClipboardEntry[]) => {
       if (cancelled) return;
+      historyLoadRef.current = "loaded";
       setEntries((prev) => {
         if (prev.length === 0) return history;
         const ids = new Set(history.map((e) => e.id));
@@ -428,11 +485,36 @@ const App: React.FC = () => {
         setAvailableGroups((prev) => {
           const recovered = mergeGroups(prev, groupsFromEntries(history));
           if (sameGroups(recovered, prev)) return prev;
-          localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(recovered));
+          // Only over a list this PC already has. Creating the key would read
+          // as an edit here, and the settings round would push it over the
+          // account's list; an absent key lets the account's list apply.
+          if (localStorage.getItem(GROUPS_STORAGE_KEY) !== null) {
+            localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(recovered));
+          }
           return recovered;
         });
       }
-    });
+    };
+    // A failed read leaves the list empty, which reads as lost history. Nothing
+    // else re-reads at startup - a window shown at launch was focused before
+    // the refocus refresh existed - so it is retried twice, then said out loud
+    // until a later read lands (see the refocus refresh and the merge listener).
+    const loadHistory = (retries: number) => {
+      invoke<ClipboardEntry[]>("get_history")
+        .then(showHistory)
+        .catch((e) => {
+          console.error("[history] startup load failed", e);
+          if (cancelled) return;
+          if (retries > 0) {
+            window.setTimeout(() => loadHistory(retries - 1), 1000);
+          } else if (historyLoadRef.current !== "loaded") {
+            // A refocus read may have filled the list between tries.
+            historyLoadRef.current = "failed";
+            showHistoryLoadFailed();
+          }
+        });
+    };
+    loadHistory(2);
 
     let unlistenDeleted: (() => void) | undefined;
 
@@ -532,28 +614,36 @@ const App: React.FC = () => {
       });
     };
 
+    // A sweep merges once per page and once per downloaded blob, so a burst of
+    // these events becomes one re-read of the store.
     track(
-      win.listen("sync:history-merged", () => {
-        if (!cancelled) setSyncTick((t) => t + 1);
-        invoke<ClipboardEntry[]>("get_history").then((h) => {
-          if (!cancelled) setEntries(h);
-        });
-      }),
+      win.listen(
+        "sync:history-merged",
+        coalesce(() => {
+          if (!cancelled) setSyncTick((t) => t + 1);
+          // A failed re-read keeps the list it had; a good one heals a failed
+          // startup load, so its notice goes too.
+          invoke<ClipboardEntry[]>("get_history")
+            .then((h) => {
+              if (cancelled) return;
+              historyLoadRef.current = "loaded";
+              setEntries(h);
+              dismissToast("history-load");
+            })
+            .catch((e) => console.error("[history] re-read after merge failed", e));
+        }),
+      ),
     );
     track(
-      win.listen("sync:notes-merged", () => {
-        if (!cancelled) setSyncTick((t) => t + 1);
-        invoke<Note[]>("get_notes").then((ns) => {
-          if (!cancelled) setNotes(ns);
-        });
-      }),
-    );
-    // Another device changed settings: pull the new blob (which re-emits
-    // `sync:settings`, applied by the effect below).
-    track(
-      win.listen("sync:settings-updated", () => {
-        invoke("sync_pull_settings").catch(() => {});
-      }),
+      win.listen(
+        "sync:notes-merged",
+        coalesce(() => {
+          if (!cancelled) setSyncTick((t) => t + 1);
+          invoke<Note[]>("get_notes").then((ns) => {
+            if (!cancelled) setNotes(ns);
+          });
+        }),
+      ),
     );
 
     return () => {
@@ -568,7 +658,20 @@ const App: React.FC = () => {
   // switch screens. `sync_catch_up` is throttled in Rust, so the screens that
   // also subscribe cost one pull between them.
   useWindowRefocus(() => {
-    invoke<ClipboardEntry[]>("get_history").then(setEntries).catch(() => {});
+    // Same rule as the merge listener: keep the list on a failure, and take
+    // down a failed startup load's notice on a success. There is one toast
+    // slot, so a later toast may have replaced that notice: while no read has
+    // landed, a failure here puts it back.
+    invoke<ClipboardEntry[]>("get_history")
+      .then((h) => {
+        historyLoadRef.current = "loaded";
+        setEntries(h);
+        dismissToast("history-load");
+      })
+      .catch((e) => {
+        console.error("[history] refresh on focus failed", e);
+        if (historyLoadRef.current === "failed") showHistoryLoadFailed();
+      });
     invoke<Note[]>("get_notes").then(setNotes).catch(() => {});
   });
 
@@ -708,24 +811,20 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Settings sync: when the sync debounce fires, collect localStorage values
-  // and send them to the Rust side so they can be merged into the push payload.
+  // Settings sync: when the sync debounce fires, collect the localStorage values
+  // that are set and valid (or explicitly empty), and hand them to Rust for one
+  // pull-merge-push round.
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     listen<null>("sync:collect-settings", () => {
       if (cancelled) return;
-      const SYNC_KEYS: Record<string, string> = {
-        theme: localStorage.getItem("sc-theme") ?? "",
-        layout: localStorage.getItem("sc-layout") ?? "",
-        sort: localStorage.getItem("sc-sort") ?? "",
-        paste_slots: localStorage.getItem("sc-paste-slots") ?? "",
-        group_names: localStorage.getItem("sc-groups") ?? "[]",
-        group_colors: localStorage.getItem("sc-group-colors") ?? "{}",
-      };
-      invoke("sync_receive_local_settings", {
-        json: JSON.stringify(SYNC_KEYS),
-      }).catch(console.error);
+      const out: Record<string, string> = {};
+      for (const [name, { key, valid, empty }] of Object.entries(ROAMING_STORAGE)) {
+        const v = localStorage.getItem(key);
+        if (v !== null && (v === empty || valid(v))) out[name] = v;
+      }
+      invoke("sync_settings", { json: JSON.stringify(out) }).catch(console.error);
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;
@@ -736,7 +835,9 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Settings sync: apply incoming settings blob from the server to localStorage.
+  // Settings sync: apply the account's changed localStorage values. A value this
+  // build does not recognise is left alone here (and stays in the blob); Rust is
+  // told, so its next round does not push this PC's value over it.
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
@@ -744,37 +845,23 @@ const App: React.FC = () => {
       if (cancelled) return;
       try {
         const data = JSON.parse(event.payload) as Record<string, unknown>;
-        const STORAGE_MAP: Record<string, string> = {
-          theme: "sc-theme",
-          layout: "sc-layout",
-          sort: "sc-sort",
-          paste_slots: "sc-paste-slots",
-          group_names: "sc-groups",
-          group_colors: "sc-group-colors",
-        };
-        for (const [key, storageKey] of Object.entries(STORAGE_MAP)) {
-          const val = data[key];
-          if (val != null) {
-            localStorage.setItem(
-              storageKey,
-              typeof val === "string" ? val : JSON.stringify(val),
-            );
+        const refused: Record<string, string | null> = {};
+        for (const [name, { key, valid }] of Object.entries(ROAMING_STORAGE)) {
+          const val = data[name];
+          if (val == null) continue;
+          const s = typeof val === "string" ? val : JSON.stringify(val);
+          if (!valid(s)) {
+            const mine = localStorage.getItem(key);
+            refused[name] = mine !== null && valid(mine) ? mine : null;
+            continue;
           }
+          localStorage.setItem(key, s);
+          // Theme and groups apply at once; layout and sort on the next mount.
+          if (name === "theme") setTheme(s as AppTheme);
+          if (name === "group_names") setAvailableGroups(sanitizeGroups(parse(s)));
         }
-        // Apply theme change immediately without full reload
-        if (data.theme === "dark" || data.theme === "light") {
-          setTheme(data.theme as import("../../types").AppTheme);
-        }
-        // Apply groups change
-        if (typeof data.group_names === "string") {
-          try {
-            const groups = JSON.parse(data.group_names) as string[];
-            if (Array.isArray(groups)) {
-              setAvailableGroups(groups.filter((g) => typeof g === "string"));
-            }
-          } catch {
-            /* ignore */
-          }
+        if (Object.keys(refused).length > 0) {
+          invoke("sync_settings_refused", { json: JSON.stringify(refused) }).catch(console.error);
         }
       } catch (e) {
         console.error("[sync:settings] apply failed", e);

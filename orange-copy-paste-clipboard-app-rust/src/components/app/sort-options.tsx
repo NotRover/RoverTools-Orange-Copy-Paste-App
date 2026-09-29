@@ -19,6 +19,9 @@ export const SORT_OPTIONS: { id: SortMode; label: string; icon: React.ReactNode 
   { id: "type", label: "Type", icon: <SortTypeIcon /> },
 ];
 
+export const isSortMode = (v: unknown): v is SortMode =>
+  SORT_OPTIONS.some((o) => o.id === v);
+
 export function sortableText(e: ClipboardEntry): string {
   if (e.type === "text") return e.content.toLowerCase();
   if (e.type === "html") return htmlPlainText(e.content).toLowerCase();

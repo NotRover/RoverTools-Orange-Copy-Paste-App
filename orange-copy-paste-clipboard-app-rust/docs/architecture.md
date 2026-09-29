@@ -220,11 +220,12 @@ src/
 4. **`setup_runtime()`** - Called inside `tauri::Builder::setup`:
    - Configures the images directory (`{app_data}/images/`) for on-disk image storage
    - Loads history from `{app_data}/history.bin` (MessagePack binary) + `{app_data}/images/`
-   - Loads pinned entries from `{app_data}/pinned_entries.bin` (fallback on first run)
+     through `ClipboardHistory::load_from_disk`, which folds in a pre-upgrade
+     `pinned_entries.bin` once (section 7.2)
    - Creates popup windows (hidden, off-screen)
    - Registers global shortcuts (Ctrl+Shift+C, Ctrl+Shift+V)
    - Starts clipboard watcher thread
-   - Starts background flush thread (saves dirty history every 2s)
+   - Starts background flush thread (`flush_dirty_stores` every 2s; see History keeping in section 4.2)
    - Sets up main-window focus handler (auto-hides popups)
    - Restores saved window geometry
    - Starts window move/resize tracking
@@ -279,7 +280,7 @@ part, and it would change what the next launch may conclude from a rejected toke
 AppState
 ├── history: Arc<Mutex<ClipboardHistory>>   ← shared across all threads
 ├── suppress_next_capture: Arc<AtomicBool>  ← prevents watcher re-capturing
-├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting (~1ns check)
+├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting, default on (~1ns check)
 ├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.bin
 ├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
 ├── os_notifications: Arc<AtomicBool>       ← may also raise an OS toast while unfocused
@@ -287,7 +288,7 @@ AppState
 ├── notification_enabled: Arc<AtomicBool>   ← master toggle for copy/paste notifications
 ├── notif_copy: Arc<AtomicBool>             ← show notification on copy action
 ├── notif_paste: Arc<AtomicBool>            ← show notification on paste action
-├── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries
+├── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries, default on
 ├── show_splash: Arc<AtomicBool>            ← show the startup splash on launch
 ├── splash_updating: Arc<AtomicBool>        ← splash is mid auto-update; holds its close timer
 ├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
@@ -303,7 +304,7 @@ AppState
 
 **Suppress flag**: When `copy_entry`, `paste_entry`, or Ctrl+Shift+C write to the OS clipboard, they set `suppress_next_capture = true`. The next watcher poll sees this, clears it, and skips capture - preventing duplicate entries.
 
-**Entry size** is capped as well as entry count. `MAX_TEXT_BYTES` (4 MiB) bounds one
+**Entry size** is capped; entry count is not. `MAX_TEXT_BYTES` (4 MiB) bounds one
 text, rich-text or file-list entry. Image content is a path to a file on disk and is
 exempt.
 
@@ -327,7 +328,37 @@ exempt.
 - What this app holds locally and what a cloud row may weigh are different questions,
   and history is useful without sync.
 
-**History keeping**: When `keep_history` is enabled, the `history_dirty` flag is set on every mutation. A background thread flushes the full history to `history.bin` (MessagePack binary) every 2 seconds when dirty. Image data is externalised to individual files in the `images/` directory.
+**History keeping.** Every mutation sets `history_dirty`. `flush_dirty_stores` (`lib.rs`)
+writes `history.bin` at most every 2 seconds, and again, forced, on every exit and before
+a self-restart or update install (`flush_for_restart`). There is one history file and one
+writer, `ClipboardHistory::save_to_file`, which goes through `health::write_state`.
+
+| `keep_history` (per device) | What `history.bin` holds |
+|---|---|
+| On (the default) | Every entry |
+| Off | Pinned and Saved entries, plus every entry this device's sync record names: `entry_states()`, or with no client `id_map.json` and `sync_pending.json` read from disk. With no client, a record that will not read keeps everything for that flush. A client whose `id_map.json` did not read at launch starts from an empty record (`IdMap::load`). |
+
+- **Nothing caps the entry count.** `MAX_TEXT_BYTES` bounds a single entry (above).
+- **Turning Keep history back on loses nothing.** Startup loads `history.bin` whatever
+  the setting, so memory already holds everything the file does, and the next flush
+  writes it all.
+- **Files go only with their entry.** An image or received-files folder is queued in
+  `gone_files` when its entry is removed and deleted once the save that drops the entry
+  has landed, never for an id that is live again. Nothing scans `images/` for orphans.
+- **With Keep history off, the final exit drops what it does not write.** Only the
+  `RunEvent::Exit` flush (`Flush::Exit`) calls `drop_unkept`, so the entries it leaves out
+  lose their files the same way. A restart flush drops nothing, since an update install
+  can fail and return to the running app, and neither does a flush that keeps everything.
+  The drop trusts the record as the table reads it, so under a client that started from
+  an empty record, cloud and space entries lose their files too. So can an image or file
+  merged during the flush, since a blob merge inserts the entry before it records the row.
+- **The cursor never runs ahead of the file.** A pull page flushes the store before
+  `last_server_ts` moves past it (section 6.3).
+
+**Why:** a device that holds less than its sync record says it pulled cannot tell
+"deleted" from "never written", and the delta pull never offers those rows again. Each
+default on a keep-or-drop path falls to keep: dropping what the user expected to keep
+cannot be undone, keeping extra entries can (bug #31 in `docs/bugfix-history.md`).
 
 ### 4.3 Clipboard Module
 
@@ -352,29 +383,28 @@ ClipboardEntry {
 
 | Method                              | Behavior                                                  |
 | ----------------------------------- | --------------------------------------------------------- |
-| `push(entry)`                       | Prepend, trim unpinned entries beyond `MAX_HISTORY` (100) |
-| `push_if_distinct(entry)`           | Skip if top entry matches (kind + content)                |
-| `push_if_distinct_with_flag(entry)` | Same, also returns whether insertion happened             |
+| `push(entry)`                       | Prepend, externalising an inline image. No count cap      |
+| `push_if_distinct_with_flag(entry)` | Skip if top entry matches (kind + content); returns whether insertion happened |
 | `top_matches(entry)`                | Whether the newest entry holds this content, taking no copy |
 | `drop_oversized()`                  | Drop entries past `MAX_TEXT_BYTES`, returning their sizes  |
 | `top(n)`                            | First N entries                                           |
 | `find(id)` / `find_mut(id)`         | Lookup by ID                                              |
 | `pin(id)` / `unpin(id)`             | Toggle pinned flag                                        |
 | `remove(id)`                        | Delete by ID                                              |
-| `clear()`                           | Remove all unpinned entries                               |
+| `clear()`                           | Remove every entry that is not pinned or Saved; returns each removed (id, timestamp) for its tombstone |
 | `set_groups(id, groups)`            | Replace the groups list for an entry                      |
 | `add_group(id, group)`              | Add a single group tag (no duplicates)                    |
 | `purge_group(group)`                | Remove a group tag from every entry that has it           |
 | `rename_group(old, new)`            | Rename a group tag across all entries                     |
 | `remove_group(id, group)`           | Remove a single group tag from an entry                   |
 | `pinned_entries()`                  | All pinned entries                                        |
-| `saved_entries()`                   | All entries that survive restarts (pinned or saved)       |
 | `all()`                             | Full history slice (most-recent first)                    |
 | `set_images_dir(dir)`               | Configure the directory for on-disk image storage         |
-| `load_saved_from_file(path)`        | Restore saved entries from MessagePack binary on startup  |
-| `save_saved_to_file(path)`          | Save pinned/saved entries to MessagePack binary           |
-| `save_all_to_file(path)`            | Flush full history to disk, clean orphaned image files    |
-| `load_all_from_file(path)`          | Load full history from MessagePack binary                 |
+| `upsert_synced(entry)`              | Insert or replace a merged entry by id; refuses one past `MAX_TEXT_BYTES` |
+| `save_to_file(path, also_keep)`     | Write pinned/Saved entries plus those `also_keep` names, then delete `gone_files` |
+| `drop_unkept(also_keep)`            | Drop the entries `save_to_file` would leave out, queueing their files in `gone_files`; final exit flush only |
+| `load_from_disk(history, legacy, keep)` | Startup load, including the one-time fold of `pinned_entries.bin` (section 7.2) |
+| `merge_leftover(bytes)`             | Fold in a sealed session's leftover by id, adding only what is missing |
 
 #### `commands.rs` - Tauri Command Handlers
 
@@ -387,13 +417,12 @@ ClipboardEntry {
 | -------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `get_history`              | `() -> Vec<ClipboardEntry>`    | Return full history (most-recent first)                                                              |
 | `delete_entry`             | `(id) -> bool`                 | Remove entry, emit `clipboard:entry-deleted`                                                         |
-| `clear_history`            | `() -> bool`                   | Remove all unpinned entries                                                                          |
+| `clear_history`            | `() -> bool`                   | Remove every entry not pinned or Saved; tombstones exactly those                                     |
 | `pin_entry`                | `(id) -> bool`                 | Pin entry (max 10), auto-save to disk                                                                |
 | `unpin_entry`              | `(id) -> bool`                 | Unpin entry, auto-save to disk                                                                       |
 | `copy_entry`               | `(id) -> bool`                 | Write entry to OS clipboard, set suppress flag, update active clipboard ID, show copy notification   |
 | `copy_entries`            | `(ids) -> bool`               | Copy a multi-entry selection as one clipboard payload (text block or one file drop) |
 | `paste_entry`              | `(id) -> bool`                 | Write to clipboard, hide popup, simulate Ctrl+V, update active clipboard ID, show paste notification |
-| `save_history`             | `() -> bool`                   | Flush full history to disk (on first enable)                                                         |
 | `get_active_clipboard_id`  | `() -> String`                 | Return ID of entry currently in the OS clipboard                                                     |
 | `set_entry_groups`         | `(id, groups) -> bool`         | Set group tags for an entry, auto-save                                                               |
 | `purge_group_from_entries` | `(group) -> bool`              | Remove a group tag from all entries                                                                  |
@@ -403,7 +432,7 @@ ClipboardEntry {
 | `bulk_add_group`           | `(ids, group) -> u32`          | Add a group to multiple entries                                                                      |
 | `bulk_remove_group`        | `(ids, group) -> u32`          | Remove a group from multiple entries                                                                 |
 | `get_setting`              | `(key) -> Option<Value>`       | Read a setting from `settings.json`                                                                  |
-| `set_setting`              | `(key, value) -> bool`         | Write a setting; syncs in-memory caches for known keys (`sync_enabled`, `sync_server_url` included)  |
+| `set_setting`              | `(key, value) -> bool`         | Write a setting; syncs in-memory caches for known keys (`sync_enabled`, `sync_server_url` included); a roaming key schedules a settings round |
 | `get_image_file_preview`   | `(path) -> Option<String>`     | Read image file -> data-URL (max 12 MB)                                                               |
 | `check_missing_files`      | `(paths) -> Vec<String>`       | Returns paths that do not exist (used by paste popup before paste)                                   |
 | `stat_files`             | `(paths) -> Vec<FileStat>`     | Per-path facts for a multi-file card: is-dir, size, item count, missing (batched)                    |
@@ -847,21 +876,29 @@ The sync module runs entirely in a dedicated background Tokio runtime, separate 
   or note is stored
 - `on_update_clipboard_entry(entry)` / `on_update_note(note)` - called from the
   pin, group and edit commands
-- `on_delete_clipboard_entry(client_id, entry_ts)` / `on_delete_note(note_id, entry_ts)` -
-  called from the delete commands; queues a tombstone
+- `delete_entries(entry_type, items)` - reached from the delete commands through
+  `forward_deletes`; writes the tombstones to the queue before sending them (see
+  Deletes under `pending_queue.rs`)
 - `on_manual_push_clipboard_entry(entry)` / `on_manual_push_note(note)` - "Upload to
   cloud" on a picked item, which goes out even in manual mode
 - `flush_and_pull()` - flush the offline queue, then pull the delta (`sync_now`)
+- `restore_sweep()` / `restore_if_owed()` - walk the whole account for rows missing
+  here (see Restore sweep below)
+- `schedule_settings_sync()` - debounce one settings round (see Settings Sync below)
 - `start_ws_listener()` / `stop_ws_listener()` - WebSocket lifecycle (private)
 
 On startup, when sync is enabled and a Supabase session can be restored:
 
 1. Restore the Supabase session. On first login, bootstrap the account (fetch
    `kdf_salt`, unwrap the UMK) and register the device (obtain `device_id`).
-2. Flush `sync_pending.json`, then pull the delta after `last_server_ts`, page by
-   page (`flush_and_pull`).
-3. Decrypt and merge remote entries into the local store.
-4. Open the WebSocket connection.
+2. Open the WebSocket connection. Opening it schedules a settings round, which
+   pulls before it pushes.
+3. Flush `sync_pending.json`, then pull the delta after `last_server_ts`, page by
+   page (`flush_and_pull`), decrypting and merging remote entries into the local
+   store.
+4. Sweep the whole account if a restore is due (`restore_if_owed`).
+
+Manual mode stops after recovering space keyrings: steps 3 and 4 wait for Sync now.
 
 The routes, query parameters and headers for each step are the wire contract: see
 `orange-copy-paste-clipboard-backend/docs/architecture.md`.
@@ -885,6 +922,54 @@ Three local questions decide the answer, none of them touching the network:
 | Is a client already built for this launch? | `AppState.sync_client` | Yes -> use it, and do not re-read `settings.json`. |
 | Did the user turn sync off? | `SyncConfig::enabled` **and** `enabled_known` | Off only counts when the file actually said so; a `settings.json` that would not open is not a sign-out. |
 | Is there anything to restore? | `SyncClient::has_stored_session` | Keychain refresh token plus a user id from `sync_state.json` or the install session pointer. A store that will not answer counts as yes. |
+
+#### Restore sweep - rows missing here
+
+A delta pull asks only for rows newer than `last_server_ts`, and `id_map.json` records
+what this device pushed or pulled, not what it still holds. A row that was on the server
+before this device caught up, or that this device lost since, sits behind the cursor for
+good. The restore sweep is the way back.
+
+- **What it does** (`sweep_locked`, under `flush_lock`): walks the account from no
+  cursor, page by page, and merges only rows with no local copy (`MergeSource::Sweep`).
+  It never touches a local copy and never moves the cursor. It is the only merge that
+  lifts the same-device skip, and only for rows missing here: a row this device wrote
+  and then lost is exactly what it is for.
+- **What it leaves out** (`sweep_admits`): keys with queued work or a push in flight,
+  taken once before the walk, and keys removed during this run (`removed_this_run`,
+  recorded when the removal starts). Tombstones and `local_only` markers apply as in
+  any merge. A restored row is never pushed back.
+
+| Trigger | Path |
+|---|---|
+| Startup and sign-in | `trigger_initial_sync` -> `restore_if_owed`. `finalize_session` owes one sweep on every sign-in (`restore_owed` in `sync_state.json`). |
+| Sync now | `sync_now` -> `restore_if_owed` |
+| A space key arrives | The key path runs `restore_sweep`. In Manual mode it only sets `restore_owed`. |
+| Restore from cloud (Account screen) | `sync_restore_from_cloud`: flushes the queue, then sweeps whatever is owed |
+
+`restore_if_owed` sweeps only when `restore_due`: a sweep is owed, or either count rose
+past `restore_mark`, the counts the last sweep left:
+
+- **missing** - rows in this device's record with no local copy, leaving out removed,
+  queued and in-flight keys.
+- **gap** - the account's own live rows (the `/sync/breakdown` total) minus those
+  present here. Only the server can count a row this device never pulled. Unknown when
+  the server cannot be asked, and then it never triggers.
+
+A count that falls lowers the mark, so the next rise is measured from there. Two more
+things owe a sweep: a row whose space key has not arrived (the pull moves past it all
+the same), and a blob download that ends without landing (`BlobClaim`). A sweep clears
+`restore_owed` before it walks, so an owe raised during the walk survives it, and a
+failed page puts back what was owed.
+
+The answer is `sync::types::RestoreOutcome { restored, downloading }`, where
+`downloading` counts blob-backed rows still fetching. It is not the session restore's
+`RestoreOutcome` above.
+
+**Limit.** The first sweep after updating can bring back many older entries at once:
+everything a restart dropped under the old Keep history default, and any item an older
+build deleted while signed out, since those builds sent no tombstone and kept no marker
+for it.
 
 #### `client.rs` - HTTP Client
 
@@ -977,6 +1062,25 @@ the same as what *will* not:
 - Push size is also checked locally before a send (`refuses_inline_size`), so the
   ordinary oversized case never reaches this path or the network.
 
+**Deletes are written ahead, and stay deleted.**
+
+- `delete_entries` queues every tombstone with one write (`push_many`) before sending
+  any, so a crash between the local removal and the send leaves the Delete on disk.
+- A landed tombstone leaves the queue in memory only (`remove_delete`). The fan-out
+  writes the queue once when its last answer is in (`BatchAnswer`), so a large Clear
+  all is not quadratic in disk writes.
+- A Delete that replays is a repeat tombstone, harmless unless the entry was uploaded
+  again meanwhile. An accepted push therefore drops any Delete still queued for its
+  entry (`supersede_delete`), but only while the entry is still here: a removal made
+  while the push was in the air is the newer one.
+- With sync off, `forward_deletes` writes a `local_only` marker for each item this
+  device knows is in the cloud (`IdMap::mark_removed_offline`), one write per call. No
+  tombstone is sent: queued with no client, it would replay under whichever account
+  signs in next. The item stays on the server and on other devices, and the marker keeps
+  it off this one.
+- A merged live row for a key with a queued or in-flight removal is skipped, and a sweep
+  re-checks `removed_this_run` before inserting.
+
 **One flush at a time.** `flush_and_pull` is serialised on its own lock. Its
 triggers are manual Sync now, login, a socket reconnect, the background tick and a
 window refocus. **Why:** two runs at once start from the same cursor and walk the
@@ -1032,12 +1136,13 @@ All cryptography runs here. Nothing outside this module touches raw key material
 | `sync_logout`          | `() -> ()`                                           | Sign out of Supabase; clear UMK; optionally deactivate the device                        |
 | `sync_get_user`        | `() -> Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
 | `sync_get_status`      | `() -> SyncStatusInfo`                               | `{ connected, pending_count, skipped_count, skipped, last_synced_at }`                   |
-| `sync_now`             | `() -> ()`                                           | Trigger immediate pull + queue flush                                                     |
+| `sync_now`             | `() -> ()`                                           | Flush the queue, pull the delta, then sweep if a restore is due                          |
+| `sync_restore_from_cloud` | `() -> RestoreOutcome`                            | Flush the queue, then sweep the whole account for rows missing here (Restore from cloud) |
 | `sync_set_enabled`     | `(enabled: bool) -> ()`                              | Toggle sync; persists to `settings.json`                                                 |
 | `sync_set_mode`        | `(mode: String) -> ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
 | `sync_get_mode`        | `() -> String`                                       | Current cloud sync mode                                                                  |
-| `sync_pull_settings`          | `() -> ()`                                              | `GET /settings`; decrypt and apply if server is newer; emits `sync:settings` Tauri event            |
-| `sync_receive_local_settings` | `(json: String) -> ()`                                  | Receives `localStorage` settings from React in response to `sync:collect-settings` event; merged into the next `push_settings()` call |
+| `sync_settings`        | `(json: String) -> ()`                               | One settings round (see Settings Sync). React invokes it on `sync:collect-settings`; `json` is its `localStorage` part |
+| `sync_settings_refused` | `(json: String) -> ()`                              | React refused values a newer build wrote; resets their base so the next round does not push over them |
 | `sync_reset_password`  | `(email: String) -> Result<()>`                       | Mint a PKCE pair, keep the verifier in the keychain, ask Supabase to mail a link to `reset_page_url` |
 | `sync_complete_password_reset` | `(code, new_password, recovery_code?, device_name, start_over) -> Result<SyncUser>` | Redeem the emailed code, recover the UMK, re-wrap it under the new password, then sign in. `start_over` mints a new key and gives up the old data |
 | `sync_change_password` | `(new_password: String) -> Result<()>`                | Signed-in password change: re-wrap the in-memory UMK, then set the password. Cannot lose anything |
@@ -1292,27 +1397,58 @@ socket-applied entry. Anything skipped live is guaranteed to arrive on the next 
 
 #### Settings Sync - What Gets Synced
 
-The sync module builds a plaintext settings JSON from two sources and encrypts the whole blob under the UMK before pushing:
+The account holds one settings blob, encrypted under the UMK. Each device merges it with
+its own values key by key; no device's copy replaces the blob whole.
 
-**Synced (user preferences):**
-- From `localStorage`: `theme`, `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
-- From `settings.json` (`SYNCED_JSON_KEYS` in `sync/commands.rs`): `keep_history`, `close_to_tray`, `start_minimized`, `notification`, `notif_copy`, `notif_paste`, `autosave`, `space_send_filters`
+**Roams (user preferences):**
+- From `localStorage` (`ROAMING_STORAGE` in `App.tsx`): `theme`, `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
+- From `settings.json` (`ROAMING_JSON_KEYS` in `sync/commands.rs`): `close_to_tray`, `start_minimized`, `notification`, `notif_copy`, `notif_paste`, `space_send_filters`
 
 Send filters ride in the blob so they roam between a user's devices; the server never sees
 the plaintext group names they reference.
 
-**Not synced (device-specific - never included in blob):**
-- `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:{space_id}` - each device decides independently
+**Per device (never applied from the blob):**
+- `keep_history` and `autosave` (`NO_LONGER_ROAMING`). Older builds roamed them, so the
+  blob keeps the account's values for those builds to read, but this build never applies
+  or changes them.
+- `sync_enabled`, `sync_server_url`, `sync_mode`, `os_notifications`, `space_autocopy:{space_id}` - each device decides independently
 - Window geometry, autostart, and every other `settings.json` key not listed above
 
-Push is debounced (`SETTINGS_DEBOUNCE_SECS`, 2s). Each synced setting change restarts the timer, so a burst of changes sends one push.
+**One settings round** (`sync_settings`, one at a time on `settings_lock`):
 
-- On the `settings:updated` socket event, the app calls `sync_pull_settings()`.
-- On pull, Rust emits `sync:settings` with the decrypted JSON. React applies the
-  `localStorage` keys; Rust writes the `settings.json` keys directly.
-- Settings are not pulled at sign-in. `sync_pull_settings` runs only on the
-  `settings:updated` socket event (`App.tsx`) or an explicit invoke, so a freshly
-  signed-in device keeps its local preferences until another device changes one.
+1. `schedule_settings_sync` waits out the debounce (`SETTINGS_DEBOUNCE_SECS`, 2s), then
+   emits `sync:collect-settings`. React answers with its `localStorage` part.
+2. Pull the blob. One this device cannot decrypt ends the round with no push: it may be
+   the account's only copy.
+3. Merge (`merge_settings`) the account's values, this device's, and `settings_base`,
+   this device's roaming values as of its last round (in `sync_state.json`). A key
+   changed here since the base keeps this device's value; every other key takes the
+   account's. With no base (first round on this device or account), the account wins
+   and local values only fill keys it lacks.
+4. Apply what the account changed. `settings.json` keys are written and stored into
+   their in-memory flags at once; the `localStorage` keys go to React as
+   `sync:settings`.
+5. Push only when the merge differs from the account's blob, stamped later than the
+   pulled one. If the server reports that another push won, schedule another round.
+6. Move the base to the merged blob, unless the `settings.json` write failed.
+
+**Empty values never roam.** `is_unset` reads `null`, `""`, `"[]"` and `"{}"` as no
+value, so an older build's `""` layout or `"[]"` groups cannot wipe a choice. A group
+list emptied here stays empty here: it is not pushed, and the account's list is not put
+back while it still matches the base. React drops a layout, sort or theme value it does
+not know (from a newer build) and reports it through `sync_settings_refused`, so the next
+round does not read this device's value as a change and push it over.
+
+**Triggers:** sign-in and session restore (`start_ws_listener`), the `settings:updated`
+socket event (including the echo of this device's own push), `set_setting` for a
+roaming key, and a send-filter change. A `localStorage` change on its own schedules no
+round; it rides the next one.
+
+**Why:** a fresh install used to push its whole blob, defaults and blanks included,
+minutes after sign-in, over the account's (bug #31 in `docs/bugfix-history.md`).
+
+**Limit.** Two devices that change settings in the same moment can lose one change. The
+server keeps whichever push is stamped later and has no conditional write.
 
 #### `config.rs` - Sync Settings
 
@@ -1445,7 +1581,12 @@ frontend drives popup sizing and reveal through these.
 ### 4.8 Health & Self-Update
 
 `health.rs` runs the panic hook, heartbeat watchdog, atomic writes and quarantine
-(see section 4.1, Shutdown and the rotation window). These commands are polled at
+(see section 4.1, Shutdown and the rotation window).
+
+`load_state` keeps a `.bak` of each state file's last copy that parsed. When a file
+loads at under a quarter of its `.bak`, the old `.bak` moves to `.bak.prev` first,
+which nothing reads automatically. A real Clear all cannot come back through a
+recovery, and a loss still leaves the larger copy on disk. These commands are polled at
 startup because the matching events only reach listeners attached when they fired.
 
 | Command | Purpose |
@@ -1504,8 +1645,7 @@ summarizes the emitted events; the code is authoritative.
 | `sync:entry-skipped` | `sync/mod.rs` | A push was refused (size or quota) |
 | `sync:entry-synced` / `sync:note-synced` | `sync/mod.rs` | A push was acknowledged by the server |
 | `sync:collect-settings` | `sync/mod.rs` | Ask React to hand down its `localStorage` settings |
-| `sync:settings` | `sync/commands.rs` | Decrypted settings blob to apply |
-| `sync:settings-updated` | `sync/ws_listener.rs` | Server settings changed; pull them |
+| `sync:settings` | `sync/commands.rs` | The `localStorage` keys a settings round took from the account |
 | `sync:device-presence` | `sync/ws_listener.rs` | A device went online or offline |
 | `sync:join-requested` / `sync:join-decided` | `sync/ws_listener.rs` | A join request was made / answered |
 | `sync:invite-received` / `sync:invite-updated` | `sync/ws_listener.rs` | An addressed invite arrived / changed |
@@ -1607,10 +1747,10 @@ rejection string.
 1. Subscribe to `clipboard:new-entry` events (prepend to state, deduplicated by ID).
 2. Subscribe to `clipboard:entry-deleted` events (remove from state).
 3. Subscribe to `clipboard:active-id` events (update `activeClipboardId` state).
-4. Fetch `get_history` and `get_active_clipboard_id` from Rust, **merge** with any entries already received via events.
+4. Fetch `get_history` and `get_active_clipboard_id` from Rust, **merge** with any entries already received via events. A rejected `get_history` is logged and retried twice, a second apart. If the last try also fails and no other read has landed meanwhile, a persistent error toast (key `history-load`) says so, rather than an empty list that reads as no history.
 
 **Focus resync:**
-Listens to `tauri://focus` on the main window. On focus, it re-fetches the full history from Rust to catch up on events missed while the app was in the background.
+Listens to `tauri://focus` on the main window. On focus, it re-fetches the full history from Rust to catch up on events missed while the app was in the background. This re-read and the one after `sync:history-merged` keep the current list when they fail, and take down the `history-load` toast when they succeed. Until one succeeds, a failed focus re-read raises that toast again, because the app shows one toast at a time and a later one may have replaced it.
 
 ### 5.5 Screens
 
@@ -1622,6 +1762,7 @@ The main history view. Entries are grouped by day ("Today", "Yesterday", "Mar 6"
 
 - **Layout toggle**: Tiles (CSS grid, variable heights) or List (full-width rows). Persisted to `localStorage`.
 - **Sort**: Newest, Oldest, A->Z, Z->A, Type. Persisted to `localStorage`.
+- **Filters** (`search-filter/SearchFilter.tsx`): persisted to `localStorage` (`sc-f-*`). The `Cloud` section and the `Mine` and `From others` chips are hidden while no account is signed in, which includes a session that is still restoring (`sync_get_user` returns nothing until it lands). Their saved choices then leave the list, the funnel badge and the filter strip alone, so they cannot narrow the history out of sight. They are kept, and apply again after sign-in.
 - **Day groups**: Collapsible with animated transitions.
 - **Toolbar**: Sort dropdown + layout toggle + clear-all button.
 - **Empty state**: Placeholder with Ctrl+Shift+C hint.
@@ -1661,7 +1802,8 @@ Renders a single `ClipboardEntry` with type-specific previews:
 Among its settings (the screen is the full list):
 
 - **`Number-key paste slots`**: how many entries the paste popup numbers (3-10, default 3). Persisted to `localStorage.sc-paste-slots`.
-- **`Keep history across app restarts`**: save the full clipboard history to disk. Setting `keep_history` in `settings.json`.
+- **`Keep history across restarts`**: on by default, per device. Off keeps only pinned, Saved, and cloud or space entries across a restart (History keeping, section 4.2). Setting `keep_history` in `settings.json`.
+- **`Auto-save copied entries`**: on by default, per device. Tags each new capture Saved. Setting `autosave`.
 - **`Close to system tray`**: hide to the system tray on close instead of quitting. Setting `close_to_tray`.
 - **`Start minimized`**: launch hidden in the tray. Setting `start_minimized`.
 - **`In-app popup`**: master toggle (`notification`) plus checkboxes for the copy and paste notifications (`notif_copy`, `notif_paste`).
@@ -1675,7 +1817,7 @@ Among its settings (the screen is the full list):
 - **Clipboard/group embeds**: Insert clipboard references and group tags into note content.
 - **Auto-save**: Debounced save while typing plus flush-on-unmount behavior.
 - **Pinning and groups**: Pin notes and assign shared group tags.
-- **Filtering**: Search and filter notes by query, groups, date range, and pin state.
+- **Filtering**: Search and filter notes by query, groups, date range, and pin state, plus the Clipboard Screen's cloud, space and owner filters, which follow its signed-out rule.
 - **Bulk actions**: Multi-select delete/pin/group operations.
 
 #### Spaces Screen (`spaces-screen/SpacesScreen.tsx`)
@@ -1819,6 +1961,7 @@ On startup / reconnect:
          │              keep client_id as its id, record in id_map.json
          │
          ├─ emit sync:history-merged (or sync:notes-merged) → React re-render
+         ├─ flush_dirty_stores: the page reaches disk before the cursor moves
          └─ advance the server cursor to last_server_ts (see wire contract)
               next_cursor when the server sent one - it is already clamped to
               the point both streams are complete to, so it can be behind the
@@ -1826,6 +1969,10 @@ On startup / reconnect:
 
 Repeat until next_cursor = null
 ```
+
+A row this device wrote (`device_id` matches) is skipped as an echo. A restore sweep
+walks the same pages from no cursor, merges only rows missing here, and never moves
+the cursor (section 4.6).
 
 ### 6.4 Cloud Sync - Realtime (WebSocket -> Local)
 
@@ -1850,26 +1997,24 @@ WebSocket entry event received (event/payload shape: see wire contract)
 
 ### 7.1 Binary Persistence Format
 
-History and pinned entries use a **MessagePack binary format** for fast, compact disk storage:
+History uses a **MessagePack binary format** for fast, compact disk storage:
 
-1. **Metadata** (`history.bin`, `pinned_entries.bin`) - Entry metadata serialized with **MessagePack** (`rmp-serde`) and written directly to disk (no compression). Image entries store an absolute file path instead of inline base64 data.
+1. **Metadata** (`history.bin`) - Entry metadata serialized with **MessagePack** (`rmp-serde`) and written directly to disk (no compression). Image entries store an absolute file path instead of inline base64 data.
 2. **Image store** (`images/`) - Raw image bytes (PNG, JPEG, WebP, etc.) written to individual files named `{id}_{label}.{ext}`. On `push()`, data-URL images are immediately externalised to this directory, keeping in-memory footprint small.
 3. **On load** - File-path image entries are served to the frontend via Tauri's `convertFileSrc()` asset protocol. Old inline data-URLs from previous sessions are automatically externalised on load.
-4. **Orphan cleanup** - `save_all_to_file` removes image files in `images/` that no longer correspond to any history entry.
+4. **File cleanup** - `save_to_file` deletes the image file or received-files folder of each entry removed since the last save, once that save lands (`gone_files`). Nothing scans the directories.
 
 ### 7.2 Storage Locations
 
 | What               | Location                               | Format                                                           | When Saved               | When Loaded        |
 | ------------------ | -------------------------------------- | ---------------------------------------------------------------- | ------------------------ | ------------------ |
-| Pinned entries     | `{app_data}/pinned_entries.bin`        | MessagePack binary                                               | On pin/unpin/groups      | On startup         |
-| Full history       | `{app_data}/history.bin`               | MessagePack binary                                               | Every 2s when dirty      | On startup         |
+| Full history       | `{app_data}/history.bin`               | MessagePack binary (what it holds: section 4.2)                  | Every 2s when dirty, and on exit | On startup |
 | Image files        | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)                      | On push to history       | Via asset protocol |
 | Received files     | `{app_data}/received-files/{client_id}/` | Files/folders extracted from a synced file entry's ZIP blob    | On pull of a file entry  | Via asset protocol |
 | Note attachments   | `{app_data}/note-attachments/{images,files}/` | Raw bytes of images/files pasted, dropped, or attached in a note | On attach (`save_note_image`/`save_note_file`) | Via asset protocol |
 | Settings           | `{app_data}/settings.json`             | JSON object `{ key: value }`                                     | On `set_setting`         | On startup         |
 | Notes              | `{app_data}/notes.bin`                 | MessagePack binary                                               | Every 2s when dirty      | On startup         |
 | Notifications      | `{app_data}/notifications.bin`         | MessagePack binary                                               | Every 2s when dirty      | On startup         |
-| Boot ID            | `{app_data}/boot_id.txt`               | Plain text (boot epoch seconds)                                  | On startup               | On startup         |
 | Window geometry    | `{app_data}/window-state.json`         | `{ x, y, width, height, maximized }`                             | On every move/resize     | On startup         |
 | Theme preference   | `localStorage.sc-theme`                | `"dark"` or `"light"`                                            | On toggle                | On mount           |
 | Layout preference  | `localStorage.sc-layout`               | `"tiles"` or `"list"`                                            | On change                | On mount           |
@@ -1877,14 +2022,28 @@ History and pinned entries use a **MessagePack binary format** for fast, compact
 | Paste slot count   | `localStorage.sc-paste-slots`          | `"3"` - `"10"`                                                   | On change                | On popup show      |
 | Group names        | `localStorage.sc-groups`               | JSON string array                                                | On group edits           | On mount           |
 | Group colors       | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                           | On color change          | On mount           |
-| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, announcements_cursor, clock_offset_ms, ... }` | After each pull/settings push | On sync init  |
+| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, announcements_cursor, clock_offset_ms, settings_base, restore_owed, restore_mark, ... }` | After each pull, sweep and settings round | On sync init  |
 | Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update/push_local ops (encrypted content, except push_local which is an id) | On mutation when offline | On reconnect       |
 | ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", ... }` plus `entry_shares`        | After each push          | On sync init       |
-| Staged local settings | `{app_data}/sync_settings_local.json` | JSON object of `localStorage` values handed down for the next settings push | On `sync_receive_local_settings` | Merged into the blob on settings push (`push_settings`) |
 
-**Note**: When `keep_history` is off (the default), unpinned clipboard history is in memory only and lost on restart. Only pinned and saved entries survive. When it is on, the full history is flushed to `history.bin` every 2 seconds.
+**Upgrading from a build with `pinned_entries.bin`** (`ClipboardHistory::load_from_disk`):
 
-**Sync note**: `sync_pending.json` and `id_map.json` are safe to delete. Losing them triggers a re-sync, and the server dedupes duplicate entries on the next push. Losing `sync_state.json` causes a full re-pull from the server on the next startup.
+- The file is folded into `history.bin` once, then removed, or renamed `.retired` when it
+  will not go.
+- An older build with Keep history off never read `history.bin`, so that copy is stale.
+  It is moved to `history.bin.pre-upgrade`, which nothing reads or writes, instead of
+  being loaded. An empty `.pre-upgrade` marks the upgrade done when there was nothing to
+  set aside.
+- A legacy file that could not go at all leaves `pinned_entries.bin.folded`, so later
+  launches only retry the removal instead of laying its copies back over deletions.
+
+Builds before this one also wrote `boot_id.txt` and `sync_settings_local.json`. Nothing
+reads either now.
+
+**Sync note**: `sync_pending.json` and `id_map.json` are not safe to delete. The queue
+holds deletes the server has not had yet, and the id map holds the markers that keep
+items deleted while signed out off this device; without them those items come back.
+Losing `sync_state.json` causes a full re-pull from the server on the next startup.
 
 ### 7.3 `{app_data}` location and the identifier-rename migration
 
@@ -1956,19 +2115,19 @@ The **promises** are the workspace root `docs/architecture.md` (Cross-Component 
 | 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                           |
 | 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                      |
 | 4   | **UMK never leaves the device**                | The UMK (from `unwrap_umk`) is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.         |
-| 5   | **Tombstones always propagate**                | `delete_entry` command must call `SyncClient.on_delete_clipboard_entry(client_id, entry_ts)` even when offline. The delete must be queued in `sync_pending.json`.                                |
+| 5   | **Tombstones always propagate**                | The delete commands go through `forward_deletes`. With a client, `delete_entries` writes every Delete to `sync_pending.json` before sending, offline included; with sync off, `IdMap::mark_removed_offline` writes a `local_only` marker. No merge or restore sweep may bring back a key that is queued, in flight, marked, or removed this run. |
 | 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_clipboard_entry` call happens after `history.push()`, as a post-commit side-effect.               |
 | 7   | **Suppress flag is respected**                 | `SyncClient.on_new_clipboard_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                    |
 
 | 8   | **Sync runtime never blocks the main runtime** | `SyncClient` work runs in its dedicated background Tokio runtime. Entry points such as `on_new_clipboard_entry` are synchronous and spawn onto it through the stored `handle` - never `block_on` from the Tauri runtime. |
-| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store.                                                  |
+| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store, and after `flush_dirty_stores` has written the page to disk. |
 | 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable - the server deduplicates by `client_id`.   |
 | 11  | **Sharing is always opt-in**                   | An entry gets a `space_id` only from an explicit share or an enabled send filter that matches it. Send filters default to off, and local group tags never share by themselves. |
 | 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:entry-skipped` to the UI; do not silently drop.                                           |
 | 13  | **A space key is never lost while entries reference it** | Space keyrings keep every key we have held, newest first, and are recovered from the server-side wrapped keyring on reconnect. A rekey prepends; it never replaces. |
 | 14  | **Settings blob is encrypted**                 | `crypto::encrypt(UMK, settings_json)` must be called before `PUT /settings`. Never send plaintext preferences over the network.                                       |
-| 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:*`, autostart, and window geometry must be excluded from the settings blob at the call site in `push_settings()`. |
-| 16  | **Settings push is debounced**                 | `schedule_settings_push()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation - always go through the debounce path.                        |
+| 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:*`, autostart, and window geometry never enter the blob: `sync_settings` keeps only `ROAMING_JSON_KEYS` from `settings.json`, and passes `NO_LONGER_ROAMING` through as the account has them, never applying them. |
+| 16  | **Settings push is debounced**                 | `schedule_settings_sync()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation - always go through a round, which pulls before it pushes.  |
 | 17  | **Auto-copy cannot flood the clipboard**       | Only WebSocket-delivered space entries may auto-copy - never a pull page, never a personal entry - and the write sets the suppress flag before touching the clipboard. |
 | 18  | **Passive mode never loses an entry**          | `last_server_ts` advances only in the pull path. An entry skipped live in passive mode must still arrive on the next interval or manual pull.                          |
 

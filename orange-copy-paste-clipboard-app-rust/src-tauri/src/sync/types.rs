@@ -267,6 +267,14 @@ impl EntryType {
     }
 }
 
+/// What a restore brought back: entries merged now, and image or file entries
+/// whose blob is still downloading.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct RestoreOutcome {
+    pub restored: usize,
+    pub downloading: usize,
+}
+
 
 // ── Space comments ───────────────────────────────────────────────────
 

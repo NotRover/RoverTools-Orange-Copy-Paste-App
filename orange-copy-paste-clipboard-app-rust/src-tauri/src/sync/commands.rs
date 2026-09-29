@@ -14,8 +14,8 @@ use crate::sync::client::{CreateSpaceRequest, JoinSpaceRequest};
 use crate::sync::config::SyncConfig;
 use crate::sync::crypto;
 use crate::sync::types::{
-    SendFilter, Space, SpaceComment, SpaceCommentCount, SyncDevice, SyncMode, SyncQuota,
-    SyncStatusInfo, SyncUser,
+    EntryType, SendFilter, Space, SpaceComment, SpaceCommentCount, SyncDevice, SyncMode,
+    SyncQuota, SyncStatusInfo, SyncUser,
 };
 use crate::sync::SyncClient;
 
@@ -77,13 +77,14 @@ fn sync_http(
     Ok((sync, http))
 }
 
-/// Read-modify-write `settings.json` under app_data.
-fn update_settings(
+/// Read-modify-write `settings.json` under app_data. True only when the file
+/// was written.
+pub(crate) fn update_settings(
     app: &tauri::AppHandle,
     f: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
-) {
+) -> bool {
     let Ok(dir) = app.path().app_data_dir() else {
-        return;
+        return false;
     };
     let path = dir.join("settings.json");
     // Read-modify-write, so a read that failed must not become an empty map:
@@ -99,15 +100,14 @@ fn update_settings(
                 "settings write skipped: settings.json could not be read",
                 &format!("{e} - refusing to overwrite it with a blank file"),
             );
-            return;
+            return false;
         }
     };
     f(&mut map);
-    if let Ok(json) = serde_json::to_string_pretty(&map) {
-        // Read-modify-write of the whole settings file: a truncated write here
-        // silently resets preferences, so replace it atomically.
-        let _ = crate::health::write_atomic(&path, json.as_bytes());
-    }
+    // Read-modify-write of the whole settings file: a truncated write here
+    // silently resets preferences, so replace it atomically.
+    serde_json::to_string_pretty(&map)
+        .is_ok_and(|json| crate::health::write_atomic(&path, json.as_bytes()).is_ok())
 }
 
 fn write_setting(app: &tauri::AppHandle, key: &str, value: serde_json::Value) {
@@ -773,18 +773,13 @@ pub fn sync_unpush_entries(
     // so they are skipped rather than counted - the caller reports this number
     // back to the user, and counting the whole request claimed removals that
     // never happened.
-    let mut count = 0usize;
-    for id in client_ids {
-        if sync.is_remote_entry(&entry_type, &id) {
-            continue;
-        }
-        count += 1;
-        if entry_type == "note" {
-            sync.on_unpush_owned_note(id);
-        } else {
-            sync.on_unpush_owned_clipboard_entry(id);
-        }
-    }
+    let ids: Vec<String> = client_ids
+        .into_iter()
+        .filter(|id| !sync.is_remote_entry(&entry_type, id))
+        .collect();
+    let count = ids.len();
+    let kind = if entry_type == "note" { EntryType::Notes } else { EntryType::Clipboard };
+    sync.unpush_owned(kind, ids);
     Ok(count)
 }
 
@@ -819,16 +814,16 @@ pub async fn sync_unpush_all(state: State<'_, AppState>) -> Result<Vec<String>, 
             }
         }
     }
+    let (mut notes, mut clips) = (Vec::new(), Vec::new());
     for key in &keys {
         let Some((kind, id)) = key.split_once(':') else {
             continue;
         };
-        if kind == "note" {
-            sync.on_unpush_owned_note(id.to_string());
-        } else {
-            sync.on_unpush_owned_clipboard_entry(id.to_string());
-        }
+        let list = if kind == "note" { &mut notes } else { &mut clips };
+        list.push(id.to_string());
     }
+    sync.unpush_owned(EntryType::Notes, notes);
+    sync.unpush_owned(EntryType::Clipboard, clips);
     Ok(keys)
 }
 
@@ -966,7 +961,22 @@ pub fn sync_bulk_progress(keys: Vec<String>, state: State<'_, AppState>) -> Bulk
 #[tauri::command]
 pub async fn sync_now(state: State<'_, AppState>) -> Result<(), String> {
     let sync = sync_client(&state)?;
-    sync.flush_and_pull().await
+    sync.flush_and_pull().await?;
+    sync.restore_if_owed().await;
+    Ok(())
+}
+
+/// "Restore from cloud": bring back everything the account holds that is
+/// missing here. Deleted items stay deleted. Qualified because this module's
+/// own `RestoreOutcome` is the session restore's answer.
+#[tauri::command]
+pub async fn sync_restore_from_cloud(
+    state: State<'_, AppState>,
+) -> Result<crate::sync::types::RestoreOutcome, String> {
+    let sync = sync_client(&state)?;
+    // The queue goes first, so its deletes are already out or kept out.
+    sync.flush_and_pull().await?;
+    sync.restore_sweep().await
 }
 
 /// Shortest gap between two catch-ups. Several screens can ask at once when the
@@ -1043,34 +1053,6 @@ pub async fn sync_get_connection(app: tauri::AppHandle) -> SyncConnection {
     SyncConnection {
         configured: SyncConfig::load(&app).is_configured(),
     }
-}
-
-// ── Settings sync ─────────────────────────────────────────────────────
-
-/// Called by React in response to the `sync:collect-settings` event.
-///
-/// Stores the localStorage values and then pushes. The debounce only asks React
-/// for these values in order to send them, so there is no later push to defer to:
-/// storing without pushing leaves the blob on disk and the server's copy stale
-/// forever, which is what used to happen.
-///
-/// A failed push is not a failed store. The values are on disk, and the next
-/// change reschedules the debounce, so being signed out or offline for a moment
-/// must not surface as an error on the collect path.
-#[tauri::command]
-pub async fn sync_receive_local_settings(
-    json: String,
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    {
-        let sync = sync_client(&state)?;
-        sync.store_local_settings_payload(json);
-    }
-    if let Err(e) = push_settings(state, app).await {
-        eprintln!("[sync] settings push failed: {e}");
-    }
-    Ok(())
 }
 
 // ── Spaces ────────────────────────────────────────────────────────────
@@ -1418,7 +1400,7 @@ pub fn space_set_send_filter(
     let filters = sync.send_filters();
     let value = serde_json::to_value(&filters).map_err(|e| format!("filters json: {e}"))?;
     write_setting(&app, crate::sync::SEND_FILTERS_KEY, value);
-    sync.schedule_settings_push();
+    sync.schedule_settings_sync();
     Ok(())
 }
 
@@ -1783,124 +1765,358 @@ pub async fn sync_revoke_invite(
 
 // ── Settings sync commands ────────────────────────────────────────────
 
-/// Settings keys sourced from settings.json that participate in cloud sync.
+/// Settings keys sourced from settings.json that roam in the encrypted blob.
 /// `space_send_filters` rides here so filters roam across a user's devices
-/// inside the encrypted blob — the server never sees the plaintext group names
-/// they reference.  The auto-copy toggles and `sync_mode` are deliberately
-/// absent: those are per-device choices.
-const SYNCED_JSON_KEYS: &[&str] = &[
-    "keep_history",
+/// without the server seeing the plaintext group names they reference.  The
+/// auto-copy toggles, `sync_mode` and `os_notifications` are per-device.
+pub(crate) const ROAMING_JSON_KEYS: &[&str] = &[
     "close_to_tray",
     "start_minimized",
     "notification",
     "notif_copy",
     "notif_paste",
-    "autosave",
     crate::sync::SEND_FILTERS_KEY,
 ];
 
-/// Encrypt and push merged settings (settings.json + localStorage) to the server.
-/// If the server wins (its settings are newer), decrypts and emits `sync:settings`.
+/// Keys an older build roamed that are now per-device. The blob carries them
+/// as the account has them, so an older build still reads its own value, and
+/// they are never applied here.
+const NO_LONGER_ROAMING: &[&str] = &["keep_history", "autosave"];
+
+/// An empty value never roams: an older build sent `""` for an unset layout
+/// and `"[]"` for no groups, and applying those wiped this PC's choice.
+fn is_unset(v: &serde_json::Value) -> bool {
+    v.is_null() || matches!(v.as_str(), Some("" | "[]" | "{}"))
+}
+
+/// Three-way merge of the account's settings (`server`), this PC's (`local`)
+/// and this PC's values as of its last sync (`base`). A key changed here since
+/// the base keeps this PC's value; every other key takes the account's. With no
+/// base (first sync, or a new account) nothing counts as changed here, so the
+/// account wins and local values only fill keys it lacks.
 ///
-/// Not a command: the only thing that should push is the debounce's own
-/// collect-then-send handshake, so `sync_receive_local_settings` is the one
-/// caller. Exposing it to the frontend as well would let a push go out with a
-/// stale `sync_settings_local.json`, which is the blob it exists to send.
-async fn push_settings(
+/// A value emptied here since the base (the last group deleted, say) is not
+/// sent, so the blob keeps the account's value, but that value is not put back
+/// here either while the account still holds what the base did. Emptied means
+/// the key is here with an empty value: an absent key (localStorage wiped
+/// while the base survived) says nothing, and the account's value applies.
+///
+/// Returns the blob the server should hold and the keys to apply here.
+fn merge_settings(
+    server: &crate::settings_file::Map,
+    local: &crate::settings_file::Map,
+    base: Option<&crate::settings_file::Map>,
+) -> (crate::settings_file::Map, crate::settings_file::Map) {
+    let mut merged = crate::settings_file::Map::new();
+    let mut apply = crate::settings_file::Map::new();
+    let keys: std::collections::BTreeSet<&String> = server.keys().chain(local.keys()).collect();
+    for k in keys {
+        if NO_LONGER_ROAMING.contains(&k.as_str()) {
+            if let Some(v) = server.get(k) {
+                merged.insert(k.clone(), v.clone());
+            }
+            continue;
+        }
+        let l = local.get(k).filter(|v| !is_unset(v));
+        let s = server.get(k).filter(|v| !is_unset(v));
+        let changed_here = base.is_some_and(|b| l.is_some() && l != b.get(k));
+        let was = base.and_then(|b| b.get(k)).filter(|v| !is_unset(v));
+        let emptied_here = local.get(k).is_some_and(is_unset) && was.is_some() && was == s;
+        let value = match s {
+            Some(s) if !changed_here => {
+                if l != Some(s) && !emptied_here {
+                    apply.insert(k.clone(), s.clone());
+                }
+                Some(s)
+            }
+            _ => l,
+        };
+        if let Some(v) = value {
+            merged.insert(k.clone(), v.clone());
+        }
+    }
+    (merged, apply)
+}
+
+/// Land the account's values here: settings.json keys on disk and in the
+/// in-memory flags, the rest to React as `sync:settings` for localStorage.
+///
+/// Returns false when the settings.json write did not land. The base must not
+/// move then: it would record values this file never got, and the next round
+/// would push the file's old values back as changes made here.
+fn apply_pulled_settings(
+    app: &tauri::AppHandle,
+    sync: &SyncClient,
+    apply: crate::settings_file::Map,
+) -> bool {
+    let (file, rest): (crate::settings_file::Map, crate::settings_file::Map) = apply
+        .into_iter()
+        .partition(|(k, _)| ROAMING_JSON_KEYS.contains(&k.as_str()));
+    let landed = file.is_empty() || update_settings(app, |m| m.extend(file.clone()));
+    if !file.is_empty() && landed {
+        let state = app.state::<AppState>();
+        for (k, v) in &file {
+            if let Some(flag) = crate::clipboard::commands::setting_flag(state.inner(), k) {
+                flag.store(
+                    v.as_bool().unwrap_or(false),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
+        }
+        if file.contains_key(crate::sync::SEND_FILTERS_KEY) {
+            sync.reload_local_sync_prefs();
+        }
+    }
+    if !rest.is_empty() {
+        let _ = app.emit("sync:settings", serde_json::Value::Object(rest).to_string());
+    }
+    landed
+}
+
+/// One settings round: pull the account's blob, merge it with this PC's values,
+/// apply what the account changed, and push only when the merge differs from it.
+///
+/// Invoked by React on `sync:collect-settings`, which the debounce emits after
+/// [`SyncClient::schedule_settings_sync`]; `json` is React's localStorage part.
+/// Being offline or signed out is not an error here: the next change or
+/// `settings:updated` schedules another round.
+#[tauri::command]
+pub async fn sync_settings(
+    json: String,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    let umk = sync.umk_clone().ok_or("not authenticated")?;
+    let sync = sync_client(&state)?;
+    let _one = sync.settings_lock.lock().await;
+    let (Some(http), Some(umk)) = (sync.http(), sync.umk_clone()) else {
+        return Ok(());
+    };
+
+    let pulled = match http.pull_settings().await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[sync] settings pull failed: {e}");
+            return Ok(());
+        }
+    };
+    let (server, server_ts) = match pulled {
+        None => (crate::settings_file::Map::new(), 0),
+        // A blob this PC cannot read must not be pushed over: it may be the
+        // only copy of the account's settings.
+        Some(p) => {
+            let map = crypto::decrypt(&umk, &p.encrypted_blob, "settings")
+                .ok()
+                .and_then(|plain| serde_json::from_str::<crate::settings_file::Map>(&plain).ok())
+                .ok_or("settings blob unreadable")?;
+            (map, p.updated_at)
+        }
+    };
 
     let app_data = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data: {e}"))?;
+    let mut local = match crate::settings_file::read_map(&app_data.join("settings.json")) {
+        Ok(map) => map,
+        Err(crate::settings_file::ReadError::Absent) => crate::settings_file::Map::new(),
+        Err(_) => {
+            eprintln!("[sync] settings sync skipped: settings.json could not be read");
+            return Ok(());
+        }
+    };
+    local.retain(|k, _| ROAMING_JSON_KEYS.contains(&k.as_str()));
+    let from_react: crate::settings_file::Map =
+        serde_json::from_str(&json).map_err(|e| format!("settings json: {e}"))?;
+    local.extend(
+        from_react
+            .into_iter()
+            .filter(|(k, _)| !ROAMING_JSON_KEYS.contains(&k.as_str())),
+    );
 
-    // Build blob from settings.json
-    let settings_path = app_data.join("settings.json");
-    let mut blob: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-    if let Ok(data) = std::fs::read_to_string(&settings_path) {
-        if let Ok(map) = serde_json::from_str::<serde_json::Map<_, _>>(&data) {
-            for key in SYNCED_JSON_KEYS {
-                if let Some(v) = map.get(*key) {
-                    blob.insert(key.to_string(), v.clone());
-                }
+    let base = sync.settings_base();
+    let (merged, apply) = merge_settings(&server, &local, base.as_ref());
+    let applied = apply.is_empty() || apply_pulled_settings(&app, &sync, apply);
+
+    if merged != server {
+        let blob = serde_json::Value::Object(merged.clone()).to_string();
+        let encrypted = crypto::encrypt(&umk, &blob, "settings")
+            .map_err(|e| format!("encrypt settings: {e}"))?;
+        // Compared against other devices' settings pushes, so it goes in the
+        // shared frame (see `crate::clock`). It must also beat the blob it was
+        // merged from when this clock reads behind that one.
+        let updated_at = crate::clock::now_ms().max(server_ts + 1);
+        let resp = match http
+            .push_settings(crate::sync::client::SettingsPushRequest {
+                encrypted_blob: encrypted,
+                updated_at,
+            })
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[sync] settings push failed: {e}");
+                return Ok(());
             }
+        };
+        // Another device pushed between the pull and this push. Merge again
+        // against its blob; the base stays, so this PC's changes still count.
+        if resp.winner == "server" {
+            sync.schedule_settings_sync();
+            return Ok(());
         }
     }
 
-    // Merge localStorage values collected via sync_receive_local_settings
-    let local_path = app_data.join("sync_settings_local.json");
-    if let Ok(data) = std::fs::read_to_string(&local_path) {
-        if let Ok(map) = serde_json::from_str::<serde_json::Map<_, _>>(&data) {
-            for (k, v) in map {
-                blob.insert(k, v);
-            }
-        }
+    if applied {
+        sync.set_settings_base(merged);
     }
-
-    let blob_str = serde_json::to_string(&serde_json::Value::Object(blob))
-        .map_err(|e| format!("serialize: {e}"))?;
-    let encrypted = crypto::encrypt(&umk, &blob_str, "settings")
-        .map_err(|e| format!("encrypt settings: {e}"))?;
-    // Compared against other devices' settings pushes, so it goes in the
-    // shared frame. See `crate::clock`.
-    let updated_at = crate::clock::now_ms();
-
-    let resp = http
-        .push_settings(crate::sync::client::SettingsPushRequest {
-            encrypted_blob: encrypted,
-            updated_at,
-        })
-        .await?;
-
-    // Server wins: apply its blob
-    if resp.winner == "server" {
-        if let Some(server_blob) = resp.encrypted_blob {
-            if let Ok(decrypted) = crypto::decrypt(&umk, &server_blob, "settings") {
-                let _ = app.emit("sync:settings", &decrypted);
-            }
-        }
-    }
-
     Ok(())
 }
 
-/// Pull settings from the server, decrypt, and apply.
-/// Emits `sync:settings` to React with the decrypted JSON blob.
+/// React refused values a round handed it: a layout, sort or theme this build
+/// does not know, from a newer build. Their base goes back to this PC's value,
+/// so the next round does not read that value as a change made here and push it
+/// over the newer build's choice. `json` maps each refused key to this PC's
+/// value, or null when it has none.
 #[tauri::command]
-pub async fn sync_pull_settings(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let (sync, http) = sync_http(&state)?;
-    let umk = sync.umk_clone().ok_or("not authenticated")?;
-
-    let result = http.pull_settings().await?;
-    let Some(pull) = result else {
-        return Ok(()); // No settings on server yet
+pub async fn sync_settings_refused(json: String, state: State<'_, AppState>) -> Result<(), String> {
+    let sync = sync_client(&state)?;
+    let refused: crate::settings_file::Map =
+        serde_json::from_str(&json).map_err(|e| format!("settings json: {e}"))?;
+    let _one = sync.settings_lock.lock().await;
+    let Some(mut base) = sync.settings_base() else {
+        return Ok(());
     };
+    for (k, v) in refused {
+        if is_unset(&v) {
+            base.remove(&k);
+        } else {
+            base.insert(k, v);
+        }
+    }
+    sync.set_settings_base(base);
+    Ok(())
+}
 
-    let decrypted = crypto::decrypt(&umk, &pull.encrypted_blob, "settings")
-        .map_err(|e| format!("decrypt settings: {e}"))?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
 
-    // Emit localStorage keys to React for application
-    let _ = app.emit("sync:settings", &decrypted);
-
-    // Write settings.json keys directly
-    if let Ok(blob) = serde_json::from_str::<serde_json::Map<_, _>>(&decrypted) {
-        update_settings(&app, |existing| {
-            for key in SYNCED_JSON_KEYS {
-                if let Some(v) = blob.get(*key) {
-                    existing.insert(key.to_string(), v.clone());
-                }
-            }
-        });
-        // Roamed send filters just landed on disk — refresh the push-path cache.
-        sync.reload_local_sync_prefs();
+    fn map(v: serde_json::Value) -> crate::settings_file::Map {
+        v.as_object().expect("test maps are objects").clone()
     }
 
-    Ok(())
+    /// With no base nothing counts as changed here: the account's values win,
+    /// and this PC's values only fill keys the account does not have.
+    #[test]
+    fn the_first_sync_takes_the_account_values() {
+        let server = map(json!({ "theme": "dark", "notification": true }));
+        let local = map(json!({ "theme": "light", "notification": false, "layout": "list" }));
+
+        let (merged, apply) = merge_settings(&server, &local, None);
+
+        assert_eq!(merged, map(json!({ "theme": "dark", "notification": true, "layout": "list" })));
+        assert_eq!(apply, map(json!({ "theme": "dark", "notification": true })));
+    }
+
+    #[test]
+    fn only_keys_changed_here_are_pushed() {
+        let base = map(json!({ "theme": "dark", "sort": "newest", "notif_copy": true }));
+        let server = base.clone();
+        let local = map(json!({ "theme": "light", "sort": "newest", "notif_copy": true }));
+
+        let (merged, apply) = merge_settings(&server, &local, Some(&base));
+
+        assert_eq!(merged, map(json!({ "theme": "light", "sort": "newest", "notif_copy": true })));
+        assert!(apply.is_empty());
+    }
+
+    #[test]
+    fn server_changes_apply_only_to_keys_not_changed_here() {
+        let base = map(json!({ "theme": "dark", "layout": "tiles" }));
+        let server = map(json!({ "theme": "light", "layout": "list" }));
+        let local = map(json!({ "theme": "dark", "layout": "single" }));
+
+        let (merged, apply) = merge_settings(&server, &local, Some(&base));
+
+        assert_eq!(merged, map(json!({ "theme": "light", "layout": "single" })));
+        assert_eq!(apply, map(json!({ "theme": "light" })));
+    }
+
+    #[test]
+    fn empty_values_are_never_pushed_or_applied() {
+        let server = map(json!({
+            "layout": "", "group_names": "[]", "group_colors": "{}", "sort": null, "theme": "dark"
+        }));
+        let local = map(json!({
+            "layout": "tiles", "group_names": "[\"Work\"]", "group_colors": "{}", "sort": "", "theme": ""
+        }));
+        let base = map(json!({ "theme": "light" }));
+
+        for base in [None, Some(&base)] {
+            let (merged, apply) = merge_settings(&server, &local, base);
+
+            assert_eq!(
+                merged,
+                map(json!({ "layout": "tiles", "group_names": "[\"Work\"]", "theme": "dark" }))
+            );
+            assert_eq!(apply, map(json!({ "theme": "dark" })));
+        }
+    }
+
+    /// The last group deleted here: the empty list is not sent, and the
+    /// account's old list must not come back while it still matches the base.
+    /// A newer list from another PC still applies.
+    #[test]
+    fn a_value_emptied_here_is_not_put_back() {
+        let base = map(json!({ "group_names": "[\"Work\"]" }));
+        let local = map(json!({ "group_names": "[]" }));
+
+        let (merged, apply) = merge_settings(&base, &local, Some(&base));
+        assert_eq!(merged, base);
+        assert!(apply.is_empty());
+
+        let newer = map(json!({ "group_names": "[\"Home\"]" }));
+        let (_, apply) = merge_settings(&newer, &local, Some(&base));
+        assert_eq!(apply, newer);
+    }
+
+    /// localStorage wiped while the base survived: an absent key is not an
+    /// emptied one, so the account's value comes back.
+    #[test]
+    fn an_absent_key_takes_the_account_value() {
+        let base = map(json!({ "group_names": "[\"Work\"]", "theme": "dark" }));
+        let local = map(json!({}));
+
+        let (merged, apply) = merge_settings(&base, &local, Some(&base));
+        assert_eq!(merged, base);
+        assert_eq!(apply, base);
+    }
+
+    #[test]
+    fn keep_history_and_autosave_pass_through_and_never_apply() {
+        let server = map(json!({ "keep_history": false, "autosave": false }));
+        let local = map(json!({ "keep_history": true }));
+
+        for base in [None, Some(&local)] {
+            let (merged, apply) = merge_settings(&server, &local, base);
+
+            assert_eq!(merged, server);
+            assert!(apply.is_empty());
+        }
+        let (merged, _) = merge_settings(&crate::settings_file::Map::new(), &local, Some(&local));
+        assert!(merged.is_empty(), "a per-device key never enters the blob from here");
+    }
+
+    #[test]
+    fn nothing_changed_means_merged_equals_server() {
+        let server = map(json!({ "theme": "dark", "notif_paste": false, "keep_history": true }));
+        let local = map(json!({ "theme": "dark", "notif_paste": false }));
+        let base = local.clone();
+
+        let (merged, apply) = merge_settings(&server, &local, Some(&base));
+
+        assert_eq!(merged, server);
+        assert!(apply.is_empty());
+    }
 }

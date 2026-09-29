@@ -93,7 +93,10 @@ interface CloudFilterContext {
   remoteKeys: Set<string>;
   /** Spaces this account belongs to, for the per-space rows. */
   spaces: Space[];
-  /** False when no account is signed in, which hides the whole section. */
+  /** False when no account is signed in, which hides the whole section and
+   *  the owner chips. Their saved choices then sit out of the list, the badge
+   *  and the names, and apply again on sign-in. A session still restoring
+   *  reads as signed out, so the list can briefly show more, never less. */
   signedIn: boolean;
 }
 
@@ -299,7 +302,7 @@ export function useSearchFilter(
       quick:
         (pinnedOnly ? 1 : 0) +
         (savedOnly ? 1 : 0) +
-        (ownerFilter !== "any" ? 1 : 0),
+        (cloud?.signedIn && ownerFilter !== "any" ? 1 : 0),
       kinds: selectedKinds.size,
       cloud: cloud?.signedIn
         ? (cloudFilter !== "any" ? 1 : 0) +
@@ -361,7 +364,8 @@ export function useSearchFilter(
       }
       // Cloud and space state is Rust-owned bookkeeping keyed by entry id,
       // not fields on the entry, so it all resolves through the same key.
-      if (cloud) {
+      // Signed out none of it applies; see `CloudFilterContext.signedIn`.
+      if (cloud?.signedIn) {
         const key = `clipboard:${e.id}`;
         if (skip !== "cloud" && cloudFilter !== "any") {
           if (!!cloud.syncStates[key] !== (cloudFilter === "in")) return false;
@@ -464,8 +468,10 @@ export function useSearchFilter(
     const out: string[] = [];
     if (pinnedOnly) out.push("Pinned");
     if (savedOnly) out.push("Saved");
-    if (ownerFilter === "mine") out.push("Mine");
-    else if (ownerFilter === "others") out.push("From others");
+    if (cloud?.signedIn) {
+      if (ownerFilter === "mine") out.push("Mine");
+      else if (ownerFilter === "others") out.push("From others");
+    }
     for (const k of ALL_DISPLAY_KINDS) {
       if (selectedKinds.has(k)) out.push(TYPE_LABELS[k]);
     }

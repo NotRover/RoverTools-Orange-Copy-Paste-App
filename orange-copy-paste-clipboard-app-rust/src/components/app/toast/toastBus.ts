@@ -64,7 +64,7 @@ export function showToast(
  * Take a toast down early. `key` names which one, so undoing a slow action does
  * not pull the rug out from under a newer toast that has since replaced it.
  */
-function dismissToast(key?: string): void {
+export function dismissToast(key?: string): void {
   document.dispatchEvent(
     new CustomEvent(APP_TOAST_DISMISS_EVENT, { detail: { key } }),
   );

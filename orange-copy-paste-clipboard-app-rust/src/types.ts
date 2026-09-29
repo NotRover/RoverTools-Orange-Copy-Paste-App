@@ -231,6 +231,14 @@ export interface SyncInviteList {
   received: SyncInvite[];
 }
 
+/** Mirrors the Rust `sync::types::RestoreOutcome` from `sync_restore_from_cloud`. */
+export interface RestoreOutcome {
+  /** Items merged into this device's history or notes. */
+  restored: number;
+  /** Images and files whose download started; they appear as each one lands. */
+  downloading: number;
+}
+
 /** What raised a notification. Drives its icon and which chip it sits under. */
 export type NotificationKind =
   | "space_invite"
@@ -394,6 +402,23 @@ export function renameGroupColor(oldName: string, newName: string): void {
 }
 
 //  Helpers
+
+/**
+ * Collapses a burst of calls into one call `ms` after the first. The call runs
+ * after the burst, so it reads the newest state. For event-driven re-reads over
+ * IPC: a sync sweep or a large Clear all fires one event per page, blob or
+ * item, and a full re-read per event is the bug #26 failure class.
+ */
+export function coalesce(fn: () => void, ms = 200): () => void {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    if (t) return;
+    t = setTimeout(() => {
+      t = undefined;
+      fn();
+    }, ms);
+  };
+}
 
 export function timeAgo(ts: number): string {
   // `sharedNow`, not `Date.now`: the stored time was corrected against the

@@ -15,7 +15,10 @@ import {
 } from "../../icons";
 import "./Topbar.css";
 
-export type ClipboardLayout = "tiles" | "single" | "list";
+export const CLIPBOARD_LAYOUTS = ["tiles", "single", "list"] as const;
+export type ClipboardLayout = (typeof CLIPBOARD_LAYOUTS)[number];
+export const isClipboardLayout = (v: unknown): v is ClipboardLayout =>
+  CLIPBOARD_LAYOUTS.includes(v as ClipboardLayout);
 
 // Shell
 

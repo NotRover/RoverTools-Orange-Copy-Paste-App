@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast, toastError } from "../components/app/toast/toastBus";
 import { listen } from "@tauri-apps/api/event";
-import type { Space } from "../types";
+import { coalesce, type Space } from "../types";
 
 type ShareKind = "clipboard" | "note";
 
@@ -60,10 +60,12 @@ export function useRemoteEntryKeys(): Set<string> {
 
   useEffect(() => {
     refresh();
+    // One read per burst: a restore merges once per page and per blob.
+    const refreshSoon = coalesce(refresh);
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
     for (const event of REFRESH_ON) {
-      listen(event, refresh).then((fn) => {
+      listen(event, refreshSoon).then((fn) => {
         if (cancelled) fn();
         else unlisteners.push(fn);
       });
@@ -118,10 +120,12 @@ export function useSpaceShares(): SpaceShares {
 
   useEffect(() => {
     refresh();
+    // One read per burst: a restore merges once per page and per blob.
+    const refreshSoon = coalesce(refresh);
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
     for (const event of REFRESH_ON) {
-      listen(event, refresh).then((fn) => {
+      listen(event, refreshSoon).then((fn) => {
         if (cancelled) fn();
         else unlisteners.push(fn);
       });

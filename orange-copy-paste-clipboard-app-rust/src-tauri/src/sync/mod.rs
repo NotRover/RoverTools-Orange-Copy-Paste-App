@@ -9,7 +9,7 @@
 //! - UMK is in-memory only; never written to any file or log.
 //! - Sync runtime never calls `block_on` on Tauri's runtime.
 //! - Capture pipeline is untouched; hooks fire only after a confirmed push.
-//! - Tombstones always propagate; `on_delete_entry` queues even while offline.
+//! - Tombstones always propagate; `delete_entries` queues even while offline.
 
 pub mod client;
 pub mod commands;
@@ -49,12 +49,12 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
-    EntryType, RemovalScope, SendFilter, SkippedEntry, Space, SpaceComment, SpaceCommentCount,
-    SpaceMember, SyncMode, SyncStatusInfo, SyncUser,
+    EntryType, RemovalScope, RestoreOutcome, SendFilter, SkippedEntry, Space, SpaceComment,
+    SpaceCommentCount, SpaceMember, SyncMode, SyncStatusInfo, SyncUser,
 };
 use crate::sync::ws_listener::WsListener;
 
-/// How long after the last `schedule_settings_push()` call before the push fires.
+/// How long after the last `schedule_settings_sync()` call before the sync fires.
 const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
 
 /// How far back a live delivery may claim to have been written before this
@@ -115,6 +115,18 @@ pub enum PushOrigin {
     Automatic,
     /// The user asked for this item to go up. Never held.
     UserInitiated,
+}
+
+/// Where a batch of rows handed to [`SyncClient::merge_pulled`] came from.
+#[derive(Clone, Copy)]
+pub(crate) enum MergeSource<'a> {
+    /// A delta pull page.
+    Pull,
+    /// One row delivered over the socket.
+    Live,
+    /// A restore sweep over the whole account. Carries the keys it must leave
+    /// out (queued or in flight), taken once before the walk starts.
+    Sweep(&'a HashSet<String>),
 }
 
 struct PushCtx {
@@ -591,6 +603,12 @@ pub struct SyncClient {
     /// staying blank until the server answers - a wait long enough to read as
     /// "nothing happened".
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// Entry keys this run removed here, and when. A restore sweep never brings
+    /// these back, and a blob download that started before the removal drops
+    /// its result instead of re-adding the entry.
+    removed_this_run: Arc<Mutex<HashMap<String, Instant>>>,
+    /// Entry keys with a claimed blob download running. See [`BlobClaim`].
+    blob_merges: Arc<Mutex<HashSet<String>>>,
     /// Client-to-server ID mapping.
     id_map: Arc<Mutex<IdMap>>,
     /// Sync state (cursor, device_id, user_id).
@@ -640,6 +658,9 @@ pub struct SyncClient {
     /// One flush + delta pull at a time. See [`Self::flush_and_pull`]; a Tokio
     /// mutex for the same reason `restore_lock` is one.
     flush_lock: tokio::sync::Mutex<()>,
+    /// One settings sync at a time, so two rounds never read the same base and
+    /// push over each other. See `crate::sync::commands::sync_settings`.
+    settings_lock: tokio::sync::Mutex<()>,
 
     /// True while the space-key distribution retry loop is running. Reconcile
     /// runs from several triggers at once (screen mount, socket event, join),
@@ -764,7 +785,7 @@ impl SyncClient {
 
         // Debounce task: sleeps until 2s after the most recent schedule call,
         // then signals React to collect localStorage values.  Idle (no polling)
-        // until `schedule_settings_push()` wakes it.
+        // until `schedule_settings_sync()` wakes it.
         {
             let push_at = Arc::clone(&settings_push_at);
             let notify = Arc::clone(&settings_notify);
@@ -815,6 +836,8 @@ impl SyncClient {
             push_gate: Arc::new(Semaphore::new(PUSH_CONCURRENCY)),
             blob_budget: Arc::new(Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
+            removed_this_run: Arc::new(Mutex::new(HashMap::new())),
+            blob_merges: Arc::new(Mutex::new(HashSet::new())),
             id_map,
             sync_state,
             status,
@@ -827,6 +850,7 @@ impl SyncClient {
             restore_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             restore_lock: tokio::sync::Mutex::new(()),
             flush_lock: tokio::sync::Mutex::new(()),
+            settings_lock: tokio::sync::Mutex::new(()),
             key_retrying: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             settings_push_at,
             settings_notify,
@@ -1576,6 +1600,9 @@ impl SyncClient {
             }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);
+            // Every sign-in owes one restore sweep: the cursor only covers what
+            // this device pulled, not what went missing here meanwhile.
+            state.set_restore_owed(true);
         }
 
         // 8b. And a copy beside the credentials themselves. sync_state.json is
@@ -2110,6 +2137,9 @@ impl SyncClient {
         let listener = WsListener::new(self.app.clone(), http);
         listener.clone().connect(&self.handle);
         *self.ws_listener.lock() = Some(listener);
+        // Sign-in and session restore both end here. Every settings sync
+        // starts with a pull, so the account's values land before any push.
+        self.schedule_settings_sync();
     }
 
     fn stop_ws_listener(&self) {
@@ -2124,22 +2154,21 @@ impl SyncClient {
 
     // ── Settings sync debounce ────────────────────────────────────
 
-    /// Schedule a settings push 2 seconds from now.  Repeated calls within
-    /// the 2-second window reset the timer.  Thread-safe — can be called from
-    /// any sync command handler.
-    pub fn schedule_settings_push(&self) {
+    /// Schedule a settings sync (pull, merge, push) 2 seconds from now.
+    /// Repeated calls within the 2-second window reset the timer.  Thread-safe
+    /// — can be called from any sync command handler.
+    pub fn schedule_settings_sync(&self) {
         *self.settings_push_at.lock() = Some(Instant::now());
         self.settings_notify.notify_one();
     }
 
-    /// Store the localStorage values received from React via the
-    /// `sync_receive_local_settings` command.  They will be merged with
-    /// `settings.json` values on the next debounced push.
-    pub fn store_local_settings_payload(&self, json: String) {
-        // Persist temporarily to disk so the push task can read it. Scratch data
-        // read back moments later, so it needs the atomic swap but not the flush.
-        let path = self.app_data.join("sync_settings_local.json");
-        let _ = crate::health::replace_atomic(&path, json.as_bytes());
+    /// The roaming settings as of this device's last settings sync.
+    pub(crate) fn settings_base(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        self.sync_state.lock().data.settings_base.clone()
+    }
+
+    pub(crate) fn set_settings_base(&self, base: serde_json::Map<String, serde_json::Value>) {
+        self.sync_state.lock().set_settings_base(base);
     }
 
     // ── Entry sync hooks ──────────────────────────────────────────
@@ -2171,29 +2200,32 @@ impl SyncClient {
         self.spawn_push_clipboard_entry(entry, umk, true, PushOrigin::Automatic);
     }
 
-    /// The user removed this one item. An item another member wrote is dropped
-    /// from this device and leaves a placeholder in the space; nothing is
-    /// pushed, because the row belongs to its author.
+    /// The user removed these items. An item another member wrote is dropped
+    /// from this device and leaves a placeholder in the space; its tombstone
+    /// reaches only this account's devices, because the row belongs to its
+    /// author.
     ///
-    /// `entry_ts` is the item's own timestamp, which the caller has to read
-    /// before it drops the copy - by the time this runs there is nothing local
-    /// left to read it from, and the placeholder would then sort by the removal
-    /// instead of by the item it stands for.
-    pub fn on_delete_clipboard_entry(&self, client_id: String, entry_ts: Option<u64>) {
-        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::ThisItem, entry_ts);
+    /// Each `Option<u64>` is the item's own timestamp, which the caller has to
+    /// read before it drops the copy - by the time this runs there is nothing
+    /// local left to read it from, and the placeholder would then sort by the
+    /// removal instead of by the item it stands for.
+    pub fn delete_entries(&self, entry_type: EntryType, items: Vec<(String, Option<u64>)>) {
+        self.spawn_deletes(entry_type, RemovalScope::ThisItem, items);
     }
 
-    /// One step of a sweep over everything this account has on the server.
+    /// A sweep over everything this account has on the server, keeping the
+    /// local copies.
     ///
-    /// Separate from [`Self::on_delete_clipboard_entry`] so the scope is part
-    /// of the call rather than something the caller had to remember to filter
-    /// for: an item another member wrote is not this account's to remove, and
-    /// [`Self::spawn_delete_entry`] refuses to touch one under this scope even
-    /// if a caller puts it in the list.
-    pub fn on_unpush_owned_clipboard_entry(&self, client_id: String) {
-        // No timestamp needed: this scope leaves the local copy alone, so it is
-        // still there to be read.
-        self.spawn_delete_entry(client_id, EntryType::Clipboard, RemovalScope::OwnedOnly, None);
+    /// Separate from [`Self::delete_entries`] so the scope is part of the call
+    /// rather than something the caller had to remember to filter for: an item
+    /// another member wrote is not this account's to remove, and
+    /// [`Self::spawn_deletes`] refuses to touch one under this scope even if a
+    /// caller puts it in the list.
+    pub fn unpush_owned(&self, entry_type: EntryType, ids: Vec<String>) {
+        // No timestamps needed: this scope leaves the local copy alone, so it
+        // is still there to be read.
+        let items = ids.into_iter().map(|id| (id, None)).collect();
+        self.spawn_deletes(entry_type, RemovalScope::OwnedOnly, items);
     }
 
     pub fn on_new_note(&self, note: Note) {
@@ -2229,17 +2261,6 @@ impl SyncClient {
         };
         let at = note.updated_at.max(now_ms());
         self.spawn_push_note(note, umk, true, Some(at), PushOrigin::UserInitiated);
-    }
-
-    /// The user removed this one note. See [`Self::on_delete_clipboard_entry`].
-    pub fn on_delete_note(&self, note_id: String, entry_ts: Option<u64>) {
-        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::ThisItem, entry_ts);
-    }
-
-    /// One step of an account-wide sweep. See
-    /// [`Self::on_unpush_owned_clipboard_entry`].
-    pub fn on_unpush_owned_note(&self, note_id: String) {
-        self.spawn_delete_entry(note_id, EntryType::Notes, RemovalScope::OwnedOnly, None);
     }
 
     // ── Internal spawn helpers ────────────────────────────────────
@@ -2509,169 +2530,204 @@ impl SyncClient {
         });
     }
 
-    fn spawn_delete_entry(
+    /// Remove a batch of entries: markers and intent first, then every
+    /// tombstone queued in one write, then one task per tombstone.
+    fn spawn_deletes(
         &self,
-        client_id: String,
         entry_type: EntryType,
         scope: RemovalScope,
-        entry_ts: Option<u64>,
+        items: Vec<(String, Option<u64>)>,
     ) {
         let http = self.http.lock().clone();
         let umk = self.umk.lock().clone();
-        let queue = Arc::clone(&self.pending_queue);
-        let id_map = Arc::clone(&self.id_map);
-        let status = Arc::clone(&self.status);
-        let gate = Arc::clone(&self.push_gate);
-        let type_str = entry_type.as_str().to_string();
-        let map_key = format!("{type_str}:{client_id}");
-        // The tombstone must reach the same spaces the entry did, so members
-        // remove it too. Captured before the id_map row is dropped below.
-        let (space_ids, is_remote, owner_id) = {
-            let map = self.id_map.lock();
-            (
-                map.shares_for(&map_key),
-                map.is_remote(&map_key),
-                map.owner_of(&map_key),
-            )
-        };
+        let type_str = entry_type.as_str();
+        // Gone from here, so a restore sweep must not bring any of it back. All
+        // of the batch at once, before the per-item work below: the copies are
+        // already out of the store, and a sweep page landing while a large
+        // Clear all works through its id_map writes would otherwise re-add the
+        // items not reached yet. Not for OwnedOnly, whose local copies stay.
+        if scope == RemovalScope::ThisItem {
+            let now = Instant::now();
+            let mut removed = self.removed_this_run.lock();
+            for (client_id, _) in &items {
+                removed.insert(format!("{type_str}:{client_id}"), now);
+            }
+        }
+        let mut ops = Vec::with_capacity(items.len());
+        let mut jobs = Vec::with_capacity(items.len());
+        for (client_id, entry_ts) in items {
+            let map_key = format!("{type_str}:{client_id}");
+            // The tombstone must reach the same spaces the entry did, so members
+            // remove it too. Captured before the id_map row is dropped below.
+            let (space_ids, is_remote, owner_id) = {
+                let map = self.id_map.lock();
+                (
+                    map.shares_for(&map_key),
+                    map.is_remote(&map_key),
+                    map.owner_of(&map_key),
+                )
+            };
 
-        // An account-wide action has no business here at all. Rows are keyed by
-        // owner, so this account has no server copy of someone else's item to
-        // take down - the only thing a sweep could do is drop the local copy,
-        // which is not what "remove my things from the cloud" asks for and is
-        // not something the user chose for this item. Refusing at the sink
-        // means a caller that builds its list wrongly does nothing, instead of
-        // quietly taking items away; `owned_keys` is how the list should be
-        // built, and this is the backstop for when it is not.
-        if scope == RemovalScope::OwnedOnly && is_remote {
-            debug_assert!(
-                false,
-                "account-wide removal reached {map_key}, which another member wrote"
-            );
+            // An account-wide action has no business here at all. Rows are keyed
+            // by owner, so this account has no server copy of someone else's item
+            // to take down - the only thing a sweep could do is drop the local
+            // copy, which is not what "remove my things from the cloud" asks for
+            // and is not something the user chose for this item. Refusing at the
+            // sink means a caller that builds its list wrongly does nothing,
+            // instead of quietly taking items away; `owned_keys` is how the list
+            // should be built, and this is the backstop for when it is not.
+            if scope == RemovalScope::OwnedOnly && is_remote {
+                debug_assert!(
+                    false,
+                    "account-wide removal reached {map_key}, which another member wrote"
+                );
+                continue;
+            }
+
+            // A removal in a space leaves a placeholder, so the item does not just
+            // disappear from under the other members.
+            if !space_ids.is_empty() {
+                // Whatever the caller read before it dropped the copy, else the
+                // copy itself - the scopes that keep it leave it there to be read.
+                let entry_ts = entry_ts.or_else(|| self.local_entry_ts(type_str, &client_id));
+                self.id_map.lock().mark_deleted(
+                    &map_key,
+                    crate::sync::id_map::DeletedMarker {
+                        space_ids: space_ids.clone(),
+                        owner_id,
+                        deleted_at: now_ms(),
+                        by_author: !is_remote,
+                        content_gone: true,
+                        local_only: is_remote,
+                        entry_ts,
+                        removed_by: self.self_user_id(),
+                    },
+                );
+            }
+
+            // Someone else wrote this one. Deleting it is "remove from my devices"
+            // for a received item: it must reach this account's other devices, but
+            // never the space. So forget our copy and fall through to push a
+            // tombstone under OUR account with NO space ids. Rows are keyed by
+            // (user_id, client_id, entry_type), so this inserts a row we own — it
+            // never touches the author's — and the server fans it out on
+            // `user:{id}` only. Our devices drop their copy while every member
+            // keeps theirs; our other devices accept it through the self-hide path
+            // in `merge_pulled`. The local_only marker written above is what stops
+            // the author's live row handing it straight back on the next pull.
+            //
+            // Authorship is kept: `forget_received_copy` drops the copy but not the
+            // record of who wrote it, so the entry can never be mistaken later for
+            // an unsynced local one and published under this account.
+            if is_remote {
+                self.id_map.lock().forget_received_copy(&map_key);
+            }
+            // What the tombstone carries: the item's own spaces when we own it, so
+            // members remove it too; none for a received item, so it stays in the
+            // space for everyone and only this account's devices drop it.
+            let push_space_ids = if is_remote { Vec::new() } else { space_ids };
+
+            // What this removal means, written down before the tombstone leaves.
+            //
+            // A tombstone is the only wire shape a removal has, so "take it off
+            // the server, keep it here" and "delete it everywhere" are the same
+            // message and come back indistinguishable. The intent has to be
+            // recorded on the device that had it. Done before the push (not on
+            // success) because the tombstone is queued when offline and flushed
+            // later, by which point this scope is gone.
+            {
+                let mut id_map = self.id_map.lock();
+                match scope {
+                    RemovalScope::OwnedOnly => id_map.mark_unpushed(&map_key),
+                    // A real deletion. Clears any earlier "keep it here" so the
+                    // entry is deletable again after having been unpushed.
+                    RemovalScope::ThisItem => id_map.clear_unpushed(&map_key),
+                }
+            }
+            // Claimed here, before the task starts, so a removal is visible for its
+            // whole life. Without it a tombstone for a row this device has no local
+            // record of - one another device pushed - would be indistinguishable
+            // from a finished removal from the very first poll, and the bulk bar
+            // would report a clean sweep while the pushes were still going out.
+            self.in_flight.lock().insert(map_key.clone());
+            ops.push(PendingOp::Delete {
+                client_id: client_id.clone(),
+                entry_type: type_str.to_string(),
+            });
+            jobs.push((client_id, map_key, is_remote, push_space_ids));
+        }
+        if ops.is_empty() {
             return;
         }
 
-        // A removal in a space leaves a placeholder, so the item does not just
-        // disappear from under the other members.
-        if !space_ids.is_empty() {
-            // Whatever the caller read before it dropped the copy, else the copy
-            // itself - the scopes that keep it leave it there to be read.
-            let entry_ts = entry_ts.or_else(|| self.local_entry_ts(&type_str, &client_id));
-            self.id_map.lock().mark_deleted(
-                &map_key,
-                crate::sync::id_map::DeletedMarker {
-                    space_ids: space_ids.clone(),
-                    owner_id,
-                    deleted_at: now_ms(),
-                    by_author: !is_remote,
-                    content_gone: true,
-                    local_only: is_remote,
-                    entry_ts,
-                    removed_by: self.self_user_id(),
-                },
-            );
-        }
+        // Write-ahead: every tombstone is queued before the first one leaves, in
+        // one write. A quit mid fan-out then replays the rest on the next flush,
+        // instead of leaving rows on the server that read as missing here and
+        // come back in a restore. Each task takes its own op back out once its
+        // tombstone lands.
+        self.pending_queue.lock().push_many(ops);
+        self.status.lock().pending_count = self.pending_queue.lock().len();
 
-        // Someone else wrote this one. Deleting it is "remove from my devices"
-        // for a received item: it must reach this account's other devices, but
-        // never the space. So forget our copy and fall through to push a
-        // tombstone under OUR account with NO space ids. Rows are keyed by
-        // (user_id, client_id, entry_type), so this inserts a row we own — it
-        // never touches the author's — and the server fans it out on
-        // `user:{id}` only. Our devices drop their copy while every member keeps
-        // theirs; our other devices accept it through the self-hide path in
-        // `merge_pulled`. The local_only marker written above is what stops the
-        // author's live row handing it straight back on the next pull.
-        //
-        // Authorship is kept: `forget_received_copy` drops the copy but not the
-        // record of who wrote it, so the entry can never be mistaken later for
-        // an unsynced local one and published under this account.
-        if is_remote {
-            self.id_map.lock().forget_received_copy(&map_key);
-        }
-        // What the tombstone carries: the item's own spaces when we own it, so
-        // members remove it too; none for a received item, so it stays in the
-        // space for everyone and only this account's devices drop it.
-        let push_space_ids = if is_remote { Vec::new() } else { space_ids };
-
-        // What this removal means, written down before the tombstone leaves.
-        //
-        // A tombstone is the only wire shape a removal has, so "take it off the
-        // server, keep it here" and "delete it everywhere" are the same message
-        // and come back indistinguishable. The intent has to be recorded on the
-        // device that had it. Done before the push (not on success) because the
-        // tombstone is queued when offline and flushed later, by which point
-        // this scope is gone.
-        {
-            let mut id_map = self.id_map.lock();
-            match scope {
-                RemovalScope::OwnedOnly => id_map.mark_unpushed(&map_key),
-                // A real deletion. Clears any earlier "keep it here" so the
-                // entry is deletable again after having been unpushed.
-                RemovalScope::ThisItem => id_map.clear_unpushed(&map_key),
-            }
-        }
-
-        // Claimed here, before the task starts, so a removal is visible for its
-        // whole life. Without it a tombstone for a row this device has no local
-        // record of - one another device pushed - would be indistinguishable
-        // from a finished removal from the very first poll, and the bulk bar
-        // would report a clean sweep while the pushes were still going out.
-        self.in_flight.lock().insert(map_key.clone());
-        let in_flight = Arc::clone(&self.in_flight);
-        let flight_key = map_key.clone();
-        let flight_type = entry_type.as_str();
-        let app = self.app.clone();
-
-        self.handle.spawn(async move {
-            // Every exit path below releases the claim.
-            let _flight = InFlightGuard {
-                set: in_flight,
-                key: flight_key,
-                app,
-                entry_type: flight_type,
+        // Tombstones still waiting for an answer. See [`BatchAnswer`].
+        let unanswered = Arc::new(std::sync::atomic::AtomicUsize::new(jobs.len()));
+        for (client_id, map_key, is_remote, push_space_ids) in jobs {
+            let http = http.clone();
+            let umk = umk.clone();
+            let queue = Arc::clone(&self.pending_queue);
+            let id_map = Arc::clone(&self.id_map);
+            let status = Arc::clone(&self.status);
+            let gate = Arc::clone(&self.push_gate);
+            let answer = BatchAnswer {
+                unanswered: Arc::clone(&unanswered),
+                queue: Arc::clone(&queue),
             };
-            // "Remove from cloud" fans out one of these per entry, so they
-            // share the push window rather than flooding the server.
-            let _permit = gate.acquire_owned().await;
-            // Always tombstone — even if offline (invariant #5).  A tombstone is
-            // a push with deleted_at set, keyed by client_id (no server_id).
-            //
-            // Sent in every mode, manual included: a removal is something the
-            // user did, from the item menu or the bulk bar, so it is never the
-            // app acting on its own.
-            if let (Some(http), Some(umk)) = (
-                http.as_ref().filter(|h| h.is_authenticated()),
-                umk.as_ref(),
-            ) {
-                if let Some(req) = tombstone_req(umk, &client_id, &type_str, push_space_ids) {
-                    match http.push_entries(vec![req]).await {
-                        Ok(_) => {
-                            // A received item's copy was already forgotten above,
-                            // and its authorship (remote flag + owner) is kept on
-                            // purpose - `forget_received_copy`, not `remove_entry`
-                            // - so the item can never later be taken for an
-                            // unsynced local one and published under this account.
-                            // `remove_entry` would wipe exactly that, leaving the
-                            // entry to render as ours. Only an owned item runs it,
-                            // where it drops a real server id.
-                            if !is_remote {
-                                id_map.lock().remove_entry(&map_key);
-                            }
-                            status.lock().pending_count = queue.lock().len();
-                            return;
-                        }
-                        Err(e) => eprintln!("[sync] tombstone push failed: {e}"),
-                    }
-                }
-            }
-            // Offline / not logged in — queue the tombstone for the next flush.
-            queue.lock().push(PendingOp::Delete {
-                client_id,
+            let flight = InFlightGuard {
+                set: Arc::clone(&self.in_flight),
+                key: map_key.clone(),
+                app: self.app.clone(),
                 entry_type: type_str,
+            };
+            self.handle.spawn(async move {
+                // Every exit path below releases the claim and counts the answer.
+                let _flight = flight;
+                let _answer = answer;
+                // "Remove from cloud" fans out one of these per entry, so they
+                // share the push window rather than flooding the server.
+                let _permit = gate.acquire_owned().await;
+                // A tombstone is a push with deleted_at set, keyed by client_id
+                // (no server_id). Sent in every mode, manual included: a removal
+                // is something the user did, from the item menu or the bulk bar,
+                // so it is never the app acting on its own.
+                let (Some(http), Some(umk)) = (
+                    http.as_ref().filter(|h| h.is_authenticated()),
+                    umk.as_ref(),
+                ) else {
+                    return; // offline or signed out: the queued op waits for a flush
+                };
+                let Some(req) = tombstone_req(umk, &client_id, type_str, push_space_ids) else {
+                    return;
+                };
+                match http.push_entries(vec![req]).await {
+                    Ok(_) => {
+                        // A received item's copy was already forgotten above,
+                        // and its authorship (remote flag + owner) is kept on
+                        // purpose - `forget_received_copy`, not `remove_entry`
+                        // - so the item can never later be taken for an
+                        // unsynced local one and published under this account.
+                        // `remove_entry` would wipe exactly that, leaving the
+                        // entry to render as ours. Only an owned item runs it,
+                        // where it drops a real server id.
+                        if !is_remote {
+                            id_map.lock().remove_entry(&map_key);
+                        }
+                        queue.lock().remove_delete(type_str, &client_id);
+                        status.lock().pending_count = queue.lock().len();
+                    }
+                    // The op is already queued, so the next flush retries it.
+                    Err(e) => eprintln!("[sync] tombstone push failed: {e}"),
+                }
             });
-            status.lock().pending_count = queue.lock().len();
-        });
+        }
     }
 
     // ── Pull merge ────────────────────────────────────────────────
@@ -2683,14 +2739,25 @@ impl SyncClient {
     /// remove the local entry; live entries upsert by id (which is the shared
     /// `client_id`).
     ///
-    /// `live` marks WebSocket-delivered entries (vs. pull pages). It gates two
-    /// behaviors: passive mode skips live *personal* entries (the cursor only
-    /// advances on pull, so the next interval/manual pull picks them up), and
-    /// auto-copy fires only for live space entries — never for backfill.
-    pub(crate) fn merge_pulled(&self, entries: &[crate::sync::client::PulledEntry], live: bool) {
+    /// `src` says where the rows came from. `Live` (WebSocket delivery) gates
+    /// two behaviors: passive mode skips live *personal* entries (the cursor
+    /// only advances on pull, so the next interval/manual pull picks them up),
+    /// and auto-copy fires only for live space entries - never for a pull or a
+    /// sweep. `Sweep` merges only rows missing here; see [`MergeSource`].
+    pub(crate) fn merge_pulled(
+        &self,
+        entries: &[crate::sync::client::PulledEntry],
+        src: MergeSource<'_>,
+    ) -> RestoreOutcome {
         use std::sync::atomic::Ordering;
+        let live = matches!(src, MergeSource::Live);
+        let keep_out = match src {
+            MergeSource::Sweep(k) => Some(k),
+            _ => None,
+        };
+        let mut out = RestoreOutcome::default();
         let Some(umk) = self.umk_clone() else {
-            return;
+            return out;
         };
         let state = self.app.state::<crate::state::AppState>();
         let my_device = self.sync_state.lock().data.device_id.clone();
@@ -2700,6 +2767,8 @@ impl SyncClient {
 
         let mut clip_changed = false;
         let mut notes_changed = false;
+        // Keys with a removal queued or in flight, read once and only if needed.
+        let mut removing: Option<HashSet<String>> = None;
 
         for e in entries {
             // The id becomes a path under app data when a blob lands (see
@@ -2711,16 +2780,6 @@ impl SyncClient {
                 eprintln!("[sync] pulled row with a malformed id refused");
                 continue;
             }
-            // Skip entries this device originated (echoed back over the user
-            // channel); they are already present locally.
-            if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
-                continue;
-            }
-            // Passive and manual: personal entries are not applied live. Space
-            // entries always are — spaces are realtime by definition.
-            if live && passive && e.space_ids.is_empty() {
-                continue;
-            }
             let is_note = e.entry_type == "note";
 
             let key = format!(
@@ -2728,6 +2787,49 @@ impl SyncClient {
                 if is_note { "note" } else { "clipboard" },
                 e.client_id
             );
+
+            if let Some(keep_out) = keep_out {
+                // A sweep only fills gaps: it never touches a local copy, and
+                // never brings back what is queued, in flight, or removed this
+                // run. This is the only place the same-device skip is lifted,
+                // and only for rows missing here.
+                let has_local = if is_note {
+                    state.notes.lock().find(&e.client_id).is_some()
+                } else {
+                    state.history.lock().find(&e.client_id).is_some()
+                };
+                let admitted =
+                    sweep_admits(&key, has_local, keep_out, &self.removed_this_run.lock());
+                if !admitted {
+                    continue;
+                }
+            } else if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
+                // Skip entries this device originated (echoed back over the
+                // user channel); they are already present locally.
+                continue;
+            } else if e.deleted_at.is_none()
+                && removing
+                    .get_or_insert_with(|| self.restore_keep_out())
+                    .contains(&key)
+            {
+                // A live row read before this device's own tombstone for it
+                // landed. With no local copy, a queued or in-flight key can only
+                // be a removal (a push always has one), and a personal item
+                // leaves no marker to stop the row coming back.
+                let has_local = if is_note {
+                    state.notes.lock().find(&e.client_id).is_some()
+                } else {
+                    state.history.lock().find(&e.client_id).is_some()
+                };
+                if !has_local {
+                    continue;
+                }
+            }
+            // Passive and manual: personal entries are not applied live. Space
+            // entries always are — spaces are realtime by definition.
+            if live && passive && e.space_ids.is_empty() {
+                continue;
+            }
 
             // A tombstone this account pushed for an item another member wrote:
             // this user hiding a received entry across their own devices
@@ -2753,6 +2855,7 @@ impl SyncClient {
                 } else {
                     clip_changed |= gone;
                 }
+                self.note_removed(&key);
                 let mut id_map = self.id_map.lock();
                 let local_spaces = id_map.shares_for(&key);
                 let owner_id = id_map.owner_of(&key);
@@ -2829,6 +2932,7 @@ impl SyncClient {
                     clip_changed |= gone;
                     gone
                 };
+                self.note_removed(&key);
                 let mut id_map = self.id_map.lock();
                 // Spaces come off the id_map row rather than the tombstone: the
                 // payload carries them too, but the local record is what this
@@ -2901,6 +3005,11 @@ impl SyncClient {
             // entries, else through a carried space's keyring.
             let Some((content_key, from_space)) = self.unwrap_cek(&umk, e) else {
                 eprintln!("[sync] merge: no usable key for {}", e.client_id);
+                // A space row that arrived before its key. The cursor moves past
+                // it all the same, so only a sweep can pick it up later.
+                if keep_out.is_none() && !e.space_ids.is_empty() {
+                    self.sync_state.lock().set_restore_owed(true);
+                }
                 continue;
             };
             let Ok(content) = crypto::decrypt(&content_key, &e.encrypted_content, &e.client_id)
@@ -2930,6 +3039,10 @@ impl SyncClient {
             {
                 groups.push("Saved".to_string());
             }
+            // Checked again after the decrypt: a removal can land while it runs.
+            if keep_out.is_some() && self.removed_this_run.lock().contains_key(&key) {
+                continue;
+            }
 
             if is_note {
                 let title = meta
@@ -2947,6 +3060,7 @@ impl SyncClient {
                     groups,
                 });
                 notes_changed = true;
+                out.restored += 1;
             } else {
                 let kind = EntryKind::from_label(e.kind.as_deref().unwrap_or("text"));
                 let label = meta.get("label").and_then(|l| l.as_str()).map(str::to_string);
@@ -2956,14 +3070,23 @@ impl SyncClient {
                 if kind == EntryKind::Image {
                     if let Some(blob_key) = e.blob_key.clone() {
                         let http = self.http.lock().clone();
-                        if let Some(http) = http {
+                        // A download already running for this key covers a sweep
+                        // row. A pull or live row runs anyway, unclaimed, so its
+                        // newer metadata lands. Only a claimed pull or live row
+                        // owes a sweep if its download fails; a sweep's own
+                        // failure waits for the next trigger.
+                        let owe = keep_out.is_none();
+                        let claim = http.as_ref().and_then(|_| self.claim_blob(&key, owe));
+                        if let Some(http) = http.filter(|_| owe || claim.is_some()) {
                             let mime = serde_json::from_str::<serde_json::Value>(&content)
                                 .ok()
                                 .and_then(|v| v.get("mime").and_then(|m| m.as_str()).map(String::from))
                                 .unwrap_or_else(|| "image/png".into());
+                            out.downloading += usize::from(claim.is_some());
                             self.spawn_blob_image_merge(
                                 http,
                                 content_key.clone(),
+                                claim,
                                 ImageMergeMeta {
                                     client_id: e.client_id.clone(),
                                     server_id: e.server_id.clone(),
@@ -3005,10 +3128,15 @@ impl SyncClient {
                 if kind == EntryKind::File {
                     if let Some(blob_key) = e.blob_key.clone() {
                         let http = self.http.lock().clone();
-                        if let Some(http) = http {
+                        // Claimed like the image branch above.
+                        let owe = keep_out.is_none();
+                        let claim = http.as_ref().and_then(|_| self.claim_blob(&key, owe));
+                        if let Some(http) = http.filter(|_| owe || claim.is_some()) {
+                            out.downloading += usize::from(claim.is_some());
                             self.spawn_blob_files_merge(
                                 http,
                                 content_key.clone(),
+                                claim,
                                 FilesMergeMeta {
                                     client_id: e.client_id.clone(),
                                     server_id: e.server_id.clone(),
@@ -3058,6 +3186,7 @@ impl SyncClient {
                 }
                 if state.history.lock().upsert_synced(merged) {
                     clip_changed = true;
+                    out.restored += 1;
                 }
             }
 
@@ -3095,6 +3224,7 @@ impl SyncClient {
             state.notes_dirty.store(true, Ordering::Relaxed);
             let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
         }
+        out
     }
 
     // ── Manual sync trigger ───────────────────────────────────────
@@ -3152,9 +3282,17 @@ impl SyncClient {
                                 // "clipboard" filed every flushed note under a
                                 // key nothing would ever look up or clean out.
                                 let key = format!("{entry_type}:{}", r.client_id);
-                                let mut id_map = self.id_map.lock();
-                                id_map.set_entry(&key, &r.server_id);
-                                id_map.set_entry_shares(&key, &space_ids);
+                                {
+                                    let mut id_map = self.id_map.lock();
+                                    id_map.set_entry(&key, &r.server_id);
+                                    id_map.set_entry_shares(&key, &space_ids);
+                                }
+                                supersede_queued_delete(
+                                    &self.app,
+                                    &self.pending_queue,
+                                    entry_type,
+                                    &r.client_id,
+                                );
                             }
                         }
                         Err(e) if e.is_permanent_rejection() => {
@@ -3183,33 +3321,39 @@ impl SyncClient {
                     }
                 }
                 PendingOp::Delete { client_id, entry_type } => {
-                    if let Some(umk) = self.umk_clone() {
-                        let map_key = format!("{entry_type}:{client_id}");
-                        let space_ids = self
-                            .id_map
-                            .lock()
-                            .entry_shares()
-                            .remove(&map_key)
-                            .unwrap_or_default();
-                        if let Some(req) = tombstone_req(&umk, &client_id, &entry_type, space_ids)
-                        {
-                            match http.push_entries(vec![req]).await {
-                                // Same rule as the online delete path: a received
-                                // item keeps its authorship (its copy was already
-                                // forgotten when the delete was queued), so only an
-                                // owned item drops its server id here. Wiping it
-                                // would let the entry come back looking like ours.
-                                Ok(_) => {
-                                    let mut id_map = self.id_map.lock();
-                                    if !id_map.is_remote(&map_key) {
-                                        id_map.remove_entry(&map_key);
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("[sync] queued delete failed: {e}");
-                                    unsent.push(PendingOp::Delete { client_id, entry_type });
-                                }
+                    let map_key = format!("{entry_type}:{client_id}");
+                    // A running delete task owns this op and takes it out when its
+                    // tombstone lands. Sending it here as well doubled every
+                    // tombstone of a fan-out that a flush overlapped.
+                    if self.in_flight.lock().contains(&map_key) {
+                        unsent.push(PendingOp::Delete { client_id, entry_type });
+                        continue;
+                    }
+                    let space_ids = self.id_map.lock().shares_for(&map_key);
+                    let req = self
+                        .umk_clone()
+                        .and_then(|umk| tombstone_req(&umk, &client_id, &entry_type, space_ids));
+                    // No key yet, or the tombstone could not be sealed: kept for a
+                    // flush that can send it. Dropping it lost the deletion.
+                    let Some(req) = req else {
+                        unsent.push(PendingOp::Delete { client_id, entry_type });
+                        continue;
+                    };
+                    match http.push_entries(vec![req]).await {
+                        // Same rule as the online delete path: a received item
+                        // keeps its authorship (its copy was already forgotten
+                        // when the delete was queued), so only an owned item drops
+                        // its server id here. Wiping it would let the entry come
+                        // back looking like ours.
+                        Ok(_) => {
+                            let mut id_map = self.id_map.lock();
+                            if !id_map.is_remote(&map_key) {
+                                id_map.remove_entry(&map_key);
                             }
+                        }
+                        Err(e) => {
+                            eprintln!("[sync] queued delete failed: {e}");
+                            unsent.push(PendingOp::Delete { client_id, entry_type });
                         }
                     }
                 }
@@ -3276,7 +3420,7 @@ impl SyncClient {
                             Some(r.removed_by.clone()),
                         );
                     }
-                    self.merge_pulled(&pull.entries, false);
+                    self.merge_pulled(&pull.entries, MergeSource::Pull);
 
                     // The watermark has to cover both streams. It used to be the
                     // last entry's timestamp alone, so a page carrying only
@@ -3295,6 +3439,10 @@ impl SyncClient {
                         newest_entry.max(newest_removal)
                     });
                     if let Some(ts) = watermark {
+                        // What this page merged reaches disk before the cursor
+                        // moves past it. The other order let a crash lose the
+                        // page for good: the next pull starts after it.
+                        crate::flush_dirty_stores(&self.app, crate::Flush::Dirty);
                         self.sync_state.lock().set_last_server_ts(ts);
                         let _ = http.advance_cursor(ts).await;
                     }
@@ -3318,73 +3466,159 @@ impl SyncClient {
         Ok(())
     }
 
-    /// Re-pull from the beginning of the account's history, merging only what is
-    /// new to this device.
-    ///
-    /// A normal pull asks for `server_ts > cursor`, so entries that were on the
-    /// server before this device caught up are permanently behind it. That is
-    /// exactly the situation when an owner opens a space's back catalogue: rows
-    /// that were filtered out at the time are now visible, but no delta pull
-    /// would ever ask for them again.
-    ///
-    /// The cursor is left where it was. Entries already held are dropped before
-    /// the merge rather than re-applied, which is what keeps this from
-    /// re-downloading every image blob the device already has.
-    pub async fn backfill_pull(&self) -> Result<(), String> {
-        let http = self.http.lock().clone().ok_or("not authenticated")?;
-        if !http.is_authenticated() {
-            return Err("not authenticated".into());
-        }
-        let state = self.app.state::<crate::state::AppState>();
+    /// Keys a restore must not bring back: queued work (a Delete above all)
+    /// and anything a task is pushing or removing right now.
+    fn restore_keep_out(&self) -> HashSet<String> {
+        let mut out: HashSet<String> =
+            self.pending_queue.lock().pending_keys().into_iter().collect();
+        out.extend(self.in_flight.lock().iter().cloned());
+        out
+    }
 
-        let mut cursor = None;
-        let mut merged = 0usize;
-        loop {
-            let pull = match http.pull_entries(cursor, 200).await {
-                Ok(p) => p,
+    /// Walk the whole account, merging only rows missing here. Never moves the
+    /// cursor. The caller holds `flush_lock`.
+    ///
+    /// A delta pull asks for `server_ts > cursor`, so a row that was on the
+    /// server before this device caught up, or that this device lost since, is
+    /// behind it for good: an owner opening a space's back catalogue, a key that
+    /// arrived after its rows, a history file that did not survive.
+    async fn sweep_locked(&self, http: &SyncHttpClient) -> Result<RestoreOutcome, String> {
+        let keep_out = self.restore_keep_out();
+        // Cleared before the walk, not after it, so an owe raised while the walk
+        // runs (a download that fails meanwhile, say) survives it.
+        let was_owed = {
+            let mut state = self.sync_state.lock();
+            let owed = state.data.restore_owed;
+            state.set_restore_owed(false);
+            owed
+        };
+        let mut out = RestoreOutcome::default();
+        let mut cursor: Option<u64> = None;
+        // Same bound as `server_entries`: rows pushed in the same millisecond
+        // share a server_ts, so a cursor that stops advancing ends the walk.
+        for _ in 0..200 {
+            // A failed page fails the sweep, so whatever owed it stays owed.
+            let page = match http.pull_entries(cursor, 500).await {
+                Ok(page) => page,
                 Err(e) => {
-                    eprintln!("[sync] backfill pull failed: {e}");
-                    break;
+                    if was_owed {
+                        self.sync_state.lock().set_restore_owed(true);
+                    }
+                    return Err(e);
                 }
             };
-            let next_cursor = pull.next_cursor;
-            let fresh: Vec<_> = pull
-                .entries
+            let got = self.merge_pulled(&page.entries, MergeSource::Sweep(&keep_out));
+            out.restored += got.restored;
+            out.downloading += got.downloading;
+            match page.next_cursor {
+                Some(c) if Some(c) != cursor => cursor = Some(c),
+                _ => break,
+            }
+        }
+        // The counts the sweep leaves behind, so only a later rise sweeps again.
+        let (missing, gap) = self.restore_counts().await;
+        {
+            let mut state = self.sync_state.lock();
+            let old_gap = state.data.restore_mark.1;
+            state.set_restore_mark((missing, gap.unwrap_or(old_gap)));
+        }
+        Ok(out)
+    }
+
+    /// Entry keys with a local copy, as `"clipboard:{id}"` / `"note:{id}"`.
+    fn local_keys(&self) -> HashSet<String> {
+        let state = self.app.state::<crate::state::AppState>();
+        let mut keys: HashSet<String> = state
+            .history
+            .lock()
+            .all()
+            .iter()
+            .map(|e| format!("clipboard:{}", e.id))
+            .collect();
+        keys.extend(state.notes.lock().all().iter().map(|n| format!("note:{}", n.id)));
+        keys
+    }
+
+    /// The two restore counts, from one look at what is present here (a local
+    /// copy, or a download in progress).
+    ///
+    /// - missing: rows this device has on record in the cloud but no copy of,
+    ///   leaving out the ones that are not supposed to be here: removed (a
+    ///   content-gone marker), queued or in flight.
+    /// - gap: how many of this account's own rows the server holds beyond the
+    ///   ones present here. The account-wide half of the trigger: a row this
+    ///   device never pulled is not in the id map, so only the server can count
+    ///   it. `None` when the server cannot be asked.
+    async fn restore_counts(&self) -> (usize, Option<usize>) {
+        let total = self.cloud_breakdown().await.ok().flatten().map(|b| b.total);
+        let mut present = self.local_keys();
+        present.extend(self.blob_merges.lock().iter().cloned());
+        let (known, gone): (Vec<String>, HashSet<String>) = {
+            let map = self.id_map.lock();
+            let gone = map
+                .deleted_markers()
                 .into_iter()
-                .filter(|e| {
-                    // A tombstone always applies: the local copy is exactly what
-                    // it is there to remove.
-                    if e.deleted_at.is_some() {
-                        return true;
-                    }
-                    if e.entry_type == "note" {
-                        // Notes are edited, so an older copy still has to merge.
-                        !state
-                            .notes
-                            .lock()
-                            .find(&e.client_id)
-                            .is_some_and(|n| n.updated_at >= e.updated_at)
-                    } else {
-                        // Clipboard entries are immutable once captured, so
-                        // holding one at all is enough - and re-merging an image
-                        // would download and rewrite its blob for nothing.
-                        state.history.lock().find(&e.client_id).is_none()
-                    }
-                })
+                .filter(|(_, m)| m.content_gone)
+                .map(|(k, _)| k)
                 .collect();
-            if !fresh.is_empty() {
-                merged += fresh.len();
-                self.merge_pulled(&fresh, false);
-            }
-            match next_cursor {
-                Some(next) => cursor = Some(next),
-                None => break,
-            }
+            (map.entry_keys(), gone)
+        };
+        let keep_out = self.restore_keep_out();
+        let missing = known
+            .iter()
+            .filter(|k| !present.contains(*k) && !gone.contains(*k) && !keep_out.contains(*k))
+            .count();
+        let gap = total.map(|total| {
+            let own_present = self
+                .owned_entry_keys()
+                .iter()
+                .filter(|k| present.contains(*k))
+                .count();
+            total.saturating_sub(own_present)
+        });
+        (missing, gap)
+    }
+
+    /// "Restore from cloud": sweep the account now, whatever is owed.
+    pub async fn restore_sweep(&self) -> Result<RestoreOutcome, String> {
+        let _flushing = self.flush_lock.lock().await;
+        let http = self
+            .http()
+            .filter(|h| h.is_authenticated())
+            .ok_or("not signed in")?;
+        self.sweep_locked(&http).await
+    }
+
+    /// Sweep only when something says rows went missing here: a sweep is owed,
+    /// or either count has risen past the mark the last sweep left.
+    pub(crate) async fn restore_if_owed(&self) {
+        let _flushing = self.flush_lock.lock().await;
+        let Some(http) = self.http().filter(|h| h.is_authenticated()) else {
+            return;
+        };
+        let (owed, mark) = {
+            let state = self.sync_state.lock();
+            (state.data.restore_owed, state.data.restore_mark)
+        };
+        let (missing, gap) = self.restore_counts().await;
+        if !restore_due(owed, missing, gap, mark) {
+            // Counts that came down (rows restored some other way, or removed)
+            // lower the mark, so the next rise is measured from here.
+            let lowered = (mark.0.min(missing), gap.map_or(mark.1, |g| mark.1.min(g)));
+            self.sync_state.lock().set_restore_mark(lowered);
+            return;
         }
-        if merged > 0 {
-            eprintln!("[sync] backfill merged {merged} entries");
+        match self.sweep_locked(&http).await {
+            Ok(out) => {
+                if out.restored + out.downloading > 0 {
+                    eprintln!(
+                        "[sync] restore merged {} entries, {} downloading",
+                        out.restored, out.downloading
+                    );
+                }
+            }
+            Err(e) => eprintln!("[sync] restore sweep failed: {e}"),
         }
-        Ok(())
     }
 
     // ── Status / accessors ────────────────────────────────────────
@@ -4069,9 +4303,9 @@ impl SyncClient {
         }
     }
 
-    /// Spawn a background flush + delta pull on the sync runtime.  Called right
-    /// after login so a freshly-signed-in device catches up without blocking
-    /// the `sync_login` command's return.
+    /// Spawn a background flush + delta pull on the sync runtime, then a restore
+    /// sweep if one is due.  Called right after login so a freshly-signed-in
+    /// device catches up without blocking the `sync_login` command's return.
     pub fn trigger_initial_sync(self: Arc<Self>) {
         let handle = self.handle.clone();
         handle.spawn(async move {
@@ -4087,7 +4321,9 @@ impl SyncClient {
             }
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
+                return;
             }
+            self.restore_if_owed().await;
         });
     }
 
@@ -4939,6 +5175,9 @@ impl SyncClient {
         }
 
         let mut out = Vec::new();
+        // Set when a space became readable on this install for the first time:
+        // its earlier rows went past the cursor while they could not be opened.
+        let mut key_arrived = false;
         for s in server_spaces {
             let is_owner = s.owner_id == me;
             let pubkey_of = |uid: &str| {
@@ -5038,8 +5277,10 @@ impl SyncClient {
                             // every launch reaches here. Whether it is *news*
                             // is a durable question, and this is where it is
                             // asked. See bug #16.
-                            if self.sync_state.lock().mark_space_announced(&s.id) {
+                            let first = self.sync_state.lock().mark_space_announced(&s.id);
+                            if first {
                                 self.note_space_readable(&s.id, flushed);
+                                key_arrived = true;
                             }
                         }
                     }
@@ -5187,10 +5428,16 @@ impl SyncClient {
                 .map(|s| s.id.clone())
                 .collect()
         };
-        if !owed.is_empty() {
+        // Manual mode holds automatic personal pulls, so a key arrival there
+        // only owes the sweep, for Sync now or Restore from cloud to run.
+        if key_arrived && *self.sync_mode.lock() == SyncMode::Manual {
+            self.sync_state.lock().set_restore_owed(true);
+            key_arrived = false;
+        }
+        if !owed.is_empty() || key_arrived {
             let this = Arc::clone(self);
             self.handle.spawn(async move {
-                if this.backfill_pull().await.is_ok() {
+                if this.restore_sweep().await.is_ok() {
                     let mut state = this.sync_state.lock();
                     for id in owed {
                         state.mark_history_backfilled(&id);
@@ -5263,15 +5510,36 @@ impl SyncClient {
         });
     }
 
+    /// Note that `key` was removed here just now. See `removed_this_run`.
+    fn note_removed(&self, key: &str) {
+        self.removed_this_run.lock().insert(key.to_string(), Instant::now());
+    }
+
+    /// Claim `key` for a blob download, or `None` when one is already running.
+    /// `owe` makes a download that ends without landing owe a restore sweep.
+    fn claim_blob(&self, key: &str, owe: bool) -> Option<BlobClaim> {
+        if !self.blob_merges.lock().insert(key.to_string()) {
+            return None;
+        }
+        Some(BlobClaim {
+            set: Arc::clone(&self.blob_merges),
+            key: key.to_string(),
+            owe: owe.then(|| Arc::clone(&self.sync_state)),
+            done: false,
+        })
+    }
+
     /// Download, decrypt, and materialize an image blob to the images dir, then
     /// upsert the entry into history.  Runs on the background runtime because
     /// `merge_pulled` (its caller) is synchronous.  A download failure (e.g. a
     /// blob owned by another Live Share member — download URLs are owner-only)
-    /// is logged and skipped, not fatal.
+    /// is logged and skipped, not fatal; `claim` decides whether it owes a
+    /// restore sweep, and `None` (a duplicate carrying newer metadata) owes none.
     fn spawn_blob_image_merge(
         &self,
         http: Arc<SyncHttpClient>,
         key: Zeroizing<[u8; 32]>,
+        mut claim: Option<BlobClaim>,
         meta: ImageMergeMeta,
     ) {
         use std::sync::atomic::Ordering;
@@ -5284,19 +5552,10 @@ impl SyncClient {
             .map(|d| d.join("images"));
         let id_map = Arc::clone(&self.id_map);
         let in_flight = Arc::clone(&self.in_flight);
+        let started = Instant::now();
+        let removed = Arc::clone(&self.removed_this_run);
 
         self.handle.spawn(async move {
-            let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
-                eprintln!("[sync] image blob {} download-url failed (skipped)", meta.blob_key);
-                return;
-            };
-            let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
-                return;
-            };
-            let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
-                eprintln!("[sync] image blob {} decrypt failed", meta.client_id);
-                return;
-            };
             let Some(dir) = images_dir else { return };
             // Checked again here, not only at merge: this is the line that
             // turns the id into a path, and it must not depend on every caller
@@ -5305,13 +5564,30 @@ impl SyncClient {
                 return;
             }
             let path = dir.join(format!("{}.{}", meta.client_id, ext_for_mime(&meta.mime)));
-            // Atomic, because the entry upserted below points at this file — a
-            // torn write would leave history referencing a truncated image.
-            if crate::health::replace_atomic(&path, &bytes).is_err() {
-                return;
+            // Still on disk from before (a restore after history was lost, say).
+            // It was written by `replace_atomic` below and ids are unique, so it
+            // is this blob: no need to spend a download on it.
+            if !path.exists() {
+                let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
+                    eprintln!("[sync] image blob {} download-url failed (skipped)", meta.blob_key);
+                    return;
+                };
+                let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
+                    return;
+                };
+                let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
+                    eprintln!("[sync] image blob {} decrypt failed", meta.client_id);
+                    return;
+                };
+                // Atomic, because the entry upserted below points at this file — a
+                // torn write would leave history referencing a truncated image.
+                if crate::health::replace_atomic(&path, &bytes).is_err() {
+                    return;
+                }
             }
 
             let state = app.state::<crate::state::AppState>();
+            let key = format!("clipboard:{}", meta.client_id);
             // Deleted while this blob was downloading - a received item the user
             // removed from their devices, say. Re-adding the copy now resurrects
             // a row the delete already took out, and it races the delete's
@@ -5319,9 +5595,18 @@ impl SyncClient {
             // The deletion marker outlives the copy, so it is what we ask.
             if id_map
                 .lock()
-                .deleted_marker(&format!("clipboard:{}", meta.client_id))
+                .deleted_marker(&key)
                 .is_some_and(|m| m.content_gone)
             {
+                BlobClaim::land(&mut claim);
+                return;
+            }
+            // A personal item leaves no marker, so a delete or tombstone that
+            // landed after this download began is asked about directly. One from
+            // before it began does not count: that is a later share bringing the
+            // item back.
+            if removed_since(&removed.lock(), &key, started) {
+                BlobClaim::land(&mut claim);
                 return;
             }
             let merged = ClipboardEntry {
@@ -5338,9 +5623,9 @@ impl SyncClient {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
             }
             let _ = state.history.lock().upsert_synced(merged);
+            BlobClaim::land(&mut claim);
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
-            let key = format!("clipboard:{}", meta.client_id);
             let mut id_map = id_map.lock();
             id_map.set_entry(&key, &meta.server_id);
             if !in_flight.lock().contains(&key) {
@@ -5366,12 +5651,13 @@ impl SyncClient {
         &self,
         http: Arc<SyncHttpClient>,
         key: Zeroizing<[u8; 32]>,
+        mut claim: Option<BlobClaim>,
         meta: FilesMergeMeta,
     ) {
         use std::sync::atomic::Ordering;
         let app = self.app.clone();
-        // Kept apart from `images/`, which a save sweep prunes by referenced
-        // filename — an extracted tree would look unreferenced and be deleted.
+        // One directory per entry, named by its id, so removing the entry
+        // removes exactly its tree and nothing else under the root.
         let files_root = self
             .app
             .path()
@@ -5380,6 +5666,8 @@ impl SyncClient {
             .map(|d| d.join("received-files"));
         let id_map = Arc::clone(&self.id_map);
         let in_flight = Arc::clone(&self.in_flight);
+        let started = Instant::now();
+        let removed = Arc::clone(&self.removed_this_run);
 
         self.handle.spawn(async move {
             let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
@@ -5418,15 +5706,22 @@ impl SyncClient {
                 .join("\n");
 
             let state = app.state::<crate::state::AppState>();
+            let key = format!("clipboard:{}", meta.client_id);
             // Deleted while this blob was downloading - see the image merge for
             // why re-adding it now would resurrect a removed row and can hand it
             // back looking like ours. The deletion marker is what outlives the
             // copy, so it is what we ask.
             if id_map
                 .lock()
-                .deleted_marker(&format!("clipboard:{}", meta.client_id))
+                .deleted_marker(&key)
                 .is_some_and(|m| m.content_gone)
             {
+                BlobClaim::land(&mut claim);
+                return;
+            }
+            // Removed after this download began; see the image merge.
+            if removed_since(&removed.lock(), &key, started) {
+                BlobClaim::land(&mut claim);
                 return;
             }
             let merged = ClipboardEntry {
@@ -5443,9 +5738,9 @@ impl SyncClient {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
             }
             let _ = state.history.lock().upsert_synced(merged);
+            BlobClaim::land(&mut claim);
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
-            let key = format!("clipboard:{}", meta.client_id);
             let mut id_map = id_map.lock();
             id_map.set_entry(&key, &meta.server_id);
             if !in_flight.lock().contains(&key) {
@@ -5558,6 +5853,98 @@ fn accepts_row(author: Option<&str>, incoming: Option<&str>) -> bool {
         (_, None) => true,
         (None, Some(_)) => true,
         (Some(author), Some(incoming)) => author == incoming,
+    }
+}
+
+/// Whether a restore sweep may merge the row for `key`: only when nothing of it
+/// is here, and nothing here says it should stay away.
+fn sweep_admits(
+    key: &str,
+    has_local: bool,
+    keep_out: &HashSet<String>,
+    removed: &HashMap<String, Instant>,
+) -> bool {
+    !has_local && !keep_out.contains(key) && !removed.contains_key(key)
+}
+
+/// Whether `key` was removed here at or after `started`, the moment a download
+/// for it began.
+fn removed_since(removed: &HashMap<String, Instant>, key: &str, started: Instant) -> bool {
+    removed.get(key).is_some_and(|at| *at >= started)
+}
+
+/// Whether a restore sweep is due: one is owed, or a count rose past the mark
+/// the last sweep left. An unknown gap (server unreachable) never triggers.
+fn restore_due(owed: bool, missing: usize, gap: Option<usize>, mark: (usize, usize)) -> bool {
+    owed || missing > mark.0 || gap.is_some_and(|g| g > mark.1)
+}
+
+/// A push for this entry was accepted: drop any Delete still queued for it
+/// (see `PendingQueue::supersede_delete`). Only while the entry is still here:
+/// a removal made while the push was in the air has no local copy, and that
+/// Delete is the newer one.
+fn supersede_queued_delete(
+    app: &tauri::AppHandle,
+    queue: &Mutex<PendingQueue>,
+    entry_type: &str,
+    client_id: &str,
+) {
+    let state = app.state::<crate::state::AppState>();
+    let here = if entry_type == "note" {
+        state.notes.lock().find(client_id).is_some()
+    } else {
+        state.history.lock().find(client_id).is_some()
+    };
+    if here {
+        queue.lock().supersede_delete(entry_type, client_id);
+    }
+}
+
+/// Send the user's deletes on to sync.
+///
+/// With a client, every item gets a tombstone. With sync off, an item this
+/// device knows is in the cloud gets a `local_only` marker instead, so the row
+/// does not come back when sync returns (see `IdMap::mark_removed_offline`).
+pub(crate) fn forward_deletes(
+    app: &tauri::AppHandle,
+    entry_type: EntryType,
+    items: Vec<(String, Option<u64>)>,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let state = app.state::<crate::state::AppState>();
+    // Held while the files are written, so no client is built over them.
+    let slot = state.sync_client.lock();
+    if let Some(s) = slot.clone() {
+        drop(slot);
+        s.delete_entries(entry_type, items);
+        return;
+    }
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let queued: HashSet<String> = PendingQueue::load(pending_queue::pending_queue_path(&dir))
+        .pending_keys()
+        .into_iter()
+        .collect();
+    // A file that will not read is left alone: an empty map saved over it
+    // would lose every earlier offline marker, which the server cannot rebuild.
+    let mut map = match IdMap::try_load(id_map::id_map_path(&dir)) {
+        Ok(map) => map,
+        Err(e) => {
+            eprintln!("[sync] id map unreadable, offline delete not recorded: {e}");
+            return;
+        }
+    };
+    let mut changed = false;
+    for (id, ts) in items {
+        let key = format!("{}:{id}", entry_type.as_str());
+        changed |= map.mark_removed_offline(&key, ts, queued.contains(&key));
+    }
+    // One write for the whole batch, not one per item.
+    if changed {
+        map.persist();
     }
 }
 
@@ -6099,6 +6486,59 @@ struct InFlightGuard {
     entry_type: &'static str,
 }
 
+/// A blob download in progress for one entry key, released however the task
+/// ends.
+///
+/// While it is held the key counts as present, so a restore neither starts a
+/// second download for it nor counts it as missing. A download from a pull or
+/// live row that ends without its entry landing (no URL, a failed fetch or
+/// decrypt) owes a restore sweep: the cursor has already moved past the row, so
+/// nothing else would ever fetch it again.
+struct BlobClaim {
+    set: Arc<Mutex<HashSet<String>>>,
+    key: String,
+    /// Set for a pull or live download; a sweep's own failure owes nothing.
+    owe: Option<Arc<Mutex<SyncStateStore>>>,
+    /// True once the task reached an answer: upserted, or deliberately dropped.
+    done: bool,
+}
+
+impl BlobClaim {
+    /// The task reached an answer. A claim-less duplicate has nothing to mark.
+    fn land(claim: &mut Option<Self>) {
+        if let Some(c) = claim {
+            c.done = true;
+        }
+    }
+}
+
+/// One tombstone of a delete batch, answered however its task ends. The last
+/// answer writes the queue, so the landed ops leave the file too: one write per
+/// batch, and none left on disk to replay over an entry uploaded again later.
+struct BatchAnswer {
+    unanswered: Arc<std::sync::atomic::AtomicUsize>,
+    queue: Arc<Mutex<PendingQueue>>,
+}
+
+impl Drop for BatchAnswer {
+    fn drop(&mut self) {
+        if self.unanswered.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+            self.queue.lock().persist();
+        }
+    }
+}
+
+impl Drop for BlobClaim {
+    fn drop(&mut self) {
+        self.set.lock().remove(&self.key);
+        if !self.done {
+            if let Some(state) = &self.owe {
+                state.lock().set_restore_owed(true);
+            }
+        }
+    }
+}
+
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
         self.set.lock().remove(&self.key);
@@ -6266,6 +6706,7 @@ async fn push_entry_task(
                 if let Some(r) = result.accepted.into_iter().find(|r| r.client_id == client_id) {
                     // The row owns the blob now.
                     blob_guard.disarm();
+                    supersede_queued_delete(&ctx.app, &ctx.queue, entry_type, &client_id);
                     if entry_type == "note" {
                         ctx.id_map
                             .lock()
@@ -6491,10 +6932,108 @@ mod tests {
         );
     }
 
+    fn keys(list: &[&str]) -> HashSet<String> {
+        list.iter().map(|k| k.to_string()).collect()
+    }
+
+    // ── Restore sweep ───────────────────────────────────────────────
+
+    #[test]
+    fn a_sweep_never_touches_a_local_copy() {
+        let none = HashMap::new();
+        assert!(!sweep_admits("clipboard:a", true, &HashSet::new(), &none));
+        assert!(sweep_admits("clipboard:a", false, &HashSet::new(), &none));
+    }
+
+    #[test]
+    fn a_sweep_skips_queued_and_in_flight_keys() {
+        let keep_out = keys(&["clipboard:queued", "note:in-flight"]);
+        let none = HashMap::new();
+        assert!(!sweep_admits("clipboard:queued", false, &keep_out, &none));
+        assert!(!sweep_admits("note:in-flight", false, &keep_out, &none));
+        assert!(sweep_admits("clipboard:other", false, &keep_out, &none));
+    }
+
+    #[test]
+    fn a_sweep_skips_what_was_removed_this_run() {
+        let removed = HashMap::from([("clipboard:a".to_string(), Instant::now())]);
+        assert!(!sweep_admits("clipboard:a", false, &HashSet::new(), &removed));
+    }
+
+    #[test]
+    fn a_download_started_before_a_removal_is_dropped() {
+        let started = Instant::now();
+        let removed_at = started + Duration::from_millis(5);
+        let removed = HashMap::from([("clipboard:a".to_string(), removed_at)]);
+        assert!(removed_since(&removed, "clipboard:a", started));
+        assert!(!removed_since(&removed, "clipboard:b", started));
+    }
+
+    /// A removal, then the author sharing the item again: the download that
+    /// share starts is newer than the removal and has to land.
+    #[test]
+    fn a_removal_before_a_download_started_does_not_block_a_reshare() {
+        let removed_at = Instant::now();
+        let started = removed_at + Duration::from_millis(5);
+        let removed = HashMap::from([("clipboard:a".to_string(), removed_at)]);
+        assert!(!removed_since(&removed, "clipboard:a", started));
+    }
+
+    #[test]
+    fn owed_always_sweeps() {
+        assert!(restore_due(true, 0, Some(0), (10, 10)));
+        assert!(restore_due(true, 0, None, (0, 0)));
+    }
+
+    #[test]
+    fn a_count_above_the_mark_sweeps() {
+        assert!(restore_due(false, 3, Some(0), (2, 0)));
+        assert!(restore_due(false, 0, Some(5), (0, 4)));
+    }
+
+    #[test]
+    fn counts_at_or_below_the_mark_do_not() {
+        assert!(!restore_due(false, 2, Some(4), (2, 4)));
+        assert!(!restore_due(false, 0, Some(0), (2, 4)));
+    }
+
+    #[test]
+    fn an_unknown_gap_never_triggers() {
+        assert!(!restore_due(false, 0, None, (0, 0)));
+    }
+
     fn scratch_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("rovertools-{tag}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("scratch dir");
         dir
+    }
+
+    /// A tombstone task that returns early (offline, signed out) still counts
+    /// as answered, so the batch's last answer writes the landed ops out.
+    #[test]
+    fn a_delete_batch_writes_the_queue_once_every_task_ends() {
+        let dir = scratch_dir("batch-answer");
+        let path = crate::sync::pending_queue::pending_queue_path(&dir);
+        let op = |id: &str| PendingOp::Delete {
+            client_id: id.to_string(),
+            entry_type: "clipboard".to_string(),
+        };
+        let queue = Arc::new(Mutex::new(PendingQueue::load(path.clone())));
+        queue.lock().push_many(vec![op("a"), op("b")]);
+        let unanswered = Arc::new(std::sync::atomic::AtomicUsize::new(2));
+        let answer = || BatchAnswer {
+            unanswered: Arc::clone(&unanswered),
+            queue: Arc::clone(&queue),
+        };
+        let (landed, early) = (answer(), answer());
+
+        queue.lock().remove_delete("clipboard", "a");
+        drop(landed);
+        assert_eq!(PendingQueue::load(path.clone()).len(), 2, "one task still out");
+        drop(early);
+        assert_eq!(PendingQueue::load(path).len(), 1, "the landed op left the file");
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// A file entry's content is the file bytes, not its machine-specific paths:

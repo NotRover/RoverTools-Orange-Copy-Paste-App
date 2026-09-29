@@ -22,6 +22,7 @@ import type {
   SyncInviteList,
 } from "../../../types";
 import {
+  coalesce,
   timeAgo,
   truncateText,
   htmlPlainText,
@@ -2768,6 +2769,8 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   // Where an item went lives outside the item model, so it needs its own
   // refresh whenever something is pushed or merged.
   useEffect(() => {
+    // One read per burst: a restore merges once per page and per blob.
+    const refreshSoon = coalesce(() => void refreshShares());
     const unlisteners: Array<() => void> = [];
     let cancelled = false;
     for (const event of [
@@ -2776,7 +2779,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
       "sync:entry-synced",
       "sync:note-synced",
     ]) {
-      listen(event, refreshShares).then((fn) => {
+      listen(event, refreshSoon).then((fn) => {
         if (cancelled) fn();
         else unlisteners.push(fn);
       });

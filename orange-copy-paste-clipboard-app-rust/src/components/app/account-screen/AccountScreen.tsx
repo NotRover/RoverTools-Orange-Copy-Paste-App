@@ -20,6 +20,7 @@ import type {
   SyncMode,
   SyncQuota,
   SyncServerBreakdown,
+  RestoreOutcome,
 } from "../../../types";
 import { deriveDisplayKind } from "../../../types";
 import { userError } from "../../../userError";
@@ -33,6 +34,7 @@ import {
   ChartBar,
   Check,
   Cloud,
+  CloudArrowDown,
   CloudArrowUp,
   CloudCheck,
   Desktop,
@@ -102,6 +104,19 @@ function formatBytes(bytes: number): string {
   const mb = kb / 1024;
   if (mb < 1024) return `${mb.toFixed(1)} MB`;
   return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** The result line after Restore from cloud. Downloads land after the command
+ *  returns, so they are counted apart from what is already back. */
+function restoreText({ restored, downloading }: RestoreOutcome): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  const items = (v: number) => `${n(v)} item${v === 1 ? "" : "s"}`;
+  const verb = (v: number) => (v === 1 ? "is" : "are");
+  if (restored === 0 && downloading === 0) return "Nothing to restore.";
+  if (restored === 0) return `${items(downloading)} ${verb(downloading)} downloading.`;
+  const more =
+    downloading > 0 ? ` ${n(downloading)} more ${verb(downloading)} downloading.` : "";
+  return `Restored ${items(restored)}.${more}`;
 }
 
 /** Pick a device glyph from the reported platform string. */
@@ -268,6 +283,11 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
   // Sync actions
   const [syncNowLoading, setSyncNowLoading] = useState(false);
   const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreNote, setRestoreNote] = useState<{
+    text: string;
+    warn: boolean;
+  } | null>(null);
 
   const refreshQuota = useCallback(() => {
     invoke<SyncQuota>("sync_get_quota")
@@ -780,19 +800,49 @@ Keep this. It is the only way back into your synced items if you forget your pas
     }
   };
 
+  // What a finished sync changes on this screen: status, last sync, the
+  // quota, and the account's item counts.
+  const afterSync = async () => {
+    const s = await invoke<SyncStatusInfo>("sync_get_status");
+    setSyncStatus(s);
+    setLastSynced(Date.now());
+    refreshQuota();
+    refreshCloudCount(true);
+  };
+
   const handleSyncNow = async () => {
     setSyncNowLoading(true);
+    // A restore's result describes that moment only; a refresh supersedes it.
+    setRestoreNote(null);
     try {
       await invoke("sync_now");
-      const s = await invoke<SyncStatusInfo>("sync_get_status");
-      setSyncStatus(s);
-      setLastSynced(Date.now());
-      refreshQuota();
-      refreshCloudCount(true);
+      await afterSync();
     } catch (e) {
       console.error("sync_now failed", e);
     } finally {
       setSyncNowLoading(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    setRestoreNote(null);
+    try {
+      const r = await invoke<RestoreOutcome>("sync_restore_from_cloud");
+      setRestoreNote({ text: restoreText(r), warn: false });
+      // Not awaited into the catch below: a failed status read must not turn
+      // a restore that worked into an error line.
+      afterSync().catch((e) => console.error("sync_get_status failed", e));
+    } catch (e) {
+      setRestoreNote({
+        text: userError(
+          e,
+          "Could not restore from the cloud. Check your connection and try again.",
+        ),
+        warn: true,
+      });
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -1888,7 +1938,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     type="button"
                     className="acct-btn"
                     onClick={handleSyncNow}
-                    disabled={syncNowLoading}
+                    disabled={syncNowLoading || restoring}
                   >
                     {syncNowLoading ? "Refreshing..." : "Refresh"}
                   </button>
@@ -1929,20 +1979,57 @@ Keep this. It is the only way back into your synced items if you forget your pas
                 </div>
               </div>
 
+              {/* Restore from cloud gets its own line rather than a third button
+                  up top, which is what made that row wrap. The line says what it
+                  does, because the button alone reads like it could bring back
+                  deletes, and turns into the result once it has run. */}
+              <div className="acct-id-line">
+                <span className="acct-zone-icon">
+                  <CloudArrowDown size={13} />
+                </span>
+                <div className="acct-id-line-text">
+                  <span className="acct-id-line-title">Restore from cloud</span>
+                  <span
+                    className={
+                      restoreNote
+                        ? `acct-id-line-desc acct-id-line-desc--${restoreNote.warn ? "warn" : "result"}`
+                        : "acct-id-line-desc"
+                    }
+                    role="status"
+                  >
+                    {restoreNote?.text ??
+                      "Downloads anything your account holds that is missing on this PC. Deleted items stay deleted."}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="acct-btn acct-btn--sm"
+                  onClick={handleRestore}
+                  disabled={restoring || syncNowLoading}
+                >
+                  {restoring ? "Restoring..." : "Restore"}
+                </button>
+              </div>
+
               {/* The recovery code gets its own line rather than a third link.
                   Replacing one invalidates the copy the user already saved, which
                   is not the same kind of action as opening a dialog, and the line
                   is the only place that says what the code is for. */}
-              <div className="acct-id-recovery">
-                <Key size={15} className="acct-id-recovery-icon" />
-                <span className="acct-id-recovery-text">
-                  {recoveryNeeded === false
-                    ? "Recovery code saved. It is the only way back in without your password."
-                    : "A recovery code is the only way back in without your password."}
+              <div className="acct-id-line">
+                <span className="acct-zone-icon">
+                  <Key size={13} />
                 </span>
+                <div className="acct-id-line-text">
+                  <span className="acct-id-line-title">Recovery code</span>
+                  <span className="acct-id-line-desc">
+                    {recoveryNeeded === false
+                      ? "Saved. It is the only way back in without your password."
+                      : "The only way back in without your password."}
+                  </span>
+                </div>
                 <button
                   type="button"
-                  className="acct-btn acct-btn--sm acct-btn--quiet"
+                  className="acct-btn acct-btn--sm"
                   onClick={() => {
                     setRecoveryError(null);
                     setRecoveryCode(null);
