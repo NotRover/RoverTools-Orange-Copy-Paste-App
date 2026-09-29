@@ -131,6 +131,7 @@ src-tauri/
 │   │   ├── device_id.rs        # Stable per-machine device fingerprint (not identity)
 │   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
 │   │   ├── pending_queue.rs    # sync_pending.json read/write for offline accumulation
+│   │   ├── pending_work.rs     # sync_pending_work.json: uploads and downloads under way
 │   │   ├── id_map.rs           # client_id -> server_id map (id_map.json)
 │   │   ├── sync_state.rs       # Connection/status state shared with the UI
 │   │   ├── persist.rs          # Cached session + sync metadata persistence
@@ -251,13 +252,39 @@ marker file naming this pid under the temp directory.
 
 | Exit path | What it does |
 |---|---|
-| Tray quit, window close, any `AppHandle::exit` | `RunEvent::ExitRequested` prevents the exit once, drains on a worker thread, then re-issues it. Two latches - one for "the drain is running", one for "this exit is ours" - because there are two independent sources of the event and the drain re-issues it; collapsing them gives either a skipped drain or an app that cannot be quit. |
-| `health_restart_app` | Drains inline. A restart carries its own exit code and the runtime ignores an objection to it, so there is nothing to prevent - same reason the flush is inline here. Blocks the main thread for the budget. |
-| `updater_install` | Flushes and drains **before** `install()`. On Windows the plugin ends this process from inside that call, so anything after it never runs. |
+| Tray quit, window close, any `AppHandle::exit` | `RunEvent::ExitRequested` prevents the exit once, drains on a worker thread (sync work first, see below, then the rotation), then re-issues it. Two latches - one for "the drain is running", one for "this exit is ours" - because there are two independent sources of the event and the drain re-issues it; collapsing them gives either a skipped drain or an app that cannot be quit. |
+| `health_restart_app` | Drains and flushes before it asks for the restart (`flush_for_restart`). A restart carries its own exit code and the runtime ignores an objection to it, so there is nothing to prevent. The command is async and runs the drain on a blocking thread, so the main thread stays free; the restart is then asked for off the main thread, which delivers `ExitRequested` (code `RESTART_EXIT_CODE`) and `Exit`. |
+| `updater_install` | Drains and flushes **before** `install()`, the same way. On Windows the plugin ends this process from inside that call, so anything after it never runs. An install that fails hands sync back (`resume_after_failed_restart`) and shows the window again if the drain hid it. |
 | Being force-killed by a relaunch | The victim gets no say, so the *killer* waits: `wait_out_rotation` polls the marker file and holds off while it names a process it is about to kill. A marker abandoned by a crash names a pid that is not a victim, so it costs one file read rather than the wait. |
 
-`EXIT_DRAIN_MS` (3s) bounds all four paths. It is sized from the keychain write's own
-retry ladder. On a timeout the exit goes ahead, and `crash.log` records it.
+`EXIT_DRAIN_MS` (3s) bounds the rotation wait on all four paths. It is sized from the
+keychain write's own retry ladder. After a sync wait (below) it gets what is left of that
+wait's budget, if that is less. On a timeout the exit goes ahead, and `crash.log`
+records it.
+
+**Running sync work** (`drain_sync_work`). A quit or restart also waits for uploads and
+blob downloads that are already running:
+
+- `SyncClient::begin_quit` first, so nothing new starts. A push or download that comes
+  due after it, or a push still waiting for its slot, is written to the pending-work
+  record instead (section 4.6). A queue flush needs no wait: ops it took are in the
+  queue's in-flight file, which the next launch replays.
+- Nothing running: no wait, no window change.
+- Otherwise the main window hides at once and the app's own toast reads "Finishing
+  sync". The note under it says the app will close, or restart, in a few seconds. The
+  toast shows whatever the notification settings say, and stays up until the app exits.
+- `SYNC_DRAIN_MS` (10s) bounds the sync wait and the rotation wait together. What is
+  still running then is already named in `sync_pending_work.json`, so the exit flush
+  keeps its entry and the next launch runs it. `crash.log` records the timeout.
+- Opening the app again during a quit's wait calls the quit off (`QUIT_CANCELLED`): the
+  wait ends, sync starts again, the toast goes and the window comes back. A restart's
+  wait cannot be called off.
+- A restart's `Exit` writes with `Flush::Forced`, like the flush before it, so it drops
+  nothing.
+
+**Why:** an entry can be in the middle of its upload, or of the download that brings it
+here, when the user quits. With Keep history off, that entry had nothing yet to keep it,
+so the exit dropped it. The wait lets most transfers finish; the record covers the rest.
 
 **Limit.** Part of the window stays open. It opens the moment GoTrue commits, inside an
 await that no exit hook can reach. If the process dies while the response is in flight,
@@ -336,7 +363,7 @@ writer, `ClipboardHistory::save_to_file`, which goes through `health::write_stat
 | `keep_history` (per device) | What `history.bin` holds |
 |---|---|
 | On (the default) | Every entry |
-| Off | Pinned and Saved entries, plus every entry this device's sync record names: `entry_states()`, or with no client `id_map.json` and `sync_pending.json` read from disk. With no client, a record that will not read keeps everything for that flush. A client whose `id_map.json` did not read at launch starts from an empty record (`IdMap::load`). |
+| Off | Pinned and Saved entries, plus every entry this device's sync records name: `SyncClient::keep_keys`, or with no client the same files read from disk (`keep_keys_on_disk`). That is the id map's rows, shares waiting for a space key and items received from a space (`IdMap::keep_keys`), queued ops including those a flush holds, pushes in flight, and the pending-work record. A record that will not read keeps everything: for that flush with no client, for the whole session with one. |
 
 - **Nothing caps the entry count.** `MAX_TEXT_BYTES` bounds a single entry (above).
 - **Turning Keep history back on loses nothing.** Startup loads `history.bin` whatever
@@ -349,9 +376,15 @@ writer, `ClipboardHistory::save_to_file`, which goes through `health::write_stat
   `RunEvent::Exit` flush (`Flush::Exit`) calls `drop_unkept`, so the entries it leaves out
   lose their files the same way. A restart flush drops nothing, since an update install
   can fail and return to the running app, and neither does a flush that keeps everything.
-  The drop trusts the record as the table reads it, so under a client that started from
-  an empty record, cloud and space entries lose their files too. So can an image or file
-  merged during the flush, since a blob merge inserts the entry before it records the row.
+- **A file the clipboard still holds stays, with its entry.** `drop_unkept` keeps an
+  entry whose file the system clipboard names (CF_HDROP, read by
+  `files::clipboard_file_paths`) or a kept entry names, so no file is left that nothing
+  points at. A clipboard that will not read may hold anything, so that exit drops
+  nothing.
+- **The keep set is read under the history lock.** Every merge writes the id_map row
+  before the entry reaches history, and every upload or download is in the pending-work
+  record from before it starts until after its row is written, so no entry can be in
+  history with nothing naming it.
 - **The cursor never runs ahead of the file.** A pull page flushes the store before
   `last_server_ts` moves past it (section 6.3).
 
@@ -402,7 +435,7 @@ ClipboardEntry {
 | `set_images_dir(dir)`               | Configure the directory for on-disk image storage         |
 | `upsert_synced(entry)`              | Insert or replace a merged entry by id; refuses one past `MAX_TEXT_BYTES` |
 | `save_to_file(path, also_keep)`     | Write pinned/Saved entries plus those `also_keep` names, then delete `gone_files` |
-| `drop_unkept(also_keep)`            | Drop the entries `save_to_file` would leave out, queueing their files in `gone_files`; final exit flush only |
+| `drop_unkept(also_keep, clipboard_refs)` | Drop the entries `save_to_file` would leave out, queueing their files in `gone_files` unless the clipboard or a kept entry names them; final exit flush only |
 | `load_from_disk(history, legacy, keep)` | Startup load, including the one-time fold of `pinned_entries.bin` (section 7.2) |
 | `merge_leftover(bytes)`             | Fold in a sealed session's leftover by id, adding only what is missing |
 
@@ -942,8 +975,8 @@ good. The restore sweep is the way back.
 
 | Trigger | Path |
 |---|---|
-| Startup and sign-in | `trigger_initial_sync` -> `restore_if_owed`. `finalize_session` owes one sweep on every sign-in (`restore_owed` in `sync_state.json`). |
-| Sync now | `sync_now` -> `restore_if_owed` |
+| Startup and sign-in | `trigger_initial_sync` -> `restore_if_owed`. `finalize_session` owes one sweep on every sign-in (`restore_owed` in `sync_state.json`). If that launch's flush fails, the next `flush_and_pull` that succeeds runs the check (`restore_check_missed`). In Manual mode the launch makes no flush, so the check waits for Sync now. |
+| Sync now | `sync_now` -> `restore_if_owed`, in every mode |
 | A space key arrives | The key path runs `restore_sweep`. In Manual mode it only sets `restore_owed`. |
 | Restore from cloud (Account screen) | `sync_restore_from_cloud`: flushes the queue, then sweeps whatever is owed |
 
@@ -953,8 +986,13 @@ past `restore_mark`, the counts the last sweep left:
 - **missing** - rows in this device's record with no local copy, leaving out removed,
   queued and in-flight keys.
 - **gap** - the account's own live rows (the `/sync/breakdown` total) minus those
-  present here. Only the server can count a row this device never pulled. Unknown when
-  the server cannot be asked, and then it never triggers.
+  present here, where an own row whose download is running counts as present
+  (`restore_gap`). Only the server can count a row this device never pulled. Unknown
+  when the server cannot be asked, and then it never triggers.
+
+A sweep that meets one of the account's own live rows already here, with no id_map row
+and no removal recorded, writes the row (`adopt_own_row`). A wiped map is rebuilt this
+way, so its entries are kept with Keep history off and the gap after the sweep is real.
 
 A count that falls lowers the mark, so the next rise is measured from there. Two more
 things owe a sweep: a row whose space key has not arrived (the pull moves past it all
@@ -1041,6 +1079,8 @@ pre-encrypted and parked:
 - `drain` writes them there before emptying the queue.
 - `settle` requeues whatever did not send, and only then removes the file.
 - `load` folds a leftover copy back in at the front.
+- Between the two, `pending_keys` still names the drained ops, so the exit flush and
+  the card badges treat them as queued.
 
 **Why:** the extra write covers an asymmetry between op kinds.
 
@@ -1100,6 +1140,44 @@ while it is minimized to the tray, where the window never refocuses:
   happened to trigger.
 - **Manual mode** is the only one held back: it flushes solely on Sync now.
 
+#### `pending_work.rs` - Work Under Way
+
+`{app_data}/sync_pending_work.json` names every entry key with an upload or a blob
+download that has started and not finished:
+
+```jsonc
+{ "upload": ["clipboard:3f2a9c1e-7b4d-4e8a-9c2f-1d6b5e0a8f47"], "download": ["note:b81e4d02-5c9a-4f3e-a716-2e9d0c4b7a13"] }
+```
+
+- **Recorded** in `spawn_push_clipboard_entry` and `spawn_push_note` after their skip
+  checks, and in `merge_pulled` before a blob download starts. Every change is written
+  to the file at once, so it never names finished work or misses started work.
+- **Cleared** when the task ends (`WorkGuard`): after the server's answer is recorded, the
+  push is queued, the download lands and its id_map row is written, or the work is
+  refused. Two tasks for one key clear it only when both end. A push whose slot comes
+  after a quit began defers instead: the record stays.
+- **Kept** when the process ends first. `SyncClient`'s `Drop` closes the store before the
+  runtime drops its tasks, so their guards leave the records alone.
+- **Re-driven** after each `flush_and_pull` that succeeds, so a delete another device
+  made meanwhile has landed first and a re-sent upload never undoes it. An upload goes
+  out as the user's own push, an entry no longer here is forgotten, and a download
+  becomes a restore owed. In Manual mode that waits for Sync now.
+- **Reset** with the id map when a different account signs in.
+
+It is separate from `sync_pending.json` because queue ops carry ciphertext and replay
+rules; this file holds only keys.
+
+**Unreadable records.** `id_map.json`, `sync_pending.json`, its in-flight file and
+`sync_pending_work.json` load through `persist::load_json_checked`. A file that is there
+and will not read or parse:
+
+- loads empty, with an unreadable flag set on its store,
+- is never written for the rest of the session, so it stays as it was,
+- and is noted in `crash.log`.
+
+Any flag makes `SyncClient::keep_keys` answer "keep everything" for the session. A
+missing file is an empty record, as before.
+
 #### `crypto.rs` - Encryption Primitives
 
 All cryptography runs here. Nothing outside this module touches raw key material.
@@ -1142,7 +1220,7 @@ All cryptography runs here. Nothing outside this module touches raw key material
 | `sync_set_mode`        | `(mode: String) -> ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
 | `sync_get_mode`        | `() -> String`                                       | Current cloud sync mode                                                                  |
 | `sync_schedule_settings` | `() -> ()`                                         | Schedule a settings round after a user edit to a `ROAMING_STORAGE` key (see Settings Sync); nothing to do without a `SyncClient` |
-| `sync_settings`        | `(json: String) -> ()`                               | One settings round (see Settings Sync). React invokes it on `sync:collect-settings`; `json` is its `localStorage` part |
+| `sync_settings`        | `(json: String, round: u64) -> ()`                   | One settings round (see Settings Sync). React invokes it on `sync:collect-settings`; `json` is its `localStorage` part, `round` the number the event carried |
 | `sync_settings_refused` | `(json: String) -> ()`                              | React refused values a newer build wrote; resets their base so the next round does not push over them |
 | `sync_reset_password`  | `(email: String) -> Result<()>`                       | Mint a PKCE pair, keep the verifier in the keychain, ask Supabase to mail a link to `reset_page_url` |
 | `sync_complete_password_reset` | `(code, new_password, recovery_code?, device_name, start_over) -> Result<SyncUser>` | Redeem the emailed code, recover the UMK, re-wrap it under the new password, then sign in. `start_over` mints a new key and gives up the old data |
@@ -1267,9 +1345,13 @@ or the account out of room) is a recorded skip. Not signed in -> skip.
 
 **Receive** (`spawn_blob_files_merge`, mirroring `spawn_blob_image_merge`):
 
-- Download the blob, decrypt it, and `extract_zip_to_dir` into
-  `{app_data}/received-files/{client_id}/`. This replaces any prior extraction, and
-  `enclosed_name` blocks zip-slip.
+- When the entry is already here and every path it names exists, the row is newer
+  metadata for it: the files stay, and nothing is downloaded.
+- Otherwise download the blob, decrypt it, and `extract_zip_to_dir` into
+  `{app_data}/received-files/{client_id}/`. The archive goes into
+  `{client_id}.incoming` first and is renamed into place once whole, and the old tree
+  goes only after that. A failed extract leaves the old tree as it was. `enclosed_name`
+  blocks zip-slip.
 - `entry.content` becomes the extracted top-level paths, so the entry copies and
   pastes as a normal file-drop on the receiving device.
 - A file entry from before this was wired has no `blob_key`. Nothing is
@@ -1419,7 +1501,11 @@ the plaintext group names they reference.
 
 1. `schedule_settings_sync` waits out the debounce (`SETTINGS_DEBOUNCE_SECS`, 2s after
    the latest call, so a burst of calls makes one round), then emits
-   `sync:collect-settings`. React answers with its `localStorage` part.
+   `sync:collect-settings` with the current round number. React answers with its
+   `localStorage` part and that number. A round that waited on `settings_lock` behind
+   another finds the number moved on: its snapshot predates what that round applied, so
+   it asks for a fresh one and ends. Every round that gets past this check, and every
+   `sync_settings_refused`, moves the number on.
 2. Pull the blob. One this device cannot decrypt ends the round with no push: it may be
    the account's only copy.
 3. Merge (`merge_settings`) the account's values, this device's, and `settings_base`,
@@ -1429,10 +1515,11 @@ the plaintext group names they reference.
    and local values only fill keys it lacks.
 4. Apply what the account changed. `settings.json` keys are written and stored into
    their in-memory flags at once; the `localStorage` keys go to React as
-   `sync:settings`. Unless the `settings.json` write failed, and when a base exists, the
-   base takes the applied values at once, before any push, so a round that ends before
-   step 6 (the push failed, another push won, or the app closed mid-push) does not leave
-   them reading as changes made here. A first round has no base to add them to.
+   `sync:settings`. When a base exists, it takes the values that landed at once, before
+   any push, so a round that ends before step 6 (the push failed, another push won, or
+   the app closed mid-push) does not leave them reading as changes made here. The
+   `localStorage` values always land; the `settings.json` ones only when the write did.
+   A first round has no base to add them to.
 5. Push only when the merge differs from the account's blob, stamped later than the
    pulled one. The push names the pulled blob's own `updated_at` (0 when there was none)
    as `base_updated_at`, so the server stores it only over the blob it was merged from
@@ -1664,7 +1751,7 @@ summarizes the emitted events; the code is authoritative.
 | `sync:entry-queued` | `sync/mod.rs` | A push was queued offline |
 | `sync:entry-skipped` | `sync/mod.rs` | A push was refused (size or quota) |
 | `sync:entry-synced` / `sync:note-synced` | `sync/mod.rs` | A push was acknowledged by the server |
-| `sync:collect-settings` | `sync/mod.rs` | Ask React to hand down its `localStorage` settings |
+| `sync:collect-settings` | `sync/mod.rs` | Ask React to hand down its `localStorage` settings. Payload `{ round }`, passed back to `sync_settings` |
 | `sync:settings` | `sync/commands.rs` | The `localStorage` keys a settings round took from the account |
 | `sync:device-presence` | `sync/ws_listener.rs` | A device went online or offline |
 | `sync:join-requested` / `sync:join-decided` | `sync/ws_listener.rs` | A join request was made / answered |
@@ -2045,6 +2132,7 @@ History uses a **MessagePack binary format** for fast, compact disk storage:
 | Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, announcements_cursor, clock_offset_ms, settings_base, restore_owed, restore_mark, ... }` | After each pull, sweep and settings round | On sync init  |
 | Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update/push_local ops (encrypted content, except push_local which is an id) | On mutation when offline | On reconnect       |
 | ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", ... }` plus `entry_shares`        | After each push          | On sync init       |
+| Sync work under way | `{app_data}/sync_pending_work.json`   | `{ upload: [key], download: [key] }`: entries with a transfer started and not finished | Before a transfer touches the network, and on every flush | On sync init |
 
 **Upgrading from a build with `pinned_entries.bin`** (`ClipboardHistory::load_from_disk`):
 
@@ -2060,7 +2148,8 @@ History uses a **MessagePack binary format** for fast, compact disk storage:
 Builds before this one also wrote `boot_id.txt` and `sync_settings_local.json`. Nothing
 reads either now.
 
-**Sync note**: `sync_pending.json` and `id_map.json` are not safe to delete. The queue
+**Sync note**: `sync_pending.json`, `id_map.json` and `sync_pending_work.json` are not
+safe to delete. The queue
 holds deletes the server has not had yet, and the id map holds the markers that keep
 items deleted while signed out off this device; without them those items come back.
 Losing `sync_state.json` causes a full re-pull from the server on the next startup.

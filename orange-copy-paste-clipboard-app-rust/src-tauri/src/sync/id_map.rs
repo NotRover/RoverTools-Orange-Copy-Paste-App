@@ -3,8 +3,10 @@
 //! Maps `"clipboard:{client_id}"` → `server_uuid` and
 //!      `"note:{client_id}"`      → `server_uuid`.
 //!
-//! Losing this file is safe — the server deduplicates by `client_id` on the
-//! next push, so nothing is lost permanently.
+//! It is also this device's record of which clipboard entries are in the
+//! cloud or a space, which is what keeps them across a restart with Keep
+//! history off. So a file that will not read is never taken for an empty one:
+//! see [`IdMap::unreadable`].
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -139,12 +141,25 @@ const PLACEHOLDER_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 pub struct IdMap {
     data: IdMapData,
     path: PathBuf,
+    /// The file existed at load and would not read or parse.
+    unreadable: bool,
 }
 
 impl IdMap {
+    /// Load the map. A file that is there and will not read loads as an empty
+    /// map with [`Self::unreadable`] set; the file is then never written this session.
     pub fn load(path: PathBuf) -> Self {
-        let data = crate::sync::persist::load_json(&path);
-        Self::with_data(data, path)
+        let (data, unreadable) = crate::sync::persist::load_json_checked(&path);
+        let mut map = Self::with_data(data, path);
+        map.unreadable = unreadable;
+        map
+    }
+
+    /// Whether the file failed to load. The map then says nothing about which
+    /// entries are in the cloud or a space, so nothing may be dropped on its
+    /// word this session.
+    pub fn unreadable(&self) -> bool {
+        self.unreadable
     }
 
     /// Like [`Self::load`], but a file that exists and will not read or parse
@@ -160,7 +175,7 @@ impl IdMap {
     }
 
     fn with_data(data: IdMapData, path: PathBuf) -> Self {
-        let mut map = Self { data, path };
+        let mut map = Self { data, path, unreadable: false };
         // Also on startup, not only when the next removal arrives: an install
         // that stops removing things would otherwise keep its last batch for
         // good.
@@ -206,6 +221,22 @@ impl IdMap {
     /// Keys of every entry the server has acknowledged.
     pub fn entry_keys(&self) -> Vec<String> {
         self.data.entries.keys().cloned().collect()
+    }
+
+    /// Keys of every entry any part of this record names: acknowledged by the
+    /// server, shared into a space (a share still waiting for its space key has
+    /// no server row yet), or received from another member. What the exit flush
+    /// keeps with Keep history off. A received item from a space the user has
+    /// since left is on no server this device can reach any more, so every
+    /// field that names it counts, not only the server id.
+    pub fn keep_keys(&self) -> HashSet<String> {
+        self.data
+            .entries
+            .keys()
+            .chain(self.data.entry_shares.keys())
+            .chain(self.data.remote_entries.iter())
+            .cloned()
+            .collect()
     }
 
     pub fn remove_entry(&mut self, client_id: &str) {
@@ -553,6 +584,30 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("id_map_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         IdMap::load(dir.join("id_map.json"))
+    }
+
+    /// A share into a space whose key has not arrived has no server row, and a
+    /// received item may have lost its row: both still name the entry.
+    #[test]
+    fn keep_keys_cover_shares_and_received_items() {
+        let mut m = map();
+        m.set_entry("clipboard:a", "srv-1");
+        m.set_entry_shares("clipboard:b", &["space-1".to_string()]);
+        m.mark_entry_remote("clipboard:c");
+        let keys = m.keep_keys();
+        for k in ["clipboard:a", "clipboard:b", "clipboard:c"] {
+            assert!(keys.contains(k), "{k}");
+        }
+    }
+
+    #[test]
+    fn an_unreadable_map_is_flagged_not_empty() {
+        let dir = std::env::temp_dir().join(format!("id_map_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("id_map.json");
+        std::fs::write(&path, b"{\"entries\": {").unwrap();
+        assert!(IdMap::load(path).unreadable());
+        assert!(!map().unreadable());
     }
 
     /// A delete made with sync off: the row is forgotten and a marker that is

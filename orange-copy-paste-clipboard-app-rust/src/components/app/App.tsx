@@ -820,14 +820,18 @@ const App: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen<null>("sync:collect-settings", () => {
+    // `round` goes back with the snapshot, so Rust can tell a snapshot taken
+    // before another round landed and ask for a fresh one.
+    listen<{ round: number }>("sync:collect-settings", (event) => {
       if (cancelled) return;
       const out: Record<string, string> = {};
       for (const [name, { key, valid, empty }] of Object.entries(ROAMING_STORAGE)) {
         const v = localStorage.getItem(key);
         if (v !== null && (v === empty || valid(v))) out[name] = v;
       }
-      invoke("sync_settings", { json: JSON.stringify(out) }).catch(console.error);
+      invoke("sync_settings", { json: JSON.stringify(out), round: event.payload.round }).catch(
+        console.error,
+      );
     }).then((fn) => {
       if (cancelled) fn();
       else unlisten = fn;

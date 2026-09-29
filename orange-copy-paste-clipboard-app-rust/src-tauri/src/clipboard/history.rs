@@ -490,21 +490,37 @@ impl ClipboardHistory {
     /// its file for that save to delete. For the last save before the process
     /// ends only: nothing outlives it to show those entries, and nothing else
     /// would ever delete their files.
-    pub fn drop_unkept(&mut self, also_keep: impl Fn(&str) -> bool) {
+    ///
+    /// An entry whose file something still points at stays, file and all: one
+    /// of `clipboard_refs` (what the system clipboard holds right now, so a
+    /// paste after the quit still works), or a path a kept entry names.
+    pub fn drop_unkept(&mut self, also_keep: impl Fn(&str) -> bool, clipboard_refs: &[PathBuf]) {
+        let keep = |e: &ClipboardEntry| e.is_saved() || also_keep(&e.id);
+        let mut refs: Vec<PathBuf> = clipboard_refs.to_vec();
+        refs.extend(self.entries.iter().filter(|e| keep(e)).flat_map(entry_paths));
+        // An entry whose file the clipboard or a kept entry still points at
+        // stays too: dropping it would leave a file nothing names.
         let (kept, dropped): (Vec<_>, Vec<_>) = std::mem::take(&mut self.entries)
             .into_iter()
-            .partition(|e| e.is_saved() || also_keep(&e.id));
+            .partition(|e| keep(e) || self.owned_file(e).is_some_and(|f| path_in_use(&f, &refs)));
         self.entries = kept;
         for e in &dropped {
             self.note_gone(e);
         }
     }
 
-    /// Queue the file a removed entry owns for the next save to delete. Only a
-    /// single path component is joined onto its directory, so nothing outside
-    /// `images/` or `received-files/` can be named.
+    /// Queue the file a removed entry owns for the next save to delete.
     fn note_gone(&mut self, e: &ClipboardEntry) {
-        let file = match e.kind {
+        if let Some(file) = self.owned_file(e) {
+            self.gone_files.push((e.id.clone(), file));
+        }
+    }
+
+    /// The file an entry owns under app data, if any. Only a single path
+    /// component is joined onto its directory, so nothing outside `images/` or
+    /// `received-files/` can be named.
+    fn owned_file(&self, e: &ClipboardEntry) -> Option<PathBuf> {
+        match e.kind {
             EntryKind::Image if !e.content.starts_with("data:") => self
                 .images_dir
                 .as_ref()
@@ -516,9 +532,6 @@ impl ClipboardHistory {
                 .zip(Path::new(&e.id).file_name())
                 .map(|(dir, name)| dir.join(name)),
             EntryKind::Image | EntryKind::Text | EntryKind::Html => None,
-        };
-        if let Some(file) = file {
-            self.gone_files.push((e.id.clone(), file));
         }
     }
 
@@ -756,6 +769,35 @@ impl ClipboardHistory {
             }
         }
     }
+}
+
+/// The paths on disk an entry points at: an image's file, a file entry's
+/// files and folders.
+fn entry_paths(e: &ClipboardEntry) -> Vec<PathBuf> {
+    match e.kind {
+        EntryKind::Image if !e.content.starts_with("data:") => vec![PathBuf::from(&e.content)],
+        EntryKind::File => e
+            .content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        EntryKind::Image | EntryKind::Text | EntryKind::Html => Vec::new(),
+    }
+}
+
+/// Whether `file` (a file, or a folder and everything under it) is one of
+/// `refs` or holds one. Case-insensitive on Windows, where the file system is.
+pub(crate) fn path_in_use(file: &Path, refs: &[PathBuf]) -> bool {
+    let fold = |p: &Path| -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(p.to_string_lossy().to_lowercase())
+        } else {
+            p.to_path_buf()
+        }
+    };
+    let file = fold(file);
+    refs.iter().map(|r| fold(r)).any(|r| r.starts_with(&file))
 }
 
 #[cfg(test)]
@@ -996,7 +1038,7 @@ mod tests {
         ];
 
         let keep = |id: &str| id == "cloud";
-        hist.drop_unkept(keep);
+        hist.drop_unkept(keep, &[]);
         hist.save_to_file(&dir.join("history.bin"), keep).unwrap();
 
         assert!(!images.join("local-img.png").exists(), "dropped image kept");
@@ -1006,6 +1048,45 @@ mod tests {
         }
         assert_eq!(ids(&reload(&dir.join("history.bin"))), ["cloud", "pinned", "saved"]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A dropped entry whose file the system clipboard still names keeps the
+    /// file: the user copied it and may paste it after the app has gone.
+    #[test]
+    fn an_entry_whose_file_is_on_the_clipboard_is_kept() {
+        let dir = scratch();
+        let (images, recv) = (dir.join("images"), dir.join("received-files"));
+        fs::create_dir_all(&images).unwrap();
+        fs::create_dir_all(recv.join("got")).unwrap();
+        fs::write(recv.join("got").join("a.txt"), b"a").unwrap();
+        let png = images.join("img.png");
+        fs::write(&png, b"png").unwrap();
+        let mut hist = ClipboardHistory::new();
+        hist.set_images_dir(images.clone());
+        hist.set_received_files_dir(recv.clone());
+        let mut file = ClipboardEntry::new_file(recv.join("got").join("a.txt").display().to_string());
+        file.id = "got".to_string();
+        let mut image = ClipboardEntry::new_image(png.to_string_lossy().to_string());
+        image.id = "img".to_string();
+        hist.entries = vec![file, image];
+
+        let on_clipboard = vec![recv.join("got").join("a.txt")];
+        hist.drop_unkept(|_| false, &on_clipboard);
+        hist.save_to_file(&dir.join("history.bin"), |_| true).unwrap();
+
+        assert!(recv.join("got").join("a.txt").exists(), "a file on the clipboard was deleted");
+        assert!(hist.find("got").is_some(), "the entry naming it was dropped");
+        assert!(!png.exists() && hist.find("img").is_none(), "an unreferenced entry was kept");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn path_in_use_matches_the_folder_and_what_is_under_it() {
+        let root = PathBuf::from("root").join("id");
+        assert!(path_in_use(&root, &[root.join("a.txt")]));
+        assert!(path_in_use(&root, std::slice::from_ref(&root)));
+        assert!(!path_in_use(&root, &[PathBuf::from("root").join("id2")]));
+        assert!(!path_in_use(&root, &[]));
     }
 
     /// A refused last save leaves history.bin as it was, which may still name
@@ -1023,7 +1104,7 @@ mod tests {
 
         let sealed = dir.join("sealed.bin");
         crate::health::seal(&sealed, "test");
-        hist.drop_unkept(|_| false);
+        hist.drop_unkept(|_| false, &[]);
         assert!(hist.save_to_file(&sealed, |_| false).is_err());
 
         assert!(recv.join("x").exists(), "file deleted before a save landed");

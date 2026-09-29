@@ -36,6 +36,78 @@ const EXIT_DRAIN_MS: u64 = 3000;
 
 const DRAIN_POLL_MS: u64 = 25;
 
+/// How long a quit or a restart waits, in all, for sync work already running
+/// (uploads and blob downloads) and then for a token rotation. What is still
+/// running after it is on disk in the pending-work record and finishes on the
+/// next launch.
+const SYNC_DRAIN_MS: u64 = 10_000;
+
+/// Set while a sync drain has the main window hidden, so a restart that fails
+/// can put it back.
+static DRAIN_HID_WINDOW: AtomicBool = AtomicBool::new(false);
+
+/// Set once the runtime has been asked for a restart. The exit that follows
+/// writes everything, like the flush before it, instead of dropping entries.
+static RESTARTING: AtomicBool = AtomicBool::new(false);
+
+/// Set while a quit waits for sync work. Opening the app again meanwhile sets
+/// [`QUIT_CANCELLED`], and the app stays instead of closing on the user.
+static QUIT_DRAINING: AtomicBool = AtomicBool::new(false);
+static QUIT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Stop new sync work and wait for what is running, then return what is left
+/// of [`SYNC_DRAIN_MS`] for the rotation drain.
+///
+/// Returns at once when nothing is running. Otherwise the main window hides
+/// and a notice, which stays up until the app exits, says why it has not gone
+/// yet. A timeout is recorded, never enforced, as with [`drain_token_rotation`]:
+/// the work left over is named in the pending-work record, so the next launch
+/// runs it and the exit flush keeps its entry. Called from a plain thread,
+/// never the main one: the notice needs the event loop running to show.
+pub(crate) fn drain_sync_work(app: &tauri::AppHandle, restarting: bool) -> u64 {
+    let start = std::time::Instant::now();
+    let left = || SYNC_DRAIN_MS.saturating_sub(start.elapsed().as_millis() as u64);
+    let Some(sync) = app.state::<AppState>().sync_client.lock().clone() else {
+        return SYNC_DRAIN_MS;
+    };
+    sync.begin_quit();
+    if !sync.work_running() {
+        return SYNC_DRAIN_MS;
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        if w.is_visible().unwrap_or(false) && w.hide().is_ok() {
+            DRAIN_HID_WINDOW.store(true, Ordering::SeqCst);
+        }
+    }
+    crate::runtime::notifications::notify_finishing_sync(app, restarting);
+    QUIT_DRAINING.store(!restarting, Ordering::SeqCst);
+    while sync.work_running() && left() > 0 && !QUIT_CANCELLED.load(Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(DRAIN_POLL_MS));
+    }
+    QUIT_DRAINING.store(false, Ordering::SeqCst);
+    if sync.work_running() && !QUIT_CANCELLED.load(Ordering::SeqCst) {
+        crate::health::note(
+            "exit: sync work did not finish",
+            "the process is leaving with uploads or downloads running; the next launch runs them",
+        );
+    }
+    left()
+}
+
+/// A quit or restart that was asked for did not happen (the user opened the
+/// app again, or an update failed to install): sync starts again, and the
+/// window a drain hid comes back.
+pub(crate) fn resume_after_failed_restart(app: &tauri::AppHandle) {
+    let sync = app.state::<AppState>().sync_client.lock().clone();
+    if let Some(sync) = sync {
+        sync.end_quit();
+    }
+    crate::runtime::popup_windows::hide_popup(app, "notification");
+    if DRAIN_HID_WINDOW.swap(false, Ordering::SeqCst) {
+        crate::runtime::tray::show_main_window(app);
+    }
+}
+
 /// Wait, up to `budget_ms`, for this process to finish spending a refresh token.
 ///
 /// GoTrue revokes a refresh token the instant it is presented, so between that
@@ -92,12 +164,16 @@ fn adopt_leftover(
     }
 }
 
-/// The flush a self-restart runs inline, since `restart` bypasses the event
-/// loop and so the exit-time flush. Flushed on both sides of the rotation
-/// drain: the second, forced write keeps whatever landed while it finished.
+/// The drain and flush a self-restart runs before it asks for the restart: the
+/// runtime ignores an objection to a restart's exit, so nothing can wait there.
+/// Sync work goes first, so what it lands is in the writes. Flushed on both
+/// sides of the rotation drain: the second, forced write keeps whatever landed
+/// while it finished. Blocks for up to [`SYNC_DRAIN_MS`], so the callers run it
+/// off the main thread.
 pub(crate) fn flush_for_restart(app: &tauri::AppHandle) {
+    let left = drain_sync_work(app, true);
     flush_dirty_stores(app, Flush::Dirty);
-    drain_token_rotation(EXIT_DRAIN_MS);
+    drain_token_rotation(left.min(EXIT_DRAIN_MS));
     flush_dirty_stores(app, Flush::Forced);
 }
 
@@ -131,11 +207,15 @@ pub(crate) enum Flush {
 /// before the process goes holds everything, dirty flag or not.
 ///
 /// Saved entries are always written. With Keep history off, so are entries in
-/// the cloud or a space, which this device's sync record names; the rest stay
-/// in memory only, and at `Flush::Exit` their files go once the write lands.
+/// the cloud or a space, queued, or with an upload or download under way, all
+/// of which this device's sync records name; the rest stay in memory only, and
+/// at `Flush::Exit` their files go once the write lands - unless the system
+/// clipboard still points at one. A record that would not read keeps
+/// everything.
 ///
 /// Never call this while holding `sync_client`, `history`, or any lock that
-/// `SyncClient::entry_states` takes.
+/// `SyncClient::keep_keys` takes. It takes those while holding `history`, so no
+/// code may take `history` while holding one of them.
 pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle, mode: Flush) {
     use tauri::Manager;
     // A second caller waits for the write in progress instead of racing it.
@@ -150,49 +230,57 @@ pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle, mode: Flush) {
         state.history_dirty.store(true, Ordering::Relaxed);
     }
     if state.history_dirty.swap(false, Ordering::Relaxed) {
-        let mut keep_all = state.keep_history.load(Ordering::Relaxed);
-        let cloud: std::collections::HashSet<String> = if keep_all {
-            Default::default()
+        let keep_history = state.keep_history.load(Ordering::Relaxed);
+        // What the system clipboard holds as files, read before the history
+        // lock: an OS call, and only the exit deletes anything. A clipboard
+        // that will not read may hold any file, so it deletes nothing.
+        let clipboard_refs = if mode == Flush::Exit && !keep_history {
+            crate::clipboard::files::clipboard_file_paths()
+        } else {
+            Some(Vec::new())
+        };
+        // The client, cloned out of the slot so the slot is not held across
+        // the history lock. With sync off, this device's records on disk still
+        // name what is in the cloud or a space; read under the slot, so no
+        // client is built over these files meanwhile.
+        let (client, on_disk) = if keep_history {
+            (None, None)
         } else {
             let slot = state.sync_client.lock();
-            let keys: Vec<String> = match slot.clone() {
-                Some(s) => {
-                    drop(slot);
-                    s.entry_states().into_keys().collect()
-                }
-                // Sync is off, but this device's record on disk still names what
-                // is in the cloud or a space. Read under the slot, so no client
-                // is built over these files meanwhile. A record that will not
-                // read keeps everything this time rather than nothing.
-                None => match crate::sync::id_map::IdMap::try_load(
-                    crate::sync::id_map::id_map_path(&app_data),
-                ) {
-                    Ok(map) => {
-                        let mut keys = map.entry_keys();
-                        keys.extend(
-                            crate::sync::pending_queue::PendingQueue::load(
-                                crate::sync::pending_queue::pending_queue_path(&app_data),
-                            )
-                            .pending_keys(),
-                        );
-                        keys
-                    }
-                    Err(_) => {
-                        keep_all = true;
-                        Vec::new()
-                    }
-                },
-            };
+            match slot.clone() {
+                Some(s) => (Some(s), None),
+                None => (None, Some(keep_keys_on_disk(&app_data))),
+            }
+        };
+        let mut history = state.history.lock();
+        // Read while the history lock is held: an entry that lands in history
+        // is named by its sync record before it lands (see `merge_pulled`), so
+        // none can arrive between this read and the write it feeds.
+        let kept: Option<std::collections::HashSet<String>> = if keep_history {
+            None
+        } else {
+            match (&client, on_disk) {
+                (Some(s), _) => s.keep_keys(),
+                (None, Some(keys)) => keys,
+                (None, None) => None,
+            }
+        }
+        .map(|keys| {
             keys.into_iter()
                 .filter_map(|k| k.strip_prefix("clipboard:").map(str::to_owned))
                 .collect()
-        };
-        let keep = |id: &str| keep_all || cloud.contains(id);
-        let mut history = state.history.lock();
+        });
+        let keep_all = kept.is_none();
+        let keep = |id: &str| keep_all || kept.as_ref().is_some_and(|k| k.contains(id));
+        // After the exit prune, what is left is exactly what stays.
+        let mut pruned = false;
         if mode == Flush::Exit && !keep_all {
-            history.drop_unkept(keep);
+            if let Some(refs) = &clipboard_refs {
+                history.drop_unkept(keep, refs);
+                pruned = true;
+            }
         }
-        let _ = history.save_to_file(&app_data.join("history.bin"), keep);
+        let _ = history.save_to_file(&app_data.join("history.bin"), |id| pruned || keep(id));
     }
     if state.notes_dirty.swap(false, Ordering::Relaxed) {
         let _ = state.notes.lock().save_to_file(&app_data.join("notes.bin"));
@@ -203,6 +291,29 @@ pub(crate) fn flush_dirty_stores(app: &tauri::AppHandle, mode: Flush) {
             .lock()
             .save_to_file(&app_data.join("notifications.bin"));
     }
+}
+
+/// Every entry key this device's sync records on disk name, for the flush
+/// with sync off: the id map's keep set, the queue, and the pending-work
+/// record. `None` when any of them is there and will not read, which keeps
+/// everything this time rather than nothing.
+fn keep_keys_on_disk(app_data: &std::path::Path) -> Option<std::collections::HashSet<String>> {
+    let mut keys = crate::sync::id_map::IdMap::try_load(crate::sync::id_map::id_map_path(app_data))
+        .ok()?
+        .keep_keys();
+    keys.extend(
+        crate::sync::pending_queue::PendingQueue::try_keys(
+            &crate::sync::pending_queue::pending_queue_path(app_data),
+        )
+        .ok()?,
+    );
+    keys.extend(
+        crate::sync::pending_work::PendingWork::try_keys(
+            &crate::sync::pending_work::pending_work_path(app_data),
+        )
+        .ok()?,
+    );
+    Some(keys)
 }
 
 /// The bundle identifier before the 2026 rename that dropped a personal handle
@@ -907,6 +1018,12 @@ pub fn run() {
             if let Some(url) = argv.iter().find(|a| a.starts_with("orange://")) {
                 dispatch_deep_link(app, url);
             }
+            // Opened again while a quit waits for sync: the user wants the app,
+            // so the quit is called off and the drain puts the window back.
+            if QUIT_DRAINING.load(Ordering::SeqCst) {
+                QUIT_CANCELLED.store(true, Ordering::SeqCst);
+                return;
+            }
             // Surface the already-running window the same way the tray does -
             // show, unminimize, and force to the foreground past the Windows
             // background-process focus block.
@@ -1172,12 +1289,13 @@ pub fn run() {
         .build(context)
         .expect("error while running tauri application")
         .run(|app, event| match event {
-            // Quitting mid-rotation is the one shutdown that costs the user
-            // their session, so it is the one worth delaying. Everything else
-            // about this arm is arranged to leave the ordinary quit untouched:
-            // the check is an atomic read, and when nothing is rotating the
-            // handler returns before allocating a thread or preventing anything.
-            tauri::RunEvent::ExitRequested { api, .. } => {
+            // Two things are worth delaying a quit for: a refresh-token rotation
+            // caught mid-flight (it costs the user their session), and sync work
+            // already running (it costs them the upload or download). Everything
+            // else about this arm leaves the ordinary quit untouched: with
+            // neither running, the handler returns before allocating a thread or
+            // preventing anything.
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
                 // Two flags, because there are two independent ways to arrive
                 // here - the last window being destroyed, and an explicit
                 // `exit` - and the drain re-issues the exit itself. One flag
@@ -1189,7 +1307,19 @@ pub fn run() {
                 if EXIT_REISSUED.load(Ordering::SeqCst) {
                     return;
                 }
-                if !crate::sync::client::rotation_in_flight() {
+                // A restart: the runtime ignores `prevent_exit` for it, and the
+                // command that asked has drained and flushed already.
+                if code == Some(tauri::RESTART_EXIT_CODE) {
+                    RESTARTING.store(true, Ordering::SeqCst);
+                    return;
+                }
+                // Nothing new starts from here, waited for or not.
+                let sync = app.state::<AppState>().sync_client.lock().clone();
+                if let Some(sync) = &sync {
+                    sync.begin_quit();
+                }
+                let syncing = sync.as_ref().is_some_and(|s| s.work_running());
+                if !syncing && !crate::sync::client::rotation_in_flight() {
                     return;
                 }
                 api.prevent_exit();
@@ -1197,18 +1327,28 @@ pub fn run() {
                     return;
                 }
                 // Off the main thread: the event loop has to keep running for
-                // the re-issued exit to be delivered at all.
+                // the toast to show and the re-issued exit to be delivered.
                 let handle = app.clone();
                 std::thread::spawn(move || {
-                    drain_token_rotation(EXIT_DRAIN_MS);
+                    let left = drain_sync_work(&handle, false);
+                    if QUIT_CANCELLED.swap(false, Ordering::SeqCst) {
+                        DRAIN_STARTED.store(false, Ordering::SeqCst);
+                        resume_after_failed_restart(&handle);
+                        return;
+                    }
+                    drain_token_rotation(left.min(EXIT_DRAIN_MS));
                     EXIT_REISSUED.store(true, Ordering::SeqCst);
                     handle.exit(0);
                 });
             }
             // The last thing the process does with user data. `app.exit(0)` on
-            // window destroy lands here too; only `app.restart()` bypasses the
-            // event loop, and both restart sites flush for themselves.
-            tauri::RunEvent::Exit => flush_dirty_stores(app, Flush::Exit),
+            // window destroy lands here too, and so does a restart the two
+            // restart commands asked for off the main thread; that one keeps
+            // everything, since it may be an update that hands the app back.
+            tauri::RunEvent::Exit => {
+                let mode = if RESTARTING.load(Ordering::SeqCst) { Flush::Forced } else { Flush::Exit };
+                flush_dirty_stores(app, mode);
+            }
             _ => {}
         });
 }

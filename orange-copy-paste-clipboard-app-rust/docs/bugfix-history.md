@@ -1461,3 +1461,69 @@ too, and it is not covered.
 **Invariant to keep**: **anything keyed by the bundle identifier moves with it.** Before
 changing the identifier, list every folder and store the old one keys, including the
 webview profile, and carry each one before anything opens it.
+
+---
+
+## #35 - Quitting during an upload or download could lose the entry
+
+**Symptom.** Found 2026-09-29, fixed the same day, not yet released. With Keep history
+off, an item copied just before a quit, a restart or an update could be missing on the
+next launch, from this PC and from the cloud. So could an item that was still arriving
+from another device or a space. A file pasted from the app after quitting could fail
+because its folder was already gone.
+
+**Cause.** The exit flush keeps what this device's sync record names, and several
+moments left an entry named nowhere:
+
+- An upload named its entry only once the server answered, and a quit did not wait for
+  it. The entry was in no record, so the exit dropped it, and the upload died with the
+  process.
+- A queue flush took its ops out of the queue before sending them. A flush that
+  overlapped the exit left those keys out of the keep set.
+- A text merge added the entry to history before it wrote the id_map row, and a blob
+  merge did the same after its download. The keep set was also read before the history
+  lock, so a merge could land between the two.
+- An `id_map.json` or `sync_pending.json` that would not read loaded as an empty record,
+  and the exit then dropped every cloud and space entry, and the next write replaced the
+  file.
+- The exit deleted a dropped entry's files even while the system clipboard still held
+  them.
+- A received file re-download emptied the entry's folder before extracting, so a failure
+  or a quit half way left a broken tree.
+- Settings: a failed `settings.json` write held the `localStorage` values that did land
+  out of the base, and a round queued behind another pushed a snapshot taken before that
+  round applied its values.
+- The restore check ran only when the launch's first flush succeeded, and a sweep's gap
+  mark counted its own running downloads as missing, so a later loss of that size never
+  triggered a sweep.
+
+**Fix.** A write-ahead record, `sync_pending_work.json`, names an entry before its
+transfer touches the network and clears only when the work is done or queued. The keep
+set now includes it, the ops a flush holds, shares waiting for a space key and received
+items, and it is read under the history lock. Merges write the id_map row first. A quit
+or restart stops new sync work, hides the window, shows a toast and waits up to 10 s for
+what is running; the rest is re-driven after the next launch's first successful sync. An
+unreadable record keeps everything for the session and is never written that session. An
+entry whose files the clipboard still holds stays.
+Received files extract into a staging folder and are renamed into place, and an entry
+whose files are all present is not downloaded again. Section 4.1 (Shutdown), section 4.2
+and section 4.6 of `docs/architecture.md` have the details.
+
+**How a regression is caught.** `pending_work.rs`: all five tests. `pending_queue.rs`:
+`drained_ops_stay_pending_until_the_settle`, `an_unreadable_queue_file_is_flagged`.
+`persist.rs`: `an_unreadable_file_is_flagged_and_never_overwritten`. `id_map.rs`:
+`keep_keys_cover_shares_and_received_items`, `an_unreadable_map_is_flagged_not_empty`.
+`history.rs`: `an_entry_whose_file_is_on_the_clipboard_is_kept`. `sync/mod.rs`:
+`downloads_in_progress_are_not_part_of_the_gap`, `a_re_extract_swaps_the_folder_in_whole`.
+`sync/commands.rs`: `a_failed_file_write_keeps_only_the_file_keys_out_of_the_base`,
+`a_snapshot_from_before_the_last_round_is_stale`.
+
+**Not fixed.** Work still running after 10 s is cut off; it restarts from the beginning
+at the next launch. A forced shutdown or a crash gets no wait at all, only the record. A
+received row whose id_map row was lost is rebuilt only when it arrives again through a
+merge; until then an unreadable map keeps it, a merely empty one does not. Between the
+two renames of a re-extract, the entry's folder is briefly absent.
+
+**Invariant to keep**: **every entry in history is named by something on disk before the
+work that could lose it starts.** Write the record first, then act, then clear it; never
+the other way round.

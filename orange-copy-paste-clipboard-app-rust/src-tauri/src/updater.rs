@@ -390,7 +390,7 @@ pub async fn updater_download(app: tauri::AppHandle) -> Result<UpdateInfo, Strin
 /// way there is nothing useful after it, so the app is never left half-swapped
 /// with a live window.
 #[tauri::command]
-pub fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     if !updates_permitted() {
         return Err(DEV_BUILD_REFUSAL.to_string());
     }
@@ -415,14 +415,22 @@ pub fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     //
     // Both are idempotent, which is what makes running them ahead of a call
     // that can still fail harmless: the flush writes stores that are already
-    // clean, and the drain returns at once when nothing is rotating.
-    crate::flush_for_restart(&app);
+    // clean, and the drain returns at once when nothing is rotating. A failed
+    // install hands sync back below. On a blocking thread, since the sync
+    // drain can wait for seconds with a toast up.
+    let app2 = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || crate::flush_for_restart(&app2)).await;
     // This process is about to be replaced by the updated build - the installer
     // relaunches it on Windows, `app.restart()` below on Linux. Mark it so that
     // replacement takes over rather than deferring to this dying process (a
     // relaunch now surfaces a running copy by default instead of replacing it).
     crate::mark_self_restart();
-    pending.update.install(bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = pending.update.install(bytes) {
+        // Put it back so "Try again" installs without a fresh download.
+        *PENDING.lock() = Some(pending);
+        crate::resume_after_failed_restart(&app);
+        return Err(e.to_string());
+    }
     app.restart()
 }
 

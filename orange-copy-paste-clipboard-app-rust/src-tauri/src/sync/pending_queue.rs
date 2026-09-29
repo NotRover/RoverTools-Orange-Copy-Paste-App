@@ -56,6 +56,12 @@ pub struct PendingQueue {
     path: PathBuf,
     /// A landed Delete left memory but not yet the file.
     unwritten: bool,
+    /// Ops a [`Self::drain`] handed out and no [`Self::settle`] has closed yet.
+    /// Still named by [`Self::pending_keys`]: a flush in the air has not sent
+    /// them, and the exit flush keeps entries by those keys.
+    taken: Vec<PendingOp>,
+    /// A queue file existed and would not read or parse at load.
+    unreadable: bool,
 }
 
 impl PendingQueue {
@@ -63,10 +69,18 @@ impl PendingQueue {
         let inflight_path = inflight_path(&path);
         // Ops taken for a flush that never finished go back at the front: they
         // were queued before anything still in the main file.
-        let mut ops: Vec<PendingOp> = crate::sync::persist::load_json(&inflight_path);
+        let (mut ops, inflight_bad): (Vec<PendingOp>, bool) =
+            crate::sync::persist::load_json_checked(&inflight_path);
         let recovered = ops.len();
-        ops.extend(crate::sync::persist::load_json::<Vec<PendingOp>>(&path));
-        let mut queue = Self { ops, path, unwritten: false };
+        let (main, main_bad): (Vec<PendingOp>, bool) = crate::sync::persist::load_json_checked(&path);
+        ops.extend(main);
+        let mut queue = Self {
+            ops,
+            path,
+            unwritten: false,
+            taken: Vec::new(),
+            unreadable: inflight_bad || main_bad,
+        };
         if recovered > 0 {
             // Fold the recovered ops into the main file first, so a crash in
             // the next second does not lose them a second time.
@@ -78,6 +92,27 @@ impl PendingQueue {
             );
         }
         queue
+    }
+
+    /// Whether a queue file existed and would not read at load. The queue in
+    /// memory then says nothing about which entries still have work queued.
+    pub fn unreadable(&self) -> bool {
+        self.unreadable
+    }
+
+    /// Every key the queue files on disk name, read without changing them. For
+    /// the exit flush with sync off. `Err` when either file is there and will
+    /// not read or parse.
+    pub fn try_keys(path: &Path) -> Result<Vec<String>, String> {
+        let mut keys = Vec::new();
+        for file in [inflight_path(path), path.to_path_buf()] {
+            let Some(bytes) = crate::health::read_state(&file)? else {
+                continue;
+            };
+            let ops: Vec<PendingOp> = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            keys.extend(ops.iter().filter_map(op_key));
+        }
+        Ok(keys)
     }
 
     /// Write the queue as it stands in memory.
@@ -134,6 +169,7 @@ impl PendingQueue {
         let ops = std::mem::take(&mut self.ops);
         crate::sync::persist::save_json(&inflight_path(&self.path), &ops);
         self.persist();
+        self.taken.extend(ops.iter().cloned());
         ops
     }
 
@@ -150,6 +186,7 @@ impl PendingQueue {
             ops.append(&mut self.ops);
             self.ops = ops;
         }
+        self.taken.clear();
         self.persist();
         // Last, and only now: until this the file is the only copy of anything
         // that got dropped along the way.
@@ -158,27 +195,11 @@ impl PendingQueue {
 
     /// id_map-style keys (`"clipboard:{id}"` / `"note:{id}"`) for every queued
     /// op, so the UI can mark those entries as still waiting to upload.
+    ///
+    /// Ops taken by a flush that has not settled count too: until the settle
+    /// they are neither sent nor back in the queue.
     pub fn pending_keys(&self) -> Vec<String> {
-        self.ops
-            .iter()
-            .filter_map(|op| match op {
-                PendingOp::Push { entry_json, entry_type }
-                | PendingOp::Update { entry_json, entry_type } => {
-                    serde_json::from_str::<serde_json::Value>(entry_json)
-                        .ok()
-                        .and_then(|v| {
-                            v.get("client_id")
-                                .and_then(|c| c.as_str())
-                                .map(str::to_string)
-                        })
-                        .map(|id| format!("{entry_type}:{id}"))
-                }
-                PendingOp::Delete { client_id, entry_type }
-                | PendingOp::PushLocal { client_id, entry_type } => {
-                    Some(format!("{entry_type}:{client_id}"))
-                }
-            })
-            .collect()
+        self.ops.iter().chain(&self.taken).filter_map(op_key).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -187,6 +208,21 @@ impl PendingQueue {
 
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
+    }
+}
+
+/// The id_map-style key one op is for.
+fn op_key(op: &PendingOp) -> Option<String> {
+    match op {
+        PendingOp::Push { entry_json, entry_type } | PendingOp::Update { entry_json, entry_type } => {
+            serde_json::from_str::<serde_json::Value>(entry_json)
+                .ok()
+                .and_then(|v| v.get("client_id").and_then(|c| c.as_str()).map(str::to_string))
+                .map(|id| format!("{entry_type}:{id}"))
+        }
+        PendingOp::Delete { client_id, entry_type } | PendingOp::PushLocal { client_id, entry_type } => {
+            Some(format!("{entry_type}:{client_id}"))
+        }
     }
 }
 
@@ -373,6 +409,48 @@ mod tests {
         queue.push(delete_op("first"));
         queue.push_many(vec![delete_op("second"), delete_op("third")]);
         assert_eq!(ids(&queue), vec!["first", "second", "third"]);
+    }
+
+    /// A flush takes every op out of memory before it sends them. Until the
+    /// settle those keys must still read as queued, or the exit flush drops the
+    /// entries they stand for.
+    #[test]
+    fn drained_ops_stay_pending_until_the_settle() {
+        let path = scratch_queue("taken");
+        let mut queue = PendingQueue::load(path);
+        queue.push(PendingOp::PushLocal {
+            client_id: "img-1".to_string(),
+            entry_type: "clipboard".to_string(),
+        });
+        queue.drain();
+        assert!(queue.is_empty());
+        assert_eq!(queue.pending_keys(), vec!["clipboard:img-1"]);
+        queue.settle(Vec::new());
+        assert!(queue.pending_keys().is_empty());
+    }
+
+    /// A queue file that will not parse is flagged, never read as an empty
+    /// queue, and `try_keys` refuses it rather than naming nothing.
+    #[test]
+    fn an_unreadable_queue_file_is_flagged() {
+        let path = scratch_queue("unreadable");
+        std::fs::write(&path, b"[{\"op\":").unwrap();
+        let queue = PendingQueue::load(path.clone());
+        assert!(queue.unreadable());
+        assert!(PendingQueue::try_keys(&path).is_err());
+    }
+
+    #[test]
+    fn try_keys_reads_both_files_without_changing_them() {
+        let path = scratch_queue("try-keys");
+        let mut queue = PendingQueue::load(path.clone());
+        queue.push(delete_op("a"));
+        queue.drain();
+        queue.push(delete_op("b"));
+        let mut keys = PendingQueue::try_keys(&path).unwrap();
+        keys.sort();
+        assert_eq!(keys, vec!["clipboard:a", "clipboard:b"]);
+        assert!(inflight_path(&path).exists());
     }
 
     #[test]

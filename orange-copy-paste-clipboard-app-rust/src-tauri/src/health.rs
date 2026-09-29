@@ -800,21 +800,23 @@ pub fn health_sealed_notice() -> Option<String> {
 /// every in-memory structure from what is on disk, which was protected from the
 /// bad state precisely so this would be safe.
 #[tauri::command]
-pub fn health_restart_app(app: tauri::AppHandle) {
-    // `restart` bypasses the event loop, so neither the exit-time flush nor
-    // the rotation drain runs - do both here. While degraded the writes are
-    // refused into quarantine, which is exactly what the restart is about to
-    // recover. Preventing the exit is not an option on this path either: a
-    // restart carries its own exit code and the runtime ignores an objection to
-    // it, which is the other half of why the work has to happen inline.
+pub async fn health_restart_app(app: tauri::AppHandle) {
+    // A restart carries its own exit code and the runtime ignores an objection
+    // to it, so the sync and rotation drains and the flush run here, before
+    // the restart is asked for. While degraded the writes are refused into
+    // quarantine, which is exactly what the restart is about to recover.
     //
-    // This blocks the main thread for up to the drain budget, so the window
-    // freezes for that long. It cannot deadlock: `SyncClient` owns its own
+    // Async, and the blocking part on a blocking thread: the sync drain can
+    // wait for seconds and shows a toast meanwhile, and neither works on a
+    // frozen main thread. It cannot deadlock: `SyncClient` owns its own
     // runtime, and nothing in the sync module ever waits on this thread.
-    crate::flush_for_restart(&app);
+    let app2 = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || crate::flush_for_restart(&app2)).await;
     // A relaunch surfaces a running copy by default; this is a self-restart that
     // must instead take over, so mark it before the replacement launches.
     crate::mark_self_restart();
+    // Off the main thread, so the runtime delivers the exit events and the
+    // exit-time flush runs as well.
     app.restart()
 }
 

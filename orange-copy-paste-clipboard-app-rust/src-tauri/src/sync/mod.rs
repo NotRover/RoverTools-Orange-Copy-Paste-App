@@ -19,6 +19,7 @@ pub mod device_id;
 pub mod id_map;
 pub mod oauth;
 pub mod pending_queue;
+pub mod pending_work;
 pub(crate) mod persist;
 pub mod supabase;
 pub mod sync_state;
@@ -45,6 +46,7 @@ use crate::sync::client::{
 use crate::sync::config::SyncConfig;
 use crate::sync::id_map::IdMap;
 use crate::sync::pending_queue::{PendingOp, PendingQueue};
+use crate::sync::pending_work::{PendingWork, WorkGuard, WorkKind};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
@@ -141,6 +143,8 @@ struct PushCtx {
     budget: BlobBudget,
     /// Pushes running right now, so the UI can show them as pending.
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// The app is quitting. See [`SyncClient::begin_quit`].
+    quitting: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Bytes of blob storage left on the account, as last known.
@@ -609,6 +613,24 @@ pub struct SyncClient {
     removed_this_run: Arc<Mutex<HashMap<String, Instant>>>,
     /// Entry keys with a claimed blob download running. See [`BlobClaim`].
     blob_merges: Arc<Mutex<HashSet<String>>>,
+    /// Write-ahead record of the uploads and downloads that have started and
+    /// not finished. See [`pending_work`].
+    pending_work: Arc<Mutex<PendingWork>>,
+    /// The id map, the queue or the pending-work record was there at load and
+    /// would not read. None of them can then say what is safe to drop, so the
+    /// exit flush keeps every entry this session. See [`Self::keep_keys`].
+    stores_unreadable: bool,
+    /// Set once the app has begun to quit or restart. No new upload, download
+    /// or queue flush starts after it; work that comes due is recorded for the
+    /// next launch instead. See [`Self::begin_quit`].
+    quitting: Arc<std::sync::atomic::AtomicBool>,
+    /// The launch's restore check was skipped because its flush failed. The
+    /// next flush that succeeds runs it.
+    restore_check_missed: std::sync::atomic::AtomicBool,
+    /// Counts settings rounds. A snapshot carries the count it was taken at,
+    /// so a round that waited behind another can tell its values are older
+    /// than what that round landed. See `commands::sync_settings`.
+    settings_round: Arc<std::sync::atomic::AtomicU64>,
     /// Client-to-server ID mapping.
     id_map: Arc<Mutex<IdMap>>,
     /// Sync state (cursor, device_id, user_id).
@@ -692,6 +714,10 @@ impl Drop for SyncClient {
         // `shutdown_background` never blocks, so it is safe from any context:
         // in-flight tasks are abandoned rather than awaited, which is what we
         // want for a client that is already logged out.
+        //
+        // The pending-work record closes first: dropping those tasks runs their
+        // guards, and a guard must not clear work its task never finished.
+        self.pending_work.lock().close();
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_background();
         }
@@ -757,6 +783,12 @@ impl SyncClient {
             pending_queue::pending_queue_path(&app_data),
         )));
         let id_map = Arc::new(Mutex::new(IdMap::load(id_map::id_map_path(&app_data))));
+        let pending_work = Arc::new(Mutex::new(PendingWork::load(
+            pending_work::pending_work_path(&app_data),
+        )));
+        let stores_unreadable = id_map.lock().unreadable()
+            || pending_queue.lock().unreadable()
+            || pending_work.lock().unreadable();
         let sync_state = Arc::new(Mutex::new(SyncStateStore::load(
             sync_state::state_path(&app_data),
         )));
@@ -782,6 +814,7 @@ impl SyncClient {
         }));
         let settings_push_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         let settings_notify = Arc::new(tokio::sync::Notify::new());
+        let settings_round = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         // Debounce task: sleeps until 2s after the most recent schedule call,
         // then signals React to collect localStorage values.  Idle (no polling)
@@ -789,6 +822,7 @@ impl SyncClient {
         {
             let push_at = Arc::clone(&settings_push_at);
             let notify = Arc::clone(&settings_notify);
+            let round = Arc::clone(&settings_round);
             let app2 = app.clone();
             handle.spawn(async move {
                 loop {
@@ -802,7 +836,7 @@ impl SyncClient {
                         let now = Instant::now();
                         if now >= deadline {
                             *push_at.lock() = None;
-                            let _ = app2.emit("sync:collect-settings", serde_json::Value::Null);
+                            emit_collect_settings(&app2, &round);
                             break;
                         }
                         tokio::time::sleep(deadline - now).await;
@@ -838,6 +872,11 @@ impl SyncClient {
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             removed_this_run: Arc::new(Mutex::new(HashMap::new())),
             blob_merges: Arc::new(Mutex::new(HashSet::new())),
+            pending_work,
+            stores_unreadable,
+            quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            restore_check_missed: std::sync::atomic::AtomicBool::new(false),
+            settings_round,
             id_map,
             sync_state,
             status,
@@ -1588,6 +1627,7 @@ impl SyncClient {
             let previous = state.user_id().to_string();
             if !previous.is_empty() && previous != user_id {
                 self.id_map.lock().reset();
+                self.pending_work.lock().reset();
                 state.reset_for_new_account();
                 // Invites and space activity are addressed to a person, so the
                 // feed is the previous account's mail. It is refilled from the
@@ -2276,6 +2316,7 @@ impl SyncClient {
             gate: Arc::clone(&self.push_gate),
             budget: Arc::clone(&self.blob_budget),
             in_flight: Arc::clone(&self.in_flight),
+            quitting: Arc::clone(&self.quitting),
         }
     }
 
@@ -2342,12 +2383,23 @@ impl SyncClient {
         if self.skips_automatic_push(origin, &space_ids, &format!("clipboard:{}", entry.id)) {
             return;
         }
+        let Some(work) = self.begin_work(format!("clipboard:{}", entry.id), WorkKind::Upload) else {
+            return;
+        };
 
         self.handle.spawn(async move {
             // Taken before anything touches the network, so a bulk upload of
             // images opens PUSH_CONCURRENCY connections rather than one per
             // entry.
             let permit = ctx.gate.clone().acquire_owned().await.ok();
+            // A quit that began while this waited: the record stays and the
+            // next launch sends it. Otherwise held to the end of the task, past
+            // the point where the server's answer is recorded or the push is
+            // queued, so something names the entry the whole time.
+            if ctx.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+                return work.defer();
+            }
+            let _work = work;
             let skip_label = skip_label_for(&entry);
 
             // Refuse an over-limit file entry before it is archived, so a huge
@@ -2494,9 +2546,16 @@ impl SyncClient {
         if self.skips_automatic_push(origin, &space_ids, &format!("note:{}", note.id)) {
             return;
         }
+        let Some(work) = self.begin_work(format!("note:{}", note.id), WorkKind::Upload) else {
+            return;
+        };
 
         self.handle.spawn(async move {
             let permit = ctx.gate.clone().acquire_owned().await.ok();
+            if ctx.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+                return work.defer();
+            }
+            let _work = work;
             // Taken before the title is moved into the metadata below.
             let skip_label = if note.title.trim().is_empty() {
                 "A note".to_string()
@@ -2801,6 +2860,9 @@ impl SyncClient {
                 let admitted =
                     sweep_admits(&key, has_local, keep_out, &self.removed_this_run.lock());
                 if !admitted {
+                    if has_local && !keep_out.contains(&key) {
+                        self.adopt_own_row(&key, e);
+                    }
                     continue;
                 }
             } else if !my_device.is_empty() && e.device_id.as_deref() == Some(my_device.as_str()) {
@@ -3044,12 +3106,19 @@ impl SyncClient {
                 continue;
             }
 
+            // Blob rows record theirs when the download lands.
+            let write_row = || {
+                let owner = e.user_id.as_deref();
+                record_row(&self.id_map, &self.in_flight, &key, &e.server_id, &e.space_ids, from_space, owner);
+            };
+
             if is_note {
                 let title = meta
                     .get("title")
                     .and_then(|t| t.as_str())
                     .unwrap_or_default()
                     .to_string();
+                write_row();
                 state.notes.lock().upsert_synced(Note {
                     id: e.client_id.clone(),
                     title,
@@ -3077,7 +3146,9 @@ impl SyncClient {
                         // failure waits for the next trigger.
                         let owe = keep_out.is_none();
                         let claim = http.as_ref().and_then(|_| self.claim_blob(&key, owe));
-                        if let Some(http) = http.filter(|_| owe || claim.is_some()) {
+                        let http = http.filter(|_| owe || claim.is_some());
+                        let work = http.as_ref().and_then(|_| self.begin_work(key.clone(), WorkKind::Download));
+                        if let (Some(http), Some(work)) = (http, work) {
                             let mime = serde_json::from_str::<serde_json::Value>(&content)
                                 .ok()
                                 .and_then(|v| v.get("mime").and_then(|m| m.as_str()).map(String::from))
@@ -3087,6 +3158,7 @@ impl SyncClient {
                                 http,
                                 content_key.clone(),
                                 claim,
+                                work,
                                 ImageMergeMeta {
                                     client_id: e.client_id.clone(),
                                     server_id: e.server_id.clone(),
@@ -3131,12 +3203,15 @@ impl SyncClient {
                         // Claimed like the image branch above.
                         let owe = keep_out.is_none();
                         let claim = http.as_ref().and_then(|_| self.claim_blob(&key, owe));
-                        if let Some(http) = http.filter(|_| owe || claim.is_some()) {
+                        let http = http.filter(|_| owe || claim.is_some());
+                        let work = http.as_ref().and_then(|_| self.begin_work(key.clone(), WorkKind::Download));
+                        if let (Some(http), Some(work)) = (http, work) {
                             out.downloading += usize::from(claim.is_some());
                             self.spawn_blob_files_merge(
                                 http,
                                 content_key.clone(),
                                 claim,
+                                work,
                                 FilesMergeMeta {
                                     client_id: e.client_id.clone(),
                                     server_id: e.server_id.clone(),
@@ -3184,34 +3259,13 @@ impl SyncClient {
                 if autocopy {
                     crate::clipboard::commands::copy_entry_suppressed(&self.app, &merged);
                 }
+                write_row();
                 if state.history.lock().upsert_synced(merged) {
                     clip_changed = true;
                     out.restored += 1;
                 }
             }
 
-            let mut id_map = self.id_map.lock();
-            id_map.set_entry(&key, &e.server_id);
-            // The sender's metadata carries *their* local group names, which say
-            // nothing about the space the entry travelled through. Recording the
-            // server ids is what lets the Spaces screen place a received entry
-            // under the space it actually came from.
-            // Not while we are pushing this entry: a share we just made is
-            // newer than anything this response can carry, and a pull that
-            // overlapped the push would write the pre-share list back - the
-            // checkmark switching off and on again as the push lands.
-            if !self.in_flight.lock().contains(&key) {
-                id_map.set_entry_shares(&key, &e.space_ids);
-            }
-            if from_space {
-                id_map.mark_entry_remote(&key);
-                // Only for entries that came through a space: a space row has to
-                // say who sent it, and our own entries are the ones without an
-                // owner recorded.
-                if let Some(owner) = e.user_id.as_deref() {
-                    id_map.set_entry_owner(&key, owner);
-                }
-            }
         }
 
         if clip_changed {
@@ -3238,8 +3292,29 @@ impl SyncClient {
     /// each other writing `last_server_ts`, and re-download the same blobs off a
     /// metered quota. Queuing the second caller costs it the first one's
     /// duration and gives it the newer cursor, which is the answer it wanted.
+    ///
+    /// After each one that succeeds, work the last run left unfinished goes
+    /// out: only then, so a delete another device made meanwhile has landed
+    /// here first and is never undone by a re-sent upload. A launch whose own
+    /// flush failed skipped its restore check; the first flush that succeeds
+    /// after it runs that check, once the lock is free.
     pub async fn flush_and_pull(&self) -> Result<(), String> {
+        self.flush_and_pull_locked().await?;
+        self.redrive_recovered_work();
+        if self.restore_check_missed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            self.restore_if_owed().await;
+        }
+        Ok(())
+    }
+
+    async fn flush_and_pull_locked(&self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
         let _flushing = self.flush_lock.lock().await;
+        // Nothing new starts while the app quits. What is queued stays on disk
+        // for the next launch.
+        if self.quitting.load(Ordering::SeqCst) {
+            return Err("the app is closing".into());
+        }
         let http = self.http.lock().clone().ok_or("not authenticated")?;
         if !http.is_authenticated() {
             return Err("not authenticated".into());
@@ -3404,6 +3479,11 @@ impl SyncClient {
         let after_ts = self.sync_state.lock().data.last_server_ts;
         let mut cursor = after_ts;
         loop {
+            // The cursor only moves past a page that landed, so stopping here
+            // loses nothing: the next launch pulls from the same point.
+            if self.quitting.load(Ordering::SeqCst) {
+                break;
+            }
             match http.pull_entries(cursor, 200).await {
                 Ok(pull) => {
                     // Removals first. An entry that was withdrawn and later
@@ -3552,8 +3632,9 @@ impl SyncClient {
     async fn restore_counts(&self) -> (usize, Option<usize>) {
         let total = self.cloud_breakdown().await.ok().flatten().map(|b| b.total);
         let mut present = self.local_keys();
-        present.extend(self.blob_merges.lock().iter().cloned());
-        let (known, gone): (Vec<String>, HashSet<String>) = {
+        let downloading: HashSet<String> = self.blob_merges.lock().iter().cloned().collect();
+        present.extend(downloading.iter().cloned());
+        let (known, gone, own_downloading): (Vec<String>, HashSet<String>, usize) = {
             let map = self.id_map.lock();
             let gone = map
                 .deleted_markers()
@@ -3561,7 +3642,15 @@ impl SyncClient {
                 .filter(|(_, m)| m.content_gone)
                 .map(|(k, _)| k)
                 .collect();
-            (map.entry_keys(), gone)
+            // A download has no id_map row until it lands, so the owned keys
+            // below miss it. Counted here, or every sweep that starts downloads
+            // leaves a gap mark inflated by them, and a later real loss of that
+            // size never reads as a rise.
+            let own_downloading = downloading
+                .iter()
+                .filter(|k| map.get_server_id(k).is_none() && !map.is_remote(k))
+                .count();
+            (map.entry_keys(), gone, own_downloading)
         };
         let keep_out = self.restore_keep_out();
         let missing = known
@@ -3569,12 +3658,7 @@ impl SyncClient {
             .filter(|k| !present.contains(*k) && !gone.contains(*k) && !keep_out.contains(*k))
             .count();
         let gap = total.map(|total| {
-            let own_present = self
-                .owned_entry_keys()
-                .iter()
-                .filter(|k| present.contains(*k))
-                .count();
-            total.saturating_sub(own_present)
+            restore_gap(total, &self.owned_entry_keys(), &present, own_downloading)
         });
         (missing, gap)
     }
@@ -3731,6 +3815,157 @@ impl SyncClient {
             }
         }
         Ok(keys)
+    }
+
+    // ── Pending work and quitting ─────────────────────────────────
+
+    /// Record `key` as having `kind` work running and return the guard that
+    /// clears it, or `None` while the app quits: the work is then recorded for
+    /// the next launch and not started.
+    fn begin_work(&self, key: String, kind: WorkKind) -> Option<WorkGuard> {
+        if self.quitting.load(std::sync::atomic::Ordering::SeqCst) {
+            self.pending_work.lock().defer(&key, kind);
+            return None;
+        }
+        Some(WorkGuard::begin(&self.pending_work, key, kind))
+    }
+
+    /// Every entry key the exit flush must keep with Keep history off: in the
+    /// cloud or a space by this device's record, queued (including ops a flush
+    /// holds), being pushed, or named by the pending-work record. `None` when
+    /// one of those records would not read at load, which keeps everything.
+    ///
+    /// The caller holds the history lock, so no entry can land between this
+    /// read and the write it feeds.
+    pub fn keep_keys(&self) -> Option<HashSet<String>> {
+        if self.stores_unreadable {
+            return None;
+        }
+        let mut keys = self.id_map.lock().keep_keys();
+        keys.extend(self.pending_queue.lock().pending_keys());
+        keys.extend(self.in_flight.lock().iter().cloned());
+        keys.extend(self.pending_work.lock().keys());
+        Some(keys)
+    }
+
+    /// Whether an upload or a blob download is running now. A queue flush cut
+    /// short needs no wait: its ops are in the queue's in-flight file, which
+    /// the next launch replays.
+    pub fn work_running(&self) -> bool {
+        self.pending_work.lock().active() || !self.in_flight.lock().is_empty()
+    }
+
+    /// The app is quitting or restarting: start nothing new. Uploads and
+    /// downloads that come due are recorded for the next launch.
+    pub fn begin_quit(&self) {
+        self.quitting.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The quit did not happen after all (an update that failed to install).
+    /// What was deferred meanwhile goes out with the next flush.
+    pub fn end_quit(&self) {
+        self.quitting.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Run the work the record names with no task behind it: left by the last
+    /// run, or deferred while this one was quitting.
+    ///
+    /// An upload goes out as the user's own push: it was decided on before
+    /// the quit. An entry no longer here needs nothing. A download is a row
+    /// the cursor may already have passed, so it becomes a restore owed.
+    fn redrive_recovered_work(&self) {
+        let (uploads, downloads) = {
+            let work = self.pending_work.lock();
+            (work.recovered(WorkKind::Upload), work.recovered(WorkKind::Download))
+        };
+        if !downloads.is_empty() {
+            self.sync_state.lock().set_restore_owed(true);
+            let mut work = self.pending_work.lock();
+            for key in &downloads {
+                work.forget(key, WorkKind::Download);
+            }
+        }
+        if uploads.is_empty() {
+            return;
+        }
+        // Without the key nothing can be sealed; the records wait for a launch
+        // that has it.
+        let Some(umk) = self.umk_clone() else {
+            return;
+        };
+        let state = self.app.state::<crate::state::AppState>();
+        for key in uploads {
+            if let Some((entry_type, client_id)) = key.split_once(':') {
+                let on_server = self.id_map.lock().get_server_id(&key).is_some();
+                if entry_type == "note" {
+                    let note = state.notes.lock().find(client_id).cloned();
+                    if let Some(note) = note {
+                        // Stamped like "Upload to cloud" when the server has no
+                        // row for it, so a tombstone left there cannot outrank it.
+                        let at = (!on_server).then(|| note.updated_at.max(now_ms()));
+                        self.spawn_push_note(note, umk.clone(), true, at, PushOrigin::UserInitiated);
+                    }
+                } else {
+                    let entry = state.history.lock().find(client_id).cloned();
+                    if let Some(entry) = entry {
+                        self.spawn_push_clipboard_entry(entry, umk.clone(), true, PushOrigin::UserInitiated);
+                    }
+                }
+            }
+            // A push that started holds its own guard, so this leaves its record
+            // alone. One that did not (the entry is gone, or it was received from
+            // someone else) has nothing left to wait for.
+            self.pending_work.lock().forget(&key, WorkKind::Upload);
+        }
+    }
+
+    /// A sweep found one of the account's own live rows already here, with no
+    /// id_map row naming it: the map was lost or wiped, and the copy here is
+    /// that row. Record it, so the entry is kept with Keep history off and the
+    /// restore gap counts it as present instead of missing. Nothing else is
+    /// taken from the row: the local copy is not touched.
+    ///
+    /// Only a row this account wrote and nothing here removed. A received
+    /// row's authorship is settled by a real merge, which needs its space key.
+    fn adopt_own_row(&self, key: &str, e: &crate::sync::client::PulledEntry) {
+        if e.deleted_at.is_some() {
+            return;
+        }
+        let Some(me) = self.self_user_id() else {
+            return;
+        };
+        if e.user_id.as_deref() != Some(me.as_str()) {
+            return;
+        }
+        if self.removed_this_run.lock().contains_key(key) {
+            return;
+        }
+        let known = {
+            let id_map = self.id_map.lock();
+            id_map.get_server_id(key).is_some()
+                || id_map.is_remote(key)
+                || id_map.is_unpushed(key)
+                || id_map.deleted_marker(key).is_some_and(|m| m.content_gone)
+        };
+        if known {
+            return;
+        }
+        record_row(&self.id_map, &self.in_flight, key, &e.server_id, &e.space_ids, false, None);
+    }
+
+    /// The settings round now running. See `commands::sync_settings`.
+    pub fn settings_round(&self) -> u64 {
+        self.settings_round.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// A settings round finished: snapshots taken before now are stale.
+    pub fn bump_settings_round(&self) {
+        self.settings_round.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Ask React for a fresh settings snapshot, stamped with the current round.
+    pub fn request_settings_snapshot(&self) {
+        emit_collect_settings(&self.app, &self.settings_round);
     }
 
     /// Per-entry sync state keyed `"clipboard:{id}"` / `"note:{id}"`, for the
@@ -4321,6 +4556,10 @@ impl SyncClient {
             }
             if let Err(e) = self.flush_and_pull().await {
                 eprintln!("[sync] initial sync failed: {e}");
+                // The restore check below is what brings back rows lost here,
+                // so it must not wait for the next sign-in.
+                self.restore_check_missed
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 return;
             }
             self.restore_if_owed().await;
@@ -5540,6 +5779,7 @@ impl SyncClient {
         http: Arc<SyncHttpClient>,
         key: Zeroizing<[u8; 32]>,
         mut claim: Option<BlobClaim>,
+        work: WorkGuard,
         meta: ImageMergeMeta,
     ) {
         use std::sync::atomic::Ordering;
@@ -5556,6 +5796,8 @@ impl SyncClient {
         let removed = Arc::clone(&self.removed_this_run);
 
         self.handle.spawn(async move {
+            // Cleared when the task ends, after the id_map row is written.
+            let _work = work;
             let Some(dir) = images_dir else { return };
             // Checked again here, not only at merge: this is the line that
             // turns the id into a path, and it must not depend on every caller
@@ -5622,22 +5864,12 @@ impl SyncClient {
             if meta.autocopy {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
             }
+            let owner = meta.owner_id.as_deref();
+            record_row(&id_map, &in_flight, &key, &meta.server_id, &meta.space_ids, meta.remote, owner);
             let _ = state.history.lock().upsert_synced(merged);
             BlobClaim::land(&mut claim);
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
-            let mut id_map = id_map.lock();
-            id_map.set_entry(&key, &meta.server_id);
-            if !in_flight.lock().contains(&key) {
-                id_map.set_entry_shares(&key, &meta.space_ids);
-            }
-            if meta.remote {
-                id_map.mark_entry_remote(&key);
-                if let Some(owner) = meta.owner_id.as_deref() {
-                    id_map.set_entry_owner(&key, owner);
-                }
-            }
-            drop(id_map);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
     }
@@ -5652,6 +5884,7 @@ impl SyncClient {
         http: Arc<SyncHttpClient>,
         key: Zeroizing<[u8; 32]>,
         mut claim: Option<BlobClaim>,
+        work: WorkGuard,
         meta: FilesMergeMeta,
     ) {
         use std::sync::atomic::Ordering;
@@ -5670,42 +5903,65 @@ impl SyncClient {
         let removed = Arc::clone(&self.removed_this_run);
 
         self.handle.spawn(async move {
-            let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
-                eprintln!("[sync] file blob {} download-url failed (skipped)", meta.blob_key);
-                return;
-            };
-            let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
-                return;
-            };
-            let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
-                eprintln!("[sync] file blob {} decrypt failed", meta.client_id);
-                return;
-            };
-            let Some(root) = files_root else { return };
+            let _work = work;
             // Same guard as the image path, for the same reason: `dest` is
-            // emptied and rewritten below, so it has to stay under `root`.
+            // replaced below, so it has to stay under `root`.
             if !is_canonical_uuid(&meta.client_id) {
                 return;
             }
-            let dest = root.join(&meta.client_id);
-            let paths = match extract_zip_to_dir(&bytes, &dest) {
-                Ok(paths) if !paths.is_empty() => paths,
-                Ok(_) => {
-                    eprintln!("[sync] file blob {} extracted to nothing", meta.client_id);
-                    return;
-                }
-                Err(e) => {
-                    eprintln!("[sync] file blob {} extract failed: {e}", meta.client_id);
-                    return;
+            let state = app.state::<crate::state::AppState>();
+            // The entry is here and every file it points at is on disk: this
+            // row is newer metadata for it (a pin, a group), not new content.
+            // Keep the files, and spend no download re-extracting them over the
+            // very paths the entry, and perhaps the clipboard, point at.
+            // Read out first: the check below touches the disk, which can be a
+            // slow or offline drive, and must not hold the history lock.
+            let local = state
+                .history
+                .lock()
+                .find(&meta.client_id)
+                .filter(|e| e.kind == EntryKind::File)
+                .map(|e| e.content.clone());
+            let kept = local.filter(|c| files_all_present(c));
+            let content = match kept {
+                Some(content) => content,
+                None => {
+                    let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
+                        eprintln!("[sync] file blob {} download-url failed (skipped)", meta.blob_key);
+                        return;
+                    };
+                    let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
+                        return;
+                    };
+                    let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
+                        eprintln!("[sync] file blob {} decrypt failed", meta.client_id);
+                        return;
+                    };
+                    let Some(root) = files_root else { return };
+                    let dest = root.join(&meta.client_id);
+                    // Blocking file work, off the sync runtime's workers.
+                    let extracted = tokio::task::spawn_blocking(move || extract_zip_to_dir(&bytes, &dest))
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()));
+                    let paths = match extracted {
+                        Ok(paths) if !paths.is_empty() => paths,
+                        Ok(_) => {
+                            eprintln!("[sync] file blob {} extracted to nothing", meta.client_id);
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("[sync] file blob {} extract failed: {e}", meta.client_id);
+                            return;
+                        }
+                    };
+                    paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 }
             };
-            let content = paths
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
 
-            let state = app.state::<crate::state::AppState>();
             let key = format!("clipboard:{}", meta.client_id);
             // Deleted while this blob was downloading - see the image merge for
             // why re-adding it now would resurrect a removed row and can hand it
@@ -5737,22 +5993,12 @@ impl SyncClient {
             if meta.autocopy {
                 crate::clipboard::commands::copy_entry_suppressed(&app, &merged);
             }
+            let owner = meta.owner_id.as_deref();
+            record_row(&id_map, &in_flight, &key, &meta.server_id, &meta.space_ids, meta.remote, owner);
             let _ = state.history.lock().upsert_synced(merged);
             BlobClaim::land(&mut claim);
             state.history.lock().sort_recent();
             state.history_dirty.store(true, Ordering::Relaxed);
-            let mut id_map = id_map.lock();
-            id_map.set_entry(&key, &meta.server_id);
-            if !in_flight.lock().contains(&key) {
-                id_map.set_entry_shares(&key, &meta.space_ids);
-            }
-            if meta.remote {
-                id_map.mark_entry_remote(&key);
-                if let Some(owner) = meta.owner_id.as_deref() {
-                    id_map.set_entry_owner(&key, owner);
-                }
-            }
-            drop(id_map);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
     }
@@ -5856,6 +6102,43 @@ fn accepts_row(author: Option<&str>, incoming: Option<&str>) -> bool {
     }
 }
 
+/// Write the id_map row for a merged `key`, before its copy lands in the store:
+/// the other order left the entry in history with nothing naming it, and an
+/// exit flush in that moment dropped it with Keep history off.
+///
+/// The server's space ids place a received entry under the space it came
+/// through; the sender's group names say nothing about that. Not while this
+/// device pushes the entry: a share just made is newer than the pulled list,
+/// and writing that back flips the checkmark off and on. A row that came
+/// through a space is marked remote and names who sent it.
+fn record_row(
+    id_map: &Mutex<IdMap>,
+    in_flight: &Mutex<HashSet<String>>,
+    key: &str,
+    server_id: &str,
+    space_ids: &[String],
+    remote: bool,
+    owner: Option<&str>,
+) {
+    let mut id_map = id_map.lock();
+    id_map.set_entry(key, server_id);
+    if !in_flight.lock().contains(key) {
+        id_map.set_entry_shares(key, space_ids);
+    }
+    if remote {
+        id_map.mark_entry_remote(key);
+        if let Some(owner) = owner {
+            id_map.set_entry_owner(key, owner);
+        }
+    }
+}
+
+/// Tell React to send its settings snapshot, with the round it answers.
+fn emit_collect_settings(app: &tauri::AppHandle, round: &std::sync::atomic::AtomicU64) {
+    let round = round.load(std::sync::atomic::Ordering::SeqCst);
+    let _ = app.emit("sync:collect-settings", serde_json::json!({ "round": round }));
+}
+
 /// Whether a restore sweep may merge the row for `key`: only when nothing of it
 /// is here, and nothing here says it should stay away.
 fn sweep_admits(
@@ -5871,6 +6154,14 @@ fn sweep_admits(
 /// for it began.
 fn removed_since(removed: &HashMap<String, Instant>, key: &str, started: Instant) -> bool {
     removed.get(key).is_some_and(|at| *at >= started)
+}
+
+/// How many of the account's own rows the server holds beyond the ones present
+/// here: `owned` keys with a local copy, plus `own_downloading` own rows whose
+/// download is running (those have no id_map row yet, so `owned` misses them).
+fn restore_gap(total: usize, owned: &[String], present: &HashSet<String>, own_downloading: usize) -> usize {
+    let own_present = owned.iter().filter(|k| present.contains(*k)).count() + own_downloading;
+    total.saturating_sub(own_present)
 }
 
 /// Whether a restore sweep is due: one is owed, or a count rose past the mark
@@ -6415,7 +6706,6 @@ fn extract_zip_to_dir(
     bytes: &[u8],
     dest: &std::path::Path,
 ) -> Result<Vec<std::path::PathBuf>, String> {
-    use std::io::Read;
     // Opened before anything on disk is touched, so a hostile archive is
     // refused with the previous contents of `dest` intact.
     let mut archive =
@@ -6431,8 +6721,71 @@ fn extract_zip_to_dir(
             return Err("archive too large".into());
         }
     }
-    let _ = std::fs::remove_dir_all(dest); // idempotent re-merge
-    std::fs::create_dir_all(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+    // Into a staging folder beside `dest`, then renamed into place. Extracting
+    // straight into `dest` emptied it first, so a failure half way (a full
+    // disk, a file in use) left the entry pointing at a half-written tree, and
+    // a quit mid-extract left it that way for good. Now `dest` changes only by
+    // rename, once the new tree is whole.
+    //
+    // One extract at a time in the process: two rows for one id can both be
+    // downloading, and the staging names below are fixed per id.
+    static EXTRACT: Mutex<()> = Mutex::new(());
+    let _one = EXTRACT.lock();
+    let staging = sibling(dest, "incoming");
+    let replaced = sibling(dest, "replaced");
+    // Left by a run that stopped between the steps below.
+    let _ = std::fs::remove_dir_all(&staging);
+    let _ = std::fs::remove_dir_all(&replaced);
+    let tops = match extract_zip_into(&mut archive, &staging, dest) {
+        Ok(tops) => tops,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e);
+        }
+    };
+    // The swap. Between the two renames `dest` is briefly absent; a crash in
+    // that moment leaves the new tree in `staging`, and the next download of
+    // this entry extracts it again.
+    let had_old = dest.exists();
+    if had_old {
+        if let Err(e) = std::fs::rename(dest, &replaced) {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("replace {}: {e}", dest.display()));
+        }
+    }
+    if let Err(e) = std::fs::rename(&staging, dest) {
+        if had_old {
+            let _ = std::fs::rename(&replaced, dest);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("move {} into place: {e}", dest.display()));
+    }
+    let _ = std::fs::remove_dir_all(&replaced);
+    Ok(tops)
+}
+
+/// `dest` with `.{tag}` on its name, beside it.
+fn sibling(dest: &std::path::Path, tag: &str) -> std::path::PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{tag}"));
+    dest.with_file_name(name)
+}
+
+/// Whether every path a file entry names is on disk.
+fn files_all_present(content: &str) -> bool {
+    let mut paths = content.lines().filter(|l| !l.trim().is_empty()).peekable();
+    paths.peek().is_some() && paths.all(|p| std::path::Path::new(p).exists())
+}
+
+/// Write every entry of `archive` under `into`, and return the top-level paths
+/// as they will be once `into` is renamed to `dest`.
+fn extract_zip_into(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    into: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    use std::io::Read;
+    std::fs::create_dir_all(into).map_err(|e| format!("create {}: {e}", into.display()))?;
     let mut tops: Vec<std::path::PathBuf> = Vec::new();
     let mut seen = std::collections::HashSet::<std::ffi::OsString>::new();
     let mut written: u64 = 0;
@@ -6446,7 +6799,7 @@ fn extract_zip_to_dir(
                 tops.push(dest.join(top));
             }
         }
-        let out = dest.join(&rel);
+        let out = into.join(&rel);
         if file.is_dir() {
             std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
         } else {
@@ -7034,6 +7387,66 @@ mod tests {
         assert_eq!(PendingQueue::load(path).len(), 1, "the landed op left the file");
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Right after a sweep starts its downloads, those rows are on their way,
+    /// not missing. Counting them as missing set the mark that high, and a
+    /// later loss of the same size never read as a rise.
+    #[test]
+    fn downloads_in_progress_are_not_part_of_the_gap() {
+        let owned = vec!["clipboard:a".to_string(), "clipboard:b".to_string()];
+        let present: HashSet<String> = HashSet::from(["clipboard:a".to_string()]);
+        assert_eq!(restore_gap(5, &owned, &present, 0), 4);
+        assert_eq!(restore_gap(5, &owned, &present, 3), 1);
+        assert_eq!(restore_gap(2, &owned, &present, 3), 0, "never below zero");
+    }
+
+    /// Extracting over an entry's folder replaces it whole, and leaves no
+    /// staging folder behind, including one a stopped run left.
+    #[test]
+    fn a_re_extract_swaps_the_folder_in_whole() {
+        let src = scratch_dir("ziptest-swap-src");
+        std::fs::write(src.join("new.txt"), b"new").unwrap();
+        let archive = zip_paths_to_bytes(&src.join("new.txt").display().to_string()).expect("zip");
+
+        let dest = scratch_dir("ziptest-swap-dest");
+        std::fs::write(dest.join("old.txt"), b"old").unwrap();
+        let leftover = sibling(&dest, "incoming");
+        std::fs::create_dir_all(&leftover).unwrap();
+        std::fs::write(leftover.join("half.txt"), b"half").unwrap();
+
+        let tops = extract_zip_to_dir(&archive, &dest).expect("extract");
+        assert_eq!(tops, vec![dest.join("new.txt")]);
+        assert_eq!(std::fs::read(dest.join("new.txt")).unwrap(), b"new");
+        assert!(!dest.join("old.txt").exists(), "the old tree was merged, not replaced");
+        assert!(!leftover.exists(), "a staging folder was left behind");
+        assert!(!sibling(&dest, "replaced").exists());
+
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    /// An archive that is refused leaves the folder the entry points at as it
+    /// was.
+    #[test]
+    fn a_refused_archive_leaves_the_folder_alone() {
+        let dest = scratch_dir("ziptest-refused");
+        std::fs::write(dest.join("keep.txt"), b"keep").unwrap();
+        assert!(extract_zip_to_dir(b"not a zip", &dest).is_err());
+        assert_eq!(std::fs::read(dest.join("keep.txt")).unwrap(), b"keep");
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    #[test]
+    fn files_all_present_needs_every_path() {
+        let dir = scratch_dir("files-present");
+        std::fs::write(dir.join("a"), b"a").unwrap();
+        let a = dir.join("a").display().to_string();
+        let b = dir.join("b").display().to_string();
+        assert!(files_all_present(&a));
+        assert!(!files_all_present(&format!("{a}\n{b}")));
+        assert!(!files_all_present(""), "an entry naming nothing is not complete");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A file entry's content is the file bytes, not its machine-specific paths:

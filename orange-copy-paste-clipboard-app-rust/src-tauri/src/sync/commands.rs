@@ -1841,14 +1841,16 @@ fn merge_settings(
 /// Land the account's values here: settings.json keys on disk and in the
 /// in-memory flags, the rest to React as `sync:settings` for localStorage.
 ///
-/// Returns false when the settings.json write did not land. The base must not
-/// move then: it would record values this file never got, and the next round
-/// would push the file's old values back as changes made here.
+/// Returns the values that landed, and whether the settings.json write did.
+/// Only landed values may join the base: one this file never got would read as
+/// a change made here next round, and push the file's old value back. The
+/// localStorage part lands either way, so a failed file write must not hold it
+/// out of the base too.
 fn apply_pulled_settings(
     app: &tauri::AppHandle,
     sync: &SyncClient,
     apply: crate::settings_file::Map,
-) -> bool {
+) -> (crate::settings_file::Map, bool) {
     let (file, rest): (crate::settings_file::Map, crate::settings_file::Map) = apply
         .into_iter()
         .partition(|(k, _)| ROAMING_JSON_KEYS.contains(&k.as_str()));
@@ -1868,9 +1870,31 @@ fn apply_pulled_settings(
         }
     }
     if !rest.is_empty() {
-        let _ = app.emit("sync:settings", serde_json::Value::Object(rest).to_string());
+        let _ = app.emit("sync:settings", serde_json::Value::Object(rest.clone()).to_string());
     }
-    landed
+    (landed_values(file, rest, landed), landed)
+}
+
+/// What an apply put in place: the localStorage part always (React takes it
+/// as sent, and a value it refuses comes back through `sync_settings_refused`),
+/// the settings.json part only when the file write landed.
+fn landed_values(
+    file: crate::settings_file::Map,
+    mut rest: crate::settings_file::Map,
+    file_landed: bool,
+) -> crate::settings_file::Map {
+    if file_landed {
+        rest.extend(file);
+    }
+    rest
+}
+
+/// Whether a settings snapshot taken at round `taken` is still current at
+/// round `now`. A round that finished in between may have changed the base and
+/// handed React new values, so the snapshot predates both and would read the
+/// values it replaced as changes made here.
+fn snapshot_is_current(taken: u64, now: u64) -> bool {
+    taken == now
 }
 
 /// Schedule a settings round for a user edit to React's localStorage part of
@@ -1893,14 +1917,25 @@ pub fn sync_schedule_settings(state: State<'_, AppState>) -> Result<(), String> 
 /// [`SyncClient::schedule_settings_sync`]; `json` is React's localStorage part.
 /// Being offline or signed out is not an error here: the next change or
 /// `settings:updated` schedules another round.
+///
+/// `round` is the count `sync:collect-settings` carried when React took the
+/// snapshot. A round that waited on the lock behind another finds the count
+/// moved on, and asks for a fresh snapshot instead of pushing a stale one.
 #[tauri::command]
 pub async fn sync_settings(
     json: String,
+    round: u64,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     let sync = sync_client(&state)?;
     let _one = sync.settings_lock.lock().await;
+    if !snapshot_is_current(round, sync.settings_round()) {
+        sync.request_settings_snapshot();
+        return Ok(());
+    }
+    // However this round ends from here, a snapshot taken before it is stale.
+    let _next = SettingsRoundEnd(&sync);
     let (Some(http), Some(umk)) = (sync.http(), sync.umk_clone()) else {
         return Ok(());
     };
@@ -1948,14 +1983,17 @@ pub async fn sync_settings(
 
     let base = sync.settings_base();
     let (merged, apply) = merge_settings(&server, &local, base.as_ref());
-    let landed = apply.clone();
-    let applied = apply.is_empty() || apply_pulled_settings(&app, &sync, apply);
-    // The applied values landed here, so the base takes them now, before the
-    // push. A push that fails, loses to another device's push or never
-    // finishes would otherwise leave them reading as changes made here, and the next round would push
-    // them back over another device's newer ones. With no base yet (first
-    // sync) there is nothing to add them to.
-    if let (true, Some(mut base)) = (applied, base) {
+    let (landed, applied) = if apply.is_empty() {
+        (crate::settings_file::Map::new(), true)
+    } else {
+        apply_pulled_settings(&app, &sync, apply)
+    };
+    // The values that landed here join the base now, before the push. A push
+    // that fails, loses to another device's push or never finishes would
+    // otherwise leave them reading as changes made here, and the next round
+    // would push them back over another device's newer ones. With no base yet
+    // (first sync) there is nothing to add them to.
+    if let (false, Some(mut base)) = (landed.is_empty(), base) {
         base.extend(landed);
         sync.set_settings_base(base);
     }
@@ -2010,6 +2048,8 @@ pub async fn sync_settings_refused(json: String, state: State<'_, AppState>) -> 
     let refused: crate::settings_file::Map =
         serde_json::from_str(&json).map_err(|e| format!("settings json: {e}"))?;
     let _one = sync.settings_lock.lock().await;
+    // The base changes below, so a snapshot taken before this is stale too.
+    let _next = SettingsRoundEnd(&sync);
     let Some(mut base) = sync.settings_base() else {
         return Ok(());
     };
@@ -2024,10 +2064,41 @@ pub async fn sync_settings_refused(json: String, state: State<'_, AppState>) -> 
     Ok(())
 }
 
+/// Moves the settings round on when a round ends, by whatever path.
+struct SettingsRoundEnd<'a>(&'a SyncClient);
+
+impl Drop for SettingsRoundEnd<'_> {
+    fn drop(&mut self) {
+        self.0.bump_settings_round();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A settings.json write that fails holds only the file's keys out of the
+    /// base. React's values landed, and leaving them out made the next round
+    /// read the replaced values as changes made here and push them back.
+    #[test]
+    fn a_failed_file_write_keeps_only_the_file_keys_out_of_the_base() {
+        let map = |pairs: &[(&str, &str)]| -> crate::settings_file::Map {
+            pairs.iter().map(|(k, v)| (k.to_string(), json!(v))).collect()
+        };
+        let file = map(&[("history_limit", "50")]);
+        let rest = map(&[("theme", "dark")]);
+        assert_eq!(landed_values(file.clone(), rest.clone(), false), rest);
+        let both = landed_values(file, rest, true);
+        assert_eq!(both.len(), 2);
+        assert_eq!(both.get("history_limit"), Some(&json!("50")));
+    }
+
+    #[test]
+    fn a_snapshot_from_before_the_last_round_is_stale() {
+        assert!(snapshot_is_current(3, 3));
+        assert!(!snapshot_is_current(3, 4));
+    }
 
     fn map(v: serde_json::Value) -> crate::settings_file::Map {
         v.as_object().expect("test maps are objects").clone()
