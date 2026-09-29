@@ -27,7 +27,7 @@
 This release keeps your clipboard history through restarts, reboots and new PCs. Anything your account holds that is missing on a PC now comes back on its own, and you can also ask for it from the Account screen.
 
 ### New
-- The Account screen has a new "Restore from cloud" line with a "Restore" button. It downloads anything your account holds that is missing on this PC, then shows what it did, such as "Restored 1,445 items." or "Nothing to restore." Items you deleted stay deleted.
+- The Cloud sync section of the Account screen has a new "Restore from cloud" card with a "Restore" button. It downloads anything your account holds that is missing on this PC, then shows what it did, such as "Restored 1,445 items." or "Nothing to restore." Items you deleted stay deleted.
 - Missing items now come back without you asking: after every sign-in, at startup, when you first get access to a space on this PC, and when your account holds more of your items than this PC does. In "Manual" sync mode this waits until you press "Refresh" or "Restore".
 
 ### Improved
@@ -39,6 +39,7 @@ This release keeps your clipboard history through restarts, reboots and new PCs.
 - "Keep history across restarts" and "Auto-save copied entries" now apply to each PC separately and no longer follow your account. Changing one on this PC leaves your other PCs as they are. Your theme, layout, sort order, groups and your other synced settings still follow your account, as before.
 - Quitting, restarting or installing an update now waits up to 10 seconds for uploads and downloads that are already running. The window goes away at once and a notice says "Finishing sync". Anything still running after that finishes the next time you start the app. Opening the app during the wait cancels the quit.
 - The recovery code now has its own line on the Account screen, with a "Replace" button once you have saved one, or "New code" if you have not.
+- "Remove from cloud" on the Account screen now asks first in the same dialog as deleting an item. Before, a second click within 3 seconds removed everything. Tick "Don't ask again" to skip it, and turn it back on in Settings under Confirmations.
 
 ### Fixed
 - A PC signed in to sync could show an empty clipboard history, with nothing in your spaces, after a restart, while your other PCs still had everything. If this happened to you, update the app: the missing items come back at the next start, or press "Restore" on the Account screen.

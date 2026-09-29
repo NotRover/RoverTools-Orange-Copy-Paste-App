@@ -118,6 +118,7 @@
 .cdd-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
 .cdd-btn {

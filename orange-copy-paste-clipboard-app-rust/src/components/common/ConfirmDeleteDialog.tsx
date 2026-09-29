@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { WarningIcon } from "../icons";
 import { describeDelete, deleteMessage, type DeleteOrigin } from "../../confirmDelete";
 import "./ConfirmDeleteDialog.css";
@@ -100,7 +101,9 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
   if (!open) return null;
   const plural = count > 1;
 
-  return (
+  // Portalled to the body: a caller inside a transformed or filtered card
+  // would otherwise pin the fixed overlay to that card, not the window.
+  return createPortal(
     <div
       className="cdd-overlay"
       role="dialog"
@@ -153,7 +156,8 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

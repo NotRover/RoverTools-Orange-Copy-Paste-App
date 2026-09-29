@@ -34,7 +34,6 @@ import {
   ChartBar,
   Check,
   Cloud,
-  CloudArrowDown,
   CloudArrowUp,
   CloudCheck,
   Desktop,
@@ -53,6 +52,8 @@ import {
   NETWORK_REFOCUS_MS,
   useWindowRefocus,
 } from "../../../hooks/useWindowRefocus";
+import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
+import { disableCloudRemoveConfirm, shouldConfirmCloudRemove } from "../../../confirmDelete";
 import { UserAvatar } from "../../UserAvatar";
 // The scroll container reuses .settings-screen; everything else is acct-*/auth-*.
 import "../settings-screen/SettingsScreen.css";
@@ -1227,17 +1228,12 @@ Keep this. It is the only way back into your synced items if you forget your pas
     void startUpload();
   };
 
-  // Two clicks: this is a delete on the server, so the other devices lose
-  // their copies too. Arming beats a dialog for something this small.
+  // Confirmed in the delete dialog until the user turns it off: this is a
+  // delete on the server, so the other devices lose their copies too.
   const [unpushing, setUnpushing] = useState(false);
-  const [unpushArmed, setUnpushArmed] = useState(false);
+  const [unpushConfirm, setUnpushConfirm] = useState(false);
   const handleUnpushAll = async () => {
-    if (!unpushArmed) {
-      setUnpushArmed(true);
-      setTimeout(() => setUnpushArmed(false), 3000);
-      return;
-    }
-    setUnpushArmed(false);
+    setUnpushConfirm(false);
     setUnpushing(true);
     setBulkResult(null);
     try {
@@ -1979,57 +1975,20 @@ Keep this. It is the only way back into your synced items if you forget your pas
                 </div>
               </div>
 
-              {/* Restore from cloud gets its own line rather than a third button
-                  up top, which is what made that row wrap. The line says what it
-                  does, because the button alone reads like it could bring back
-                  deletes, and turns into the result once it has run. */}
-              <div className="acct-id-line">
-                <span className="acct-zone-icon">
-                  <CloudArrowDown size={13} />
-                </span>
-                <div className="acct-id-line-text">
-                  <span className="acct-id-line-title">Restore from cloud</span>
-                  <span
-                    className={
-                      restoreNote
-                        ? `acct-id-line-desc acct-id-line-desc--${restoreNote.warn ? "warn" : "result"}`
-                        : "acct-id-line-desc"
-                    }
-                    role="status"
-                  >
-                    {restoreNote?.text ??
-                      "Downloads anything your account holds that is missing on this PC. Deleted items stay deleted."}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="acct-btn acct-btn--sm"
-                  onClick={handleRestore}
-                  disabled={restoring || syncNowLoading}
-                >
-                  {restoring ? "Restoring..." : "Restore"}
-                </button>
-              </div>
-
               {/* The recovery code gets its own line rather than a third link.
                   Replacing one invalidates the copy the user already saved, which
                   is not the same kind of action as opening a dialog, and the line
                   is the only place that says what the code is for. */}
-              <div className="acct-id-line">
-                <span className="acct-zone-icon">
-                  <Key size={13} />
+              <div className="acct-id-recovery">
+                <Key size={15} className="acct-id-recovery-icon" />
+                <span className="acct-id-recovery-text">
+                  {recoveryNeeded === false
+                    ? "Recovery code saved. It is the only way back in without your password."
+                    : "A recovery code is the only way back in without your password."}
                 </span>
-                <div className="acct-id-line-text">
-                  <span className="acct-id-line-title">Recovery code</span>
-                  <span className="acct-id-line-desc">
-                    {recoveryNeeded === false
-                      ? "Saved. It is the only way back in without your password."
-                      : "The only way back in without your password."}
-                  </span>
-                </div>
                 <button
                   type="button"
-                  className="acct-btn acct-btn--sm"
+                  className="acct-btn acct-btn--sm acct-btn--quiet"
                   onClick={() => {
                     setRecoveryError(null);
                     setRecoveryCode(null);
@@ -2155,15 +2114,27 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     <button
                       type="button"
                       className="acct-btn acct-btn--sm acct-btn--quiet acct-btn--danger"
-                      onClick={handleUnpushAll}
+                      onClick={async () => {
+                        if (await shouldConfirmCloudRemove()) setUnpushConfirm(true);
+                        else void handleUnpushAll();
+                      }}
                       disabled={pushingOld || unpushing || progress !== null}
                     >
                       {progress?.mode === "remove" || unpushing
                         ? "Removing..."
-                        : unpushArmed
-                          ? "Confirm?"
-                          : "Remove from cloud"}
+                        : "Remove from cloud"}
                     </button>
+                    <ConfirmDeleteDialog
+                      open={unpushConfirm}
+                      title="Remove everything from the cloud?"
+                      message="Your items leave the server and your other devices. Only this device keeps them."
+                      confirmLabel="Remove from cloud"
+                      onCancel={() => setUnpushConfirm(false)}
+                      onConfirm={(dontAsk) => {
+                        if (dontAsk) void disableCloudRemoveConfirm();
+                        void handleUnpushAll();
+                      }}
+                    />
                   </div>
                 </div>
                 {plan ? (
@@ -2235,6 +2206,29 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     upload keeps going.
                   </p>
                 )}
+              </div>
+
+              {/* Says what it does, because the button alone reads like it could
+                  bring back deletes, and turns into the result once it has run. */}
+              <div className="acct-card acct-mode">
+                <div className="acct-mode-head">
+                  <span className="acct-row-name">Restore from cloud</span>
+                  <button
+                    type="button"
+                    className="acct-btn acct-btn--sm"
+                    onClick={handleRestore}
+                    disabled={restoring || syncNowLoading}
+                  >
+                    {restoring ? "Restoring..." : "Restore"}
+                  </button>
+                </div>
+                <p
+                  className={`acct-card-desc${restoreNote ? ` acct-card-desc--${restoreNote.warn ? "warn" : "ok"}` : ""}`}
+                  role="status"
+                >
+                  {restoreNote?.text ??
+                    "Downloads anything your account holds that is missing on this PC. Deleted items stay deleted."}
+                </p>
               </div>
             </section>
 

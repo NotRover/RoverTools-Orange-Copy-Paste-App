@@ -21,6 +21,7 @@ import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
 import {
   CONFIRM_SYNC_DELETE_KEY,
   CONFIRM_SPACE_REMOVE_KEY,
+  CONFIRM_CLOUD_REMOVE_KEY,
 } from "../../../confirmDelete";
 import {
   CARD_CLICK_SETTING_EVENT,
@@ -127,6 +128,7 @@ const SettingsScreen: React.FC = () => {
   const [showSyncBadges, setShowSyncBadges] = useState(true);
   const [confirmSyncDelete, setConfirmSyncDelete] = useState(true);
   const [confirmSpaceRemove, setConfirmSpaceRemove] = useState(true);
+  const [confirmCloudRemove, setConfirmCloudRemove] = useState(true);
   // False: click copies, double click views. True: the two swap over.
   const [clickToView, setClickToView] = useState(false);
   const [pasteKeepOpenAfterCopy, setPasteKeepOpenAfterCopy] = useState(true);
@@ -169,6 +171,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("show_sync_badges", setShowSyncBadges, true);
     loadBool(CONFIRM_SYNC_DELETE_KEY, setConfirmSyncDelete, true);
     loadBool(CONFIRM_SPACE_REMOVE_KEY, setConfirmSpaceRemove, true);
+    loadBool(CONFIRM_CLOUD_REMOVE_KEY, setConfirmCloudRemove, true);
     loadBool("sound", setSound, true);
     loadBool("sound_copy", setSoundCopy, false);
     loadBool("sound_paste", setSoundPaste, false);
@@ -398,6 +401,18 @@ const SettingsScreen: React.FC = () => {
                   confirmSpaceRemove,
                   setConfirmSpaceRemove,
                   CONFIRM_SPACE_REMOVE_KEY,
+                )
+              }
+            />
+            <ToggleRow
+              label="Confirm before removing everything from the cloud"
+              desc="Ask first when Remove from cloud on the Account screen takes all your items off the server and your other devices."
+              active={confirmCloudRemove}
+              onToggle={() =>
+                toggleBoolSetting(
+                  confirmCloudRemove,
+                  setConfirmCloudRemove,
+                  CONFIRM_CLOUD_REMOVE_KEY,
                 )
               }
             />
