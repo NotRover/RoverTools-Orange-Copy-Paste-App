@@ -26,7 +26,7 @@ Then follow [Install and first run](https://orange-copy-paste-app.pages.dev/docs
 
 ## What is in this workspace
 
-This repository is the desktop app and the workspace for the whole product. The sync server and the website are submodules with their own repositories.
+This repository is the desktop app and the workspace for the whole product. The sync server and the website have their own repositories, cloned into this folder beside the app.
 
 | Component | What it is | Stack |
 | --- | --- | --- |
@@ -83,8 +83,8 @@ Exact routes, payloads, event names and key derivation are in the [server's arch
 ```text
 RoverTools-Orange-Copy-Paste-App/
 |- orange-copy-paste-clipboard-app-rust/   the desktop app (part of this repo)
-|- orange-copy-paste-clipboard-backend/    submodule: RoverTools-Orange-Copy-Paste-Backend
-|- orange-copy-paste-clipboard-website/    submodule: RoverTools-Orange-Copy-Paste-Website
+|- orange-copy-paste-clipboard-backend/    own repo: RoverTools-Orange-Copy-Paste-Backend (git-ignored here)
+|- orange-copy-paste-clipboard-website/    own repo: RoverTools-Orange-Copy-Paste-Website (git-ignored here)
 |- docs/
 |  |- architecture.md    the map: which doc owns which fact, and rules that bind app and server
 |  |- permissions.md     who may do what, and where it is enforced
@@ -98,16 +98,14 @@ RoverTools-Orange-Copy-Paste-App/
 `- CLAUDE.md             the workspace guide for AI coding agents
 ```
 
-Clone with the submodules:
+Clone the app, then the server and the website into it. This repository ignores both
+folders, so each keeps its own history. Skip either if you are not working on it.
 
 ```bash
-git clone --recurse-submodules https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
-```
-
-If you already cloned without them:
-
-```bash
-git submodule update --init --recursive
+git clone https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
+cd RoverTools-Orange-Copy-Paste-App
+git clone https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Backend.git orange-copy-paste-clipboard-backend
+git clone https://github.com/NotRover/RoverTools-Orange-Copy-Paste-Website.git orange-copy-paste-clipboard-website
 ```
 
 The default branch is `main` in all three repositories. Keep each commit to one repository.

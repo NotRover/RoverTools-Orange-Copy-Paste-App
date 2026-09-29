@@ -94,8 +94,8 @@ In `changelog/next.md`: a lead, then only the sections that have entries.
   "seamless / robust / effortless / unlock / transform …", no "it's not just X, it's
   Y", no three-adjective piles.
 - **`### Internal`:** the one place you still collapse hard. Terse lines for the
-  record, no user voice — still ASCII, still no section sign. Fold a run of submodule
-  bumps, CI, and refactors into a single line; it is a footnote, not a report.
+  record, no user voice — still ASCII, still no section sign. Fold a run of CI
+  changes and refactors into a single line; it is a footnote, not a report.
 
 ### Calibration — three ways to write the same entry
 

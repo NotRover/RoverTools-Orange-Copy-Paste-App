@@ -17,7 +17,7 @@ This file is for people changing the desktop app or the workspace around it. To 
 | `orange-copy-paste-clipboard-app-rust/docs/` | How the app works inside, and past regressions |
 | `docs/` | The architecture map, permissions, the release process, and the writing guide |
 | `changelog/` | Release notes, one file per release |
-| `orange-copy-paste-clipboard-backend/`, `orange-copy-paste-clipboard-website/` | Submodules, each with its own repository |
+| `orange-copy-paste-clipboard-backend/`, `orange-copy-paste-clipboard-website/` | Separate repositories, cloned into this folder and ignored by it |
 
 Rust owns state, storage and all encryption; React is only the interface. Do not reimplement encryption, key handling or merge logic in TypeScript.
 
@@ -26,7 +26,7 @@ Rust owns state, storage and all encryption; React is only the interface. Do not
 You need [Bun](https://bun.sh), a stable [Rust toolchain](https://rustup.rs), and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your system.
 
 ```bash
-git clone --recurse-submodules https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
+git clone https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App.git
 cd RoverTools-Orange-Copy-Paste-App/orange-copy-paste-clipboard-app-rust
 bun install
 bun run tauri dev

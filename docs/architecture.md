@@ -16,8 +16,8 @@ third time, and the third copy is what went stale.
 | Path | Role | Repo |
 |------|------|------|
 | `orange-copy-paste-clipboard-app-rust/` | Desktop app. React + TypeScript UI, Tauri v2 + Rust core. Captures the clipboard, stores history and notes locally, holds every key, does all encryption. | Lives **directly** in the parent repo |
-| `orange-copy-paste-clipboard-backend/` | Cloud sync API. FastAPI + Supabase Postgres + Redis + S3/R2. Verifies JWTs, stores ciphertext, fans out over WebSocket, brokers blobs. | **Submodule**, its own repo |
-| `orange-copy-paste-clipboard-website/` | Public docs + presentation site. Astro + Starlight. End-user how-to and the marketing landing page; not part of the product runtime. | **Submodule**, its own repo |
+| `orange-copy-paste-clipboard-backend/` | Cloud sync API. FastAPI + Supabase Postgres + Redis + S3/R2. Verifies JWTs, stores ciphertext, fans out over WebSocket, brokers blobs. | Its own repo, cloned inside the parent |
+| `orange-copy-paste-clipboard-website/` | Public docs + presentation site. Astro + Starlight. End-user how-to and the marketing landing page; not part of the product runtime. | Its own repo, cloned inside the parent |
 
 The client and the backend are the two product halves. The backend is a relay and a
 store: it never holds a key that could open anything it persists, which is why it can be
@@ -85,4 +85,4 @@ matters:
 Migrations are authored freely, but **the deploy never applies them**. It only rebuilds and
 restarts the service, so a merged revision has not reached the database until someone
 applies it with the backend's Migrate database workflow. Never assume a green deploy
-migrated. Commits stay scoped to one repo; a submodule pointer bump is its own commit.
+migrated. Commits stay scoped to one repo.

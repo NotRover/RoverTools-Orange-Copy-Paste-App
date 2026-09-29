@@ -47,10 +47,10 @@ Three components, **three git repos**:
 | Path | Role | Repo |
 |------|------|------|
 | `orange-copy-paste-clipboard-app-rust/` | Desktop Smart Clipboard app (React + TypeScript + Vite + Tauri/Rust). Clipboard, notes, and cloud-sync domains. | Part of the **parent** repo (`RoverTools` → renamed `RoverTools-Orange-Copy-Paste-App`) |
-| `orange-copy-paste-clipboard-backend/` | Cloud-sync API: FastAPI + Supabase (Postgres + GoTrue Auth) + Redis + S3/R2 blobs. | **Submodule** — its own repo (`RoverTools-Orange-Copy-Paste-Backend`) |
-| `orange-copy-paste-clipboard-website/` | Public docs + presentation site (Astro + Starlight, bun). End-user how-to and the marketing landing page. | **Submodule** — its own repo (`RoverTools-Orange-Copy-Paste-Website`) |
+| `orange-copy-paste-clipboard-backend/` | Cloud-sync API: FastAPI + Supabase (Postgres + GoTrue Auth) + Redis + S3/R2 blobs. | Its own repo (`RoverTools-Orange-Copy-Paste-Backend`), cloned inside the parent and git-ignored |
+| `orange-copy-paste-clipboard-website/` | Public docs + presentation site (Astro + Starlight, bun). End-user how-to and the marketing landing page. | Its own repo (`RoverTools-Orange-Copy-Paste-Website`), cloned inside the parent and git-ignored |
 
-The client lives **directly** in the parent repo; the backend and the website are each submodules with their own repos. Default branch on all three repos is `main`.
+The client lives **directly** in the parent repo. The backend and the website are separate repos cloned into the parent's folder, which ignores them: **not submodules**, so there is no pointer to bump and the parent never records their commits. Default branch on all three repos is `main`.
 
 ## Project Overview
 
@@ -200,14 +200,14 @@ Pick the smallest valid check set for what you touched.
 - **Client Rust/Tauri** → `cd src-tauri && cargo check`.
 - **Behavior-sensitive runtime** (watcher/hotkeys/popup/paste/sync) → `bun run tauri dev` and smoke-test that specific flow. Full E2E sync needs a live backend + Supabase + two accounts; if you can't run it, say so — don't claim it works.
 - **Backend Python** (any file) → always `uv run ty check src` and `uv run ruff check src`; fix all errors before done. Run `uv run pytest` for logic changes. Don't suppress with `# type: ignore` unless it's a documented third-party-stub false positive.
-- **Website** (`orange-copy-paste-clipboard-website/`, any content or config) → `bun run build` from the submodule; it typechecks and generates the static output. See that submodule's own `CLAUDE.md`.
+- **Website** (`orange-copy-paste-clipboard-website/`, any content or config) → `bun run build` from that folder; it typechecks and generates the static output. See that repo's own `CLAUDE.md`.
 - **Any doc or user-facing text, in any repo** → the "Checklist before merging a doc change" in `docs/writing-docs.md`, with every item passing. Also check each changed number, label and shortcut against the code. A docs change is not done on a green build alone.
 
 ## Git & Repos
 
-- The **client** is committed in the parent repo; the **backend** and the **website** are each submodules with their own repos. Keep each commit scoped to one repo; don't bundle a submodule-pointer bump with client code unless coordinating a release.
+- The **client** is committed in the parent repo; the **backend** and the **website** are each their own repo. Keep each commit scoped to one repo, and run git from inside the folder whose repo the change belongs to.
 - **Nothing reaches `main` without the user.** The user is the only account with write access, so outside changes arrive as PRs the user reviews and merges. Rulesets on all three repos block force pushes and deletion of `main` for everyone, the user included, with no bypass, and the app's release tags can't be moved or deleted. Pushes from this session use the user's credentials: push only when the user approves it in that turn, and never try to get around a rule.
-- **Not everything gets a PR.** Default to one commit pushed straight to `main`, once the user approves the push, for low-risk work: docs, `CLAUDE.md`, changelog, config (Dependabot, editor, lint), submodule-pointer bumps, and lockfile-only dependency bumps that passed the repo's checks. Say what is going in before pushing.
+- **Not everything gets a PR.** Default to one commit pushed straight to `main`, once the user approves the push, for low-risk work: docs, `CLAUDE.md`, changelog, config (Dependabot, editor, lint), and lockfile-only dependency bumps that passed the repo's checks. Say what is going in before pushing.
 - **Open a PR** only for work the user should review as a diff before it lands: app or backend code, anything crossing the wire contract, migrations, crypto/auth/security changes, the release or deploy workflows, or anything the user asks to review. PR work goes on a dedicated branch in its own repo, against that repo's `main`.
 - **One PR per piece of work.** Related changes in one repo share a branch and a PR; don't split them by file or concern, and don't open a PR just to replace bot PRs when a direct push would do.
 - **`uv.lock` churn:** `uv run` can regenerate `uv.lock`. If a task didn't intend a dependency change, restore it (`git checkout -- uv.lock`) so the commit stays scoped.
@@ -407,7 +407,7 @@ When compacting, preserve — in enough detail to act on without the original me
 - **Decisions + rationale** — every settled choice and its one-line why, so nothing gets relitigated.
 - **Current state & next step** — what's done, what's in progress, and the exact next action.
 - **Critical facts** — key `path:line`, contract details (payloads, event names, key handling), root causes, and gotchas discovered.
-- **Repo/branch context** — which repo each pending change belongs to (parent vs backend submodule), branch names, and whether anything is committed.
+- **Repo/branch context** — which repo each pending change belongs to (parent, backend or website), branch names, and whether anything is committed.
 - **Verification state** — which checks were run and their results; which flows are untested and why.
 - **User instructions** — explicit directions and constraints given this session.
 - **Open blockers / questions** — anything unresolved or awaiting the user.

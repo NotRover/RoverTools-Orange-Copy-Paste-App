@@ -46,7 +46,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        # Backend is a submodule and is not needed for the client build — skip it.
 
       - name: Install Linux system dependencies
         # Tauri v2 GTK/WebKit toolchain + libxdo (input) + appindicator (tray).
