@@ -46,6 +46,7 @@ To install and use the app, download it from the [releases page](https://github.
 - Encrypted sync of history, notes and settings, with live updates and an offline queue that uploads when you reconnect.
 - Sharing through **spaces**: live, any number of members, and a person can be in several. Each space has its own key.
 - End-to-end encryption throughout. Keys live in memory, wiped when dropped, and in the system credential store; never on disk in plain form, and never on the server. The design is explained in the [security model](https://orange-copy-paste-app.pages.dev/docs/security/).
+- Optional encryption at rest: a Settings switch encrypts the text of history and notes in the local database with a key kept in the credential store, with or without an account.
 
 ## Run it from source
 
