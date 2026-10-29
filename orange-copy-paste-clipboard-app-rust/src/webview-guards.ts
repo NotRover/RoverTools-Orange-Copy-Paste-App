@@ -20,6 +20,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { installFrontendLogging } from "./log";
 import { safeLinkHref } from "./components/app/clipboard-screen/sanitize-html";
 
 /** Fields where the native menu is Cut/Copy/Paste and worth keeping. */
@@ -76,6 +77,7 @@ function installLinkGuard(): void {
 }
 
 export function installWebviewGuards(): void {
+  installFrontendLogging();
   installLinkGuard();
   if (import.meta.env.DEV) return;
 

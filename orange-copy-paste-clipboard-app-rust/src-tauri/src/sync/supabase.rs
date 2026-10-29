@@ -116,7 +116,7 @@ impl From<AuthError> for String {
     /// return `Result<T, String>` and that string is rendered verbatim, so this
     /// conversion is the last place the two audiences can still be told apart.
     fn from(e: AuthError) -> Self {
-        eprintln!("[auth] {}", e.message);
+        log::warn!(target: "auth", "{}", e.message);
         e.user_message()
     }
 }
@@ -369,7 +369,7 @@ impl SupabaseAuth {
             .send()
             .await
             .map_err(|e| {
-                eprintln!("[auth] supabase recover: {e}");
+                log::warn!(target: "auth", "supabase recover: {e}");
                 "Cannot reach the sign-in service. Check your connection and try again."
                     .to_string()
             })?;
@@ -386,7 +386,7 @@ impl SupabaseAuth {
                         .map(str::to_string)
                 })
                 .unwrap_or(body);
-            eprintln!("[auth] supabase recover ({}): {msg}", status.as_u16());
+            log::warn!(target: "auth", "supabase recover ({}): {msg}", status.as_u16());
             return Err(AuthError {
                 status: Some(status.as_u16()),
                 message: format!("supabase recover ({}): {msg}", status.as_u16()),
@@ -436,7 +436,7 @@ impl SupabaseAuth {
         if value.get("access_token").and_then(|v| v.as_str()).is_some() {
             let session = serde_json::from_value::<SupabaseSession>(value)
                 .map_err(|e| {
-                    eprintln!("[auth] supabase signup parse: {e}");
+                    log::warn!(target: "auth", "supabase signup parse: {e}");
                     "The account was created but the reply was unreadable. Sign in to continue."
                         .to_string()
                 })?;

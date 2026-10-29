@@ -1,16 +1,24 @@
-//! Client-to-server ID mapping, persisted to `{app_data}/id_map.json`.
+//! Client-to-server ID mapping, persisted in the `sync_entries` table, one
+//! row per entry key.
 //!
 //! Maps `"clipboard:{client_id}"` → `server_uuid` and
 //!      `"note:{client_id}"`      → `server_uuid`.
 //!
 //! It is also this device's record of which clipboard entries are in the
 //! cloud or a space, which is what keeps them across a restart with Keep
-//! history off. So a file that will not read is never taken for an empty one:
-//! see [`IdMap::unreadable`].
+//! history off.
+//!
+//! Memory holds the maps below, keyed alike; the table holds the same facts
+//! as one row per key. A mutation marks the keys it touched and
+//! [`IdMap::persist`] writes those rows, so a method that changes several
+//! keys still costs one transaction.
 
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::storage::Db;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct IdMapData {
@@ -140,55 +148,158 @@ const PLACEHOLDER_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 pub struct IdMap {
     data: IdMapData,
-    path: PathBuf,
-    /// The file existed at load and would not read or parse.
-    unreadable: bool,
+    db: Arc<Db>,
+    /// Keys changed since the last [`Self::persist`].
+    dirty: HashSet<String>,
+}
+
+/// Read every row into the maps.
+fn read_all(conn: &rusqlite::Connection) -> rusqlite::Result<IdMapData> {
+    let mut st = conn.prepare(
+        "SELECT key, server_id, shares, remote, owner, arrival, unpushed, deleted_marker FROM sync_entries",
+    )?;
+    let mut data = IdMapData::default();
+    let rows = st.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, bool>(3)?,
+            r.get::<_, Option<String>>(4)?,
+            r.get::<_, Option<i64>>(5)?,
+            r.get::<_, bool>(6)?,
+            r.get::<_, Option<String>>(7)?,
+        ))
+    })?;
+    for row in rows {
+        let (key, server_id, shares, remote, owner, arrival, unpushed, marker) = row?;
+        if let Some(id) = server_id {
+            data.entries.insert(key.clone(), id);
+        }
+        if let Some(shares) = shares.and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok()) {
+            if !shares.is_empty() {
+                data.entry_shares.insert(key.clone(), shares);
+            }
+        }
+        if remote {
+            data.remote_entries.insert(key.clone());
+        }
+        if let Some(owner) = owner {
+            data.entry_owners.insert(key.clone(), owner);
+        }
+        if let Some(at) = arrival {
+            data.entry_arrivals.insert(key.clone(), at as u64);
+        }
+        if unpushed {
+            data.unpushed.insert(key.clone());
+        }
+        if let Some(marker) = marker.and_then(|m| serde_json::from_str(&m).ok()) {
+            data.deleted_markers.insert(key, marker);
+        }
+    }
+    Ok(data)
+}
+
+/// Write the rows for `keys` from `data`: a key every map lacks loses its row.
+fn write_keys<'a>(
+    tx: &rusqlite::Transaction<'_>,
+    data: &IdMapData,
+    keys: impl Iterator<Item = &'a String>,
+) -> rusqlite::Result<()> {
+    let mut upsert = tx.prepare(
+        "INSERT INTO sync_entries (key, server_id, shares, remote, owner, arrival, unpushed, deleted_marker)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(key) DO UPDATE SET server_id = excluded.server_id, shares = excluded.shares,
+             remote = excluded.remote, owner = excluded.owner, arrival = excluded.arrival,
+             unpushed = excluded.unpushed, deleted_marker = excluded.deleted_marker",
+    )?;
+    let mut delete = tx.prepare("DELETE FROM sync_entries WHERE key = ?1")?;
+    for key in keys {
+        let server_id = data.entries.get(key);
+        let shares = data.entry_shares.get(key).filter(|s| !s.is_empty());
+        let remote = data.remote_entries.contains(key);
+        let owner = data.entry_owners.get(key);
+        let arrival = data.entry_arrivals.get(key).map(|a| *a as i64);
+        let unpushed = data.unpushed.contains(key);
+        let marker = data.deleted_markers.get(key);
+        let empty = server_id.is_none()
+            && shares.is_none()
+            && !remote
+            && owner.is_none()
+            && arrival.is_none()
+            && !unpushed
+            && marker.is_none();
+        if empty {
+            delete.execute([key])?;
+            continue;
+        }
+        let shares_json = shares.and_then(|s| serde_json::to_string(s).ok());
+        let marker_json = marker.and_then(|m| serde_json::to_string(m).ok());
+        upsert.execute(params![key, server_id, shares_json, remote, owner, arrival, unpushed, marker_json])?;
+    }
+    Ok(())
 }
 
 impl IdMap {
-    /// Load the map. A file that is there and will not read loads as an empty
-    /// map with [`Self::unreadable`] set; the file is then never written this session.
-    pub fn load(path: PathBuf) -> Self {
-        let (data, unreadable) = crate::sync::persist::load_json_checked(&path);
-        let mut map = Self::with_data(data, path);
-        map.unreadable = unreadable;
-        map
-    }
-
-    /// Whether the file failed to load. The map then says nothing about which
-    /// entries are in the cloud or a space, so nothing may be dropped on its
-    /// word this session.
-    pub fn unreadable(&self) -> bool {
-        self.unreadable
-    }
-
-    /// Like [`Self::load`], but a file that exists and will not read or parse
-    /// is an error rather than an empty map. For the callers that write the map
-    /// back with sync off: the offline markers are state the server cannot
-    /// rebuild, so an empty map saved over a briefly locked file loses them.
-    pub fn try_load(path: PathBuf) -> Result<Self, String> {
-        let data = match crate::health::read_state(&path)? {
-            None => IdMapData::default(),
-            Some(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
-        };
-        Ok(Self::with_data(data, path))
-    }
-
-    fn with_data(data: IdMapData, path: PathBuf) -> Self {
-        let mut map = Self { data, path, unreadable: false };
+    /// Load the map from the table.
+    pub fn load(db: Arc<Db>) -> Self {
+        let data = db.read("load id map", read_all).unwrap_or_default();
+        let mut map = Self { data, db, dirty: HashSet::new() };
         // Also on startup, not only when the next removal arrives: an install
         // that stops removing things would otherwise keep its last batch for
         // good.
-        let before = map.data.deleted_markers.len();
         map.prune_deleted(crate::sync::now_ms());
-        if map.data.deleted_markers.len() != before {
+        if !map.dirty.is_empty() {
             map.persist();
         }
         map
     }
 
-    pub(crate) fn persist(&self) {
-        crate::sync::persist::save_json(&self.path, &self.data);
+    /// The keep set read straight from the table, for the exit flush with sync
+    /// off. `None` when the read failed, which keeps everything.
+    pub fn keep_keys_in(db: &Db) -> Option<HashSet<String>> {
+        let data = db.read("read id map keys", read_all)?;
+        Some(Self { data, db: Arc::new(Db::open_in_memory_unchecked()), dirty: HashSet::new() }.keep_keys())
+    }
+
+    /// Move the old `id_map.json` into the table, once. Returns how many keys.
+    pub fn import_file(db: &Db, path: &std::path::Path) -> Result<usize, String> {
+        let data: IdMapData = match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e.to_string()),
+        };
+        let keys: HashSet<String> = data
+            .entries
+            .keys()
+            .chain(data.entry_shares.keys())
+            .chain(data.remote_entries.iter())
+            .chain(data.entry_owners.keys())
+            .chain(data.entry_arrivals.keys())
+            .chain(data.unpushed.iter())
+            .chain(data.deleted_markers.keys())
+            .cloned()
+            .collect();
+        let count = keys.len();
+        db.write("import id map", |tx| write_keys(tx, &data, keys.iter()))
+            .ok_or_else(|| "id map rows did not land".to_string())?;
+        Ok(count)
+    }
+
+    /// Mark a key as changed, for the next [`Self::persist`].
+    fn touch(&mut self, key: &str) {
+        self.dirty.insert(key.to_string());
+    }
+
+    /// Write the rows of every key changed since the last write.
+    pub(crate) fn persist(&mut self) {
+        if self.dirty.is_empty() {
+            return;
+        }
+        let (data, dirty) = (&self.data, &self.dirty);
+        if self.db.write("write id map", |tx| write_keys(tx, data, dirty.iter())).is_some() {
+            self.dirty.clear();
+        }
     }
 
     /// Drop everything. Every field here describes one account's view of the
@@ -200,7 +311,8 @@ impl IdMap {
     /// account has never met.
     pub fn reset(&mut self) {
         self.data = IdMapData::default();
-        self.persist();
+        self.dirty.clear();
+        self.db.write("reset id map", |tx| tx.execute("DELETE FROM sync_entries", []).map(|_| ()));
     }
 
     // ── Clipboard / Note entries ──────────────────────────────────
@@ -211,6 +323,7 @@ impl IdMap {
             .insert(client_id.to_string(), server_id.to_string());
         // Back on the server, so a tombstone for it is a real deletion again.
         self.data.unpushed.remove(client_id);
+        self.touch(client_id);
         self.persist();
     }
 
@@ -265,6 +378,7 @@ impl IdMap {
         self.data.entries.remove(client_id);
         self.data.entry_shares.remove(client_id);
         self.data.entry_arrivals.remove(client_id);
+        self.touch(client_id);
     }
 
     /// Record a delete made while sync is off, so the row does not come back
@@ -277,8 +391,8 @@ impl IdMap {
     /// offering the row for good. An item this device has no record of in the
     /// cloud changes nothing.
     ///
-    /// Memory only, so a Clear all writes the file once: returns whether the
-    /// map changed, and the caller persists.
+    /// Memory only, so a Clear all writes once: returns whether the map
+    /// changed, and the caller persists.
     pub fn mark_removed_offline(&mut self, key: &str, entry_ts: Option<u64>, queued: bool) -> bool {
         let remote = self.data.remote_entries.contains(key);
         if !(self.data.entries.contains_key(key) || remote || queued) {
@@ -310,6 +424,7 @@ impl IdMap {
     /// first mark writes the file, so re-merging the same entry costs nothing.
     pub fn mark_entry_remote(&mut self, client_id: &str) {
         if self.data.remote_entries.insert(client_id.to_string()) {
+            self.touch(client_id);
             self.persist();
         }
     }
@@ -321,6 +436,7 @@ impl IdMap {
     /// same action to drop the now-meaningless server id.
     pub fn mark_unpushed(&mut self, client_id: &str) {
         if self.data.unpushed.insert(client_id.to_string()) {
+            self.touch(client_id);
             self.persist();
         }
     }
@@ -329,6 +445,7 @@ impl IdMap {
     /// uploaded again.
     pub fn clear_unpushed(&mut self, client_id: &str) {
         if self.data.unpushed.remove(client_id) {
+            self.touch(client_id);
             self.persist();
         }
     }
@@ -400,6 +517,7 @@ impl IdMap {
         self.data
             .entry_owners
             .insert(client_id.to_string(), user_id.to_string());
+        self.touch(client_id);
         self.persist();
         true
     }
@@ -418,7 +536,9 @@ impl IdMap {
     pub fn clear_all_entry_owners(&mut self) -> usize {
         let count = self.data.entry_owners.len();
         if count > 0 {
+            let keys: Vec<String> = self.data.entry_owners.keys().cloned().collect();
             self.data.entry_owners.clear();
+            self.dirty.extend(keys);
             self.persist();
         }
         count
@@ -431,6 +551,7 @@ impl IdMap {
     /// else. See `SyncClient::author_of`.
     pub fn clear_entry_owner(&mut self, client_id: &str) {
         if self.data.entry_owners.remove(client_id).is_some() {
+            self.touch(client_id);
             self.persist();
         }
     }
@@ -443,6 +564,7 @@ impl IdMap {
     pub fn record_arrival(&mut self, client_id: &str, at: u64) {
         if !self.data.entry_arrivals.contains_key(client_id) {
             self.data.entry_arrivals.insert(client_id.to_string(), at);
+            self.touch(client_id);
             self.persist();
         }
     }
@@ -464,6 +586,7 @@ impl IdMap {
         self.data
             .deleted_markers
             .insert(client_id.to_string(), marker);
+        self.touch(client_id);
         self.prune_deleted(now);
         self.persist();
     }
@@ -481,9 +604,14 @@ impl IdMap {
     /// back. The rest describe rows the server has already stopped handing us.
     fn prune_deleted(&mut self, now: u64) {
         let cutoff = now.saturating_sub(PLACEHOLDER_TTL_MS);
-        self.data
-            .deleted_markers
-            .retain(|_, m| m.local_only || m.deleted_at >= cutoff);
+        let dirty = &mut self.dirty;
+        self.data.deleted_markers.retain(|key, m| {
+            let keep = m.local_only || m.deleted_at >= cutoff;
+            if !keep {
+                dirty.insert(key.clone());
+            }
+            keep
+        });
     }
 
     /// One removal record, without cloning the whole map.
@@ -500,6 +628,7 @@ impl IdMap {
     /// when the same item is deliberately captured again locally.
     pub fn clear_deleted(&mut self, client_id: &str) {
         if self.data.deleted_markers.remove(client_id).is_some() {
+            self.touch(client_id);
             self.persist();
         }
     }
@@ -512,11 +641,13 @@ impl IdMap {
     /// last one does.
     pub fn clear_deleted_in_space(&mut self, space_id: &str) -> usize {
         let mut removed = 0usize;
-        self.data.deleted_markers.retain(|_, m| {
+        let dirty = &mut self.dirty;
+        self.data.deleted_markers.retain(|key, m| {
             if !m.space_ids.iter().any(|s| s == space_id) {
                 return true;
             }
             removed += 1;
+            dirty.insert(key.clone());
             m.space_ids.retain(|s| s != space_id);
             !m.space_ids.is_empty()
         });
@@ -536,8 +667,9 @@ impl IdMap {
             None => !space_ids.is_empty(),
         };
         if !changed {
-            return; // every push would otherwise rewrite the file for nothing
+            return; // every push would otherwise write a row for nothing
         }
+        self.touch(client_id);
         if space_ids.is_empty() {
             self.data.entry_shares.remove(client_id);
         } else {
@@ -569,21 +701,46 @@ impl IdMap {
 
 }
 
-/// Derive the path for id_map.json given an app_data directory.
-pub fn id_map_path(app_data: &Path) -> PathBuf {
-    app_data.join("id_map.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A map backed by a path in a temp dir, so `persist` is exercised rather
+    /// A map backed by a private database, so `persist` is exercised rather
     /// than stubbed.
     fn map() -> IdMap {
-        let dir = std::env::temp_dir().join(format!("id_map_test_{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        IdMap::load(dir.join("id_map.json"))
+        IdMap::load(Db::open_in_memory())
+    }
+
+    /// The same map read back through the table.
+    fn reload(m: &IdMap) -> IdMap {
+        IdMap::load(Arc::clone(&m.db))
+    }
+
+    /// Every field round-trips through its row, and a key with nothing left
+    /// loses its row.
+    #[test]
+    fn rows_round_trip_every_field() {
+        let mut m = map();
+        m.set_entry("clipboard:a", "srv-1");
+        m.set_entry_shares("clipboard:a", &["space-1".to_string()]);
+        m.mark_entry_remote("clipboard:a");
+        m.set_entry_owner("clipboard:a", "hasan");
+        m.record_arrival("clipboard:a", 99);
+        m.mark_unpushed("clipboard:b");
+        let r = reload(&m);
+        assert_eq!(r.get_server_id("clipboard:a"), Some("srv-1"));
+        assert_eq!(r.shares_for("clipboard:a"), vec!["space-1"]);
+        assert!(r.is_remote("clipboard:a"));
+        assert_eq!(r.owner_of("clipboard:a").as_deref(), Some("hasan"));
+        assert_eq!(r.entry_arrivals().get("clipboard:a"), Some(&99));
+        assert!(r.is_unpushed("clipboard:b"));
+
+        m.clear_unpushed("clipboard:b");
+        let rows: i64 = m
+            .db
+            .read("count", |c| c.query_row("SELECT count(*) FROM sync_entries", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(rows, 1, "a key with nothing left has no row");
     }
 
     /// A share into a space whose key has not arrived has no server row, and a
@@ -601,13 +758,23 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_map_is_flagged_not_empty() {
+    fn the_legacy_file_imports_every_map() {
+        let db = Db::open_in_memory();
         let dir = std::env::temp_dir().join(format!("id_map_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("id_map.json");
-        std::fs::write(&path, b"{\"entries\": {").unwrap();
-        assert!(IdMap::load(path).unreadable());
-        assert!(!map().unreadable());
+        std::fs::write(
+            &path,
+            br#"{"entries":{"clipboard:a":"srv-1"},"remote_entries":["clipboard:b"],
+                "unpushed":["clipboard:c"],"entry_owners":{"clipboard:b":"hasan"}}"#,
+        )
+        .unwrap();
+        assert_eq!(IdMap::import_file(&db, &path).unwrap(), 3);
+        let m = IdMap::load(db);
+        assert_eq!(m.get_server_id("clipboard:a"), Some("srv-1"));
+        assert!(m.is_remote("clipboard:b"));
+        assert_eq!(m.owner_of("clipboard:b").as_deref(), Some("hasan"));
+        assert!(m.is_unpushed("clipboard:c"));
     }
 
     /// A delete made with sync off: the row is forgotten and a marker that is
@@ -627,7 +794,7 @@ mod tests {
         assert!(marker.local_only && marker.content_gone && marker.by_author);
         assert_eq!(marker.space_ids, vec!["space-1".to_string()]);
         assert_eq!(marker.entry_ts, Some(42));
-        let reloaded = IdMap::load(m.path.clone());
+        let reloaded = reload(&m);
         assert!(reloaded.deleted_marker("clipboard:a").is_some());
         assert!(reloaded.get_server_id("clipboard:a").is_none());
     }
@@ -654,10 +821,10 @@ mod tests {
         let mut m = map();
         assert!(
             !m.mark_removed_offline("clipboard:never-synced", Some(1), false),
-            "nothing changed, so the caller writes no file for it"
+            "nothing changed, so the caller writes nothing for it"
         );
         assert!(m.deleted_marker("clipboard:never-synced").is_none());
-        assert!(!m.path.exists());
+        assert!(m.dirty.is_empty());
     }
 
     /// Queued for upload but not acknowledged yet: the push still goes out when

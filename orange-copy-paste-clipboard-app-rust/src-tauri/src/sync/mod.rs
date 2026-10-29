@@ -20,7 +20,6 @@ pub mod id_map;
 pub mod oauth;
 pub mod pending_queue;
 pub mod pending_work;
-pub(crate) mod persist;
 pub mod supabase;
 pub mod sync_state;
 pub mod types;
@@ -548,14 +547,9 @@ impl std::fmt::Display for RestoreError {
 /// Record that the live refresh token did not reach the keychain.
 ///
 /// The restore carries on regardless - see the call site - so this is the only
-/// trace that the *next* launch may have to ask for a password. A release build
-/// is a Windows GUI binary and prints nowhere, so the durable note is the whole
-/// point.
+/// trace that the *next* launch may have to ask for a password.
 fn note_token_at_risk(headline: &str, detail: impl std::fmt::Display) {
-    eprintln!("[sync] {headline}: {detail}");
-    let detail = format!("{detail} - this session is fine, the next launch may have to sign in");
-    let headline = headline.to_string();
-    tokio::task::spawn_blocking(move || crate::health::note(&headline, &detail));
+    log::error!(target: "sync", "{headline}: {detail} - this session is fine, the next launch may have to sign in");
 }
 
 pub struct SyncClient {
@@ -616,10 +610,6 @@ pub struct SyncClient {
     /// Write-ahead record of the uploads and downloads that have started and
     /// not finished. See [`pending_work`].
     pending_work: Arc<Mutex<PendingWork>>,
-    /// The id map, the queue or the pending-work record was there at load and
-    /// would not read. None of them can then say what is safe to drop, so the
-    /// exit flush keeps every entry this session. See [`Self::keep_keys`].
-    stores_unreadable: bool,
     /// Set once the app has begun to quit or restart. No new upload, download
     /// or queue flush starts after it; work that comes due is recorded for the
     /// next launch instead. See [`Self::begin_quit`].
@@ -748,7 +738,7 @@ async fn store_device_wrap(
         match http.store_device_wrapped_umk(&device_id, wrapped.clone()).await {
             Ok(()) => return Ok(()),
             Err(e) => {
-                eprintln!("[sync] store device umk failed: {e}");
+                log::warn!(target: "sync", "store device umk failed: {e}");
                 last = e.to_string();
             }
         }
@@ -778,20 +768,17 @@ impl SyncClient {
             .path()
             .app_data_dir()
             .map_err(|e| format!("app_data: {e}"))?;
+        let db = app
+            .state::<crate::state::AppState>()
+            .db
+            .get()
+            .cloned()
+            .ok_or_else(|| "storage is not open".to_string())?;
 
-        let pending_queue = Arc::new(Mutex::new(PendingQueue::load(
-            pending_queue::pending_queue_path(&app_data),
-        )));
-        let id_map = Arc::new(Mutex::new(IdMap::load(id_map::id_map_path(&app_data))));
-        let pending_work = Arc::new(Mutex::new(PendingWork::load(
-            pending_work::pending_work_path(&app_data),
-        )));
-        let stores_unreadable = id_map.lock().unreadable()
-            || pending_queue.lock().unreadable()
-            || pending_work.lock().unreadable();
-        let sync_state = Arc::new(Mutex::new(SyncStateStore::load(
-            sync_state::state_path(&app_data),
-        )));
+        let pending_queue = Arc::new(Mutex::new(PendingQueue::load(Arc::clone(&db))));
+        let id_map = Arc::new(Mutex::new(IdMap::load(Arc::clone(&db))));
+        let pending_work = Arc::new(Mutex::new(PendingWork::load(Arc::clone(&db))));
+        let sync_state = Arc::new(Mutex::new(SyncStateStore::load(Arc::clone(&db))));
 
         // Start from the last measurement rather than from "this machine is
         // right", then keep it current off the `Date` on every API response.
@@ -873,7 +860,6 @@ impl SyncClient {
             removed_this_run: Arc::new(Mutex::new(HashMap::new())),
             blob_merges: Arc::new(Mutex::new(HashSet::new())),
             pending_work,
-            stores_unreadable,
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             restore_check_missed: std::sync::atomic::AtomicBool::new(false),
             settings_round,
@@ -939,7 +925,7 @@ impl SyncClient {
                 Err(refused) if refused.is_invalid_credentials() && !moved_over => {
                     // Logged, not shown: the second attempt's verdict is the one
                     // the user gets, and it is at least as specific.
-                    eprintln!("[auth] {} - retrying as a pre-split account", refused);
+                    log::warn!(target: "auth", "{} - retrying as a pre-split account", refused);
                     let session = self
                         .supabase
                         .sign_in_password(&email, &keys.password)
@@ -1237,7 +1223,7 @@ impl SyncClient {
             // that decrypts nothing. Clearing it is also what makes the
             // account screen ask for a fresh code.
             if let Err(e) = http.clear_recovery_wrapped_umk().await {
-                eprintln!("[sync] stale recovery envelope not cleared: {e}");
+                log::warn!(target: "sync", "stale recovery envelope not cleared: {e}");
             }
         }
         self.supabase
@@ -1347,7 +1333,7 @@ impl SyncClient {
         let devices = match http.list_devices().await {
             Ok(devices) => devices,
             Err(e) => {
-                eprintln!("[sync] other devices not listed after start-over: {e}");
+                log::warn!(target: "sync", "other devices not listed after start-over: {e}");
                 return;
             }
         };
@@ -1356,7 +1342,7 @@ impl SyncClient {
                 continue;
             }
             if let Err(e) = http.revoke_device(&device.id).await {
-                eprintln!("[sync] device {} not revoked after start-over: {e}", device.id);
+                log::warn!(target: "sync", "device {} not revoked after start-over: {e}", device.id);
             }
         }
     }
@@ -1523,12 +1509,11 @@ impl SyncClient {
                 Some(token) => {
                     match self.supabase.update_password(&token, &keys.auth_key).await {
                         Ok(()) => self.note_auth_v2(&user_email),
-                        Err(e) => eprintln!(
-                            "[sync] auth key not stored with Supabase, will retry next sign-in: {e}"
+                        Err(e) => log::warn!(target: "sync", "auth key not stored with Supabase, will retry next sign-in: {e}"
                         ),
                     }
                 }
-                None => eprintln!("[sync] auth key not stored with Supabase: no access token"),
+                None => log::warn!(target: "sync", "auth key not stored with Supabase: no access token"),
             }
         }
         let (_identity_priv, identity_pub) = crypto::derive_identity_keypair(&umk);
@@ -1580,7 +1565,7 @@ impl SyncClient {
             })
             .await
         {
-            eprintln!("[sync] register_keys failed (space sharing disabled): {e}");
+            log::warn!(target: "sync", "register_keys failed (space sharing disabled): {e}");
         }
 
         // 7. Persist secrets to the OS keychain.
@@ -1632,11 +1617,7 @@ impl SyncClient {
                 // Invites and space activity are addressed to a person, so the
                 // feed is the previous account's mail. It is refilled from the
                 // server for whoever just signed in.
-                let app_state = self.app.state::<crate::state::AppState>();
-                app_state.notifications.lock().reset();
-                app_state
-                    .notifications_dirty
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                self.app.state::<crate::state::AppState>().notifications.lock().reset();
             }
             state.set_device_id(&device_id);
             state.set_user_id(&user_id);
@@ -1651,7 +1632,7 @@ impl SyncClient {
         //     still perfectly good, so losing it used to cost a password. Not a
         //     secret; it is here for the storage lifetime, not the protection.
         if let Err(e) = crypto::store_session_pointer(&user_id, &device_id).await {
-            eprintln!("[sync] session pointer not stored: {e}");
+            log::warn!(target: "sync", "session pointer not stored: {e}");
         }
 
         // 9. Wire in-memory state.
@@ -1683,7 +1664,7 @@ impl SyncClient {
         if !self.sync_state.lock().data.authorship_repaired {
             let cleared = self.id_map.lock().clear_all_entry_owners();
             self.sync_state.lock().rewind_for_authorship_repair();
-            eprintln!("[sync] rebuilding authorship for {cleared} entries from a full pull");
+            log::info!(target: "sync", "rebuilding authorship for {cleared} entries from a full pull");
         }
 
         // 10. Start the realtime listener.  It owns `connected` from here on —
@@ -1895,7 +1876,7 @@ impl SyncClient {
         // `http` from theirs and a `umk` from ours. Theirs is the one the user
         // is looking at, so it wins and this attempt is thrown away.
         if let Some(live) = self.current_user() {
-            eprintln!("[sync] restore finished behind a manual sign-in; keeping the live session");
+            log::info!(target: "sync", "restore finished behind a manual sign-in; keeping the live session");
             return Ok(live);
         }
 
@@ -1931,7 +1912,7 @@ impl SyncClient {
     pub(crate) fn end_session_revoked(self: &Arc<Self>) {
         let me = Arc::clone(self);
         std::thread::spawn(move || {
-            eprintln!("[sync] this device was revoked; signing out");
+            log::warn!(target: "sync", "this device was revoked; signing out");
             me.logout();
             let _ = me.app.emit("sync:device-revoked", serde_json::Value::Null);
         });
@@ -1991,7 +1972,7 @@ impl SyncClient {
                     // The credentials are good and only the server is out of
                     // reach - very common right after an update, when the app
                     // autostarts before the network is back.
-                    eprintln!("[sync] session restore deferred, will retry: {e}");
+                    log::warn!(target: "sync", "session restore deferred, will retry: {e}");
                     Arc::clone(&self).spawn_session_restore_retry();
                 }
                 Err(e) => {
@@ -1999,7 +1980,7 @@ impl SyncClient {
                     // was something to restore, so every non-transient answer is
                     // a real sign-out and worth recording. This is the line that
                     // says why, on a build that prints nowhere.
-                    eprintln!("[sync] session restore refused: {e}");
+                    log::warn!(target: "sync", "session restore refused: {e}");
                     crate::health::note("sync restore: refused", e.message());
                     let _ = self.app.emit("sync:restore-gave-up", serde_json::Value::Null);
                 }
@@ -2049,7 +2030,7 @@ impl SyncClient {
 
                 match self.try_restore_session().await {
                     Ok(user) => {
-                        eprintln!("[sync] session restored after {attempt} retries");
+                        log::info!(target: "sync", "session restored after {attempt} retries");
                         Arc::clone(&self).trigger_initial_sync();
                         let _ = self.app.emit("sync:session-restored", &user);
                         break;
@@ -2073,14 +2054,14 @@ impl SyncClient {
                             Retry::Unbounded => false,
                         };
                         if !done {
-                            eprintln!("[sync] session restore retry {attempt} failed: {e}");
+                            log::warn!(target: "sync", "session restore retry {attempt} failed: {e}");
                             continue;
                         }
                         // Recorded durably: a release build is a Windows GUI
                         // binary, so nothing printed here reaches a user machine,
                         // and this is the one line that says why they were
                         // signed out.
-                        eprintln!("[sync] session restore gave up: {e}");
+                        log::warn!(target: "sync", "session restore gave up: {e}");
                         crate::health::note(
                             "sync restore: gave up",
                             &format!("after {attempt} retries: {e}"),
@@ -2143,7 +2124,7 @@ impl SyncClient {
                 let supabase = Arc::clone(&self.supabase);
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) = supabase.sign_out(&token).await {
-                        eprintln!("[sync] supabase sign-out: {e}");
+                        log::warn!(target: "sync", "supabase sign-out: {e}");
                     }
                 });
             }
@@ -2371,7 +2352,7 @@ impl SyncClient {
         let (enc_key, wrapped_keys, space_ids) = match self.build_envelope(&umk, &targets) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("[sync] clipboard envelope: {e}");
+                log::warn!(target: "sync", "clipboard envelope: {e}");
                 return;
             }
         };
@@ -2462,8 +2443,7 @@ impl SyncClient {
                             // amber "waiting to upload" badge. No skip is recorded:
                             // this is a wait, not a refusal, and telling the user it
                             // was "not sent" and dropping it is the bug being fixed.
-                            eprintln!(
-                                "[sync] {noun} blob upload deferred (retryable): {}",
+                            log::warn!(target: "sync", "{noun} blob upload deferred (retryable): {}",
                                 fail.message
                             );
                             ctx.queue.lock().push(PendingOp::PushLocal {
@@ -2481,7 +2461,7 @@ impl SyncClient {
                             return;
                         }
                         Err(fail) => {
-                            eprintln!("[sync] {noun} blob upload failed: {}", fail.message);
+                            log::warn!(target: "sync", "{noun} blob upload failed: {}", fail.message);
                             record_skip(&ctx, &entry.id, &skip_label, fail.message);
                             return;
                         }
@@ -2538,7 +2518,7 @@ impl SyncClient {
         let (enc_key, wrapped_keys, space_ids) = match self.build_envelope(&umk, &targets) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("[sync] note envelope: {e}");
+                log::warn!(target: "sync", "note envelope: {e}");
                 return;
             }
         };
@@ -2783,7 +2763,7 @@ impl SyncClient {
                         status.lock().pending_count = queue.lock().len();
                     }
                     // The op is already queued, so the next flush retries it.
-                    Err(e) => eprintln!("[sync] tombstone push failed: {e}"),
+                    Err(e) => log::warn!(target: "sync", "tombstone push failed: {e}"),
                 }
             });
         }
@@ -2836,7 +2816,7 @@ impl SyncClient {
             // member who could pick `..\..\Startup` as an id could empty and
             // repopulate any folder on every other member's machine.
             if !is_canonical_uuid(&e.client_id) {
-                eprintln!("[sync] pulled row with a malformed id refused");
+                log::warn!(target: "sync", "pulled row with a malformed id refused");
                 continue;
             }
             let is_note = e.entry_type == "note";
@@ -3066,7 +3046,7 @@ impl SyncClient {
             // Unwrap the per-entry CEK: "personal" under the UMK for our own
             // entries, else through a carried space's keyring.
             let Some((content_key, from_space)) = self.unwrap_cek(&umk, e) else {
-                eprintln!("[sync] merge: no usable key for {}", e.client_id);
+                log::warn!(target: "sync", "merge: no usable key for {}", e.client_id);
                 // A space row that arrived before its key. The cursor moves past
                 // it all the same, so only a sweep can pick it up later.
                 if keep_out.is_none() && !e.space_ids.is_empty() {
@@ -3076,7 +3056,7 @@ impl SyncClient {
             };
             let Ok(content) = crypto::decrypt(&content_key, &e.encrypted_content, &e.client_id)
             else {
-                eprintln!("[sync] merge: decrypt content failed for {}", e.client_id);
+                log::warn!(target: "sync", "merge: decrypt content failed for {}", e.client_id);
                 continue;
             };
             let meta: serde_json::Value = e
@@ -3270,12 +3250,10 @@ impl SyncClient {
 
         if clip_changed {
             state.history.lock().sort_recent();
-            state.history_dirty.store(true, Ordering::Relaxed);
             let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
         }
         if notes_changed {
             state.notes.lock().sort_recent();
-            state.notes_dirty.store(true, Ordering::Relaxed);
             let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
         }
         out
@@ -3349,7 +3327,7 @@ impl SyncClient {
                                 (queued_blob, !result.conflicts.is_empty())
                             {
                                 if let Err(e) = http.release_blob_upload(&key).await {
-                                    eprintln!("[sync] release stranded blob {key}: {e}");
+                                    log::warn!(target: "sync", "release stranded blob {key}: {e}");
                                 }
                             }
                             for r in result.accepted {
@@ -3375,10 +3353,10 @@ impl SyncClient {
                             // server has judged this body and will judge it the
                             // same way on every flush from here on. Re-queueing
                             // it retries forever and tells nobody.
-                            eprintln!("[sync] queued push refused for good: {e}");
+                            log::warn!(target: "sync", "queued push refused for good: {e}");
                             if let Some(key) = queued_blob {
                                 if let Err(e) = http.release_blob_upload(&key).await {
-                                    eprintln!("[sync] release stranded blob {key}: {e}");
+                                    log::warn!(target: "sync", "release stranded blob {key}: {e}");
                                 }
                             }
                             let what = if entry_type == "note" { "A note" } else { "An item" };
@@ -3390,7 +3368,7 @@ impl SyncClient {
                             );
                         }
                         Err(e) => {
-                            eprintln!("[sync] queued push failed: {e}");
+                            log::warn!(target: "sync", "queued push failed: {e}");
                             unsent.push(sending.clone());
                         }
                     }
@@ -3427,7 +3405,7 @@ impl SyncClient {
                             }
                         }
                         Err(e) => {
-                            eprintln!("[sync] queued delete failed: {e}");
+                            log::warn!(target: "sync", "queued delete failed: {e}");
                             unsent.push(PendingOp::Delete { client_id, entry_type });
                         }
                     }
@@ -3519,10 +3497,9 @@ impl SyncClient {
                         newest_entry.max(newest_removal)
                     });
                     if let Some(ts) = watermark {
-                        // What this page merged reaches disk before the cursor
-                        // moves past it. The other order let a crash lose the
-                        // page for good: the next pull starts after it.
-                        crate::flush_dirty_stores(&self.app, crate::Flush::Dirty);
+                        // What this page merged is in the database already: the
+                        // stores write through as they change, so the cursor
+                        // can never run ahead of a page a crash would lose.
                         self.sync_state.lock().set_last_server_ts(ts);
                         let _ = http.advance_cursor(ts).await;
                     }
@@ -3532,7 +3509,7 @@ impl SyncClient {
                     cursor = pull.next_cursor;
                 }
                 Err(e) => {
-                    eprintln!("[sync] pull failed: {e}");
+                    log::warn!(target: "sync", "pull failed: {e}");
                     break;
                 }
             }
@@ -3695,13 +3672,12 @@ impl SyncClient {
         match self.sweep_locked(&http).await {
             Ok(out) => {
                 if out.restored + out.downloading > 0 {
-                    eprintln!(
-                        "[sync] restore merged {} entries, {} downloading",
+                    log::info!(target: "sync", "restore merged {} entries, {} downloading",
                         out.restored, out.downloading
                     );
                 }
             }
-            Err(e) => eprintln!("[sync] restore sweep failed: {e}"),
+            Err(e) => log::warn!(target: "sync", "restore sweep failed: {e}"),
         }
     }
 
@@ -3838,9 +3814,6 @@ impl SyncClient {
     /// The caller holds the history lock, so no entry can land between this
     /// read and the write it feeds.
     pub fn keep_keys(&self) -> Option<HashSet<String>> {
-        if self.stores_unreadable {
-            return None;
-        }
         let mut keys = self.id_map.lock().keep_keys();
         keys.extend(self.pending_queue.lock().pending_keys());
         keys.extend(self.in_flight.lock().iter().cloned());
@@ -4333,7 +4306,6 @@ impl SyncClient {
         removed_by: Option<String>,
     ) {
         use crate::state::app_state::AppState;
-        use std::sync::atomic::Ordering;
 
         let key = format!("{entry_type}:{client_id}");
         let is_remote = self.id_map.lock().is_remote(&key);
@@ -4393,11 +4365,11 @@ impl SyncClient {
         }
 
         let state = self.app.state::<AppState>();
-        let changed = if entry_type == "note" {
-            state.notes.lock().delete(client_id)
+        if entry_type == "note" {
+            state.notes.lock().delete(client_id);
         } else {
-            state.history.lock().remove(client_id)
-        };
+            state.history.lock().remove(client_id);
+        }
 
         {
             let mut id_map = self.id_map.lock();
@@ -4425,14 +4397,8 @@ impl SyncClient {
         // Emitted even when nothing local changed: the Spaces feed still gains
         // a placeholder row, and it refreshes off these two events.
         if entry_type == "note" {
-            if changed {
-                state.notes_dirty.store(true, Ordering::Relaxed);
-            }
             let _ = self.app.emit("sync:notes-merged", serde_json::Value::Null);
         } else {
-            if changed {
-                state.history_dirty.store(true, Ordering::Relaxed);
-            }
             let _ = self.app.emit("sync:history-merged", serde_json::Value::Null);
         }
     }
@@ -4555,7 +4521,7 @@ impl SyncClient {
                 return;
             }
             if let Err(e) = self.flush_and_pull().await {
-                eprintln!("[sync] initial sync failed: {e}");
+                log::warn!(target: "sync", "initial sync failed: {e}");
                 // The restore check below is what brings back rows lost here,
                 // so it must not wait for the next sign-in.
                 self.restore_check_missed
@@ -4696,7 +4662,7 @@ impl SyncClient {
                     && sync.user.lock().is_some();
                 if due {
                     if let Err(e) = sync.flush_and_pull().await {
-                        eprintln!("[sync] background pull: {e}");
+                        log::warn!(target: "sync", "background pull: {e}");
                     }
                 }
             }
@@ -4813,7 +4779,7 @@ impl SyncClient {
             .filter(|sid| {
                 let keyed = self.space_current_key(sid).is_some();
                 if !keyed {
-                    eprintln!("[sync] no key for space {sid}; entry {client_id} not shared there");
+                    log::warn!(target: "sync", "no key for space {sid}; entry {client_id} not shared there");
                 }
                 keyed
             })
@@ -5237,7 +5203,7 @@ impl SyncClient {
             return;
         };
         if let Err(e) = http.attach_invite_key(&invite.id, json).await {
-            eprintln!("[sync] attach invite key {}: {e}", invite.id);
+            log::warn!(target: "sync", "attach invite key {}: {e}", invite.id);
         }
     }
 
@@ -5268,13 +5234,13 @@ impl SyncClient {
             match crypto::wrap_key(&shared, key) {
                 Ok(w) => wrapped.push(w),
                 Err(e) => {
-                    eprintln!("[sync] wrap space key for {space_id}: {e}");
+                    log::warn!(target: "sync", "wrap space key for {space_id}: {e}");
                     return None;
                 }
             }
         }
         serde_json::to_string(&wrapped)
-            .inspect_err(|e| eprintln!("[sync] keyring json {space_id}: {e}"))
+            .inspect_err(|e| log::warn!(target: "sync", "keyring json {space_id}: {e}"))
             .ok()
     }
 
@@ -5392,7 +5358,7 @@ impl SyncClient {
         let server_spaces = match http.list_spaces().await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[sync] reconcile spaces: {e}");
+                log::warn!(target: "sync", "reconcile spaces: {e}");
                 return self.spaces();
             }
         };
@@ -5452,7 +5418,7 @@ impl SyncClient {
                     for wrapped in &server_keyring {
                         match crypto::unwrap_key(&shared, wrapped) {
                             Ok(key) => ring.push(*key),
-                            Err(e) => eprintln!("[sync] unwrap space key {}: {e}", s.id),
+                            Err(e) => log::warn!(target: "sync", "unwrap space key {}: {e}", s.id),
                         }
                     }
                     // Anyone may have written this ring, and the server cannot
@@ -5476,7 +5442,7 @@ impl SyncClient {
                         for key in ring.iter_mut() {
                             key.zeroize();
                         }
-                        eprintln!("[sync] space {} key fingerprint mismatch, refused", s.id);
+                        log::warn!(target: "sync", "space {} key fingerprint mismatch, refused", s.id);
                         let _ = self.app.emit(
                             "space:key-rejected",
                             serde_json::json!({ "space_id": s.id, "wrapped_by": wrapper_id }),
@@ -5540,7 +5506,7 @@ impl SyncClient {
                     // The server has a wrap for us and it does not open. That
                     // is damage, not absence, and minting would make it
                     // permanent. Report it and leave the ring alone.
-                    eprintln!("[sync] space {} own key wrap does not open, not re-minting", s.id);
+                    log::warn!(target: "sync", "space {} own key wrap does not open, not re-minting", s.id);
                     let _ = self.app.emit(
                         "space:key-rejected",
                         serde_json::json!({ "space_id": s.id, "wrapped_by": wrapper_id }),
@@ -5579,7 +5545,7 @@ impl SyncClient {
                     // is a valid shared secret, which is how a keyholder
                     // recovers its ring after a restart.
                     let Ok(shared) = crypto::x25519_shared_secret(&id_priv, &member_pub) else {
-                        eprintln!("[sync] refusing to wrap for {}: bad public key", m.user_id);
+                        log::warn!(target: "sync", "refusing to wrap for {}: bad public key", m.user_id);
                         continue;
                     };
                     let mut wrapped: Vec<String> = Vec::with_capacity(ring.len());
@@ -5588,7 +5554,7 @@ impl SyncClient {
                         match crypto::wrap_key(&shared, key) {
                             Ok(w) => wrapped.push(w),
                             Err(e) => {
-                                eprintln!("[sync] wrap space key for {}: {e}", m.user_id);
+                                log::warn!(target: "sync", "wrap space key for {}: {e}", m.user_id);
                                 failed = true;
                                 break;
                             }
@@ -5602,7 +5568,7 @@ impl SyncClient {
                             user_id: m.user_id.clone(),
                             wrapped_space_keys: json,
                         }),
-                        Err(e) => eprintln!("[sync] keyring json for {}: {e}", m.user_id),
+                        Err(e) => log::warn!(target: "sync", "keyring json for {}: {e}", m.user_id),
                     }
                 }
 
@@ -5616,7 +5582,7 @@ impl SyncClient {
                         .map(|k| crypto::space_key_fingerprint(k));
                     let req = DistributeKeysRequest { wrapped_keyrings, key_fingerprint };
                     if let Err(e) = http.distribute_space_keys(&s.id, req).await {
-                        eprintln!("[sync] distribute space keys for {}: {e}", s.id);
+                        log::warn!(target: "sync", "distribute space keys for {}: {e}", s.id);
                     }
                 }
             }
@@ -5782,7 +5748,6 @@ impl SyncClient {
         work: WorkGuard,
         meta: ImageMergeMeta,
     ) {
-        use std::sync::atomic::Ordering;
         let app = self.app.clone();
         let images_dir = self
             .app
@@ -5811,14 +5776,14 @@ impl SyncClient {
             // is this blob: no need to spend a download on it.
             if !path.exists() {
                 let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
-                    eprintln!("[sync] image blob {} download-url failed (skipped)", meta.blob_key);
+                    log::warn!(target: "sync", "image blob {} download-url failed (skipped)", meta.blob_key);
                     return;
                 };
                 let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
                     return;
                 };
                 let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
-                    eprintln!("[sync] image blob {} decrypt failed", meta.client_id);
+                    log::warn!(target: "sync", "image blob {} decrypt failed", meta.client_id);
                     return;
                 };
                 // Atomic, because the entry upserted below points at this file — a
@@ -5869,7 +5834,6 @@ impl SyncClient {
             let _ = state.history.lock().upsert_synced(merged);
             BlobClaim::land(&mut claim);
             state.history.lock().sort_recent();
-            state.history_dirty.store(true, Ordering::Relaxed);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
     }
@@ -5887,7 +5851,6 @@ impl SyncClient {
         work: WorkGuard,
         meta: FilesMergeMeta,
     ) {
-        use std::sync::atomic::Ordering;
         let app = self.app.clone();
         // One directory per entry, named by its id, so removing the entry
         // removes exactly its tree and nothing else under the root.
@@ -5927,14 +5890,14 @@ impl SyncClient {
                 Some(content) => content,
                 None => {
                     let Ok(dl) = http.blob_download_url(&meta.blob_key).await else {
-                        eprintln!("[sync] file blob {} download-url failed (skipped)", meta.blob_key);
+                        log::warn!(target: "sync", "file blob {} download-url failed (skipped)", meta.blob_key);
                         return;
                     };
                     let Ok(cipher) = http.download_blob_bytes(&dl.presigned_get_url).await else {
                         return;
                     };
                     let Ok(bytes) = crypto::decrypt_bytes(&key, &cipher, &meta.client_id) else {
-                        eprintln!("[sync] file blob {} decrypt failed", meta.client_id);
+                        log::warn!(target: "sync", "file blob {} decrypt failed", meta.client_id);
                         return;
                     };
                     let Some(root) = files_root else { return };
@@ -5946,11 +5909,11 @@ impl SyncClient {
                     let paths = match extracted {
                         Ok(paths) if !paths.is_empty() => paths,
                         Ok(_) => {
-                            eprintln!("[sync] file blob {} extracted to nothing", meta.client_id);
+                            log::warn!(target: "sync", "file blob {} extracted to nothing", meta.client_id);
                             return;
                         }
                         Err(e) => {
-                            eprintln!("[sync] file blob {} extract failed: {e}", meta.client_id);
+                            log::warn!(target: "sync", "file blob {} extract failed: {e}", meta.client_id);
                             return;
                         }
                     };
@@ -5998,7 +5961,6 @@ impl SyncClient {
             let _ = state.history.lock().upsert_synced(merged);
             BlobClaim::land(&mut claim);
             state.history.lock().sort_recent();
-            state.history_dirty.store(true, Ordering::Relaxed);
             let _ = app.emit("sync:history-merged", serde_json::Value::Null);
         });
     }
@@ -6205,29 +6167,18 @@ pub(crate) fn forward_deletes(
         return;
     }
     let state = app.state::<crate::state::AppState>();
-    // Held while the files are written, so no client is built over them.
+    // Held while the rows are written, so no client is built over them.
     let slot = state.sync_client.lock();
     if let Some(s) = slot.clone() {
         drop(slot);
         s.delete_entries(entry_type, items);
         return;
     }
-    let Ok(dir) = app.path().app_data_dir() else {
+    let Some(db) = state.db.get() else {
         return;
     };
-    let queued: HashSet<String> = PendingQueue::load(pending_queue::pending_queue_path(&dir))
-        .pending_keys()
-        .into_iter()
-        .collect();
-    // A file that will not read is left alone: an empty map saved over it
-    // would lose every earlier offline marker, which the server cannot rebuild.
-    let mut map = match IdMap::try_load(id_map::id_map_path(&dir)) {
-        Ok(map) => map,
-        Err(e) => {
-            eprintln!("[sync] id map unreadable, offline delete not recorded: {e}");
-            return;
-        }
-    };
+    let queued: HashSet<String> = PendingQueue::keys_in(db).unwrap_or_default().into_iter().collect();
+    let mut map = IdMap::load(Arc::clone(db));
     let mut changed = false;
     for (id, ts) in items {
         let key = format!("{}:{id}", entry_type.as_str());
@@ -6440,7 +6391,7 @@ async fn upload_image_blob(
             } else {
                 // A transport failure (no host, no route) carries no status and
                 // reads as transient - that is the offline case this recovers.
-                eprintln!("[sync] image upload request failed: {e}");
+                log::warn!(target: "sync", "image upload request failed: {e}");
                 BlobUploadFailed {
                     message: "Image upload failed. Try again later.".to_string(),
                     retryable: e.is_transient(),
@@ -6453,7 +6404,7 @@ async fn upload_image_blob(
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, &mime)
         .await
         .map_err(|e| {
-            eprintln!("[sync] image upload failed: {e}");
+            log::warn!(target: "sync", "image upload failed: {e}");
             BlobUploadFailed {
                 message: "Image upload failed. Try again later.".to_string(),
                 retryable: true,
@@ -6462,7 +6413,7 @@ async fn upload_image_blob(
     http.confirm_blob_upload(&up.blob_key)
         .await
         .map_err(|e| {
-            eprintln!("[sync] image upload failed: {e}");
+            log::warn!(target: "sync", "image upload failed: {e}");
             BlobUploadFailed {
                 message: "Image upload failed. Try again later.".to_string(),
                 retryable: true,
@@ -6553,7 +6504,7 @@ async fn upload_files_blob(
                     "Cloud storage is full. Remove some synced images or files to make room.".to_string(),
                 )
             } else {
-                eprintln!("[sync] file upload request failed: {e}");
+                log::warn!(target: "sync", "file upload request failed: {e}");
                 BlobUploadFailed {
                     message: "File upload failed. Try again later.".to_string(),
                     retryable: e.is_transient(),
@@ -6563,7 +6514,7 @@ async fn upload_files_blob(
     http.upload_blob_bytes(&up.presigned_put_url, ciphertext, MIME)
         .await
         .map_err(|e| {
-            eprintln!("[sync] file upload failed: {e}");
+            log::warn!(target: "sync", "file upload failed: {e}");
             BlobUploadFailed {
                 message: "File upload failed. Try again later.".to_string(),
                 retryable: true,
@@ -6572,7 +6523,7 @@ async fn upload_files_blob(
     http.confirm_blob_upload(&up.blob_key)
         .await
         .map_err(|e| {
-            eprintln!("[sync] file upload failed: {e}");
+            log::warn!(target: "sync", "file upload failed: {e}");
             BlobUploadFailed {
                 message: "File upload failed. Try again later.".to_string(),
                 retryable: true,
@@ -6958,7 +6909,7 @@ impl Drop for BlobReleaseGuard {
                         *remaining = remaining.saturating_add(size);
                     }
                 }
-                Err(e) => eprintln!("[sync] release stranded blob {key}: {e}"),
+                Err(e) => log::warn!(target: "sync", "release stranded blob {key}: {e}"),
             }
         });
     }
@@ -7016,14 +6967,14 @@ async fn push_entry_task(
     let encrypted_content = match crypto::encrypt(&enc_key, &content, &client_id) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[sync] {entry_type} encrypt content: {e}");
+            log::warn!(target: "sync", "{entry_type} encrypt content: {e}");
             return;
         }
     };
     let encrypted_metadata = match crypto::encrypt(&enc_key, &metadata_json, &client_id) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[sync] {entry_type} encrypt metadata: {e}");
+            log::warn!(target: "sync", "{entry_type} encrypt metadata: {e}");
             return;
         }
     };
@@ -7084,8 +7035,7 @@ async fn push_entry_task(
                 // A rejected push used to look exactly like an accepted one
                 // from here: no row, no event, no word anywhere. Say so.
                 if let Some(c) = result.conflicts.iter().find(|c| c.client_id == client_id) {
-                    eprintln!(
-                        "[sync] {entry_type} {client_id} rejected by the server: {}",
+                    log::warn!(target: "sync", "{entry_type} {client_id} rejected by the server: {}",
                         c.reason
                     );
                     // The server refuses a push that would plant a rival copy of
@@ -7125,7 +7075,7 @@ async fn push_entry_task(
             Err(e) if e.is_permanent_rejection() => {
                 // Falling through to the queue here would retry a body the
                 // server has already refused, on every flush, forever.
-                eprintln!("[sync] {entry_type} push refused for good: {e}");
+                log::warn!(target: "sync", "{entry_type} push refused for good: {e}");
                 let what = if entry_type == "note" { "A note" } else { "An item" };
                 record_skip(
                     &ctx,
@@ -7135,7 +7085,7 @@ async fn push_entry_task(
                 );
                 return;
             }
-            Err(e) => eprintln!("[sync] {entry_type} push failed: {e}"),
+            Err(e) => log::warn!(target: "sync", "{entry_type} push failed: {e}"),
         }
     }
 
@@ -7143,7 +7093,7 @@ async fn push_entry_task(
     let entry_json = match serde_json::to_string(&push_req) {
         Ok(j) => j,
         Err(e) => {
-            eprintln!("[sync] serialize {entry_type} push: {e}");
+            log::warn!(target: "sync", "serialize {entry_type} push: {e}");
             return;
         }
     };
@@ -7365,13 +7315,12 @@ mod tests {
     /// as answered, so the batch's last answer writes the landed ops out.
     #[test]
     fn a_delete_batch_writes_the_queue_once_every_task_ends() {
-        let dir = scratch_dir("batch-answer");
-        let path = crate::sync::pending_queue::pending_queue_path(&dir);
+        let db = crate::storage::Db::open_in_memory();
         let op = |id: &str| PendingOp::Delete {
             client_id: id.to_string(),
             entry_type: "clipboard".to_string(),
         };
-        let queue = Arc::new(Mutex::new(PendingQueue::load(path.clone())));
+        let queue = Arc::new(Mutex::new(PendingQueue::load(Arc::clone(&db))));
         queue.lock().push_many(vec![op("a"), op("b")]);
         let unanswered = Arc::new(std::sync::atomic::AtomicUsize::new(2));
         let answer = || BatchAnswer {
@@ -7382,11 +7331,9 @@ mod tests {
 
         queue.lock().remove_delete("clipboard", "a");
         drop(landed);
-        assert_eq!(PendingQueue::load(path.clone()).len(), 2, "one task still out");
+        assert_eq!(PendingQueue::load(Arc::clone(&db)).len(), 2, "one task still out");
         drop(early);
-        assert_eq!(PendingQueue::load(path).len(), 1, "the landed op left the file");
-
-        let _ = std::fs::remove_dir_all(dir);
+        assert_eq!(PendingQueue::load(db).len(), 1, "the landed op left the table");
     }
 
     /// Right after a sweep starts its downloads, those rows are on their way,

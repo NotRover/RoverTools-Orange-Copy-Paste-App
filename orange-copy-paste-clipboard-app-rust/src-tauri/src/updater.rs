@@ -413,13 +413,13 @@ pub async fn updater_install(app: tauri::AppHandle) -> Result<(), String> {
     // restore, which makes this the single most expensive moment to lose a
     // refresh token in.
     //
-    // Both are idempotent, which is what makes running them ahead of a call
-    // that can still fail harmless: the flush writes stores that are already
-    // clean, and the drain returns at once when nothing is rotating. A failed
-    // install hands sync back below. On a blocking thread, since the sync
-    // drain can wait for seconds with a toast up.
+    // Both drains are idempotent, which is what makes running them ahead of a
+    // call that can still fail harmless: each returns at once when there is
+    // nothing to wait for. A failed install hands sync back below. On a
+    // blocking thread, since the sync drain can wait for seconds with a toast
+    // up.
     let app2 = app.clone();
-    let _ = tauri::async_runtime::spawn_blocking(move || crate::flush_for_restart(&app2)).await;
+    let _ = tauri::async_runtime::spawn_blocking(move || crate::drain_for_restart(&app2)).await;
     // This process is about to be replaced by the updated build - the installer
     // relaunches it on Windows, `app.restart()` below on Linux. Mark it so that
     // replacement takes over rather than deferring to this dying process (a

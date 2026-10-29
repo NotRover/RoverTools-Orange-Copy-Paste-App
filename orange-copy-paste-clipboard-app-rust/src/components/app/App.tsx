@@ -396,38 +396,6 @@ const App: React.FC = () => {
   // user presses something in the banner below.
   const updater = useUpdater();
 
-  // What a previous degraded session had to set aside and this one took back on.
-  // Decided before this window existed, so it is polled rather than listened for.
-  useEffect(() => {
-    let cancelled = false;
-    invoke<string | null>("health_recovery_notice")
-      .then((notice) => {
-        if (!cancelled && notice)
-          showToast(
-            `Restored the ${notice} you captured before the last restart`,
-            "info",
-            { duration: 8000, key: "recovered", glyph: "warning" },
-          );
-      })
-      .catch(() => {});
-    // A state file that exists but would not read at startup. The store behind
-    // it is shown empty, and Rust holds the file itself untouched for the whole
-    // session - so the one honest thing to say is that the data is not gone.
-    invoke<string | null>("health_sealed_notice")
-      .then((notice) => {
-        if (!cancelled && notice)
-          showToast(
-            `Could not read your ${notice} file. It is safe on disk and untouched. Restart the app to try again.`,
-            "error",
-            { duration: 0, key: "sealed", glyph: "warning" },
-          );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // ── Sounds ──────────────────────────────────────────────────────
   // Rust decides what deserves a sound and emits one event for all of them;
   // this window is the only one that listens, so a cue is heard once even

@@ -25,19 +25,20 @@ pub struct UiView {
 
 /// State managed by Tauri and injected into every command handler.
 pub struct AppState {
+    /// The local database, opened once in `setup_runtime` before any store
+    /// loads. Empty only if the file could not be opened, in which case the
+    /// stores run in memory for the session and the health notice says so.
+    pub db: std::sync::OnceLock<Arc<crate::storage::Db>>,
     /// Thread-safe clipboard history (most-recent first).
     pub history: Arc<Mutex<ClipboardHistory>>,
     /// When `true`, the clipboard watcher skips the next detected change
     /// (used to suppress re-adding an entry that was written back to the
     /// clipboard by `copy_entry` / `paste_entry`).
     pub suppress_next_capture: Arc<AtomicBool>,
-    /// Cached mirror of the `keep_history` setting (default on).  Read at each
-    /// history flush: when off, only saved entries and entries in the cloud or
-    /// a space are written.
+    /// Cached mirror of the `keep_history` setting (default on). Read at exit:
+    /// when off, entries that are not saved and not in the cloud or a space
+    /// are dropped then.
     pub keep_history: Arc<AtomicBool>,
-    /// Set to `true` whenever the in-memory history diverges from the on-disk
-    /// `history.bin`.  A background thread periodically flushes when dirty.
-    pub history_dirty: Arc<AtomicBool>,
     /// When `true`, closing the main window hides it to the system tray
     /// instead of quitting the app.
     pub close_to_tray: Arc<AtomicBool>,
@@ -67,12 +68,8 @@ pub struct AppState {
     pub active_clipboard_id: Arc<Mutex<String>>,
     /// Thread-safe notes store.
     pub notes: Arc<Mutex<NoteStore>>,
-    /// Set to `true` whenever the in-memory notes diverge from disk.
-    pub notes_dirty: Arc<AtomicBool>,
     /// Notification centre feed - invites, space activity, reminders.
     pub notifications: Arc<Mutex<NotificationStore>>,
-    /// Set to `true` whenever the in-memory feed diverges from disk.
-    pub notifications_dirty: Arc<AtomicBool>,
     /// Cloud sync client.  `None` when sync is disabled or the user is not
     /// logged in.  Wrapped in a Mutex so it can be initialized lazily during
     /// `setup_runtime` or when the user enables sync via `sync_set_enabled`.

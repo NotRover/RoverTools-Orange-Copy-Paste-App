@@ -642,7 +642,7 @@ pub async fn machine_seed() -> String {
     }
     let seed = B64.encode(random_key().as_slice());
     if let Err(e) = write_secret("fp_seed", INSTALL_SCOPE, &seed).await {
-        eprintln!("[sync] fingerprint seed not stored: {e}");
+        log::warn!(target: "sync", "fingerprint seed not stored: {e}");
     }
     seed
 }

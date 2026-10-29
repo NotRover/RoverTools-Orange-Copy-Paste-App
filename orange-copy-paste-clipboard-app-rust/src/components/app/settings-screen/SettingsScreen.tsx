@@ -657,6 +657,22 @@ const SettingsScreen: React.FC = () => {
                 Open
               </button>
             </div>
+            <div className="set-row">
+              <div className="set-row-info">
+                <span className="set-row-label">Open log folder</span>
+                <span className="set-row-desc">
+                  Open the folder holding the app log. Attach app.log to a bug report.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="settings-action-btn"
+                onClick={() => invoke("open_log_folder")}
+              >
+                <FolderOpen size={14} />
+                Open
+              </button>
+            </div>
           </div>
         </section>
 

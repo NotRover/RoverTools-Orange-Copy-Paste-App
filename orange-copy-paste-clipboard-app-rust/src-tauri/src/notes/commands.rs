@@ -175,11 +175,8 @@ fn sanitize_filename(name: &str, fallback: &str) -> String {
     }
 }
 
-/// Mark the notes store dirty and propagate the updated note to sync.
+/// Propagate the updated note to sync.
 fn after_note_update(state: &State<'_, AppState>, id: &str) {
-    state
-        .notes_dirty
-        .store(true, std::sync::atomic::Ordering::Relaxed);
     let note = state.notes.lock().find(id).cloned();
     let sync = state.sync_client.lock().clone();
     if let (Some(note), Some(s)) = (note, sync) {
@@ -195,7 +192,6 @@ pub fn get_notes(state: State<'_, AppState>) -> Vec<Note> {
 #[tauri::command]
 pub fn create_note(state: State<'_, AppState>) -> Note {
     let note = state.notes.lock().create();
-    state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     let sync = state.sync_client.lock().clone();
     if let Some(s) = sync { s.on_new_note(note.clone()); }
     note
@@ -225,7 +221,6 @@ pub fn delete_note(state: State<'_, AppState>, app: tauri::AppHandle, id: String
     let entry_ts = state.notes.lock().find(&id).map(|n| n.updated_at);
     let ok = state.notes.lock().delete(&id);
     if ok {
-        state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
         crate::sync::forward_deletes(
             &app,
             crate::sync::types::EntryType::Notes,
@@ -265,13 +260,11 @@ pub fn set_note_groups(state: State<'_, AppState>, id: String, groups: Vec<Strin
 #[tauri::command]
 pub fn purge_group_from_notes(state: State<'_, AppState>, group: String) {
     state.notes.lock().purge_group(&group);
-    state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[tauri::command]
 pub fn rename_group_in_notes(state: State<'_, AppState>, old_name: String, new_name: String) {
     state.notes.lock().rename_group(&old_name, &new_name);
-    state.notes_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Export note content as a text file saved to the user's Downloads folder.

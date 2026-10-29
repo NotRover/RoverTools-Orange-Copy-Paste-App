@@ -1,8 +1,14 @@
-//! Persists the sync cursor and device identity to `{app_data}/sync_state.json`.
-//! The cursor (last_server_ts) drives delta pull on startup and reconnect.
+//! Persists the sync cursor and device identity, as one JSON value under the
+//! `sync_state` key of the `kv` table. The cursor (last_server_ts) drives
+//! delta pull on startup and reconnect.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::storage::Db;
+
+/// The `kv` key the state is stored under.
+const KV_KEY: &str = "sync_state";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SyncState {
@@ -82,17 +88,59 @@ fn auth_v2_tag(email: &str) -> String {
 
 pub struct SyncStateStore {
     pub data: SyncState,
-    path: PathBuf,
+    db: Arc<Db>,
 }
 
 impl SyncStateStore {
-    pub fn load(path: PathBuf) -> Self {
-        let data = crate::sync::persist::load_json(&path);
-        Self { data, path }
+    pub fn load(db: Arc<Db>) -> Self {
+        let data = Self::read(&db).unwrap_or_default();
+        Self { data, db }
+    }
+
+    fn read(db: &Db) -> Option<SyncState> {
+        let json: Option<String> = db.read("load sync state", |c| {
+            c.query_row("SELECT value FROM kv WHERE key = ?1", [KV_KEY], |r| r.get(0))
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other),
+                })
+        })?;
+        json.and_then(|j| serde_json::from_str(&j).ok())
     }
 
     pub fn save(&self) {
-        crate::sync::persist::save_json(&self.path, &self.data);
+        let Ok(json) = serde_json::to_string(&self.data) else {
+            return;
+        };
+        self.db.write("write sync state", |tx| {
+            tx.execute(
+                "INSERT INTO kv (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [KV_KEY, json.as_str()],
+            )
+            .map(|_| ())
+        });
+    }
+
+    /// Move the old `sync_state.json` into the table, once.
+    pub fn import_file(db: &Db, path: &std::path::Path) -> Result<bool, String> {
+        let data: SyncState = match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e.to_string()),
+        };
+        let json = serde_json::to_string(&data).map_err(|e| e.to_string())?;
+        db.write("import sync state", |tx| {
+            tx.execute(
+                "INSERT INTO kv (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [KV_KEY, json.as_str()],
+            )
+            .map(|_| ())
+        })
+        .ok_or_else(|| "sync state did not land".to_string())?;
+        Ok(true)
     }
 
     /// Advance the pull cursor and persist.
@@ -227,11 +275,6 @@ impl SyncStateStore {
     }
 }
 
-/// Derive the path for sync_state.json given an app_data directory.
-pub fn state_path(app_data: &Path) -> PathBuf {
-    app_data.join("sync_state.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,8 +282,8 @@ mod tests {
     /// A `sync_state.json` written by an older build still loads.
     ///
     /// `settings_updated_at` was dropped from this struct once nothing read it.
-    /// Every installed copy still has the key on disk, and `persist::load_json`
-    /// answers a parse failure with `Default::default()` *silently* — which would
+    /// Every installed copy still has the key on disk, and a loader that
+    /// answers a parse failure with `Default::default()` *silently* would
     /// hand the account a blank `device_id`, a blank `user_id` and no cursor, so
     /// its whole back catalogue would never arrive. That failure is invisible at
     /// runtime, so it is pinned here instead.
@@ -292,23 +335,20 @@ mod tests {
     /// back the sweep the new account's first gap should trigger.
     #[test]
     fn a_new_account_starts_with_a_clean_restore_mark() {
-        let dir = std::env::temp_dir().join(format!("rovertools-state-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        let mut store = SyncStateStore::load(state_path(&dir));
+        let db = Db::open_in_memory();
+        let mut store = SyncStateStore::load(Arc::clone(&db));
         store.set_restore_mark((12, 40));
 
         store.reset_for_new_account();
 
         assert_eq!(store.data.restore_mark, (0, 0));
-        assert_eq!(SyncStateStore::load(state_path(&dir)).data.restore_mark, (0, 0));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(SyncStateStore::load(db).data.restore_mark, (0, 0));
     }
 
     #[test]
     fn a_new_account_clears_the_settings_base() {
-        let dir = std::env::temp_dir().join(format!("rovertools-state-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        let mut store = SyncStateStore::load(state_path(&dir));
+        let db = Db::open_in_memory();
+        let mut store = SyncStateStore::load(Arc::clone(&db));
         let mut base = serde_json::Map::new();
         base.insert("theme".into(), serde_json::Value::from("dark"));
         store.set_settings_base(base);
@@ -316,7 +356,31 @@ mod tests {
         store.reset_for_new_account();
 
         assert_eq!(store.data.settings_base, None);
-        assert_eq!(SyncStateStore::load(state_path(&dir)).data.settings_base, None);
-        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(SyncStateStore::load(db).data.settings_base, None);
+    }
+
+    /// The cursor and identity survive a reopen through the table.
+    #[test]
+    fn state_round_trips_through_the_table() {
+        let db = Db::open_in_memory();
+        let mut store = SyncStateStore::load(Arc::clone(&db));
+        store.set_user_id("u");
+        store.set_device_id("d");
+        store.set_last_server_ts(42);
+        let again = SyncStateStore::load(db);
+        assert_eq!(again.data.user_id, "u");
+        assert_eq!(again.data.device_id, "d");
+        assert_eq!(again.data.last_server_ts, Some(42));
+    }
+
+    #[test]
+    fn the_legacy_state_file_imports() {
+        let db = Db::open_in_memory();
+        let dir = std::env::temp_dir().join(format!("rovertools-state-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync_state.json");
+        std::fs::write(&path, br#"{"last_server_ts":7,"device_id":"d","user_id":"u"}"#).unwrap();
+        assert!(SyncStateStore::import_file(&db, &path).unwrap());
+        assert_eq!(SyncStateStore::load(db).data.last_server_ts, Some(7));
     }
 }

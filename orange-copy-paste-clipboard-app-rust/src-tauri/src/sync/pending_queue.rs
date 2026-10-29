@@ -1,4 +1,4 @@
-//! Offline operation queue, persisted to `{app_data}/sync_pending.json`.
+//! Offline operation queue, persisted in the `sync_queue` table.
 //!
 //! When the server is unreachable, operations are accumulated here and
 //! flushed in order on the next successful reconnect.
@@ -8,12 +8,19 @@
 //! `client_id`, and the entry is still on this device to send again. A lost
 //! `Delete` is not: the tombstone is the only record that the user deleted
 //! anything, so dropping it leaves the row on the server and the next pull
-//! hands the entry back. That is why a flush moves the ops through
-//! `sync_pending.inflight.json` instead of simply clearing the file, and why
-//! [`PendingQueue::load`] folds that file back in.
+//! hands the entry back. That is why a flush marks the ops it has taken as
+//! in flight instead of simply deleting them, and why [`PendingQueue::load`]
+//! puts in-flight rows back at the front.
+//!
+//! The table always holds exactly what memory does: the ops a flush has taken
+//! and not settled (`inflight = 1`, oldest first), then the live queue. Every
+//! write replaces the whole table in one transaction; the queue is small and
+//! what matters is that no state between two writes can be observed.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::storage::Db;
 
 /// An operation that needs to reach the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,39 +60,47 @@ pub enum PendingOp {
 
 pub struct PendingQueue {
     ops: Vec<PendingOp>,
-    path: PathBuf,
-    /// A landed Delete left memory but not yet the file.
+    db: Arc<Db>,
+    /// A landed Delete left memory but not yet the table.
     unwritten: bool,
     /// Ops a [`Self::drain`] handed out and no [`Self::settle`] has closed yet.
     /// Still named by [`Self::pending_keys`]: a flush in the air has not sent
     /// them, and the exit flush keeps entries by those keys.
     taken: Vec<PendingOp>,
-    /// A queue file existed and would not read or parse at load.
-    unreadable: bool,
+}
+
+/// Every op in the table: the in-flight ones first, each group oldest first.
+fn read_ops(conn: &rusqlite::Connection) -> rusqlite::Result<(Vec<PendingOp>, Vec<PendingOp>)> {
+    let mut st = conn.prepare("SELECT op, inflight FROM sync_queue ORDER BY seq")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?;
+    let mut inflight = Vec::new();
+    let mut live = Vec::new();
+    for row in rows {
+        let (json, was_inflight) = row?;
+        let Ok(op) = serde_json::from_str::<PendingOp>(&json) else {
+            continue;
+        };
+        if was_inflight {
+            inflight.push(op);
+        } else {
+            live.push(op);
+        }
+    }
+    Ok((inflight, live))
 }
 
 impl PendingQueue {
-    pub fn load(path: PathBuf) -> Self {
-        let inflight_path = inflight_path(&path);
+    pub fn load(db: Arc<Db>) -> Self {
         // Ops taken for a flush that never finished go back at the front: they
-        // were queued before anything still in the main file.
-        let (mut ops, inflight_bad): (Vec<PendingOp>, bool) =
-            crate::sync::persist::load_json_checked(&inflight_path);
+        // were queued before anything still in the live queue.
+        let (mut ops, live) = db.read("load queue", read_ops).unwrap_or_default();
         let recovered = ops.len();
-        let (main, main_bad): (Vec<PendingOp>, bool) = crate::sync::persist::load_json_checked(&path);
-        ops.extend(main);
-        let mut queue = Self {
-            ops,
-            path,
-            unwritten: false,
-            taken: Vec::new(),
-            unreadable: inflight_bad || main_bad,
-        };
+        ops.extend(live);
+        let mut queue = Self { ops, db, unwritten: false, taken: Vec::new() };
         if recovered > 0 {
-            // Fold the recovered ops into the main file first, so a crash in
+            // Fold the recovered ops into the live queue at once, so a crash in
             // the next second does not lose them a second time.
             queue.persist();
-            let _ = std::fs::remove_file(&inflight_path);
             crate::health::note(
                 "sync: recovered a queue flush that did not finish",
                 &format!("{recovered} operation(s) put back; a queued deletion would otherwise have been lost"),
@@ -94,39 +109,48 @@ impl PendingQueue {
         queue
     }
 
-    /// Whether a queue file existed and would not read at load. The queue in
-    /// memory then says nothing about which entries still have work queued.
-    pub fn unreadable(&self) -> bool {
-        self.unreadable
+    /// Every key the table names, read without changing it. For the exit
+    /// flush with sync off. `None` when the read failed.
+    pub fn keys_in(db: &Db) -> Option<Vec<String>> {
+        let (inflight, live) = db.read("read queue keys", read_ops)?;
+        Some(inflight.iter().chain(&live).filter_map(op_key).collect())
     }
 
-    /// Every key the queue files on disk name, read without changing them. For
-    /// the exit flush with sync off. `Err` when either file is there and will
-    /// not read or parse.
-    pub fn try_keys(path: &Path) -> Result<Vec<String>, String> {
-        let mut keys = Vec::new();
-        for file in [inflight_path(path), path.to_path_buf()] {
-            let Some(bytes) = crate::health::read_state(&file)? else {
-                continue;
-            };
-            let ops: Vec<PendingOp> = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-            keys.extend(ops.iter().filter_map(op_key));
+    /// Move the ops of the old `sync_pending.json` (and its in-flight file)
+    /// into the table, once. Returns how many came across.
+    pub fn import_files(db: &Db, queue_path: &std::path::Path) -> Result<usize, String> {
+        let inflight_path = queue_path.with_extension("inflight.json");
+        let mut ops: Vec<PendingOp> = Vec::new();
+        for file in [&inflight_path, queue_path] {
+            match std::fs::read(file) {
+                Ok(bytes) => {
+                    let parsed: Vec<PendingOp> =
+                        serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+                    ops.extend(parsed);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("{}: {e}", file.display())),
+            }
         }
-        Ok(keys)
+        let count = ops.len();
+        db.write("import queue", |tx| write_all(tx, &[], &ops))
+            .ok_or_else(|| "queue rows did not land".to_string())?;
+        Ok(count)
     }
 
     /// Write the queue as it stands in memory.
     pub fn persist(&mut self) {
-        crate::sync::persist::save_json(&self.path, &self.ops);
+        let (taken, ops) = (&self.taken, &self.ops);
+        self.db.write("write queue", |tx| write_all(tx, taken, ops));
         self.unwritten = false;
     }
 
-    /// Append an operation.  Immediately persisted to disk.
+    /// Append an operation.  Immediately persisted.
     pub fn push(&mut self, op: PendingOp) {
         self.push_many(vec![op]);
     }
 
-    /// Append several operations in order, with one write to disk.
+    /// Append several operations in order, with one write.
     pub fn push_many(&mut self, ops: Vec<PendingOp>) {
         self.ops.extend(ops);
         self.persist();
@@ -136,7 +160,7 @@ impl PendingQueue {
     ///
     /// Memory only. The next write of the queue carries it, and the delete
     /// fan-out writes once when its last tombstone is answered. Persisting on
-    /// every landed delete made a large Clear all quadratic in disk writes. A
+    /// every landed delete made a large Clear all quadratic in writes. A
     /// stale op replays as a repeat tombstone, harmless unless the entry was
     /// uploaded again meanwhile, which [`Self::supersede_delete`] covers.
     pub fn remove_delete(&mut self, entry_type: &str, client_id: &str) -> bool {
@@ -153,7 +177,7 @@ impl PendingQueue {
     /// A push for this entry was accepted, so a Delete still queued for it is
     /// older than the upload (Remove from cloud, then Upload) and must not
     /// replay over it. Written at once when one was dropped, or when a landed
-    /// one (possibly this entry's) is still in the file.
+    /// one (possibly this entry's) is still in the table.
     pub fn supersede_delete(&mut self, entry_type: &str, client_id: &str) {
         if self.remove_delete(entry_type, client_id) || self.unwritten {
             self.persist();
@@ -162,14 +186,13 @@ impl PendingQueue {
 
     /// Remove and return all pending operations in FIFO order.
     ///
-    /// The ops are written to the in-flight file *before* the queue is cleared,
-    /// so at no point are they absent from disk. Every drain has to be closed by
-    /// a [`Self::settle`], or the next launch will replay it.
+    /// The ops are marked in flight in the same write that empties the live
+    /// queue, so at no point are they absent from the table. Every drain has
+    /// to be closed by a [`Self::settle`], or the next launch will replay it.
     pub fn drain(&mut self) -> Vec<PendingOp> {
         let ops = std::mem::take(&mut self.ops);
-        crate::sync::persist::save_json(&inflight_path(&self.path), &ops);
-        self.persist();
         self.taken.extend(ops.iter().cloned());
+        self.persist();
         ops
     }
 
@@ -188,9 +211,6 @@ impl PendingQueue {
         }
         self.taken.clear();
         self.persist();
-        // Last, and only now: until this the file is the only copy of anything
-        // that got dropped along the way.
-        let _ = std::fs::remove_file(inflight_path(&self.path));
     }
 
     /// id_map-style keys (`"clipboard:{id}"` / `"note:{id}"`) for every queued
@@ -211,6 +231,22 @@ impl PendingQueue {
     }
 }
 
+/// Replace the table with `taken` (in flight) followed by `ops`.
+fn write_all(
+    tx: &rusqlite::Transaction<'_>,
+    taken: &[PendingOp],
+    ops: &[PendingOp],
+) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM sync_queue", [])?;
+    let mut st = tx.prepare("INSERT INTO sync_queue (op, inflight) VALUES (?1, ?2)")?;
+    for (op, inflight) in taken.iter().map(|o| (o, true)).chain(ops.iter().map(|o| (o, false))) {
+        let json = serde_json::to_string(op)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        st.execute(rusqlite::params![json, inflight])?;
+    }
+    Ok(())
+}
+
 /// The id_map-style key one op is for.
 fn op_key(op: &PendingOp) -> Option<String> {
     match op {
@@ -226,27 +262,9 @@ fn op_key(op: &PendingOp) -> Option<String> {
     }
 }
 
-/// Derive the path for sync_pending.json given an app_data directory.
-pub fn pending_queue_path(app_data: &Path) -> PathBuf {
-    app_data.join("sync_pending.json")
-}
-
-/// Where a flush parks the ops it has taken but not yet accounted for.
-fn inflight_path(queue_path: &Path) -> PathBuf {
-    queue_path.with_extension("inflight.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Test directory named after the calling test, so tests cannot collide.
-    fn scratch_queue(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("rovertools-queue-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        pending_queue_path(&dir)
-    }
 
     fn delete_op(id: &str) -> PendingOp {
         PendingOp::Delete {
@@ -267,13 +285,13 @@ mod tests {
     }
 
     /// The case that costs a user a deletion: the process ends between the drain
-    /// and the settle, so for that moment the ops are in neither the queue file
-    /// nor the server. Without the in-flight copy the tombstone is simply gone,
+    /// and the settle, so for that moment the ops are in neither the live queue
+    /// nor the server. Without the in-flight rows the tombstone is simply gone,
     /// and the entry comes back on the next pull.
     #[test]
     fn a_flush_that_never_settled_is_replayed_on_the_next_launch() {
-        let path = scratch_queue("interrupted");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(delete_op("a"));
         queue.push(delete_op("b"));
 
@@ -282,49 +300,49 @@ mod tests {
         assert!(queue.is_empty(), "the live queue is emptied by a drain");
 
         // The process dies here - no settle.
-        let recovered = PendingQueue::load(path);
+        let recovered = PendingQueue::load(db);
         assert_eq!(ids(&recovered), vec!["a", "b"]);
     }
 
     /// Remove from cloud, then Upload: the unpush tombstone still queued must
-    /// leave the file too, or the next launch replays it over the upload.
+    /// leave the table too, or the next launch replays it over the upload.
     #[test]
     fn an_accepted_push_supersedes_a_queued_delete_on_disk() {
-        let path = scratch_queue("superseded");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(delete_op("a"));
         queue.push(delete_op("b"));
 
         queue.supersede_delete("clipboard", "a");
 
-        assert_eq!(ids(&PendingQueue::load(path)), vec!["b"]);
+        assert_eq!(ids(&PendingQueue::load(db)), vec!["b"]);
     }
 
     /// Its tombstone landed (memory only) while the rest of the batch is still
-    /// out, then it was uploaded again: the file must lose that Delete now.
+    /// out, then it was uploaded again: the table must lose that Delete now.
     #[test]
     fn a_push_after_a_landed_delete_writes_it_out() {
-        let path = scratch_queue("landed-then-pushed");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push_many(vec![delete_op("a"), delete_op("b")]);
         queue.remove_delete("clipboard", "a");
 
         queue.supersede_delete("clipboard", "a");
 
-        assert_eq!(ids(&PendingQueue::load(path)), vec!["b"]);
+        assert_eq!(ids(&PendingQueue::load(db)), vec!["b"]);
     }
 
     #[test]
     fn settling_keeps_what_did_not_send_and_drops_the_rest() {
-        let path = scratch_queue("settled");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(delete_op("sent"));
         queue.push(delete_op("failed"));
 
         queue.drain();
         queue.settle(vec![delete_op("failed")]);
 
-        let reloaded = PendingQueue::load(path);
+        let reloaded = PendingQueue::load(db);
         assert_eq!(ids(&reloaded), vec!["failed"]);
     }
 
@@ -333,8 +351,8 @@ mod tests {
     /// deletion for a row the server has never heard of.
     #[test]
     fn an_unsent_op_goes_back_ahead_of_anything_queued_since() {
-        let path = scratch_queue("ordering");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(delete_op("old"));
 
         queue.drain();
@@ -342,7 +360,7 @@ mod tests {
         queue.settle(vec![delete_op("old")]);
 
         assert_eq!(ids(&queue), vec!["old", "arrived-during-flush"]);
-        let reloaded = PendingQueue::load(path);
+        let reloaded = PendingQueue::load(db);
         assert_eq!(ids(&reloaded), vec!["old", "arrived-during-flush"]);
     }
 
@@ -351,15 +369,15 @@ mod tests {
     /// stands for cannot go up until the network is back.
     #[test]
     fn a_push_local_op_keys_and_persists() {
-        let path = scratch_queue("push-local");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(PendingOp::PushLocal {
             client_id: "img-1".to_string(),
             entry_type: "clipboard".to_string(),
         });
         assert_eq!(queue.pending_keys(), vec!["clipboard:img-1"]);
 
-        let reloaded = PendingQueue::load(path);
+        let reloaded = PendingQueue::load(db);
         assert_eq!(reloaded.pending_keys(), vec!["clipboard:img-1"]);
         assert_eq!(reloaded.len(), 1);
     }
@@ -369,18 +387,17 @@ mod tests {
     /// those rows read as missing and come back in a restore.
     #[test]
     fn a_write_ahead_delete_survives_a_restart() {
-        let path = scratch_queue("write-ahead");
-        let mut queue = PendingQueue::load(path.clone());
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push_many(vec![delete_op("a"), delete_op("b")]);
 
-        let reloaded = PendingQueue::load(path);
+        let reloaded = PendingQueue::load(db);
         assert_eq!(ids(&reloaded), vec!["a", "b"]);
     }
 
     #[test]
     fn a_landed_delete_drops_only_its_own_op() {
-        let path = scratch_queue("landed");
-        let mut queue = PendingQueue::load(path);
+        let mut queue = PendingQueue::load(Db::open_in_memory());
         queue.push_many(vec![
             PendingOp::Push {
                 entry_json: r#"{"client_id":"a"}"#.to_string(),
@@ -404,8 +421,7 @@ mod tests {
 
     #[test]
     fn push_many_keeps_order() {
-        let path = scratch_queue("push-many");
-        let mut queue = PendingQueue::load(path);
+        let mut queue = PendingQueue::load(Db::open_in_memory());
         queue.push(delete_op("first"));
         queue.push_many(vec![delete_op("second"), delete_op("third")]);
         assert_eq!(ids(&queue), vec!["first", "second", "third"]);
@@ -416,8 +432,7 @@ mod tests {
     /// entries they stand for.
     #[test]
     fn drained_ops_stay_pending_until_the_settle() {
-        let path = scratch_queue("taken");
-        let mut queue = PendingQueue::load(path);
+        let mut queue = PendingQueue::load(Db::open_in_memory());
         queue.push(PendingOp::PushLocal {
             client_id: "img-1".to_string(),
             entry_type: "clipboard".to_string(),
@@ -429,38 +444,50 @@ mod tests {
         assert!(queue.pending_keys().is_empty());
     }
 
-    /// A queue file that will not parse is flagged, never read as an empty
-    /// queue, and `try_keys` refuses it rather than naming nothing.
     #[test]
-    fn an_unreadable_queue_file_is_flagged() {
-        let path = scratch_queue("unreadable");
-        std::fs::write(&path, b"[{\"op\":").unwrap();
-        let queue = PendingQueue::load(path.clone());
-        assert!(queue.unreadable());
-        assert!(PendingQueue::try_keys(&path).is_err());
-    }
-
-    #[test]
-    fn try_keys_reads_both_files_without_changing_them() {
-        let path = scratch_queue("try-keys");
-        let mut queue = PendingQueue::load(path.clone());
+    fn keys_in_reads_in_flight_and_live_rows_without_changing_them() {
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(delete_op("a"));
         queue.drain();
         queue.push(delete_op("b"));
-        let mut keys = PendingQueue::try_keys(&path).unwrap();
+        let mut keys = PendingQueue::keys_in(&db).unwrap();
         keys.sort();
         assert_eq!(keys, vec!["clipboard:a", "clipboard:b"]);
-        assert!(inflight_path(&path).exists());
+        let reloaded = PendingQueue::load(db);
+        assert_eq!(ids(&reloaded), vec!["a", "b"], "in-flight first, then live");
     }
 
     #[test]
-    fn a_settled_flush_leaves_no_inflight_file_behind() {
-        let path = scratch_queue("cleanup");
-        let mut queue = PendingQueue::load(path.clone());
+    fn a_settled_flush_leaves_no_inflight_rows_behind() {
+        let db = Db::open_in_memory();
+        let mut queue = PendingQueue::load(Arc::clone(&db));
         queue.push(delete_op("a"));
         queue.drain();
-        assert!(inflight_path(&path).exists(), "the drain writes it");
+        let inflight = |db: &Db| -> i64 {
+            db.read("count", |c| {
+                c.query_row("SELECT count(*) FROM sync_queue WHERE inflight = 1", [], |r| r.get(0))
+            })
+            .unwrap()
+        };
+        assert_eq!(inflight(&db), 1, "the drain marks it");
         queue.settle(Vec::new());
-        assert!(!inflight_path(&path).exists(), "the settle removes it");
+        assert_eq!(inflight(&db), 0, "the settle removes it");
+    }
+
+    #[test]
+    fn legacy_queue_files_import_in_flight_first() {
+        let db = Db::open_in_memory();
+        let dir = std::env::temp_dir().join(format!("rovertools-queue-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync_pending.json");
+        std::fs::write(&path, serde_json::to_vec(&[delete_op("live")]).unwrap()).unwrap();
+        std::fs::write(
+            path.with_extension("inflight.json"),
+            serde_json::to_vec(&[delete_op("taken")]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(PendingQueue::import_files(&db, &path).unwrap(), 2);
+        assert_eq!(ids(&PendingQueue::load(db)), vec!["taken", "live"]);
     }
 }

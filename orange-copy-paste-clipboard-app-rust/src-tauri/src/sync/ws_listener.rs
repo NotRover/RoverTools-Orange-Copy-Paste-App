@@ -96,7 +96,7 @@ impl WsListener {
                 backoff = MAX_BACKOFF_SECS;
             }
             self.set_connected(false);
-            eprintln!("[sync:ws] disconnected: {err}; reconnecting in {backoff}s");
+            log::warn!(target: "sync:ws", "disconnected: {err}; reconnecting in {backoff}s");
             tokio::time::sleep(Duration::from_secs(backoff)).await;
             if !established {
                 backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
@@ -182,7 +182,7 @@ impl WsListener {
 
         // Endpoint and device only: the token is a live bearer credential, and
         // stdout here is a log file that outlives the session.
-        eprintln!("[sync:ws] connected to {endpoint} as device {device_id}");
+        log::info!(target: "sync:ws", "connected to {endpoint} as device {device_id}");
         self.set_connected(true);
 
         // Anything that happened while the socket was down was never delivered
@@ -203,7 +203,7 @@ impl WsListener {
                 sync.reconcile_spaces().await;
                 if sync.sync_mode() != crate::sync::types::SyncMode::Manual {
                     if let Err(e) = sync.flush_and_pull().await {
-                        eprintln!("[sync:ws] catch-up on reconnect failed: {e}");
+                        log::warn!(target: "sync:ws", "catch-up on reconnect failed: {e}");
                     }
                 }
             });
@@ -561,7 +561,7 @@ impl WsListener {
                     .send(Message::Text(r#"{"event":"pong"}"#.into()))
                     .await;
             }
-            other => eprintln!("[sync:ws] unknown event: {other}"),
+            other => log::warn!(target: "sync:ws", "unknown event: {other}"),
         }
     }
 }

@@ -117,25 +117,42 @@ pub fn clamp_popup(app: tauri::AppHandle, label: String) {
 
 #[tauri::command]
 pub fn open_data_folder(app: tauri::AppHandle) -> bool {
-    let Some(dir) = app.path().app_data_dir().ok() else {
-        return false;
-    };
+    app.path().app_data_dir().is_ok_and(|dir| open_folder(&dir))
+}
+
+/// The folder holding `app.log` and its rotated copies, for a bug report.
+#[tauri::command]
+pub fn open_log_folder(app: tauri::AppHandle) -> bool {
+    app.path()
+        .app_data_dir()
+        .is_ok_and(|dir| open_folder(&crate::logging::dir(&dir)))
+}
+
+/// A line from a webview, into the same log as everything else. `level` is
+/// `error`, `warn` or `info`; the target names the window it came from.
+#[tauri::command]
+pub fn log_from_webview(window: tauri::Window, level: String, message: String) {
+    let target = format!("webview:{}", window.label());
+    match level.as_str() {
+        "error" => log::error!(target: &target, "{message}"),
+        "warn" => log::warn!(target: &target, "{message}"),
+        _ => log::info!(target: &target, "{message}"),
+    }
+}
+
+/// Show `dir` in the system file manager, creating it first so the window
+/// opens on an empty folder rather than an error.
+fn open_folder(dir: &std::path::Path) -> bool {
     if !dir.exists() {
-        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(dir);
     }
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer")
-            .arg(&dir)
-            .spawn()
-            .is_ok()
+        std::process::Command::new("explorer").arg(dir).spawn().is_ok()
     }
     #[cfg(not(windows))]
     {
-        std::process::Command::new("xdg-open")
-            .arg(&dir)
-            .spawn()
-            .is_ok()
+        std::process::Command::new("xdg-open").arg(dir).spawn().is_ok()
     }
 }
 
@@ -167,9 +184,7 @@ pub fn reconcile_autostart(app: &tauri::AppHandle) {
 #[tauri::command]
 pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> bool {
     if enabled && cfg!(debug_assertions) && !ALLOW_AUTOSTART_IN_DEBUG_BUILD {
-        eprintln!(
-            "Refusing to enable autostart from a debug build (ALLOW_AUTOSTART_IN_DEBUG_BUILD=false)."
-        );
+        log::warn!(target: "autostart", "refused from a debug build (ALLOW_AUTOSTART_IN_DEBUG_BUILD=false)");
         return false;
     }
 

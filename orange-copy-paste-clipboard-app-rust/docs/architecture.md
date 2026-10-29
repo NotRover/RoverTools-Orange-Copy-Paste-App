@@ -104,25 +104,31 @@ src-tauri/
 ├── src/
 │   ├── main.rs                 # Process entry point
 │   ├── lib.rs                  # App builder, setup, Tauri command registration
-│   ├── health.rs               # Panic hook, heartbeat watchdog, atomic writes, quarantine
+│   ├── health.rs               # Panic hook, liveness watchdog, atomic writes for the files that remain
+│   ├── logging.rs              # The app log: every `log` record to logs/app.log under app data, rotated by size
 │   ├── updater.rs              # Signed self-update: check, download, install
 │   ├── clock.rs                # One clock for the whole product: every timestamp is read here
 │   ├── settings_file.rs        # settings.json reader (tolerates transient Windows sharing violations)
+│   ├── storage/                # app.db: the one SQLite database every store writes through to
+│   │   ├── mod.rs              # Db re-export, DB_FILE
+│   │   ├── db.rs               # One connection behind a mutex; read/write helpers that feed the health notice
+│   │   ├── schema.rs           # Tables, indexes, PRAGMA user_version migrations
+│   │   └── import.rs           # One-time import of the pre-SQLite files, each retired with a .migrated suffix
 │   ├── clipboard/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_history, copy, paste, etc.)
-│   │   ├── history.rs          # ClipboardEntry, ClipboardHistory, binary persistence (image files + msgpack)
+│   │   ├── history.rs          # ClipboardEntry, ClipboardHistory, write-through to the entries table, image files
 │   │   ├── files.rs            # CF_HDROP read/write (Windows file clipboard)
 │   │   ├── html.rs             # CF_HTML read/write (rich text clipboard)
 │   │   └── image.rs            # Multi-format image clipboard read/write
 │   ├── notes/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # Tauri command handlers (get_notes, create/update/delete, groups)
-│   │   └── store.rs            # Note model + MessagePack persistence
+│   │   └── store.rs            # Note model + write-through to the notes table
 │   ├── notifications/          # Notification centre (bell popout)
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── commands.rs         # list/refresh/mark-read/dismiss; reconciles invites with the server
-│   │   └── store.rs            # Notification model + MessagePack persistence, read TTL, cap
+│   │   └── store.rs            # Notification model + write-through to the notifications table, read TTL, cap
 │   ├── sync/                   # Cloud sync module (optional, runtime-gated)
 │   │   ├── mod.rs              # SyncClient init, background Tokio runtime
 │   │   ├── client.rs           # reqwest HTTP client, Bearer + X-Device-Id injection, 401 refresh
@@ -130,11 +136,10 @@ src-tauri/
 │   │   ├── oauth.rs            # Google sign-in: loopback redirect server (ports 53170-53172)
 │   │   ├── device_id.rs        # Stable per-machine device fingerprint (not identity)
 │   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
-│   │   ├── pending_queue.rs    # sync_pending.json read/write for offline accumulation
-│   │   ├── pending_work.rs     # sync_pending_work.json: uploads and downloads under way
-│   │   ├── id_map.rs           # client_id -> server_id map (id_map.json)
-│   │   ├── sync_state.rs       # Connection/status state shared with the UI
-│   │   ├── persist.rs          # Cached session + sync metadata persistence
+│   │   ├── pending_queue.rs    # sync_queue table: ops waiting to be pushed
+│   │   ├── pending_work.rs     # sync_work table: uploads and downloads under way
+│   │   ├── id_map.rs           # client_id -> server_id map (sync_entries table)
+│   │   ├── sync_state.rs       # Connection/status state shared with the UI; the durable part in kv
 │   │   ├── crypto.rs           # password split (Argon2id + HKDF), UMK envelope, AES-256-GCM, X25519
 │   │   ├── types.rs            # Wire types mirrored from the backend contract
 │   │   ├── commands.rs         # Tauri commands: sync_login, sync_logout, sync_now, etc.
@@ -220,13 +225,14 @@ src/
 3. **`AppState { .. }`** - `run()` builds `AppState` inline from the shared history and suppress flag.
 4. **`setup_runtime()`** - Called inside `tauri::Builder::setup`:
    - Configures the images directory (`{app_data}/images/`) for on-disk image storage
-   - Loads history from `{app_data}/history.bin` (MessagePack binary) + `{app_data}/images/`
-     through `ClipboardHistory::load_from_disk`, which folds in a pre-upgrade
-     `pinned_entries.bin` once (section 7.2)
+   - Opens `{app_data}/app.db` (`storage::Db::open`; when the file will not open, an
+     in-memory database stands in for the session and the log says so), imports any
+     pre-SQLite files once (section 7.2), then loads history, notes and notifications
+     from their tables
    - Creates popup windows (hidden, off-screen)
    - Registers global shortcuts (Ctrl+Shift+C, Ctrl+Shift+V)
    - Starts clipboard watcher thread
-   - Starts background flush thread (`flush_dirty_stores` every 2s; see History keeping in section 4.2)
+   - Starts the liveness probe thread: every 2s it takes and releases every store lock, then `health::beat()` (section 4.8)
    - Sets up main-window focus handler (auto-hides popups)
    - Restores saved window geometry
    - Starts window move/resize tracking
@@ -259,7 +265,7 @@ marker file naming this pid under the temp directory.
 
 `EXIT_DRAIN_MS` (3s) bounds the rotation wait on all four paths. It is sized from the
 keychain write's own retry ladder. After a sync wait (below) it gets what is left of that
-wait's budget, if that is less. On a timeout the exit goes ahead, and `crash.log`
+wait's budget, if that is less. On a timeout the exit goes ahead, and the log
 records it.
 
 **Running sync work** (`drain_sync_work`). A quit or restart also waits for uploads and
@@ -274,13 +280,13 @@ blob downloads that are already running:
   sync". The note under it says the app will close, or restart, in a few seconds. The
   toast shows whatever the notification settings say, and stays up until the app exits.
 - `SYNC_DRAIN_MS` (10s) bounds the sync wait and the rotation wait together. What is
-  still running then is already named in `sync_pending_work.json`, so the exit flush
-  keeps its entry and the next launch runs it. `crash.log` records the timeout.
+  still running then is already named in the pending-work record, so the exit prune
+  keeps its entry and the next launch runs it. The log records the timeout.
 - Opening the app again during a quit's wait calls the quit off (`QUIT_CANCELLED`): the
   wait ends, sync starts again, the toast goes and the window comes back. A restart's
   wait cannot be called off.
-- A restart's `Exit` writes with `Flush::Forced`, like the flush before it, so it drops
-  nothing.
+- A restart's `Exit` skips the Keep-history-off prune (`prune_unkept_on_exit`), so it
+  drops nothing.
 
 **Why:** an entry can be in the middle of its upload, or of the download that brings it
 here, when the user quits. With Keep history off, that entry had nothing yet to keep it,
@@ -307,8 +313,7 @@ part, and it would change what the next launch may conclude from a rejected toke
 AppState
 ├── history: Arc<Mutex<ClipboardHistory>>   ← shared across all threads
 ├── suppress_next_capture: Arc<AtomicBool>  ← prevents watcher re-capturing
-├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting, default on (~1ns check)
-├── history_dirty: Arc<AtomicBool>          ← triggers periodic flush to history.bin
+├── keep_history: Arc<AtomicBool>           ← cached mirror of the setting, default on; read at exit
 ├── close_to_tray: Arc<AtomicBool>          ← hide to tray instead of quitting
 ├── os_notifications: Arc<AtomicBool>       ← may also raise an OS toast while unfocused
 ├── start_minimized: Arc<AtomicBool>        ← start hidden (minimized to tray)
@@ -320,9 +325,7 @@ AppState
 ├── splash_updating: Arc<AtomicBool>        ← splash is mid auto-update; holds its close timer
 ├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
 ├── notes: Arc<Mutex<NoteStore>>            ← shared notes store
-├── notes_dirty: Arc<AtomicBool>            ← triggers periodic flush to notes.bin
 ├── notifications: Arc<Mutex<NotificationStore>> ← notification centre feed
-├── notifications_dirty: Arc<AtomicBool>    ← triggers periodic flush to notifications.bin
 ├── sync_client: Mutex<Option<Arc<SyncClient>>> ← None when sync disabled or not yet authed
 └── ui_view: Arc<Mutex<UiView>>             ← the screen and space the user is looking at
 ```
@@ -348,34 +351,33 @@ exempt.
 **Why:**
 
 - An entry is copied several times on its way to the user: into the store, into each
-  webview that shows it, into MessagePack on every flush, and into ciphertext when sync
+  webview that shows it, into its row on every write, and into ciphertext when sync
   pushes it. An unbounded entry is an unbounded multiple.
 - The toast ignores preferences because the only other sign of a refused capture is the
   item's absence.
 - What this app holds locally and what a cloud row may weigh are different questions,
   and history is useful without sync.
 
-**History keeping.** Every mutation sets `history_dirty`. `flush_dirty_stores` (`lib.rs`)
-writes `history.bin` at most every 2 seconds, and again, forced, on every exit and before
-a self-restart or update install (`flush_for_restart`). There is one history file and one
-writer, `ClipboardHistory::save_to_file`, which goes through `health::write_state`.
+**History keeping.** Every mutation writes its own rows to the `entries` table as it
+happens (section 7.1), so the database always holds everything in memory, whatever
+`keep_history` says. The setting decides one thing: what the final exit drops.
 
-| `keep_history` (per device) | What `history.bin` holds |
+| `keep_history` (per device) | What the exit does |
 |---|---|
-| On (the default) | Every entry |
-| Off | Pinned and Saved entries, plus every entry this device's sync records name: `SyncClient::keep_keys`, or with no client the same files read from disk (`keep_keys_on_disk`). That is the id map's rows, shares waiting for a space key and items received from a space (`IdMap::keep_keys`), queued ops including those a flush holds, pushes in flight, and the pending-work record. A record that will not read keeps everything: for that flush with no client, for the whole session with one. |
+| On (the default) | Nothing. Every entry stays. |
+| Off | `prune_unkept_on_exit` (`lib.rs`) drops every entry that is not pinned or Saved and that this device's sync records do not name: `SyncClient::keep_keys`, or with no client the same tables read directly (`keep_keys_in_db`). That is the id map's rows, shares waiting for a space key and items received from a space (`IdMap::keep_keys`), queued ops including those a flush holds, pushes in flight, and the pending-work record. A record that will not read keeps everything. |
 
 - **Nothing caps the entry count.** `MAX_TEXT_BYTES` bounds a single entry (above).
-- **Turning Keep history back on loses nothing.** Startup loads `history.bin` whatever
-  the setting, so memory already holds everything the file does, and the next flush
-  writes it all.
+- **Turning Keep history back on loses nothing.** The table holds every entry already;
+  only an exit with the setting off ever removes one.
 - **Files go only with their entry.** An image or received-files folder is queued in
-  `gone_files` when its entry is removed and deleted once the save that drops the entry
-  has landed, never for an id that is live again. Nothing scans `images/` for orphans.
-- **With Keep history off, the final exit drops what it does not write.** Only the
-  `RunEvent::Exit` flush (`Flush::Exit`) calls `drop_unkept`, so the entries it leaves out
-  lose their files the same way. A restart flush drops nothing, since an update install
-  can fail and return to the running app, and neither does a flush that keeps everything.
+  `gone_files` when its entry is removed and deleted once the write that drops the row
+  has landed, never for an id that is live again. A write that fails leaves the file
+  for the next write that lands. Nothing scans `images/` for orphans.
+- **With Keep history off, the final exit drops what nothing keeps.** Only
+  `RunEvent::Exit` calls `drop_unkept`, so the entries it drops lose their rows and
+  files together. A restart's exit drops nothing, since an update install can fail and
+  return to the running app.
 - **A file the clipboard still holds stays, with its entry.** `drop_unkept` keeps an
   entry whose file the system clipboard names (CF_HDROP, read by
   `files::clipboard_file_paths`) or a kept entry names, so no file is left that nothing
@@ -385,7 +387,7 @@ writer, `ClipboardHistory::save_to_file`, which goes through `health::write_stat
   before the entry reaches history, and every upload or download is in the pending-work
   record from before it starts until after its row is written, so no entry can be in
   history with nothing naming it.
-- **The cursor never runs ahead of the file.** A pull page flushes the store before
+- **The cursor never runs ahead of the database.** Every merge writes its rows before
   `last_server_ts` moves past it (section 6.3).
 
 **Why:** a device that holds less than its sync record says it pulled cannot tell
@@ -410,7 +412,7 @@ ClipboardEntry {
 }
 ```
 
-> **Sync note:** per-entry sync state is *not* stored on the entry. It lives in `id_map.json` and the pending queue, and the UI reads it via the `sync_get_entry_states` command (`useEntrySyncStates()`), gated by the `show_sync_badges` setting.
+> **Sync note:** per-entry sync state is *not* stored on the entry. It lives in the id map and the pending queue (both in `app.db`), and the UI reads it via the `sync_get_entry_states` command (`useEntrySyncStates()`), gated by the `show_sync_badges` setting.
 
 **`ClipboardHistory`** is a `Vec<ClipboardEntry>` with most-recent-first ordering:
 
@@ -434,10 +436,10 @@ ClipboardEntry {
 | `all()`                             | Full history slice (most-recent first)                    |
 | `set_images_dir(dir)`               | Configure the directory for on-disk image storage         |
 | `upsert_synced(entry)`              | Insert or replace a merged entry by id; refuses one past `MAX_TEXT_BYTES` |
-| `save_to_file(path, also_keep)`     | Write pinned/Saved entries plus those `also_keep` names, then delete `gone_files` |
-| `drop_unkept(also_keep, clipboard_refs)` | Drop the entries `save_to_file` would leave out, queueing their files in `gone_files` unless the clipboard or a kept entry names them; final exit flush only |
-| `load_from_disk(history, legacy, keep)` | Startup load, including the one-time fold of `pinned_entries.bin` (section 7.2) |
-| `merge_leftover(bytes)`             | Fold in a sealed session's leftover by id, adding only what is missing |
+| `drop_unkept(also_keep, clipboard_refs)` | Drop the entries that are not pinned or Saved and that `also_keep` does not name, rows and files, unless the clipboard or a kept entry names the file; final exit only |
+| `attach_db(db)` / `load_from_db()`  | Bind the store to `app.db` and read the `entries` table, newest first |
+| `load_legacy(history, legacy, keep)` | Read `history.bin` and a pre-upgrade `pinned_entries.bin` once, for the import (section 7.2) |
+| `merge_leftover(bytes)`             | Fold in a copy an older build set aside, by id, adding only what is missing; import only |
 
 #### `commands.rs` - Tauri Command Handlers
 
@@ -542,7 +544,7 @@ Uses the Win32 API directly and bypasses arboard:
 
 #### `store.rs` - Note Model and Storage
 
-`NoteStore` keeps notes in-memory as `Vec<Note>` and persists them to `{app_data}/notes.bin` using MessagePack.
+`NoteStore` keeps notes in-memory as `Vec<Note>` and writes each change through to the `notes` table in `app.db`.
 
 `Note` fields:
 
@@ -553,13 +555,13 @@ Uses the Win32 API directly and bypasses arboard:
 
 Notes are sorted by `updated_at` descending. A new note gets a UUIDv4 id. On load, a legacy numeric id counter is still advanced past any numeric ids in the file.
 
-As with clipboard entries, per-note sync state is not a field on the note. It lives in `id_map.json` and the pending queue, and the UI reads it through `sync_get_entry_states` (`useEntrySyncStates()`).
+As with clipboard entries, per-note sync state is not a field on the note. It lives in the id map and the pending queue, and the UI reads it through `sync_get_entry_states` (`useEntrySyncStates()`).
 
 #### Persistence Behavior
 
-- Note mutations set `notes_dirty = true`.
-- The shared background flush thread writes `notes.bin` every ~2s when dirty.
-- Notes are loaded during startup in `setup_runtime`.
+- Every mutation writes the rows it touched inside the store method, under the store's
+  own lock, then the database lock briefly (section 7.1).
+- Notes are loaded from the table during startup in `setup_runtime`.
 
 ---
 
@@ -926,7 +928,7 @@ On startup, when sync is enabled and a Supabase session can be restored:
    `kdf_salt`, unwrap the UMK) and register the device (obtain `device_id`).
 2. Open the WebSocket connection. Opening it schedules a settings round, which
    pulls before it pushes.
-3. Flush `sync_pending.json`, then pull the delta after `last_server_ts`, page by
+3. Flush the sync queue, then pull the delta after `last_server_ts`, page by
    page (`flush_and_pull`), decrypting and merging remote entries into the local
    store.
 4. Sweep the whole account if a restore is due (`restore_if_owed`).
@@ -954,11 +956,11 @@ Three local questions decide the answer, none of them touching the network:
 |---|---|---|
 | Is a client already built for this launch? | `AppState.sync_client` | Yes -> use it, and do not re-read `settings.json`. |
 | Did the user turn sync off? | `SyncConfig::enabled` **and** `enabled_known` | Off only counts when the file actually said so; a `settings.json` that would not open is not a sign-out. |
-| Is there anything to restore? | `SyncClient::has_stored_session` | Keychain refresh token plus a user id from `sync_state.json` or the install session pointer. A store that will not answer counts as yes. |
+| Is there anything to restore? | `SyncClient::has_stored_session` | Keychain refresh token plus a user id from the sync state (`kv` in `app.db`) or the install session pointer. A store that will not answer counts as yes. |
 
 #### Restore sweep - rows missing here
 
-A delta pull asks only for rows newer than `last_server_ts`, and `id_map.json` records
+A delta pull asks only for rows newer than `last_server_ts`, and the id map records
 what this device pushed or pulled, not what it still holds. A row that was on the server
 before this device caught up, or that this device lost since, sits behind the cursor for
 good. The restore sweep is the way back.
@@ -975,7 +977,7 @@ good. The restore sweep is the way back.
 
 | Trigger | Path |
 |---|---|
-| Startup and sign-in | `trigger_initial_sync` -> `restore_if_owed`. `finalize_session` owes one sweep on every sign-in (`restore_owed` in `sync_state.json`). If that launch's flush fails, the next `flush_and_pull` that succeeds runs the check (`restore_check_missed`). In Manual mode the launch makes no flush, so the check waits for Sync now. |
+| Startup and sign-in | `trigger_initial_sync` -> `restore_if_owed`. `finalize_session` owes one sweep on every sign-in (`restore_owed` in the sync state). If that launch's flush fails, the next `flush_and_pull` that succeeds runs the check (`restore_check_missed`). In Manual mode the launch makes no flush, so the check waits for Sync now. |
 | Sync now | `sync_now` -> `restore_if_owed`, in every mode |
 | A space key arrives | The key path runs `restore_sweep`. In Manual mode it only sets `restore_owed`. |
 | Restore from cloud (Account screen) | `sync_restore_from_cloud`: flushes the queue, then sweeps whatever is owed |
@@ -1046,7 +1048,7 @@ On a dropped connection the listener reconnects after 5s, doubling the wait up t
 
 #### `pending_queue.rs` - Offline Queue
 
-`{app_data}/sync_pending.json` stores an ordered list of operations waiting to be pushed:
+The `sync_queue` table in `app.db` stores an ordered list of operations waiting to be pushed, one JSON op per row:
 
 ```jsonc
 [
@@ -1073,13 +1075,13 @@ pre-encrypted and parked:
 - **Why:** without it, an image or file copied offline was reported "not sent" and
   dropped, so it never synced even once the connection came back.
 
-**The in-flight file.** A flush moves its ops through
-`sync_pending.inflight.json` rather than clearing the queue file first:
+**In-flight ops.** A flush marks its ops in flight (`inflight = 1`) rather than
+deleting their rows first:
 
-- `drain` writes them there before emptying the queue.
-- `settle` requeues whatever did not send, and only then removes the file.
-- `load` folds a leftover copy back in at the front.
-- Between the two, `pending_keys` still names the drained ops, so the exit flush and
+- `drain` marks them before emptying the queue.
+- `settle` requeues whatever did not send, and only then deletes the rows.
+- `load` puts leftover in-flight rows back at the front.
+- Between the two, `pending_keys` still names the drained ops, so the exit prune and
   the card badges treat them as queued.
 
 **Why:** the extra write covers an asymmetry between op kinds.
@@ -1142,8 +1144,8 @@ while it is minimized to the tray, where the window never refocuses:
 
 #### `pending_work.rs` - Work Under Way
 
-`{app_data}/sync_pending_work.json` names every entry key with an upload or a blob
-download that has started and not finished:
+The `sync_work` table in `app.db` names every entry key with an upload or a blob
+download that has started and not finished, one row per `(key, kind)`:
 
 ```jsonc
 { "upload": ["clipboard:3f2a9c1e-7b4d-4e8a-9c2f-1d6b5e0a8f47"], "download": ["note:b81e4d02-5c9a-4f3e-a716-2e9d0c4b7a13"] }
@@ -1151,7 +1153,7 @@ download that has started and not finished:
 
 - **Recorded** in `spawn_push_clipboard_entry` and `spawn_push_note` after their skip
   checks, and in `merge_pulled` before a blob download starts. Every change is written
-  to the file at once, so it never names finished work or misses started work.
+  to the table at once, so it never names finished work or misses started work.
 - **Cleared** when the task ends (`WorkGuard`): after the server's answer is recorded, the
   push is queued, the download lands and its id_map row is written, or the work is
   refused. Two tasks for one key clear it only when both end. A push whose slot comes
@@ -1164,19 +1166,15 @@ download that has started and not finished:
   becomes a restore owed. In Manual mode that waits for Sync now.
 - **Reset** with the id map when a different account signs in.
 
-It is separate from `sync_pending.json` because queue ops carry ciphertext and replay
-rules; this file holds only keys.
+It is separate from the queue because queue ops carry ciphertext and replay rules;
+this table holds only keys.
 
-**Unreadable records.** `id_map.json`, `sync_pending.json`, its in-flight file and
-`sync_pending_work.json` load through `persist::load_json_checked`. A file that is there
-and will not read or parse:
-
-- loads empty, with an unreadable flag set on its store,
-- is never written for the rest of the session, so it stays as it was,
-- and is noted in `crash.log`.
-
-Any flag makes `SyncClient::keep_keys` answer "keep everything" for the session. A
-missing file is an empty record, as before.
+**A record that will not read.** The four sync tables share `app.db` with the stores.
+A read that fails is logged and answers `None`, which
+`SyncClient::keep_keys` and `keep_keys_in_db` turn into "keep everything" for that
+exit. A database that will not open at all is replaced by an in-memory one for the
+session (section 7.1), so every record starts empty, and the next launch on the real
+file starts from what it held.
 
 #### `crypto.rs` - Encryption Primitives
 
@@ -1383,7 +1381,7 @@ shape of the wrapped-key map and the routing array is the wire contract:
 **Where an entry goes** is the union of two sources, evaluated on push:
 
 1. **Explicit shares** - the spaces the user picked from the card menu or bulk bar,
-   recorded in `id_map.json` under `entry_shares`. Authoritative for entries already
+   recorded in the id map (`sync_entries.shares`). Authoritative for entries already
    pushed.
 2. **Send-filter matches** - every space whose
    `SendFilter { enabled, kinds, groups, content }` matches, each evaluated
@@ -1441,7 +1439,7 @@ redistributes.
 2. `share_targets` drops a keyless space on the way out, so nothing unreadable is pushed.
 3. `flush_pending_shares` re-pushes those entries when `space:key-received` fires.
 
-The record in `id_map.json` *is* the queue, so it survives a restart and there is no second
+The id map row *is* the queue, so it survives a restart and there is no second
 store to keep consistent. The UI shows it as a dimmed share chip and a "waiting" row in the
 share menus.
 
@@ -1509,7 +1507,7 @@ the plaintext group names they reference.
 2. Pull the blob. One this device cannot decrypt ends the round with no push: it may be
    the account's only copy.
 3. Merge (`merge_settings`) the account's values, this device's, and `settings_base`,
-   this device's roaming values as of its last round (in `sync_state.json`). A key
+   this device's roaming values as of its last round (in the sync state). A key
    changed here since the base keeps this device's value; every other key takes the
    account's. With no base (first round on this device or account), the account wins
    and local values only fill keys it lacks.
@@ -1590,7 +1588,6 @@ source for which deployment a build ships against. A key present and non-empty i
   - Pushes to history, emits `clipboard:new-entry` to all windows.
   - Updates `active_clipboard_id` and emits `clipboard:active-id`.
   - Shows copy notification if enabled.
-  - If `keep_history` is enabled, marks `history_dirty` for background flush.
 - Advances the sequence token only when capture succeeds. If the clipboard was locked, the next poll retries.
 
 #### `hotkeys.rs` - Global Shortcut Handlers
@@ -1682,27 +1679,50 @@ frontend drives popup sizing and reveal through these.
 | `ui_screen_changed` | Frontend reports the active screen |
 | `ui_space_changed` | Frontend reports the selected space |
 | `open_data_folder` | Open the app-data folder in the OS file manager |
+| `open_log_folder` | Open `{app_data}/logs` in the OS file manager |
+| `log_from_webview` | One line from a window into the app log, under `webview:<label>` |
 | `get_autostart` | Whether run-on-startup is enabled |
 | `set_autostart` | Toggle run-on-startup (refused in debug builds) |
 
 ### 4.8 Health & Self-Update
 
-`health.rs` runs the panic hook, heartbeat watchdog, atomic writes and quarantine
-(see section 4.1, Shutdown and the rotation window).
+`health.rs` runs the panic hook, the liveness watchdog, the write-failure notice and
+the atomic replace the remaining files use (see section 4.1, Shutdown and the rotation
+window). `logging.rs` is where everything they report ends up.
 
-`load_state` keeps a `.bak` of each state file's last copy that parsed. When a file
-loads at under a quarter of its `.bak`, the old `.bak` moves to `.bak.prev` first,
-which nothing reads automatically. A real Clear all cannot come back through a
-recovery, and a loss still leaves the larger copy on disk. These commands are polled at
-startup because the matching events only reach listeners attached when they fired.
+**The app log.** Every `log` record in the process goes to `{app_data}/logs/app.log`,
+one line per record: UTC time to the millisecond, level, target, message. `init()`
+installs the logger first thing in `run()`; `attach_file` opens the file at the top of
+`setup`, once the app data directory is known, and a debug build prints every line to
+stderr as well. At 5 MB the file rotates to `app.log.1`, that to `app.log.2`, and the
+oldest goes. Records from crates this build does not own pass only at `warn` and above.
+A window's `console.error` and `console.warn`, its uncaught errors and its unhandled
+rejections reach the same file through `log_from_webview` (`src/log.ts`, installed with
+the webview guards), under the target `webview:<window label>`. `health::note` is the
+one wrapper: a fault raised anywhere lands at `error` under `health`, with its detail on
+the lines below. The file write takes its lock with `try_lock`, so a panic raised while
+the lock was held cannot hang the hook that reports it.
+
+- **A panic latches the process as degraded** (`mark_degraded`, one-way). The UI shows
+  a banner with a restart. User data keeps being written: every write is one row or a
+  few, so a value a panic left half-updated can reach its own row at worst, never the
+  whole store, and refusing the writes would lose everything captured after the fault
+  for the sake of that row.
+- **A deadlock latches nothing**, so a probe thread in `lib.rs` takes and releases
+  every store lock every 2s and calls `beat()`. The watchdog raises `health:trouble`
+  (`kind: stalled`) when the beats stop for 15s, and clears it when they resume.
+- **A write that keeps failing** raises the same event (`kind: unwritable`) once it has
+  lasted past a 6s grace period, from a file write or a database write alike
+  (`note_store_write_failed`). One write that lands clears it.
+
+These commands are polled at startup because the matching events only reach listeners
+attached when they fired.
 
 | Command | Purpose |
 | --- | --- |
 | `health_degraded_reason` | Why the process is degraded, or `None` while healthy |
 | `health_trouble` | Why saving is not working, or `None` while it is |
-| `health_recovery_notice` | What a degraded previous session left behind and this one adopted |
-| `health_sealed_notice` | Which store could not be read at startup and is being left alone |
-| `health_restart_app` | Restart the app to rebuild in-memory state from disk |
+| `health_restart_app` | Restart the app to rebuild in-memory state from the database |
 
 `updater.rs` is the signed self-update flow. Updates are off in `tauri dev` by
 design, so this path is only exercised from published builds.
@@ -2038,9 +2058,9 @@ capture_clipboard_change() → history.push(entry)
                     ├─ space_ids = explicit shares ∪ matching send filters
                     │
                     ├─ online? ──► push to server (see wire contract)
-                    │              on success: update id_map.json, set sync_status=Synced
+                    │              on success: write the id map row, set sync_status=Synced
                     │
-                    └─ offline? ─► append to sync_pending.json
+                    └─ offline? ─► append to the sync queue
                                   sync_status stays Pending
 ```
 
@@ -2065,10 +2085,10 @@ On startup / reconnect:
          ├─ client_id already in local store?
          │     └─ Yes → compare server_ts; apply if newer (LWW)
          │     └─ No  → insert as new entry
-         │              keep client_id as its id, record in id_map.json
+         │              keep client_id as its id, record in the id map
          │
+         │              (each store writes its row as it merges)
          ├─ emit sync:history-merged (or sync:notes-merged) → React re-render
-         ├─ flush_dirty_stores: the page reaches disk before the cursor moves
          └─ advance the server cursor to last_server_ts (see wire contract)
               next_cursor when the server sent one - it is already clamped to
               the point both streams are complete to, so it can be behind the
@@ -2102,57 +2122,91 @@ WebSocket entry event received (event/payload shape: see wire contract)
 
 ## 7. Persistence & Storage
 
-### 7.1 Binary Persistence Format
+### 7.1 The database
 
-History uses a **MessagePack binary format** for fast, compact disk storage:
+Everything the app cannot regenerate lives in one SQLite file, `{app_data}/app.db`
+(`storage/`). Files that are large or that another program needs to open stay files:
+images, received files, note attachments, `settings.json` and the window geometry.
 
-1. **Metadata** (`history.bin`) - Entry metadata serialized with **MessagePack** (`rmp-serde`) and written directly to disk (no compression). Image entries store an absolute file path instead of inline base64 data.
-2. **Image store** (`images/`) - Raw image bytes (PNG, JPEG, WebP, etc.) written to individual files named `{id}_{label}.{ext}`. On `push()`, data-URL images are immediately externalised to this directory, keeping in-memory footprint small.
-3. **On load** - File-path image entries are served to the frontend via Tauri's `convertFileSrc()` asset protocol. Old inline data-URLs from previous sessions are automatically externalised on load.
-4. **File cleanup** - `save_to_file` deletes the image file or received-files folder of each entry removed since the last save, once that save lands (`gone_files`). Nothing scans the directories.
+**One connection, written through.** `storage::Db` holds a single `rusqlite`
+connection behind a mutex. Each store keeps its in-memory `Vec` as before and, inside
+the same method that mutates it, writes exactly the rows it touched: the store's own
+lock first, then the database lock for the statements of that one mutation, never the
+other way round. There is no dirty flag, no timer and no whole-file rewrite; a crash
+loses at most the mutation in progress.
+
+**Durability.** WAL journal, `synchronous = FULL` (a committed transaction is on the
+platter), `foreign_keys = ON`, `temp_store = MEMORY`, a 5s busy timeout. `Db::write`
+wraps every call in a transaction, so a mutation that touches two tables lands whole
+or not at all, and reports the outcome to the health write notice (section 4.8).
+
+**Failure.** A write that fails updates memory anyway and is logged; the app keeps
+working with what it has, and the user is told once failures last. If `app.db` will
+not open at startup, `Db::open_in_memory` stands in for the session, the log says
+so, and nothing touches the file.
+
+**Schema.** `storage/schema.rs` creates the tables and bumps `PRAGMA user_version`;
+a newer file than the build knows is refused rather than guessed at.
+
+| Table | Rows | Written by |
+| --- | --- | --- |
+| `entries` | One clipboard entry: `id, kind, content, ts, pinned, label, groups` (JSON) | `ClipboardHistory` |
+| `notes` | One note: `id, title, content, created_at, updated_at, pinned, groups` (JSON) | `NoteStore` |
+| `notifications` | One feed row: `id, created_at, read`, and the whole record as `data` (JSON) | `NotificationStore` |
+| `sync_entries` | The id map, one row per entry key: `server_id, shares, remote, owner, arrival, unpushed, deleted_marker` | `IdMap` |
+| `sync_queue` | One queued op per row, in order (`seq`), with `inflight` | `PendingQueue` |
+| `sync_work` | One `(key, kind)` per upload or download under way | `PendingWork` |
+| `kv` | `sync_state`: the sync state as JSON | `SyncStateStore` |
+
+**Images and files.** Image entries store an absolute file path, never bytes: on
+`push()` a data-URL image is written to `images/{id}_{label}.{ext}` at once, and the
+frontend reads it through Tauri's `convertFileSrc()` asset protocol. A removed entry's
+image or received-files folder is deleted once the write dropping its row has landed
+(`gone_files`); nothing scans the directories.
 
 ### 7.2 Storage Locations
 
 | What               | Location                               | Format                                                           | When Saved               | When Loaded        |
 | ------------------ | -------------------------------------- | ---------------------------------------------------------------- | ------------------------ | ------------------ |
-| Full history       | `{app_data}/history.bin`               | MessagePack binary (what it holds: section 4.2)                  | Every 2s when dirty, and on exit | On startup |
+| History, notes, notifications, sync records | `{app_data}/app.db` | SQLite, tables in section 7.1                           | On every mutation        | On startup         |
 | Image files        | `{app_data}/images/{id}_{label}.{ext}` | Raw binary image bytes (PNG/JPEG/WebP/etc.)                      | On push to history       | Via asset protocol |
 | Received files     | `{app_data}/received-files/{client_id}/` | Files/folders extracted from a synced file entry's ZIP blob    | On pull of a file entry  | Via asset protocol |
 | Note attachments   | `{app_data}/note-attachments/{images,files}/` | Raw bytes of images/files pasted, dropped, or attached in a note | On attach (`save_note_image`/`save_note_file`) | Via asset protocol |
 | Settings           | `{app_data}/settings.json`             | JSON object `{ key: value }`                                     | On `set_setting`         | On startup         |
-| Notes              | `{app_data}/notes.bin`                 | MessagePack binary                                               | Every 2s when dirty      | On startup         |
-| Notifications      | `{app_data}/notifications.bin`         | MessagePack binary                                               | Every 2s when dirty      | On startup         |
 | Window geometry    | `{app_data}/window-state.json`         | `{ x, y, width, height, maximized }`                             | On every move/resize     | On startup         |
+| App log            | `{app_data}/logs/app.log` (+ `.1`, `.2`) | One line per record: UTC time, level, target, message (section 4.8) | On every record         | Never              |
 | Theme preference   | `localStorage.sc-theme`                | `"dark"` or `"light"`                                            | On toggle                | On mount           |
 | Layout preference  | `localStorage.sc-layout`               | `"tiles"` or `"list"`                                            | On change                | On mount           |
 | Sort preference    | `localStorage.sc-sort`                 | `"newest"` / `"oldest"` / `"a-z"` / `"z-a"` / `"type"`           | On change                | On mount           |
 | Paste slot count   | `localStorage.sc-paste-slots`          | `"3"` - `"10"`                                                   | On change                | On popup show      |
 | Group names        | `localStorage.sc-groups`               | JSON string array                                                | On group edits           | On mount           |
 | Group colors       | `localStorage.sc-group-colors`         | JSON object (`group -> palette index`)                           | On color change          | On mount           |
-| Sync state         | `{app_data}/sync_state.json`           | `{ last_server_ts, device_id, user_id, announcements_cursor, clock_offset_ms, settings_base, restore_owed, restore_mark, ... }` | After each pull, sweep and settings round | On sync init  |
-| Sync offline queue | `{app_data}/sync_pending.json`         | JSON array of pending push/delete/update/push_local ops (encrypted content, except push_local which is an id) | On mutation when offline | On reconnect       |
-| ID mapping         | `{app_data}/id_map.json`               | `{ "clipboard:42": "server-uuid", ... }` plus `entry_shares`        | After each push          | On sync init       |
-| Sync work under way | `{app_data}/sync_pending_work.json`   | `{ upload: [key], download: [key] }`: entries with a transfer started and not finished | Before a transfer touches the network, and on every flush | On sync init |
 
-**Upgrading from a build with `pinned_entries.bin`** (`ClipboardHistory::load_from_disk`):
+**Importing the pre-SQLite files** (`storage/import.rs`). A build before `app.db`
+kept `history.bin`, `pinned_entries.bin`, `notes.bin` and `notifications.bin`
+(MessagePack) and `id_map.json`, `sync_pending.json`, `sync_pending.inflight.json`,
+`sync_pending_work.json` and `sync_state.json`. On the first launch of this build each
+file still carrying its name is read the way the old build wrote it, written into its
+table in one transaction, and only then renamed `<name>.migrated`, so a launch that
+dies halfway reads it again next time. The old build's siblings go with it: `.bak`
+stands in when the file itself will not parse, `.sealed.quarantine` and a
+`.quarantine` newer than the file are folded in by id, and every one of `.bak`,
+`.bak.prev`, `.quarantine`, `.sealed.quarantine`, `.pre-recovery`, `.pre-upgrade`,
+`.folded` and `.retired` is renamed with its file. A file that will not import is left
+in place and logged; nothing is deleted.
 
-- The file is folded into `history.bin` once, then removed, or renamed `.retired` when it
-  will not go.
-- An older build with Keep history off never read `history.bin`, so that copy is stale.
-  It is moved to `history.bin.pre-upgrade`, which nothing reads or writes, instead of
-  being loaded. An empty `.pre-upgrade` marks the upgrade done when there was nothing to
-  set aside.
-- A legacy file that could not go at all leaves `pinned_entries.bin.folded`, so later
-  launches only retry the removal instead of laying its copies back over deletions.
+`pinned_entries.bin` is older still. `ClipboardHistory::load_legacy` folds it in with
+the saved copy winning by id, and with the old build's Keep history off treats
+`history.bin` as stale, unless a `.pre-upgrade` or `.folded` marker says a later build
+already folded the two.
 
 Builds before this one also wrote `boot_id.txt` and `sync_settings_local.json`. Nothing
 reads either now.
 
-**Sync note**: `sync_pending.json`, `id_map.json` and `sync_pending_work.json` are not
-safe to delete. The queue
-holds deletes the server has not had yet, and the id map holds the markers that keep
-items deleted while signed out off this device; without them those items come back.
-Losing `sync_state.json` causes a full re-pull from the server on the next startup.
+**Sync note**: the sync tables are not safe to clear by hand. The queue holds deletes
+the server has not had yet, and the id map holds the markers that keep items deleted
+while signed out off this device; without them those items come back. Losing the sync
+state causes a full re-pull from the server on the next startup.
 
 ### 7.3 `{app_data}` location and the identifier-rename migration
 
@@ -2174,7 +2228,7 @@ v0.3.8 renamed it.
   `tauri.conf.json` windows, and WebView2 its profile with them, before `setup`
   runs. It copies into a staging folder beside the target and renames it into place,
   so a failed copy leaves no partial store.
-- Both write their outcome to `crash.log` once `setup` has set the diag directory.
+- Both log their outcome once `setup` has attached the log file.
 - Installs that ran v0.3.8 or later already have a new profile, so the
   `localStorage` copy skips them by design. For a signed-in user the roaming
   `localStorage` keys (see Settings Sync) come back at the first settings round,
@@ -2239,17 +2293,17 @@ The **promises** are the workspace root `docs/architecture.md` (Cross-Component 
 
 | #   | Invariant                                      | App-side implication                                                                                                                                                  |
 | --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Local store is always plaintext**            | `history.bin` and `notes.bin` must never be encrypted. Encryption boundary = network only.                                                                            |
+| 1   | **Local store is always plaintext**            | `app.db` holds plaintext rows. Encryption boundary = network only.                                                                                                     |
 | 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                           |
 | 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                      |
 | 4   | **UMK never leaves the device**                | The UMK (from `unwrap_umk`) is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.         |
-| 5   | **Tombstones always propagate**                | The delete commands go through `forward_deletes`. With a client, `delete_entries` writes every Delete to `sync_pending.json` before sending, offline included; with sync off, `IdMap::mark_removed_offline` writes a `local_only` marker. No merge or restore sweep may bring back a key that is queued, in flight, marked, or removed this run. |
+| 5   | **Tombstones always propagate**                | The delete commands go through `forward_deletes`. With a client, `delete_entries` writes every Delete to the sync queue before sending, offline included; with sync off, `IdMap::mark_removed_offline` writes a `local_only` marker. No merge or restore sweep may bring back a key that is queued, in flight, marked, or removed this run. |
 | 6   | **Capture pipeline is untouched**              | `clipboard_watcher.rs` and `hotkeys.rs` must not have sync logic. The `on_new_clipboard_entry` call happens after `history.push()`, as a post-commit side-effect.               |
 | 7   | **Suppress flag is respected**                 | `SyncClient.on_new_clipboard_entry` must only be called when a genuine new entry is inserted, not on suppress-skipped polls.                                                    |
 
 | 8   | **Sync runtime never blocks the main runtime** | `SyncClient` work runs in its dedicated background Tokio runtime. Entry points such as `on_new_clipboard_entry` are synchronous and spawn onto it through the stored `handle` - never `block_on` from the Tauri runtime. |
-| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store, and after `flush_dirty_stores` has written the page to disk. |
-| 10  | **ID mapping must survive restarts**           | `id_map.json` is flushed synchronously after each successful push response. A crash between push and flush is recoverable - the server deduplicates by `client_id`.   |
+| 9   | **Cursor advances only on confirmed merge**    | `POST /sync/cursor` is sent only after the pulled entry is successfully decrypted and inserted into the local store, whose insert writes the row before it returns. |
+| 10  | **ID mapping must survive restarts**           | The id map row is written synchronously after each successful push response. A crash between push and write is recoverable - the server deduplicates by `client_id`.   |
 | 11  | **Sharing is always opt-in**                   | An entry gets a `space_id` only from an explicit share or an enabled send filter that matches it. Send filters default to off, and local group tags never share by themselves. |
 | 12  | **File/video sync is size-gated**              | `kind: 'file'` entries exceeding 5 MB total must never be pushed. Emit `sync:entry-skipped` to the UI; do not silently drop.                                           |
 | 13  | **A space key is never lost while entries reference it** | Space keyrings keep every key we have held, newest first, and are recovered from the server-side wrapped keyring on reconnect. A rekey prepends; it never replaces. |

@@ -5,7 +5,6 @@
 //! frontend never writes to the feed directly - it asks for the list, acts on a
 //! row, and re-reads.
 
-use std::sync::atomic::Ordering;
 
 use tauri::{Emitter, Manager, State};
 
@@ -26,8 +25,6 @@ pub(crate) fn commit(app: &tauri::AppHandle, changed: bool) {
     if !changed {
         return;
     }
-    let state = app.state::<AppState>();
-    state.notifications_dirty.store(true, Ordering::Relaxed);
     let _ = app.emit(CHANGED_EVENT, ());
 }
 

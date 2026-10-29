@@ -47,7 +47,7 @@ pub fn show(
         builder = builder.body(body);
     }
     if let Err(e) = builder.show() {
-        eprintln!("[os-notify] {e}");
+        log::warn!(target: "os-notify", "{e}");
     }
 }
 

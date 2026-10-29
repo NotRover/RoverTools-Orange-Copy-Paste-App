@@ -1096,7 +1096,7 @@ impl SyncHttpClient {
                 crate::sync::crypto::store_refresh_token(&user_id, &session.refresh_token)
                     .await
             {
-                eprintln!("[sync] rotated refresh token not stored: {e}");
+                log::warn!(target: "sync", "rotated refresh token not stored: {e}");
                 let detail = format!("{e} - the next launch may have to sign in again");
                 // Off the worker too: this runs with the refresh lock held, and
                 // appending to the log is disk I/O like any other.
@@ -1124,7 +1124,7 @@ impl SyncHttpClient {
             return;
         }
         if let Err(e) = self.refresh_access_token().await {
-            eprintln!("[sync] proactive token refresh failed: {e}");
+            log::warn!(target: "sync", "proactive token refresh failed: {e}");
         }
     }
 
@@ -1264,7 +1264,7 @@ impl SyncHttpClient {
         // truncated the reply under load, so say that rather than quoting a
         // decoder error at the user.
         resp.json::<T>().await.map_err(|e| {
-            eprintln!("[sync] {tag} parse: {e}");
+            log::warn!(target: "sync", "{tag} parse: {e}");
             ApiError {
                 status: None,
                 message: format!("{tag}: the server's reply was incomplete, try again"),

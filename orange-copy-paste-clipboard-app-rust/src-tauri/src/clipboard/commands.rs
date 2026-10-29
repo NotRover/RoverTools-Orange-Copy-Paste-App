@@ -90,7 +90,7 @@ pub(crate) fn allow_entry_assets(app: &tauri::AppHandle, entry: &ClipboardEntry)
             continue;
         }
         if let Err(e) = scope.allow_file(path) {
-            eprintln!("[assets] {path}: {e}");
+            log::warn!(target: "assets", "{path}: {e}");
         }
     }
 }
@@ -103,7 +103,6 @@ pub fn delete_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandl
     let removed = state.history.lock().remove(&id);
     if removed {
         let _ = app.emit("clipboard:entry-deleted", &id);
-        auto_save_history(&app);
         // Tombstone must propagate to sync even when offline (invariant #5)
         crate::sync::forward_deletes(&app, EntryType::Clipboard, vec![(id, entry_ts)]);
     }
@@ -116,7 +115,6 @@ pub fn clear_history(state: State<'_, AppState>, app: tauri::AppHandle) -> bool 
     // for those and no others (invariant #5): a saved entry is kept locally,
     // and a delete for it would wipe it from the cloud and other devices.
     let deleted = state.history.lock().clear();
-    auto_save_history(&app);
     crate::sync::forward_deletes(
         &app,
         EntryType::Clipboard,
@@ -159,7 +157,6 @@ fn toggle_pin(state: &State<'_, AppState>, app: &tauri::AppHandle, id: &str, pin
         }
     };
     if success {
-        auto_save_history(app);
         let _ = app.emit(
             "clipboard:entry-pinned",
             serde_json::json!({ "id": id, "pinned": pin }),
@@ -238,12 +235,6 @@ pub fn set_setting(
     if let Some(flag) = setting_flag(&state, &key) {
         flag.store(value.as_bool().unwrap_or(false), Ordering::Relaxed);
     }
-    // What the next flush writes depends on it: turning it off prunes the file,
-    // turning it on writes everything held.
-    if key == "keep_history" {
-        state.history_dirty.store(true, Ordering::Relaxed);
-    }
-
     let roams = crate::sync::commands::ROAMING_JSON_KEYS.contains(&key.as_str());
     let written = crate::sync::commands::update_settings(&app, |m| {
         m.insert(key, value);
@@ -260,10 +251,9 @@ pub fn set_setting(
 
 // ── Bulk operations ─────────────────────────────────────────────────
 
-/// Shared tail of the bulk update commands: persist, then propagate the
-/// updated entries to sync.
-fn finish_bulk_update(app: &tauri::AppHandle, state: &State<'_, AppState>, ids: &[String]) {
-    auto_save_history(app);
+/// Shared tail of the bulk update commands: propagate the updated entries to
+/// sync.
+fn finish_bulk_update(state: &State<'_, AppState>, ids: &[String]) {
     let sync = state.sync_client.lock().clone();
     if let Some(s) = sync {
         for id in ids {
@@ -299,7 +289,7 @@ fn bulk_modify_groups(
     }
     drop(hist);
     if changed > 0 {
-        finish_bulk_update(app, state, ids);
+        finish_bulk_update(state, ids);
     }
     changed
 }
@@ -326,7 +316,6 @@ pub fn bulk_delete_entries(
     }
     drop(hist);
     if removed > 0 {
-        auto_save_history(&app);
         crate::sync::forward_deletes(&app, EntryType::Clipboard, deleted_ids);
     }
     removed
@@ -368,7 +357,7 @@ pub fn bulk_pin_entries(
 
     drop(hist);
     if changed > 0 {
-        finish_bulk_update(&app, &state, &ids);
+        finish_bulk_update(&state, &ids);
     }
     changed
 }
@@ -407,7 +396,6 @@ pub fn set_entry_groups(
 ) -> bool {
     let success = state.history.lock().set_groups(&id, groups.clone());
     if success {
-        auto_save_history(&app);
         let _ = app.emit(
             "clipboard:entry-groups-changed",
             serde_json::json!({ "id": id, "groups": groups }),
@@ -423,13 +411,8 @@ pub fn set_entry_groups(
 
 /// Remove a group tag from every entry that has it.
 #[tauri::command]
-pub fn purge_group_from_entries(
-    group: String,
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> bool {
+pub fn purge_group_from_entries(group: String, state: State<'_, AppState>) -> bool {
     state.history.lock().purge_group(&group);
-    auto_save_history(&app);
     true
 }
 
@@ -439,20 +422,9 @@ pub fn rename_group_in_entries(
     old_name: String,
     new_name: String,
     state: State<'_, AppState>,
-    app: tauri::AppHandle,
 ) -> bool {
     state.history.lock().rename_group(&old_name, &new_name);
-    auto_save_history(&app);
     true
-}
-
-/// Mark the history as needing a flush to disk, whatever Keep history says:
-/// saved entries are always written, and the flush decides what else is. The
-/// actual I/O happens on a background timer (~2 s) so rapid clipboard changes
-/// are coalesced into a single write.  Cost: one atomic store.
-pub(crate) fn auto_save_history(app: &tauri::AppHandle) {
-    let state: tauri::State<'_, AppState> = app.state();
-    state.history_dirty.store(true, Ordering::Relaxed);
 }
 
 /// Write an entry to the clipboard on the app's own behalf (a manual copy, or
@@ -472,7 +444,7 @@ pub(crate) fn copy_entry_suppressed(
             true
         }
         Err(e) => {
-            eprintln!("[clipboard] suppressed write failed: {e}");
+            log::warn!(target: "clipboard", "suppressed write failed: {e}");
             state.suppress_next_capture.store(false, Ordering::Relaxed);
             false
         }
@@ -572,7 +544,7 @@ pub fn copy_entries(ids: Vec<String>, state: State<'_, AppState>, app: tauri::Ap
             true
         }
         Err(e) => {
-            eprintln!("[clipboard] bulk copy failed: {e}");
+            log::warn!(target: "clipboard", "bulk copy failed: {e}");
             state.suppress_next_capture.store(false, Ordering::Relaxed);
             false
         }
@@ -606,7 +578,7 @@ pub fn paste_entry(id: String, state: State<'_, AppState>, app: tauri::AppHandle
                 schedule_paste();
             }
             Err(e) => {
-                eprintln!("[paste_entry] clipboard write failed: {e}");
+                log::warn!(target: "paste_entry", "clipboard write failed: {e}");
                 // Revert suppress so the next legit copy is not swallowed.
                 suppress_next_capture.store(false, Ordering::Relaxed);
             }
@@ -997,7 +969,7 @@ fn text_preflight() -> TextPreflight {
 /// lands several times in a row, and a stack of identical lines would bury
 /// everything else in the centre.
 pub(crate) fn notify_capture_too_large(app: &tauri::AppHandle, what: &str, bytes: usize) {
-    eprintln!("[clipboard] refused a {bytes} byte {what} copy (cap {MAX_TEXT_BYTES})");
+    log::warn!(target: "clipboard", "refused a {bytes} byte {what} copy (cap {MAX_TEXT_BYTES})");
     // The toast is the part the user cannot turn off: an item they copied is
     // missing, and the alternative to saying so is letting them find out by
     // looking for it. The row below carries the why.

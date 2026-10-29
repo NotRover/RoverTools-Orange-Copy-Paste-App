@@ -9,10 +9,14 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::{fs, io};
+use std::sync::Arc;
+use std::fs;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
+
+use crate::storage::Db;
 
 // Constants
 
@@ -161,18 +165,6 @@ pub(crate) fn content_matches(a: &ClipboardEntry, b: &ClipboardEntry) -> bool {
         }
     }
     false
-}
-
-/// Load entries from a MessagePack binary file.
-/// Load entries through the shared read contract: a missing file is an empty
-/// history, a good load refreshes the `.bak` copy, and a file that will not
-/// load is sealed against writes with the backup shown instead. An `Err` here
-/// means the file failed *and* no backup could stand in.
-fn load_entries_binary(path: &std::path::Path) -> Result<Vec<ClipboardEntry>, std::io::Error> {
-    let parsed = crate::health::load_state(path, &|bytes| {
-        rmp_serde::from_slice(bytes).map_err(|e| e.to_string())
-    })?;
-    Ok(parsed.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -334,10 +326,52 @@ pub struct ClipboardHistory {
     /// entry (`received-files/{id}/`). Configured once at startup via
     /// [`Self::set_received_files_dir`].
     received_files_dir: Option<std::path::PathBuf>,
-    /// Files of entries removed since the last save, as (entry id, path). Deleted
-    /// only once a save lands, so a refused write never leaves the file on disk
-    /// naming an entry whose file is gone.
+    /// Files of entries removed since the last write that landed, as (entry id,
+    /// path). Deleted only once the write dropping their rows has committed, so
+    /// a refused write never leaves a row naming a file that is gone.
     gone_files: Vec<(String, PathBuf)>,
+    /// Where every mutation writes through to. `None` only before startup has
+    /// attached it, and in tests of the in-memory behaviour.
+    db: Option<Arc<Db>>,
+}
+
+/// One `entries` row as the struct, in `SELECT id, kind, content, ts, pinned,
+/// label, groups` order.
+fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
+    let kind: String = r.get(1)?;
+    let groups: String = r.get(6)?;
+    Ok(ClipboardEntry {
+        id: r.get(0)?,
+        kind: EntryKind::from_label(&kind),
+        content: r.get(2)?,
+        timestamp: r.get::<_, i64>(3)? as u64,
+        pinned: r.get(4)?,
+        label: r.get(5)?,
+        groups: serde_json::from_str(&groups).unwrap_or_default(),
+        content_hash: None,
+    })
+}
+
+const UPSERT_ENTRY: &str = "INSERT INTO entries (id, kind, content, ts, pinned, label, groups)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+     ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, content = excluded.content,
+         ts = excluded.ts, pinned = excluded.pinned, label = excluded.label, groups = excluded.groups";
+
+/// Write `e` as its row, inserting or replacing.
+fn upsert_entry(tx: &rusqlite::Transaction<'_>, e: &ClipboardEntry) -> rusqlite::Result<()> {
+    tx.execute(
+        UPSERT_ENTRY,
+        params![
+            e.id,
+            e.kind.label(),
+            e.content,
+            e.timestamp as i64,
+            e.pinned,
+            e.label,
+            serde_json::to_string(&e.groups).unwrap_or_else(|_| "[]".into()),
+        ],
+    )?;
+    Ok(())
 }
 
 impl ClipboardHistory {
@@ -356,6 +390,143 @@ impl ClipboardHistory {
         self.received_files_dir = Some(dir);
     }
 
+    // ── Persistence ─────────────────────────────────────────────────
+    //
+    // Memory is the model; the `entries` table follows it. Each mutation below
+    // updates the Vec and then writes exactly the rows it touched, so the two
+    // never differ by more than the statement in flight. A write that fails is
+    // reported by the health layer and memory keeps the change, same as a
+    // refused file write did; the next write that lands carries it only if it
+    // touches that row again, which is the one cost of row-level writes.
+
+    /// Attach the database every mutation from now on writes through to.
+    pub fn attach_db(&mut self, db: Arc<Db>) {
+        self.db = Some(db);
+    }
+
+    /// Replace memory with the `entries` table, newest first. `false` when the
+    /// read failed or no database is attached; memory is then left alone.
+    pub fn load_from_db(&mut self) -> bool {
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        let Some(rows) = db.read("load entries", |c| {
+            let mut st = c.prepare(
+                // rowid breaks a same-millisecond tie the way memory ordered
+                // them: the later insert first.
+                "SELECT id, kind, content, ts, pinned, label, groups FROM entries
+                 ORDER BY ts DESC, rowid DESC",
+            )?;
+            let rows = st.query_map([], row_to_entry)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        }) else {
+            return false;
+        };
+        advance_id_past(&rows);
+        self.entries = rows;
+        self.externalize_images();
+        true
+    }
+
+    /// Write every entry held, in one transaction. For the one-time import of
+    /// a file-based history; idempotent, since rows are keyed by id.
+    pub fn persist_all(&mut self) -> bool {
+        let ids: Vec<String> = self.entries.iter().map(|e| e.id.clone()).collect();
+        self.write_rows(&ids)
+    }
+
+    /// Write the rows of the entries with these ids. Ids not in memory are skipped.
+    fn write_rows(&mut self, ids: &[String]) -> bool {
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        let landed = db
+            .write("write entries", |tx| {
+                // Oldest first, so a batch's rowids order it the way memory does.
+                for e in self.entries.iter().rev().filter(|e| ids.iter().any(|i| *i == e.id)) {
+                    upsert_entry(tx, e)?;
+                }
+                Ok(())
+            })
+            .is_some();
+        if landed {
+            self.reap_gone_files();
+        }
+        landed
+    }
+
+    /// Write one entry's pin flag and groups, the columns the metadata
+    /// mutations change. Avoids copying a large content column to flip a flag.
+    fn write_meta(&mut self, id: &str) -> bool {
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        let Some(e) = self.find(id) else {
+            return false;
+        };
+        let groups = serde_json::to_string(&e.groups).unwrap_or_else(|_| "[]".into());
+        let pinned = e.pinned;
+        let landed = db
+            .write("write entry metadata", |tx| {
+                tx.execute(
+                    "UPDATE entries SET pinned = ?1, groups = ?2 WHERE id = ?3",
+                    params![pinned, groups, id],
+                )
+                .map(|_| ())
+            })
+            .is_some();
+        if landed {
+            self.reap_gone_files();
+        }
+        landed
+    }
+
+    /// Delete the rows for these ids. Their files, if any, are queued by the
+    /// caller through [`Self::note_gone`] and go once this write has landed.
+    fn delete_rows(&mut self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return true;
+        }
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        let landed = db
+            .write("delete entries", |tx| {
+                let mut st = tx.prepare("DELETE FROM entries WHERE id = ?1")?;
+                for id in ids {
+                    st.execute([id])?;
+                }
+                Ok(())
+            })
+            .is_some();
+        if landed {
+            self.reap_gone_files();
+        }
+        landed
+    }
+
+    /// Delete the files of removed entries, now that the write dropping their
+    /// rows has committed. Never for an id that is live again (removed, then
+    /// restored by a merge).
+    fn reap_gone_files(&mut self) {
+        if self.gone_files.is_empty() {
+            return;
+        }
+        let live: HashSet<&str> = self.entries.iter().map(|e| e.id.as_str()).collect();
+        for (id, file) in std::mem::take(&mut self.gone_files) {
+            if live.contains(id.as_str()) {
+                continue;
+            }
+            let _ = if file.is_dir() {
+                fs::remove_dir_all(&file)
+            } else {
+                fs::remove_file(&file)
+            };
+        }
+    }
+
+    // ── Mutations ───────────────────────────────────────────────────
+
     /// Prepend an entry. Returns a clone of the newly inserted entry.
     pub fn push(&mut self, mut entry: ClipboardEntry) -> ClipboardEntry {
         // For image entries still carrying an inline data-URL, persist the
@@ -369,6 +540,7 @@ impl ClipboardHistory {
             }
         }
         self.entries.insert(0, entry.clone());
+        self.write_rows(std::slice::from_ref(&entry.id));
         entry
     }
 
@@ -396,19 +568,20 @@ impl ClipboardHistory {
     /// prevent. Image content is a path to a file on disk, so it is exempt.
     pub fn upsert_synced(&mut self, entry: ClipboardEntry) -> bool {
         if !fits(&entry) {
-            eprintln!(
-                "[history] merge: {} is {} bytes, past the {} byte cap (skipped)",
+            log::warn!(target: "history", "merge: {} is {} bytes, past the {} byte cap (skipped)",
                 entry.id,
                 entry.content.len(),
                 MAX_TEXT_BYTES
             );
             return false;
         }
+        let id = entry.id.clone();
         if let Some(pos) = self.entries.iter().position(|e| e.id == entry.id) {
             self.entries[pos] = entry;
         } else {
             self.entries.push(entry);
         }
+        self.write_rows(std::slice::from_ref(&id));
         true
     }
 
@@ -421,13 +594,16 @@ impl ClipboardHistory {
     /// already been externalised by the time this runs.
     pub fn drop_oversized(&mut self) -> Vec<usize> {
         let mut dropped = Vec::new();
+        let mut ids = Vec::new();
         self.entries.retain(|e| {
             if fits(e) {
                 return true;
             }
             dropped.push(e.content.len());
+            ids.push(e.id.clone());
             false
         });
+        self.delete_rows(&ids);
         dropped
     }
 
@@ -463,6 +639,7 @@ impl ClipboardHistory {
         if let Some(pos) = self.entries.iter().position(|e| e.id == id) {
             let e = self.entries.remove(pos);
             self.note_gone(&e);
+            self.delete_rows(std::slice::from_ref(&e.id));
             true
         } else {
             false
@@ -477,13 +654,16 @@ impl ClipboardHistory {
             .into_iter()
             .partition(ClipboardEntry::is_saved);
         self.entries = kept;
-        dropped
+        let out: Vec<(String, u64)> = dropped
             .into_iter()
             .map(|e| {
                 self.note_gone(&e);
                 (e.id, e.timestamp)
             })
-            .collect()
+            .collect();
+        let ids: Vec<String> = out.iter().map(|(id, _)| id.clone()).collect();
+        self.delete_rows(&ids);
+        out
     }
 
     /// Drop every entry a save with this `also_keep` would not write, queueing
@@ -507,6 +687,8 @@ impl ClipboardHistory {
         for e in &dropped {
             self.note_gone(e);
         }
+        let ids: Vec<String> = dropped.into_iter().map(|e| e.id).collect();
+        self.delete_rows(&ids);
     }
 
     /// Queue the file a removed entry owns for the next save to delete.
@@ -548,15 +730,19 @@ impl ClipboardHistory {
     /// Pin an entry by ID.
     /// Returns `true` if found and pinned.
     pub fn pin(&mut self, id: &str) -> bool {
-        self.find_mut(id)
-            .map(|e| {
-                e.pinned = true;
-            })
-            .is_some()
+        let found = self.find_mut(id).map(|e| e.pinned = true).is_some();
+        if found {
+            self.write_meta(id);
+        }
+        found
     }
 
     pub fn unpin(&mut self, id: &str) -> bool {
-        self.find_mut(id).map(|e| e.pinned = false).is_some()
+        let found = self.find_mut(id).map(|e| e.pinned = false).is_some();
+        if found {
+            self.write_meta(id);
+        }
+        found
     }
 
     /// Get all pinned entries (for paste popup).
@@ -566,112 +752,106 @@ impl ClipboardHistory {
 
     /// Replace the groups list for an entry. Returns `true` if found.
     pub fn set_groups(&mut self, id: &str, groups: Vec<String>) -> bool {
-        self.find_mut(id).map(|e| e.groups = groups).is_some()
+        let found = self.find_mut(id).map(|e| e.groups = groups).is_some();
+        if found {
+            self.write_meta(id);
+        }
+        found
     }
 
     /// Add a single group to an entry (no duplicates). Returns `true` if found.
     pub fn add_group(&mut self, id: &str, group: &str) -> bool {
-        if let Some(e) = self.find_mut(id) {
-            if !e.groups.iter().any(|g| g == group) {
-                e.groups.push(group.to_string());
-            }
-            true
-        } else {
-            false
+        let Some(e) = self.find_mut(id) else {
+            return false;
+        };
+        if !e.groups.iter().any(|g| g == group) {
+            e.groups.push(group.to_string());
+            self.write_meta(id);
         }
+        true
     }
 
     /// Remove a single group from an entry. Returns `true` if found.
     pub fn remove_group(&mut self, id: &str, group: &str) -> bool {
-        if let Some(e) = self.find_mut(id) {
-            e.groups.retain(|g| g != group);
-            true
-        } else {
-            false
+        let Some(e) = self.find_mut(id) else {
+            return false;
+        };
+        let before = e.groups.len();
+        e.groups.retain(|g| g != group);
+        if e.groups.len() != before {
+            self.write_meta(id);
         }
+        true
     }
 
     /// Remove a group name from all entries that have it.
     pub fn purge_group(&mut self, group: &str) {
+        let mut changed = Vec::new();
         for e in &mut self.entries {
+            let before = e.groups.len();
             e.groups.retain(|g| g != group);
+            if e.groups.len() != before {
+                changed.push(e.id.clone());
+            }
         }
+        self.write_metas(&changed);
     }
 
     /// Rename a group across all entries that have it.
     pub fn rename_group(&mut self, old_name: &str, new_name: &str) {
+        let mut changed = Vec::new();
         for e in &mut self.entries {
+            let mut hit = false;
             for g in &mut e.groups {
                 if g == old_name {
                     *g = new_name.to_string();
+                    hit = true;
                 }
             }
+            if hit {
+                changed.push(e.id.clone());
+            }
         }
+        self.write_metas(&changed);
     }
 
-    /// Load saved entries from a file and merge them into history.
-    /// Any existing entries with matching IDs are replaced.
-    /// Advances the global ID counter past the highest loaded ID.
-    fn load_saved_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        let loaded = load_entries_binary(path)?;
-        if loaded.is_empty() {
-            return Ok(());
+    /// [`Self::write_meta`] for several entries, in one transaction.
+    fn write_metas(&mut self, ids: &[String]) {
+        if ids.is_empty() {
+            return;
         }
-
-        advance_id_past(&loaded);
-
-        let loaded_ids: std::collections::HashSet<_> = loaded.iter().map(|e| &e.id).collect();
-        self.entries.retain(|e| !loaded_ids.contains(&e.id));
-
-        // Prepend all saved entries
-        for entry in loaded.into_iter().rev() {
-            self.entries.insert(0, entry);
-        }
-
-        self.externalize_images();
-        Ok(())
-    }
-
-    /// Write the saved entries, plus every entry `also_keep` names, to `path`.
-    ///
-    /// The one writer of history.bin. It goes through `health::write_state`, so
-    /// degraded and sealed files stay protected. Only once the write has landed
-    /// are removed entries' files deleted, and never for an id that is live
-    /// again (removed, then restored). A refused write returns before that, so
-    /// the files wait for the next save that lands.
-    pub fn save_to_file(
-        &mut self,
-        path: &Path,
-        also_keep: impl Fn(&str) -> bool,
-    ) -> io::Result<()> {
-        let kept: Vec<&ClipboardEntry> = self
+        let Some(db) = self.db.clone() else {
+            return;
+        };
+        let rows: Vec<(String, bool, String)> = self
             .entries
             .iter()
-            .filter(|e| e.is_saved() || also_keep(&e.id))
+            .filter(|e| ids.contains(&e.id))
+            .map(|e| {
+                (
+                    e.id.clone(),
+                    e.pinned,
+                    serde_json::to_string(&e.groups).unwrap_or_else(|_| "[]".into()),
+                )
+            })
             .collect();
-        crate::health::write_state(path, &rmp_serde::to_vec(&kept).map_err(io::Error::other)?)?;
-        let live: HashSet<&str> = self.entries.iter().map(|e| e.id.as_str()).collect();
-        for (id, file) in std::mem::take(&mut self.gone_files) {
-            if live.contains(id.as_str()) {
-                continue;
-            }
-            let _ = if file.is_dir() {
-                fs::remove_dir_all(&file)
-            } else {
-                fs::remove_file(&file)
-            };
+        let landed = db
+            .write("write entry metadata", |tx| {
+                let mut st = tx.prepare("UPDATE entries SET pinned = ?1, groups = ?2 WHERE id = ?3")?;
+                for (id, pinned, groups) in &rows {
+                    st.execute(params![pinned, groups, id])?;
+                }
+                Ok(())
+            })
+            .is_some();
+        if landed {
+            self.reap_gone_files();
         }
-        Ok(())
     }
 
-    /// Fold in entries a sealed session captured while it could not read this
-    /// file. By id, adding only what is missing: the main file is the elder
-    /// copy and wins any overlap, and running twice adds nothing the second
-    /// time - which is what lets the leftover survive until a save that
-    /// includes it has actually landed.
-    /// `None` means the bytes did not parse - the file stays on disk for
-    /// recovery by hand. `Some(0)` means everything in it was already here,
-    /// which makes the leftover safely redundant.
+    /// Fold in a copy an older build set aside beside `history.bin`, for the
+    /// import. By id, adding only what is missing: the main file wins any
+    /// overlap. `None` means the bytes did not parse.
     pub fn merge_leftover(&mut self, bytes: &[u8]) -> Option<usize> {
         let Ok(entries) = rmp_serde::from_slice::<Vec<ClipboardEntry>>(bytes) else {
             // Adopting garbage would be its own data loss.
@@ -691,67 +871,33 @@ impl ClipboardHistory {
         Some(added)
     }
 
-    /// Load the full history from a file, replacing all current entries.
-    /// Advances the global ID counter past the highest loaded ID.
-    fn load_all_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        let loaded = load_entries_binary(path)?;
-        advance_id_past(&loaded);
-        self.entries = loaded;
-        self.externalize_images();
-        Ok(())
-    }
-
-    /// Load history at startup.
+    /// Read the files the pre-SQLite build wrote, once, for the import.
     ///
-    /// `legacy_saved` is pinned_entries.bin, which only a not-yet-upgraded install
-    /// has; `legacy_keep` is what that build did with history.bin. With Keep
-    /// history off it never read history.bin, so that copy is stale: it is moved
-    /// to `history.bin.pre-upgrade`, which nothing reads or writes, rather than
-    /// loaded or written over. The legacy file goes once a history.bin holding
-    /// both has landed.
-    ///
-    /// The upgrade runs once. A `.pre-upgrade` copy already there (empty when
-    /// there was nothing to set aside) means the one in history.bin is this
-    /// build's own, and a legacy file that would not read or would not go is
-    /// renamed out of the way, so a later launch never treats this build's
-    /// history.bin as stale. A legacy file that could not go at all leaves a
-    /// `.folded` marker: history.bin already holds it, so later launches only
-    /// retry the removal rather than lay its copies back over deletions.
-    pub fn load_from_disk(&mut self, history: &Path, legacy_saved: &Path, legacy_keep: bool) {
+    /// `legacy_saved` is pinned_entries.bin, which only an install from before
+    /// that file was folded into history.bin still has; `legacy_keep` is what
+    /// that build did with history.bin. With Keep history off it never read
+    /// history.bin, so that copy is stale and is left alone, unless a
+    /// `.pre-upgrade` or `.folded` marker says a later build already folded
+    /// the two. The saved copy wins an overlap by id.
+    pub fn load_legacy(&mut self, history: &Path, legacy_saved: &Path, legacy_keep: bool) {
         let legacy = legacy_saved.exists();
         let pre_upgrade = history.with_extension("bin.pre-upgrade");
         let folded = legacy_saved.with_extension("bin.folded");
         let stale = legacy && !legacy_keep && !pre_upgrade.exists() && !folded.exists();
-        if !stale {
-            let _ = self.load_all_from_file(history);
-        }
-        if !legacy {
-            return;
-        }
-        if !folded.exists() {
-            let _ = self.load_saved_from_file(legacy_saved); // saved copy wins by id
-            if stale && !history.exists() {
-                // Nothing to set aside, but an empty copy still marks the upgrade
-                // done, so a re-run never takes the history.bin below for stale.
-                let _ = fs::write(&pre_upgrade, b"");
-            } else if stale && fs::rename(history, &pre_upgrade).is_err() {
-                // The stale copy is still in the way, so this session must not
-                // write over it. Its writes wait in the sealed leftover for the
-                // next launch.
-                crate::health::seal(history, "the copy from before the upgrade could not be set aside");
-                return;
-            }
-            if self.save_to_file(history, |_| true).is_err() {
-                return;
-            }
-        }
-        let gone = (!crate::health::is_sealed(legacy_saved) && fs::remove_file(legacy_saved).is_ok())
-            || fs::rename(legacy_saved, legacy_saved.with_extension("bin.retired")).is_ok();
-        if gone {
-            let _ = fs::remove_file(&folded);
+        let mut entries: Vec<ClipboardEntry> = if stale {
+            Vec::new()
         } else {
-            let _ = fs::write(&folded, b"");
+            crate::storage::import::read_legacy(history)
+        };
+        if legacy && !folded.exists() {
+            let saved: Vec<ClipboardEntry> = crate::storage::import::read_legacy(legacy_saved);
+            let ids: HashSet<&str> = saved.iter().map(|e| e.id.as_str()).collect();
+            entries.retain(|e| !ids.contains(e.id.as_str()));
+            entries.splice(0..0, saved);
         }
+        advance_id_past(&entries);
+        self.entries = entries;
+        self.externalize_images();
     }
 
     /// Migrate any in-memory data-URL images to on-disk files.
@@ -761,12 +907,17 @@ impl ClipboardHistory {
         let Some(ref dir) = self.images_dir else {
             return;
         };
+        let mut changed = Vec::new();
         for entry in &mut self.entries {
             if entry.kind == EntryKind::Image && entry.content.starts_with("data:") {
                 if let Some(path) = save_image_to_disk(entry, dir) {
                     entry.content = path;
+                    changed.push(entry.id.clone());
                 }
             }
+        }
+        if !changed.is_empty() {
+            self.write_rows(&changed);
         }
     }
 }
@@ -854,11 +1005,28 @@ mod tests {
         fs::write(path, rmp_serde::to_vec(entries).unwrap()).unwrap();
     }
 
-    /// A fresh history holding what `path` reads back as.
-    fn reload(path: &Path) -> ClipboardHistory {
-        let mut hist = ClipboardHistory::new();
-        hist.load_all_from_file(path).unwrap();
+    /// A fresh history holding what the database reads back as.
+    fn reload(db: &Arc<Db>) -> ClipboardHistory {
+        let mut hist = with_db(db);
+        hist.load_from_db();
         hist
+    }
+
+    /// Make every later write on `db` fail, the way a full or refusing disk
+    /// would. Returns a guard: the failures land in the process-wide write
+    /// notice, which is cleared again when the guard drops.
+    fn break_writes(db: &Db) -> impl Drop {
+        struct Clear {
+            _one_at_a_time: parking_lot::MutexGuard<'static, ()>,
+        }
+        impl Drop for Clear {
+            fn drop(&mut self) {
+                crate::health::note_store_write_ok();
+            }
+        }
+        let hold = Clear { _one_at_a_time: crate::health::WRITE_NOTICE_TEST_LOCK.lock() };
+        db.read("break", |c| c.execute_batch("DROP TABLE entries"));
+        hold
     }
 
     /// History was capped at 100 unsaved entries, so older captures fell off the
@@ -889,38 +1057,11 @@ mod tests {
         assert_eq!(ids(&hist), ["pin", "saved"]);
     }
 
-    /// Saved entries are always written, whatever Keep history says.
-    #[test]
-    fn saved_entries_are_always_written() {
-        let dir = scratch();
-        let path = dir.join("history.bin");
-        let mut hist = ClipboardHistory::new();
-        hist.entries = vec![text_with_id("plain"), pinned("pin")];
-
-        hist.save_to_file(&path, |_| false).unwrap();
-
-        assert_eq!(ids(&reload(&path)), ["pin"]);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// With Keep history off, entries in the cloud or a space are still kept.
-    #[test]
-    fn also_keep_names_extra_entries() {
-        let dir = scratch();
-        let path = dir.join("history.bin");
-        let mut hist = ClipboardHistory::new();
-        hist.entries = vec![text_with_id("cloud"), text_with_id("local"), pinned("pin")];
-
-        hist.save_to_file(&path, |id| id == "cloud").unwrap();
-
-        assert_eq!(ids(&reload(&path)), ["cloud", "pin"]);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
     /// A removed entry's file goes with it, and only its file: the directory is
-    /// no longer swept, so a file no entry ever named stays.
+    /// never swept, so a file no entry ever named stays.
     #[test]
-    fn a_save_deletes_files_only_for_removed_entries() {
+    fn a_remove_deletes_files_only_for_removed_entries() {
+        let db = Db::open_in_memory();
         let dir = scratch();
         let recv = dir.join("received-files");
         let images = dir.join("images");
@@ -932,80 +1073,55 @@ mod tests {
         let image_file = images.join("img-id.png");
         fs::write(&image_file, b"png").unwrap();
 
-        let mut hist = ClipboardHistory::new();
+        let mut hist = with_db(&db);
         hist.set_received_files_dir(recv.clone());
         hist.set_images_dir(images.clone());
         for id in ["live-id", "gone-id"] {
             let mut e = ClipboardEntry::new_file(format!("{}/f.txt", recv.join(id).display()));
             e.id = id.to_string();
-            hist.entries.push(e);
+            hist.push(e);
         }
         let mut img = ClipboardEntry::new_image(image_file.to_string_lossy().to_string());
         img.id = "img-id".to_string();
-        hist.entries.push(img);
+        hist.push(img);
 
         assert!(hist.remove("gone-id"));
         assert!(hist.remove("img-id"));
-        hist.save_to_file(&dir.join("history.bin"), |_| true).unwrap();
 
         assert!(!recv.join("gone-id").exists(), "removed entry's dir kept");
         assert!(!image_file.exists(), "removed image's file kept");
         assert!(recv.join("live-id").exists(), "live entry's dir removed");
         assert!(recv.join("stray-id").exists(), "unnamed dir swept");
+        assert_eq!(ids(&reload(&db)), ["live-id"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A sync merge can bring an entry back between its removal and the save.
+    /// A write that fails leaves the row naming the entry, so its file must
+    /// stay until a write that drops the row has landed.
     #[test]
-    fn a_removed_then_restored_entry_keeps_its_file() {
+    fn a_failed_write_keeps_the_file_delete_pending() {
+        let db = Db::open_in_memory();
         let dir = scratch();
         let recv = dir.join("received-files");
         fs::create_dir_all(recv.join("x")).unwrap();
-        let mut hist = ClipboardHistory::new();
+        let mut hist = with_db(&db);
         hist.set_received_files_dir(recv.clone());
         let mut e = ClipboardEntry::new_file("f.txt".into());
         e.id = "x".to_string();
-        hist.entries.push(e.clone());
+        hist.push(e);
 
+        let _broken = break_writes(&db);
         assert!(hist.remove("x"));
-        assert!(hist.upsert_synced(e));
-        hist.save_to_file(&dir.join("history.bin"), |_| true).unwrap();
-
-        assert!(recv.join("x").exists(), "restored entry lost its file");
+        assert!(recv.join("x").exists(), "file deleted before a write landed");
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A refused write leaves history.bin naming the entry, so its file must
-    /// stay until a save that drops the entry has landed.
+    /// With Keep history off, the exit prune drops entries nothing keeps, and
+    /// nothing else would ever delete their files. They go with that write,
+    /// and only theirs.
     #[test]
-    fn a_refused_save_keeps_the_file_delete_pending() {
-        let dir = scratch();
-        let recv = dir.join("received-files");
-        fs::create_dir_all(recv.join("x")).unwrap();
-        let mut hist = ClipboardHistory::new();
-        hist.set_received_files_dir(recv.clone());
-        let mut e = ClipboardEntry::new_file("f.txt".into());
-        e.id = "x".to_string();
-        hist.entries.push(e);
-        assert!(hist.remove("x"));
-
-        // A sealed path is refused the way a degraded process is, without
-        // counting as a failed disk write.
-        let sealed = dir.join("sealed.bin");
-        crate::health::seal(&sealed, "test");
-        assert!(hist.save_to_file(&sealed, |_| true).is_err());
-        assert!(recv.join("x").exists(), "file deleted before a save landed");
-
-        hist.save_to_file(&dir.join("history.bin"), |_| true).unwrap();
-        assert!(!recv.join("x").exists(), "pending delete was dropped");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// With Keep history off, the last save before the process ends leaves out
-    /// entries nothing keeps, and nothing else would ever delete their files.
-    /// They go with that save, and only theirs.
-    #[test]
-    fn the_last_save_deletes_the_files_of_entries_it_leaves_out() {
+    fn the_exit_prune_deletes_the_files_of_entries_it_drops() {
+        let db = Db::open_in_memory();
         let dir = scratch();
         let (images, recv) = (dir.join("images"), dir.join("received-files"));
         fs::create_dir_all(&images).unwrap();
@@ -1026,27 +1142,23 @@ mod tests {
         pinned_image.pinned = true;
         let mut saved_file = file("saved");
         saved_file.groups.push("Saved".into());
-        let mut hist = ClipboardHistory::new();
+        let mut hist = with_db(&db);
         hist.set_images_dir(images.clone());
         hist.set_received_files_dir(recv.clone());
-        hist.entries = vec![
-            image("local-img"),
-            file("local-file"),
-            image("cloud"),
-            pinned_image,
-            saved_file,
-        ];
+        for e in [image("local-img"), file("local-file"), image("cloud"), pinned_image, saved_file] {
+            hist.push(e);
+        }
 
-        let keep = |id: &str| id == "cloud";
-        hist.drop_unkept(keep, &[]);
-        hist.save_to_file(&dir.join("history.bin"), keep).unwrap();
+        hist.drop_unkept(|id| id == "cloud", &[]);
 
         assert!(!images.join("local-img.png").exists(), "dropped image kept");
         assert!(!recv.join("local-file").exists(), "dropped entry's folder kept");
         for kept in [images.join("cloud.png"), images.join("pinned.png"), recv.join("saved")] {
             assert!(kept.exists(), "kept entry lost {}", kept.display());
         }
-        assert_eq!(ids(&reload(&dir.join("history.bin"))), ["cloud", "pinned", "saved"]);
+        let mut left = ids(&reload(&db));
+        left.sort();
+        assert_eq!(left, ["cloud", "pinned", "saved"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1054,6 +1166,7 @@ mod tests {
     /// file: the user copied it and may paste it after the app has gone.
     #[test]
     fn an_entry_whose_file_is_on_the_clipboard_is_kept() {
+        let db = Db::open_in_memory();
         let dir = scratch();
         let (images, recv) = (dir.join("images"), dir.join("received-files"));
         fs::create_dir_all(&images).unwrap();
@@ -1061,22 +1174,23 @@ mod tests {
         fs::write(recv.join("got").join("a.txt"), b"a").unwrap();
         let png = images.join("img.png");
         fs::write(&png, b"png").unwrap();
-        let mut hist = ClipboardHistory::new();
+        let mut hist = with_db(&db);
         hist.set_images_dir(images.clone());
         hist.set_received_files_dir(recv.clone());
         let mut file = ClipboardEntry::new_file(recv.join("got").join("a.txt").display().to_string());
         file.id = "got".to_string();
         let mut image = ClipboardEntry::new_image(png.to_string_lossy().to_string());
         image.id = "img".to_string();
-        hist.entries = vec![file, image];
+        hist.push(file);
+        hist.push(image);
 
         let on_clipboard = vec![recv.join("got").join("a.txt")];
         hist.drop_unkept(|_| false, &on_clipboard);
-        hist.save_to_file(&dir.join("history.bin"), |_| true).unwrap();
 
         assert!(recv.join("got").join("a.txt").exists(), "a file on the clipboard was deleted");
         assert!(hist.find("got").is_some(), "the entry naming it was dropped");
         assert!(!png.exists() && hist.find("img").is_none(), "an unreferenced entry was kept");
+        assert_eq!(ids(&reload(&db)), ["got"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1089,167 +1203,94 @@ mod tests {
         assert!(!path_in_use(&root, &[]));
     }
 
-    /// A refused last save leaves history.bin as it was, which may still name
-    /// the dropped entries, so their files stay.
+    /// A failed exit prune leaves the rows as they were, still naming the
+    /// dropped entries, so their files stay.
     #[test]
-    fn a_refused_last_save_deletes_nothing() {
+    fn a_failed_exit_prune_deletes_nothing() {
+        let db = Db::open_in_memory();
         let dir = scratch();
         let recv = dir.join("received-files");
         fs::create_dir_all(recv.join("x")).unwrap();
-        let mut hist = ClipboardHistory::new();
+        let mut hist = with_db(&db);
         hist.set_received_files_dir(recv.clone());
         let mut e = ClipboardEntry::new_file("f.txt".into());
         e.id = "x".to_string();
-        hist.entries.push(e);
+        hist.push(e);
 
-        let sealed = dir.join("sealed.bin");
-        crate::health::seal(&sealed, "test");
+        let _broken = break_writes(&db);
         hist.drop_unkept(|_| false, &[]);
-        assert!(hist.save_to_file(&sealed, |_| false).is_err());
 
-        assert!(recv.join("x").exists(), "file deleted before a save landed");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// Deletes are written like everything else: a restart must not bring
-    /// the entry back.
-    #[test]
-    fn a_deleted_entry_stays_deleted_after_restart() {
-        let dir = scratch();
-        let path = dir.join("history.bin");
-        let mut hist = ClipboardHistory::new();
-        hist.entries = vec![text_with_id("a"), text_with_id("b")];
-        hist.save_to_file(&path, |_| true).unwrap();
-        assert!(hist.remove("a"));
-        hist.save_to_file(&path, |_| true).unwrap();
-
-        let mut fresh = ClipboardHistory::new();
-        fresh.load_from_disk(&path, &dir.join("pinned_entries.bin"), true);
-
-        assert_eq!(ids(&fresh), ["b"]);
+        assert!(recv.join("x").exists(), "file deleted before a write landed");
         let _ = fs::remove_dir_all(&dir);
     }
 
     /// An older build with Keep history on wrote both files. The saved copy
-    /// wins an overlap, everything lands in history.bin, and the legacy file
-    /// goes.
+    /// wins an overlap.
     #[test]
-    fn upgrade_with_keep_on_folds_both_files_and_retires_pinned_entries_bin() {
+    fn legacy_keep_on_folds_both_files() {
         let dir = scratch();
         let (hf, pf) = (dir.join("history.bin"), dir.join("pinned_entries.bin"));
         write_file(&hf, &[text_with_id("x"), text_with_id("p")]);
         write_file(&pf, &[pinned("p")]);
 
         let mut hist = ClipboardHistory::new();
-        hist.load_from_disk(&hf, &pf, true);
+        hist.load_legacy(&hf, &pf, true);
 
         assert_eq!(ids(&hist), ["p", "x"]);
         assert!(hist.find("p").unwrap().pinned, "saved copy did not win");
-        assert!(!pf.exists(), "legacy file kept");
-        assert_eq!(ids(&reload(&hf)), ["p", "x"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
     /// With Keep history off an older build never read history.bin, so what is
-    /// in it must not come back - and it is set aside intact, not written over.
+    /// in it must not come back.
     #[test]
-    fn upgrade_with_keep_off_ignores_a_stale_history_bin() {
+    fn legacy_keep_off_ignores_a_stale_history_bin() {
         let dir = scratch();
         let (hf, pf) = (dir.join("history.bin"), dir.join("pinned_entries.bin"));
         write_file(&hf, &[text_with_id("x")]);
-        let stale = fs::read(&hf).unwrap();
         write_file(&pf, &[pinned("p")]);
 
         let mut hist = ClipboardHistory::new();
-        hist.load_from_disk(&hf, &pf, false);
+        hist.load_legacy(&hf, &pf, false);
 
         assert_eq!(ids(&hist), ["p"]);
-        assert!(!pf.exists(), "legacy file kept");
-        assert_eq!(ids(&reload(&hf)), ["p"]);
-        assert_eq!(
-            fs::read(dir.join("history.bin.pre-upgrade")).unwrap(),
-            stale,
-            "stale history.bin was not set aside intact"
-        );
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A legacy file that will not read must not re-run the upgrade on every
-    /// launch: the second launch would take this build's own history.bin for
-    /// the stale one and set it aside over the real stale copy.
+    /// A build between the two already folded pinned_entries.bin into
+    /// history.bin and left a marker, so history.bin is the one to read,
+    /// whatever the Keep setting, and the legacy file is not laid back over it.
     #[test]
-    fn an_unreadable_legacy_file_upgrades_once() {
+    fn a_folded_marker_means_history_bin_already_holds_the_legacy_copy() {
         let dir = scratch();
         let (hf, pf) = (dir.join("history.bin"), dir.join("pinned_entries.bin"));
-        write_file(&hf, &[text_with_id("x")]);
-        let stale = fs::read(&hf).unwrap();
-        fs::write(&pf, b"not msgpack").unwrap();
-
-        let mut first = ClipboardHistory::new();
-        first.load_from_disk(&hf, &pf, false);
-        assert!(!pf.exists(), "unreadable legacy file left in place");
-        assert!(pf.with_extension("bin.retired").exists(), "unreadable legacy file lost");
-
-        // This session's own history reaches disk.
-        first.entries = vec![text_with_id("new")];
-        first.save_to_file(&hf, |_| true).unwrap();
-
-        let mut second = ClipboardHistory::new();
-        second.load_from_disk(&hf, &pf, false);
-        assert_eq!(ids(&second), ["new"]);
-        assert_eq!(fs::read(dir.join("history.bin.pre-upgrade")).unwrap(), stale);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// An upgrade with no history.bin, whose legacy file then would not go: it
-    /// is folded once. Later launches read this build's history.bin rather
-    /// than set it aside as stale, and only retry the removal, so a pinned
-    /// entry deleted since does not come back from the legacy copy.
-    #[cfg(windows)]
-    #[test]
-    fn a_legacy_file_that_will_not_go_is_folded_once() {
-        use std::os::windows::fs::OpenOptionsExt;
-        let dir = scratch();
-        let (hf, pf) = (dir.join("history.bin"), dir.join("pinned_entries.bin"));
+        write_file(&hf, &[text_with_id("new")]);
         write_file(&pf, &[pinned("p")]);
-        // Held open without share-delete, so it can be neither removed nor renamed.
-        let lock = fs::OpenOptions::new().read(true).share_mode(1).open(&pf).unwrap();
+        fs::write(pf.with_extension("bin.folded"), b"").unwrap();
 
-        let mut first = ClipboardHistory::new();
-        first.load_from_disk(&hf, &pf, false);
-        assert_eq!(ids(&first), ["p"]);
-        assert!(pf.exists() && pf.with_extension("bin.folded").exists());
-        // The user deletes p and copies something new.
-        first.entries = vec![text_with_id("new")];
-        first.save_to_file(&hf, |_| true).unwrap();
+        let mut hist = ClipboardHistory::new();
+        hist.load_legacy(&hf, &pf, false);
 
-        let mut second = ClipboardHistory::new();
-        second.load_from_disk(&hf, &pf, false);
-        assert_eq!(ids(&second), ["new"]);
-        assert!(fs::read(dir.join("history.bin.pre-upgrade")).unwrap().is_empty());
-
-        drop(lock);
-        let mut third = ClipboardHistory::new();
-        third.load_from_disk(&hf, &pf, false);
-        assert_eq!(ids(&third), ["new"]);
-        assert!(!pf.exists(), "legacy file kept");
-        assert!(!pf.with_extension("bin.folded").exists(), "marker left behind");
+        assert_eq!(ids(&hist), ["new"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Once upgraded, history.bin is the only file, whatever the Keep setting.
+    /// Without a legacy file, history.bin is the only file, whatever the Keep
+    /// setting. A history.bin that will not parse falls back to its `.bak`.
     #[test]
-    fn after_upgrade_only_history_bin_is_read() {
+    fn a_history_bin_that_will_not_parse_falls_back_to_its_backup() {
         let dir = scratch();
         let (hf, pf) = (dir.join("history.bin"), dir.join("pinned_entries.bin"));
         write_file(&hf, &[text_with_id("x"), pinned("p")]);
-
         let mut hist = ClipboardHistory::new();
-        hist.load_from_disk(&hf, &pf, false);
-
+        hist.load_legacy(&hf, &pf, false);
         assert_eq!(ids(&hist), ["x", "p"]);
-        assert!(!pf.exists());
-        assert!(!dir.join("history.bin.pre-upgrade").exists());
+
+        fs::write(&hf, b"not msgpack").unwrap();
+        write_file(&dir.join("history.bin.bak"), &[text_with_id("backup")]);
+        let mut hist = ClipboardHistory::new();
+        hist.load_legacy(&hf, &pf, true);
+        assert_eq!(ids(&hist), ["backup"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1312,5 +1353,120 @@ mod tests {
     fn html_parts_without_a_marker_is_all_html() {
         let entry = ClipboardEntry::new(EntryKind::Html, "<i>legacy</i>".into());
         assert_eq!(entry.html_parts(), ("<i>legacy</i>", ""));
+    }
+
+    // ── Database-backed behaviour ───────────────────────────────────
+
+    fn with_db(db: &Arc<Db>) -> ClipboardHistory {
+        let mut hist = ClipboardHistory::new();
+        hist.attach_db(Arc::clone(db));
+        hist
+    }
+
+    /// Every mutation writes through: a fresh store on the same database reads
+    /// back exactly what the first one holds.
+    #[test]
+    fn mutations_write_through_to_the_database() {
+        let db = Db::open_in_memory();
+        let mut hist = with_db(&db);
+        hist.push(text_with_id("a"));
+        hist.push(text_with_id("b"));
+        hist.push(text_with_id("c"));
+        assert!(hist.pin("b"));
+        assert!(hist.set_groups("a", vec!["Saved".into(), "Work".into()]));
+        assert!(hist.remove("c"));
+        hist.rename_group("Work", "Office");
+
+        let mut again = with_db(&db);
+        assert!(again.load_from_db());
+        assert_eq!(ids(&again), ids(&hist));
+        assert!(again.find("b").unwrap().pinned);
+        assert_eq!(again.find("a").unwrap().groups, vec!["Saved", "Office"]);
+        assert!(again.find("c").is_none());
+    }
+
+    /// Clear all drops the unsaved rows and keeps the saved ones, in the table
+    /// as in memory.
+    #[test]
+    fn clear_drops_rows_and_keeps_saved_ones() {
+        let db = Db::open_in_memory();
+        let mut hist = with_db(&db);
+        hist.push(text_with_id("plain"));
+        hist.push(pinned("kept"));
+        assert_eq!(hist.clear().len(), 1);
+        let mut again = with_db(&db);
+        again.load_from_db();
+        assert_eq!(ids(&again), vec!["kept"]);
+    }
+
+    /// An image's file goes only once the write dropping its row has landed,
+    /// and never for an id that came back meanwhile.
+    #[test]
+    fn a_removed_image_loses_its_file_after_the_delete_commits() {
+        let db = Db::open_in_memory();
+        let dir = scratch();
+        let mut hist = with_db(&db);
+        hist.set_images_dir(dir.clone());
+        let mut img = ClipboardEntry::new_image("data:image/png;base64,aGk=".into());
+        img.id = "img".into();
+        let img = hist.push(img);
+        let file = PathBuf::from(&img.content);
+        assert!(file.exists());
+        assert!(hist.remove("img"));
+        assert!(!file.exists(), "file deleted once the row delete committed");
+    }
+
+    /// First launch of this build: the file-based history is read through the
+    /// old loader, written to the table, and the file retired.
+    #[test]
+    fn legacy_history_is_imported_once() {
+        let db = Db::open_in_memory();
+        let dir = scratch();
+        let file = dir.join("history.bin");
+        write_file(&file, &[text_with_id("old-1"), pinned("old-2")]);
+
+        let mut hist = ClipboardHistory::new();
+        assert!(crate::storage::import::history(&dir, &mut hist, &db, true));
+        assert!(!file.exists());
+        assert!(dir.join("history.bin.migrated").exists());
+
+        let mut again = with_db(&db);
+        again.load_from_db();
+        assert_eq!(ids(&again), vec!["old-1", "old-2"]);
+
+        // Nothing left to import: the caller loads from the table instead.
+        let mut third = ClipboardHistory::new();
+        assert!(!crate::storage::import::history(&dir, &mut third, &db, true));
+    }
+
+    /// What an older build's degraded or sealed session set aside beside the
+    /// file is folded in, and every sibling is retired with the file.
+    #[test]
+    fn the_import_folds_the_old_quarantines_and_retires_every_sibling() {
+        let db = Db::open_in_memory();
+        let dir = scratch();
+        let file = dir.join("history.bin");
+        write_file(&file, &[text_with_id("main")]);
+        write_file(&dir.join("history.bin.sealed.quarantine"), &[text_with_id("sealed")]);
+        write_file(&dir.join("history.bin.bak"), &[text_with_id("bak")]);
+        // Older than the file: a snapshot a later session superseded.
+        write_file(&dir.join("history.bin.quarantine"), &[text_with_id("stale")]);
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join("history.bin.quarantine"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        let mut hist = ClipboardHistory::new();
+        assert!(crate::storage::import::history(&dir, &mut hist, &db, true));
+
+        assert_eq!(ids(&reload(&db)), ["sealed", "main"]);
+        for name in ["history.bin", "history.bin.sealed.quarantine", "history.bin.bak", "history.bin.quarantine"] {
+            assert!(!dir.join(name).exists(), "{name} left in place");
+            assert!(dir.join(format!("{name}.migrated")).exists(), "{name} not retired");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 }

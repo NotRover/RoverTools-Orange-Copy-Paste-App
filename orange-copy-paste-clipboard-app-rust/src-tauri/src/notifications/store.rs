@@ -1,8 +1,12 @@
 //! Notification records and their MessagePack store.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
+
+use crate::storage::Db;
 
 /// How long a read notification is kept before the store drops it.
 ///
@@ -101,10 +105,13 @@ impl Notification {
     }
 }
 
-/// In-memory feed, newest first, with MessagePack persistence.
+/// In-memory feed, newest first. Memory is the model; the `notifications`
+/// table follows it, one row per item with the record as JSON, since the
+/// model is wide, changes with every new kind, and is never queried by field.
 #[derive(Debug, Default)]
 pub struct NotificationStore {
     items: Vec<Notification>,
+    db: Option<Arc<Db>>,
     /// Ids the user cleared by hand this session.
     ///
     /// Reconcile re-reads the server's invites on every panel open, so without
@@ -118,6 +125,95 @@ impl NotificationStore {
     pub fn new() -> Self {
         Self::default()
     }
+
+    // ── Persistence ─────────────────────────────────────────────────
+
+    /// Attach the database every mutation from now on writes through to.
+    pub fn attach_db(&mut self, db: Arc<Db>) {
+        self.db = Some(db);
+    }
+
+    /// Replace memory with the table, newest first, pruned as a load always is.
+    pub fn load_from_db(&mut self) -> bool {
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        let Some(rows) = db.read("load notifications", |c| {
+            let mut st = c.prepare("SELECT data FROM notifications ORDER BY created_at DESC")?;
+            let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        }) else {
+            return false;
+        };
+        self.items = rows
+            .iter()
+            .filter_map(|json| serde_json::from_str(json).ok())
+            .collect();
+        self.sort_recent();
+        self.prune(crate::sync::now_ms());
+        true
+    }
+
+    /// Write every item held, in one transaction. For the one-time import.
+    pub fn persist_all(&mut self) -> bool {
+        let ids: Vec<String> = self.items.iter().map(|n| n.id.clone()).collect();
+        self.write_rows(&ids)
+    }
+
+    fn write_rows(&mut self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return true;
+        }
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        db.write("write notifications", |tx| {
+            let mut st = tx.prepare(
+                "INSERT INTO notifications (id, created_at, read, data) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET created_at = excluded.created_at,
+                     read = excluded.read, data = excluded.data",
+            )?;
+            for n in self.items.iter().filter(|n| ids.contains(&n.id)) {
+                let data = serde_json::to_string(n)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                st.execute(params![n.id, n.created_at as i64, n.read, data])?;
+            }
+            Ok(())
+        })
+        .is_some()
+    }
+
+    fn delete_rows(&mut self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return true;
+        }
+        let Some(db) = self.db.clone() else {
+            return false;
+        };
+        db.write("delete notifications", |tx| {
+            let mut st = tx.prepare("DELETE FROM notifications WHERE id = ?1")?;
+            for id in ids {
+                st.execute([id])?;
+            }
+            Ok(())
+        })
+        .is_some()
+    }
+
+    /// Ids in memory that a mutation removed, given the ids from before it.
+    fn removed_since(&self, before: &[String]) -> Vec<String> {
+        before
+            .iter()
+            .filter(|id| !self.items.iter().any(|n| &n.id == *id))
+            .cloned()
+            .collect()
+    }
+
+    fn all_ids(&self) -> Vec<String> {
+        self.items.iter().map(|n| n.id.clone()).collect()
+    }
+
+    // ── Reads and mutations ─────────────────────────────────────────
 
     /// Everything currently in the feed, newest first.
     pub fn all(&self) -> &[Notification] {
@@ -142,6 +238,15 @@ impl NotificationStore {
         if self.dismissed.contains(&incoming.id) {
             return false;
         }
+        let id = incoming.id.clone();
+        let changed = self.upsert_in_memory(incoming);
+        if changed {
+            self.write_rows(&[id]);
+        }
+        changed
+    }
+
+    fn upsert_in_memory(&mut self, incoming: Notification) -> bool {
         let Some(existing) = self.items.iter_mut().find(|n| n.id == incoming.id) else {
             self.items.push(incoming);
             self.sort_recent();
@@ -175,55 +280,70 @@ impl NotificationStore {
     /// moves, the user has not seen the new number, so the row goes back to
     /// unread and takes the time of the change.
     pub fn announce(&mut self, incoming: Notification) -> bool {
-        let Some(existing) = self.items.iter_mut().find(|n| n.id == incoming.id) else {
-            self.items.push(incoming);
-            self.sort_recent();
-            return true;
+        let id = incoming.id.clone();
+        let changed = match self.items.iter_mut().find(|n| n.id == incoming.id) {
+            None => {
+                self.items.push(incoming);
+                self.sort_recent();
+                true
+            }
+            Some(existing) if existing.title == incoming.title && existing.body == incoming.body => {
+                false
+            }
+            Some(existing) => {
+                existing.title = incoming.title;
+                existing.body = incoming.body;
+                existing.data = incoming.data;
+                existing.created_at = incoming.created_at;
+                existing.read = false;
+                self.sort_recent();
+                true
+            }
         };
-        if existing.title == incoming.title && existing.body == incoming.body {
-            return false;
+        if changed {
+            self.write_rows(&[id]);
         }
-        existing.title = incoming.title;
-        existing.body = incoming.body;
-        existing.data = incoming.data;
-        existing.created_at = incoming.created_at;
-        existing.read = false;
-        self.sort_recent();
-        true
+        changed
     }
 
     /// Retire a notification in place: it stops offering actions and reads as
     /// history. Used when an invite is answered, here or on another device.
     pub fn resolve(&mut self, id: &str, outcome: &str) -> bool {
-        match self.items.iter_mut().find(|n| n.id == id) {
+        let changed = match self.items.iter_mut().find(|n| n.id == id) {
             Some(n) if n.resolved.as_deref() != Some(outcome) => {
                 n.resolved = Some(outcome.to_string());
                 true
             }
             _ => false,
+        };
+        if changed {
+            self.write_rows(&[id.to_string()]);
         }
+        changed
     }
 
     pub fn mark_read(&mut self, ids: &[String]) -> bool {
-        let mut changed = false;
+        let mut changed = Vec::new();
         for n in &mut self.items {
             if !n.read && ids.iter().any(|id| id == &n.id) {
                 n.read = true;
-                changed = true;
+                changed.push(n.id.clone());
             }
         }
-        changed
+        self.write_rows(&changed);
+        !changed.is_empty()
     }
 
     pub fn mark_all_read(&mut self) -> bool {
-        let mut changed = false;
+        let mut changed = Vec::new();
         for n in &mut self.items {
             if !n.read {
                 n.read = true;
-                changed = true;
+                changed.push(n.id.clone());
             }
         }
-        changed
+        self.write_rows(&changed);
+        !changed.is_empty()
     }
 
     /// Drop one notification for good.
@@ -233,28 +353,33 @@ impl NotificationStore {
         let removed = before != self.items.len();
         if removed {
             self.dismissed.insert(id.to_string());
+            self.delete_rows(&[id.to_string()]);
         }
         removed
     }
 
     /// Drop everything the user has already read, leaving unread items alone.
     pub fn clear_read(&mut self) -> bool {
-        let before = self.items.len();
+        let before = self.all_ids();
         let (read, keep): (Vec<Notification>, Vec<Notification>) =
             std::mem::take(&mut self.items).into_iter().partition(|n| n.read);
         self.items = keep;
         for n in read {
             self.dismissed.insert(n.id);
         }
-        before != self.items.len()
+        let gone = self.removed_since(&before);
+        self.delete_rows(&gone);
+        !gone.is_empty()
     }
 
     /// Forget the previous account's feed. Invites and space activity are
     /// addressed to a person, so signing in as someone else must not inherit
     /// them.
     pub fn reset(&mut self) {
+        let before = self.all_ids();
         self.items.clear();
         self.dismissed.clear();
+        self.delete_rows(&before);
     }
 
     fn sort_recent(&mut self) {
@@ -264,21 +389,22 @@ impl NotificationStore {
     /// Age out read notifications and cap the total. Returns `true` if
     /// anything was removed.
     fn prune(&mut self, now: u64) -> bool {
-        let before = self.items.len();
+        let before = self.all_ids();
         let cutoff = now.saturating_sub(READ_TTL_MS);
         self.items.retain(|n| !n.read || n.created_at >= cutoff);
         if self.items.len() > MAX_STORED {
             // Newest first, so the tail is the oldest.
             self.items.truncate(MAX_STORED);
         }
-        before != self.items.len()
+        let gone = self.removed_since(&before);
+        self.delete_rows(&gone);
+        !gone.is_empty()
     }
 
-    /// Fold in notifications a sealed session captured while it could not read
-    /// this file. Ids are stable and derived from the source, so "already
-    /// there" means the same event, and the existing row wins.
-    /// `None` means the bytes did not parse and the file is kept; `Some(0)`
-    /// means it held nothing new and is safely redundant.
+    /// Fold in a copy an older build set aside beside `notifications.bin`, for
+    /// the import. Ids are stable and derived from the source, so "already
+    /// there" means the same event, and the existing row wins. `None` means
+    /// the bytes did not parse.
     pub fn merge_leftover(&mut self, bytes: &[u8]) -> Option<usize> {
         let Ok(items) = rmp_serde::from_slice::<Vec<Notification>>(bytes) else {
             return None;
@@ -300,27 +426,14 @@ impl NotificationStore {
         Some(added)
     }
 
-    // -- Persistence -------------------------------------------------
+    // -- Import --------------------------------------------------------
 
-    /// Same shared read contract as the other stores: a missing file is an
-    /// empty feed, a good load refreshes `.bak`, and a file that will not load
-    /// is sealed with the backup shown instead.
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        let parsed = crate::health::load_state(path, &|bytes| {
-            rmp_serde::from_slice::<Vec<Notification>>(bytes).map_err(|e| e.to_string())
-        })?;
-        let Some(loaded) = parsed else {
-            return Ok(());
-        };
-        self.items = loaded;
+    /// Read the `notifications.bin` the pre-SQLite build wrote, once, for the
+    /// import.
+    pub fn load_legacy(&mut self, path: &std::path::Path) {
+        self.items = crate::storage::import::read_legacy(path);
         self.sort_recent();
         self.prune(crate::sync::now_ms());
-        Ok(())
-    }
-
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
-        let msgpack = rmp_serde::to_vec(&self.items).map_err(std::io::Error::other)?;
-        crate::health::write_state(path, &msgpack)
     }
 }
 

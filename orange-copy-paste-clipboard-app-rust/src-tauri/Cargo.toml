@@ -58,11 +58,18 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Base64 encoding for clipboard image data URLs
 base64 = "0.22"
 
-# Binary serialisation (MessagePack) for history persistence
+# Binary serialisation (MessagePack): reads the pre-SQLite store files once, on import.
 rmp-serde = "1"
+
+# Local store: one SQLite database in app_data holds history, notes, notifications
+# and the sync bookkeeping (see storage/). Bundled so the build needs no system
+# SQLite; plain SQL only, so the engine stays swappable.
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 # Ergonomic lock primitives (no poisoning, direct lock() → MutexGuard)
 parking_lot = "0.12"
+# Logging facade; `logging.rs` writes every record to {app_data}/logs/app.log.
+log = "0.4"
 uuid = { version = "1.23.4", features = ["v4"] }
 
 # ZIP archiving for file/folder sync: an entry's files and folders are packed

@@ -1943,7 +1943,7 @@ pub async fn sync_settings(
     let pulled = match http.pull_settings().await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[sync] settings pull failed: {e}");
+            log::warn!(target: "sync", "settings pull failed: {e}");
             return Ok(());
         }
     };
@@ -1968,7 +1968,7 @@ pub async fn sync_settings(
         Ok(map) => map,
         Err(crate::settings_file::ReadError::Absent) => crate::settings_file::Map::new(),
         Err(_) => {
-            eprintln!("[sync] settings sync skipped: settings.json could not be read");
+            log::warn!(target: "sync", "settings sync skipped: settings.json could not be read");
             return Ok(());
         }
     };
@@ -2018,7 +2018,7 @@ pub async fn sync_settings(
         {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("[sync] settings push failed: {e}");
+                log::warn!(target: "sync", "settings push failed: {e}");
                 return Ok(());
             }
         };

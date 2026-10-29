@@ -1,19 +1,21 @@
 //! Write-ahead record of sync work that has started and not finished.
 //!
-//! An entry is named here, on disk, before its upload or blob download starts,
-//! and leaves, on disk, only when that work is done: the server accepted the
-//! upload, the download landed and its id_map row is written, or the op was
-//! settled or durably re-queued. The exit flush keeps every entry this file
-//! names, so a quit, crash or forced shutdown in the middle of a transfer does
-//! not let Keep history off drop the entry the transfer was for. The next
-//! launch re-drives whatever is left over.
+//! An entry is named here, in the `sync_work` table, before its upload or
+//! blob download starts, and leaves only when that work is done: the server
+//! accepted the upload, the download landed and its id_map row is written, or
+//! the op was settled or durably re-queued. The exit flush keeps every entry
+//! this record names, so a quit, crash or forced shutdown in the middle of a
+//! transfer does not let Keep history off drop the entry the transfer was
+//! for. The next launch re-drives whatever is left over.
 //!
-//! Separate from `sync_pending.json` on purpose: queue ops carry ciphertext and
-//! replay rules, and this file holds only keys and which way the work runs.
+//! Separate from the queue on purpose: queue ops carry ciphertext and replay
+//! rules, and this record holds only keys and which way the work runs.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::storage::Db;
 
 /// Which way the work runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,6 +24,16 @@ pub enum WorkKind {
     Download,
 }
 
+impl WorkKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Upload => "upload",
+            Self::Download => "download",
+        }
+    }
+}
+
+/// The shape of the old `sync_pending_work.json`, kept for the import.
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct WorkData {
     #[serde(default)]
@@ -32,24 +44,38 @@ struct WorkData {
 
 pub struct PendingWork {
     data: WorkData,
-    path: PathBuf,
+    db: Arc<Db>,
     /// Tasks running now, per key and kind. A key leaves the record when its
     /// count reaches zero.
     active: HashMap<(String, WorkKind), usize>,
     /// Set as the client shuts down: tasks the runtime drops from here on did
     /// not finish, so their records stay for the next launch.
     closed: bool,
-    unreadable: bool,
+}
+
+fn read_all(conn: &rusqlite::Connection) -> rusqlite::Result<WorkData> {
+    let mut st = conn.prepare("SELECT key, kind FROM sync_work")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut data = WorkData::default();
+    for row in rows {
+        let (key, kind) = row?;
+        match kind.as_str() {
+            "upload" => data.upload.insert(key),
+            "download" => data.download.insert(key),
+            _ => false,
+        };
+    }
+    Ok(data)
 }
 
 impl PendingWork {
-    pub fn load(path: PathBuf) -> Self {
-        let (data, unreadable) = crate::sync::persist::load_json_checked(&path);
-        Self { data, path, active: HashMap::new(), closed: false, unreadable }
+    pub fn load(db: Arc<Db>) -> Self {
+        let data = db.read("load pending work", read_all).unwrap_or_default();
+        Self { data, db, active: HashMap::new(), closed: false }
     }
 
-    /// Name or un-name `key`, and write the file at once: every change is on
-    /// disk before the caller moves on, so the file never names finished work
+    /// Name or un-name `key`, and write the row at once: every change is in
+    /// the table before the caller moves on, so it never names finished work
     /// or misses started work.
     fn change(&mut self, key: &str, kind: WorkKind, named: bool) {
         let set = match kind {
@@ -58,7 +84,17 @@ impl PendingWork {
         };
         let changed = if named { set.insert(key.to_string()) } else { set.remove(key) };
         if changed {
-            crate::sync::persist::save_json(&self.path, &self.data);
+            self.db.write("write pending work", |tx| {
+                if named {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO sync_work (key, kind) VALUES (?1, ?2)",
+                        [key, kind.as_str()],
+                    )
+                } else {
+                    tx.execute("DELETE FROM sync_work WHERE key = ?1 AND kind = ?2", [key, kind.as_str()])
+                }
+                .map(|_| ())
+            });
         }
     }
 
@@ -119,10 +155,6 @@ impl PendingWork {
         !self.active.is_empty()
     }
 
-    pub fn unreadable(&self) -> bool {
-        self.unreadable
-    }
-
     /// Stop clearing records: the runtime is about to drop every task.
     pub fn close(&mut self) {
         self.closed = true;
@@ -133,17 +165,39 @@ impl PendingWork {
     pub fn reset(&mut self) {
         self.data = WorkData::default();
         self.active.clear();
-        crate::sync::persist::save_json(&self.path, &self.data);
+        self.db.write("reset pending work", |tx| tx.execute("DELETE FROM sync_work", []).map(|_| ()));
     }
 
-    /// Every key the file on disk names, read without changing it. For the
-    /// exit flush with sync off. `Err` when the file is there and will not read.
-    pub fn try_keys(path: &Path) -> Result<HashSet<String>, String> {
-        let Some(bytes) = crate::health::read_state(path)? else {
-            return Ok(HashSet::new());
+    /// Every key the table names, read without changing it. For the exit
+    /// flush with sync off. `None` when the read failed.
+    pub fn keys_in(db: &Db) -> Option<HashSet<String>> {
+        let data = db.read("read pending work keys", read_all)?;
+        Some(data.upload.into_iter().chain(data.download).collect())
+    }
+
+    /// Move the old `sync_pending_work.json` into the table, once.
+    pub fn import_file(db: &Db, path: &std::path::Path) -> Result<usize, String> {
+        let data: WorkData = match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e.to_string()),
         };
-        let data: WorkData = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-        Ok(data.upload.into_iter().chain(data.download).collect())
+        let rows: Vec<(String, &str)> = data
+            .upload
+            .iter()
+            .map(|k| (k.clone(), "upload"))
+            .chain(data.download.iter().map(|k| (k.clone(), "download")))
+            .collect();
+        let count = rows.len();
+        db.write("import pending work", |tx| {
+            let mut st = tx.prepare("INSERT OR IGNORE INTO sync_work (key, kind) VALUES (?1, ?2)")?;
+            for (key, kind) in &rows {
+                st.execute([key.as_str(), kind])?;
+            }
+            Ok(())
+        })
+        .ok_or_else(|| "pending work rows did not land".to_string())?;
+        Ok(count)
     }
 }
 
@@ -158,7 +212,7 @@ pub struct WorkGuard {
 }
 
 impl WorkGuard {
-    /// Name `key` on disk and return the guard that clears it.
+    /// Name `key` in the record and return the guard that clears it.
     pub fn begin(work: &std::sync::Arc<parking_lot::Mutex<PendingWork>>, key: String, kind: WorkKind) -> Self {
         work.lock().begin(&key, kind);
         Self { work: work.clone(), key, kind, keep: false }
@@ -177,37 +231,30 @@ impl Drop for WorkGuard {
     }
 }
 
-/// Derive the path for sync_pending_work.json given an app_data directory.
-pub fn pending_work_path(app_data: &Path) -> PathBuf {
-    app_data.join("sync_pending_work.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
 
-    fn shared(name: &str) -> (PathBuf, Arc<parking_lot::Mutex<PendingWork>>) {
-        let dir = std::env::temp_dir().join(format!("rovertools-work-{name}-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        let path = pending_work_path(&dir);
-        (path.clone(), Arc::new(parking_lot::Mutex::new(PendingWork::load(path))))
+    fn shared() -> (Arc<Db>, Arc<parking_lot::Mutex<PendingWork>>) {
+        let db = Db::open_in_memory();
+        (Arc::clone(&db), Arc::new(parking_lot::Mutex::new(PendingWork::load(db))))
     }
 
-    /// Both ends are on disk at once: a crash right after the work ends must
-    /// not leave a record the next launch would run again.
+    /// Both ends are in the table at once: a crash right after the work ends
+    /// must not leave a record the next launch would run again.
     #[test]
-    fn the_record_is_on_disk_while_the_work_runs_and_gone_the_moment_it_ends() {
-        let (path, work) = shared("run");
+    fn the_record_is_in_the_table_while_the_work_runs_and_gone_the_moment_it_ends() {
+        let (db, work) = shared();
         let guard = WorkGuard::begin(&work, "clipboard:a".into(), WorkKind::Upload);
-        assert!(PendingWork::try_keys(&path).unwrap().contains("clipboard:a"));
+        assert!(PendingWork::keys_in(&db).unwrap().contains("clipboard:a"));
         drop(guard);
-        assert!(PendingWork::try_keys(&path).unwrap().is_empty());
+        assert!(PendingWork::keys_in(&db).unwrap().is_empty());
     }
 
     #[test]
     fn two_tasks_for_one_key_clear_it_only_when_both_end() {
-        let (_, work) = shared("twice");
+        let (_, work) = shared();
         let first = WorkGuard::begin(&work, "clipboard:a".into(), WorkKind::Upload);
         let second = WorkGuard::begin(&work, "clipboard:a".into(), WorkKind::Upload);
         drop(first);
@@ -220,19 +267,19 @@ mod tests {
     /// for a quit defers: neither may clear what it never finished.
     #[test]
     fn closed_or_deferred_work_stays_for_the_next_launch() {
-        let (path, work) = shared("closed");
+        let (db, work) = shared();
         let dropped = WorkGuard::begin(&work, "clipboard:a".into(), WorkKind::Download);
         WorkGuard::begin(&work, "clipboard:b".into(), WorkKind::Upload).defer();
         work.lock().close();
         drop(dropped);
-        let next = PendingWork::load(path);
+        let next = PendingWork::load(db);
         assert_eq!(next.recovered(WorkKind::Download), vec!["clipboard:a"]);
         assert_eq!(next.recovered(WorkKind::Upload), vec!["clipboard:b"]);
     }
 
     #[test]
     fn deferred_work_is_recovered_and_can_be_forgotten() {
-        let (_, work) = shared("defer");
+        let (_, work) = shared();
         work.lock().defer("note:n", WorkKind::Upload);
         let _running = WorkGuard::begin(&work, "clipboard:b".into(), WorkKind::Upload);
         let mut w = work.lock();
@@ -243,10 +290,15 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_record_is_flagged() {
-        let (path, _) = shared("torn");
-        std::fs::write(&path, b"{\"upload\": [").unwrap();
-        assert!(PendingWork::load(path.clone()).unreadable());
-        assert!(PendingWork::try_keys(&path).is_err());
+    fn the_legacy_record_imports_both_directions() {
+        let db = Db::open_in_memory();
+        let dir = std::env::temp_dir().join(format!("rovertools-work-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync_pending_work.json");
+        std::fs::write(&path, br#"{"upload":["clipboard:u"],"download":["note:d"]}"#).unwrap();
+        assert_eq!(PendingWork::import_file(&db, &path).unwrap(), 2);
+        let next = PendingWork::load(db);
+        assert_eq!(next.recovered(WorkKind::Upload), vec!["clipboard:u"]);
+        assert_eq!(next.recovered(WorkKind::Download), vec!["note:d"]);
     }
 }
