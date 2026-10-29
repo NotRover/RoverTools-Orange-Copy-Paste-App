@@ -581,6 +581,16 @@ fn setup_runtime(
     };
     let _ = app.state::<AppState>().db.set(Arc::clone(&db));
     let db = Some(db);
+
+    // Encryption at rest, before any store loads or imports: a key that is
+    // there opens the sealed rows, and an import under it writes sealed rows.
+    let startup_cipher = crate::storage::cipher::at_startup(bool_setting(
+        settings.as_ref(),
+        crate::storage::commands::SETTING_KEY,
+        false,
+    ));
+    history.lock().set_cipher(startup_cipher.cipher.clone());
+    app.state::<AppState>().notes.lock().set_cipher(startup_cipher.cipher.clone());
     // Whether any file of an older build was imported this launch. The retired
     // copies are removed on the next launch, not this one.
     let mut imported = false;
@@ -636,6 +646,10 @@ fn setup_runtime(
         if db_on_disk && !imported {
             crate::storage::import::remove_retired(dir);
         }
+    }
+    if startup_cipher.finish_turning_off {
+        let state_ref: tauri::State<'_, AppState> = app.state();
+        crate::storage::commands::finish_turning_off(&history, &state_ref.notes);
     }
 
     // Drop anything a history written before the capture cap can be holding.
@@ -974,6 +988,8 @@ pub fn run() {
             crate::runtime::commands::clamp_popup,
             crate::runtime::commands::open_data_folder,
             crate::runtime::commands::open_log_folder,
+            crate::storage::commands::storage_set_encrypt_at_rest,
+            crate::storage::commands::storage_encryption_active,
             crate::runtime::commands::log_from_webview,
             crate::runtime::commands::get_autostart,
             crate::runtime::commands::set_autostart,

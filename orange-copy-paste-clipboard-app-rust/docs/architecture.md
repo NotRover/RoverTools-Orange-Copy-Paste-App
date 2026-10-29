@@ -1680,6 +1680,8 @@ frontend drives popup sizing and reveal through these.
 | `ui_space_changed` | Frontend reports the selected space |
 | `open_data_folder` | Open the app-data folder in the OS file manager |
 | `open_log_folder` | Open `{app_data}/logs` in the OS file manager |
+| `storage_set_encrypt_at_rest` | Turn encryption at rest on or off, rewriting every entry and note (section 7.1) |
+| `storage_encryption_active` | Whether rows written now are sealed; false with the setting on only when the key could not be read |
 | `log_from_webview` | One line from a window into the app log, under `webview:<label>` |
 | `get_autostart` | Whether run-on-startup is enabled |
 | `set_autostart` | Toggle run-on-startup (refused in debug builds) |
@@ -1769,6 +1771,7 @@ summarizes the emitted events; the code is authoritative.
 | `sync:oauth-ready` | `sync/mod.rs` | The OAuth handshake landed; a password is needed |
 | `sync:history-merged` / `sync:notes-merged` | `sync/mod.rs` | Pulled/merged entries; the UI re-fetches |
 | `sync:entry-queued` | `sync/mod.rs` | A push was queued offline |
+| `storage:encryption-changed` | `storage/commands.rs` | Encryption at rest was turned on or off (payload: the new state); the UI re-fetches history for the badges |
 | `sync:entry-skipped` | `sync/mod.rs` | A push was refused (size or quota) |
 | `sync:entry-synced` / `sync:note-synced` | `sync/mod.rs` | A push was acknowledged by the server |
 | `sync:collect-settings` | `sync/mod.rs` | Ask React to hand down its `localStorage` settings. Payload `{ round }`, passed back to `sync_settings` |
@@ -1935,6 +1938,7 @@ Among its settings (the screen is the full list):
 - **`Start minimized`**: launch hidden in the tray. Setting `start_minimized`.
 - **`In-app popup`**: master toggle (`notification`) plus checkboxes for the copy and paste notifications (`notif_copy`, `notif_paste`).
 - **`Show sync badges on cards`**: toggle for the per-entry cloud icon on cards. Setting `show_sync_badges`.
+- **`Encrypt history and notes on this PC`**: off by default, per device. Seals the text columns of `app.db` under a key in the OS keychain (section 7.1). Setting `encrypt_at_rest`, written by `storage_set_encrypt_at_rest` rather than `set_setting`, since the rows have to be rewritten with it.
 
 > Cloud-sync auth (login/logout), the connected-devices list and presence, sync status and the realtime/passive/manual mode control live on the **Account screen** (`AccountScreen.tsx`), not here.
 
@@ -2150,13 +2154,41 @@ a newer file than the build knows is refused rather than guessed at.
 
 | Table | Rows | Written by |
 | --- | --- | --- |
-| `entries` | One clipboard entry: `id, kind, content, ts, pinned, label, groups` (JSON) | `ClipboardHistory` |
-| `notes` | One note: `id, title, content, created_at, updated_at, pinned, groups` (JSON) | `NoteStore` |
+| `entries` | One clipboard entry: `id, kind, content, ts, pinned, label, groups` (JSON), `enc` | `ClipboardHistory` |
+| `notes` | One note: `id, title, content, created_at, updated_at, pinned, groups` (JSON), `enc` | `NoteStore` |
 | `notifications` | One feed row: `id, created_at, read`, and the whole record as `data` (JSON) | `NotificationStore` |
 | `sync_entries` | The id map, one row per entry key: `server_id, shares, remote, owner, arrival, unpushed, deleted_marker` | `IdMap` |
 | `sync_queue` | One queued op per row, in order (`seq`), with `inflight` | `PendingQueue` |
 | `sync_work` | One `(key, kind)` per upload or download under way | `PendingWork` |
 | `kv` | `sync_state`: the sync state as JSON | `SyncStateStore` |
+
+**Encryption at rest** (`storage/cipher.rs`, off by default). With the setting
+`encrypt_at_rest` on, `entries.content`, `entries.label`, `notes.title` and
+`notes.content` are sealed with AES-256-GCM before they are written, and `enc = 1`
+marks the row; the additional data names the table, row id and column, so a value
+cannot be moved to another row. The key is 32 random bytes in the OS keychain
+(`db_key:_install`, the keychain helpers of section 4.6), never in the file or in `settings.json`. Each store
+holds the cipher and seals in `upsert_entry` / `upsert_note`; a row it cannot open on
+load (no key, or another key) is skipped with a warning and left in the table. The
+entry and note structs carry `encrypted`, what the row on disk is as of the write that
+stored it, which the card shows as the shield badge. Done in the app rather than by a
+page cipher so the engine stays swappable and each row can say whether it is sealed.
+
+Not covered, by design: the columns the list is ordered and grouped by (`ts`, `kind`,
+`pinned`, `groups`), the sync tables, and the files under `images/`, `received-files/`
+and `note-attachments/`. The threat is a copied `app.db`, not a copied folder.
+
+Turning it on or off is `storage_set_encrypt_at_rest`: on stores the key first, then
+rewrites every row (`persist_all` on both stores), writes the setting, and runs
+`VACUUM` plus a WAL checkpoint so the pages that held the plaintext are gone; off
+rewrites in plain text, writes the setting, then deletes the key. A rewrite that fails
+leaves the setting as it was, so the next launch retries. At startup
+(`cipher::at_startup`): setting on and a key, use it; setting on and no key, make and
+store a new one and log that the old rows are unreadable; setting on and a keychain
+that will not answer, run without it this launch (sealed rows skipped, new rows plain,
+`storage_encryption_active` false and the Settings screen says so); setting off and a
+key still stored, a turn-off that did not finish, completed after the loads
+(`commands::finish_turning_off`).
 
 **Images and files.** Image entries store an absolute file path, never bytes: on
 `push()` a data-URL image is written to `images/{id}_{label}.{ext}` at once, and the
@@ -2307,7 +2339,7 @@ The **promises** are the workspace root `docs/architecture.md` (Cross-Component 
 
 | #   | Invariant                                      | App-side implication                                                                                                                                                  |
 | --- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Local store is always plaintext**            | `app.db` holds plaintext rows. Encryption boundary = network only.                                                                                                     |
+| 1   | **The local store is readable without the network** | `app.db` opens with what is on this PC: plain rows, or rows sealed under the key in this PC's keychain (section 7.1). No account, server or password is ever needed to read it. |
 | 2   | **Sync is always optional**                    | App boots and operates fully without `SyncClient` initialized. `sync_client: None` is a valid steady state.                                                           |
 | 3   | **Server never sees plaintext**                | `crypto::encrypt` must be called before any data leaves the process. The `client.rs` HTTP methods only accept pre-encrypted `SyncEntry` structs.                      |
 | 4   | **UMK never leaves the device**                | The UMK (from `unwrap_umk`) is stored only in `SyncClient`'s memory field. Never written to any file, log, or IPC response. Cleared on `sync_logout()` or app exit.         |

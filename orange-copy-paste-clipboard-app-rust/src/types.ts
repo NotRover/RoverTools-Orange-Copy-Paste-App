@@ -17,6 +17,11 @@ export interface ClipboardEntry {
   groups: string[];
   /** Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images). */
   label?: string;
+  /**
+   * Whether the row on this PC's disk is encrypted (Settings > Data). Set by
+   * Rust from the write that stored it; absent means false.
+   */
+  encrypted?: boolean;
   // Sync state is not part of the entry: Rust keeps it in id_map.json and the
   // pending queue. Read it with useEntrySyncStates().
 }

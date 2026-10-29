@@ -49,7 +49,7 @@ alone, so it has no home in either doc. Preserve them across any change to eithe
 
 | # | Invariant |
 |---|---|
-| 1 | **The local store is always plaintext.** `history.bin` and `notes.bin` are never encrypted. The encryption boundary is the network, not the disk. |
+| 1 | **The local store is readable without the network.** `app.db` is plain by default; with encryption at rest on, its text columns are sealed under a key held in that PC's own keychain, never under the account's keys. Nothing on disk needs the server, the account or a password to open. The sync encryption boundary is the network. |
 | 2 | **Sync is always optional.** The app is fully functional with no account, no network and no server. Nothing in the capture, search, paste or notes paths may block on it. |
 | 3 | **The server never sees plaintext or any key.** `encrypted_content` and `encrypted_metadata` are sealed on-device before any network call, and `wrapped_keys` / `wrapped_space_keys` stay opaque - the server holds no private key that could open either. |
 | 4 | **The UMK never leaves the device in the clear, and neither does the password.** In memory only, unwrapped at login from the password, the address and `kdf_salt`, cleared on lock or exit. The server holds only the wrapped envelope; Supabase holds only a separate login key derived from the password. |

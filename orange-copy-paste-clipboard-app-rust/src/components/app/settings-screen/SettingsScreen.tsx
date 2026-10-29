@@ -117,6 +117,12 @@ const SettingsScreen: React.FC = () => {
   // ── General settings ───────────────────────────────────────────
   const [pasteSlots, setPasteSlots] = useState(readSlots);
   const [keepHistory, setKeepHistory] = useState(true);
+  // Encryption at rest: the setting, whether the key is in use this launch,
+  // and the in-flight rewrite of every row (seconds on a large history).
+  const [encryptAtRest, setEncryptAtRest] = useState(false);
+  const [encryptActive, setEncryptActive] = useState(false);
+  const [encryptBusy, setEncryptBusy] = useState(false);
+  const [encryptError, setEncryptError] = useState<string | null>(null);
   const [closeToTray, setCloseToTray] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
@@ -160,6 +166,10 @@ const SettingsScreen: React.FC = () => {
       });
 
     loadBool("keep_history", setKeepHistory, true);
+    loadBool("encrypt_at_rest", setEncryptAtRest, false);
+    invoke<boolean>("storage_encryption_active")
+      .then(setEncryptActive)
+      .catch(() => {});
     loadBool("close_to_tray", setCloseToTray, false);
     loadBool("start_minimized", setStartMinimized, false);
     loadBool("notification", setNotificationEnabled, true);
@@ -206,6 +216,23 @@ const SettingsScreen: React.FC = () => {
   };
 
   const handleKeepToggle = () => toggleBoolSetting(keepHistory, setKeepHistory, "keep_history");
+
+  // Not a plain setting write: Rust rewrites every entry and note, and the
+  // toggle only moves once that has landed.
+  const handleEncryptToggle = async () => {
+    const next = !encryptAtRest;
+    setEncryptBusy(true);
+    setEncryptError(null);
+    try {
+      await invoke("storage_set_encrypt_at_rest", { enabled: next });
+      setEncryptAtRest(next);
+      setEncryptActive(next);
+    } catch (e) {
+      setEncryptError(String(e));
+    } finally {
+      setEncryptBusy(false);
+    }
+  };
   const handleCloseToTrayToggle = () => toggleBoolSetting(closeToTray, setCloseToTray, "close_to_tray");
   const handleStartMinimizedToggle = () => toggleBoolSetting(startMinimized, setStartMinimized, "start_minimized");
 
@@ -641,6 +668,23 @@ const SettingsScreen: React.FC = () => {
             <h3 className="set-section-title">Data</h3>
           </div>
           <div className="set-group">
+            <ToggleRow
+              label="Encrypt history and notes on this PC"
+              desc="The text of every entry and note in the local database is encrypted with a key kept in this PC's credential store. Images and files on disk are not. Turning this on or off rewrites every entry, which can take a few seconds."
+              active={encryptAtRest}
+              onToggle={() => void handleEncryptToggle()}
+              disabled={encryptBusy}
+            />
+            {encryptAtRest && !encryptActive && !encryptBusy && !encryptError && (
+              <span className="set-row-desc set-row-desc--warn">
+                The key could not be read from this PC's credential store. New entries are stored in plain text until the app can read it again. Open the log folder for details.
+              </span>
+            )}
+            {encryptError && (
+              <span className="set-row-desc set-row-desc--warn">
+                Could not change encryption: {encryptError}
+              </span>
+            )}
             <div className="set-row">
               <div className="set-row-info">
                 <span className="set-row-label">Open data folder</span>

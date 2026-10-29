@@ -19,7 +19,7 @@ import {
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
 import { ExpandIcon, CheckIcon, ClipboardIcon } from "../../../icons";
-import { CloudArrowUp, CloudCheck } from "@phosphor-icons/react";
+import { CloudArrowUp, CloudCheck, ShieldCheck } from "@phosphor-icons/react";
 import { ShareNetwork } from "@phosphor-icons/react";
 
 const CHIP_GAP_PX = 4;
@@ -419,6 +419,14 @@ const ChipBar: React.FC<ChipBarProps> = ({
             data-tooltip="Waiting to upload"
           >
             <CloudArrowUp size={15} />
+          </span>
+        )}
+        {entry.encrypted && (
+          <span
+            className="card-sync-icon card-sync-icon--encrypted"
+            data-tooltip="Encrypted on this PC"
+          >
+            <ShieldCheck size={15} />
           </span>
         )}
         {justPinned ? (

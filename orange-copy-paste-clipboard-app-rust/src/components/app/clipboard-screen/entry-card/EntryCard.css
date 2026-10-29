@@ -523,6 +523,12 @@ button.card-type-chip:hover {
   color: #f59e0b;
 }
 
+/* Encrypted at rest. Beside the cloud badge: that one says where the entry
+   went, this one says how it is kept here. */
+.card-sync-icon--encrypted {
+  color: var(--accent);
+}
+
 /* Shared-to-a-space indicator. Sits next to the cloud badge because both
    answer "where did this go" - one for your devices, one for other people. */
 

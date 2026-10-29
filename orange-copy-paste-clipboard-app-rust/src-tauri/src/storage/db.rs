@@ -73,6 +73,16 @@ impl Db {
         Ok(Arc::new(Self { conn: Mutex::new(conn) }))
     }
 
+    /// Rebuild the file from its live rows and truncate the WAL, so pages that
+    /// held rows since rewritten (the plaintext from before encryption at rest
+    /// was turned on) are gone from disk. Best effort; a failure is logged.
+    pub fn compact(&self) {
+        let conn = self.conn.lock();
+        if let Err(e) = conn.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);") {
+            log::warn!(target: "storage", "compact: {e}");
+        }
+    }
+
     /// Run a read. `None` when it failed; the failure is logged.
     pub fn read<T>(&self, what: &str, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Option<T> {
         let conn = self.conn.lock();

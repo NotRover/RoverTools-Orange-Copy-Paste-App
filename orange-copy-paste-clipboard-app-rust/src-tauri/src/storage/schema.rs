@@ -7,7 +7,7 @@
 use rusqlite::Connection;
 
 /// The version this build writes.
-pub const CURRENT: u32 = 1;
+pub const CURRENT: u32 = 2;
 
 const V1: &str = "
 CREATE TABLE entries (
@@ -67,6 +67,12 @@ CREATE TABLE kv (
 );
 ";
 
+/// Encryption at rest: whether a row's text columns are sealed (`cipher.rs`).
+const V2: &str = "
+ALTER TABLE entries ADD COLUMN enc INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notes ADD COLUMN enc INTEGER NOT NULL DEFAULT 0;
+";
+
 /// Bring `conn` from whatever version it is at to [`CURRENT`]. Runs inside a
 /// transaction the caller owns, so a step that fails leaves the file as it was.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -77,6 +83,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     while version < CURRENT {
         match version {
             0 => conn.execute_batch(V1)?,
+            1 => conn.execute_batch(V2)?,
             _ => unreachable!("every version below CURRENT has a step"),
         }
         version += 1;
@@ -100,6 +107,23 @@ mod tests {
             .query_row("SELECT count(*) FROM sqlite_master WHERE name = 'entries'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    /// A file from the first build steps forward one version at a time.
+    #[test]
+    fn a_version_one_file_gains_the_enc_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        migrate(&conn).unwrap();
+        let v: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, CURRENT);
+        for table in ["entries", "notes"] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name = 'enc'"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1, "{table}.enc");
+        }
     }
 
     #[test]

@@ -3107,6 +3107,7 @@ impl SyncClient {
                     updated_at: e.updated_at,
                     pinned: e.pinned,
                     groups,
+                    encrypted: false,
                 });
                 notes_changed = true;
                 out.restored += 1;
@@ -3227,6 +3228,7 @@ impl SyncClient {
                     pinned: e.pinned,
                     groups,
                     label,
+                    encrypted: false,
                     content_hash: None,
                 };
                 // Auto-copy: only live space entries, per the receiving
@@ -5824,6 +5826,7 @@ impl SyncClient {
                 pinned: meta.pinned,
                 groups: meta.groups,
                 label: meta.label,
+                encrypted: false,
                 content_hash: None,
             };
             if meta.autocopy {
@@ -5951,6 +5954,7 @@ impl SyncClient {
                 pinned: meta.pinned,
                 groups: meta.groups,
                 label: meta.label,
+                encrypted: false,
                 content_hash: None,
             };
             if meta.autocopy {

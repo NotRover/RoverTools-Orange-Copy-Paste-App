@@ -605,6 +605,16 @@ const App: React.FC = () => {
         }),
       ),
     );
+    // Encryption at rest turned on or off: every entry's badge changed.
+    track(
+      win.listen("storage:encryption-changed", () => {
+        invoke<ClipboardEntry[]>("get_history")
+          .then((h) => {
+            if (!cancelled) setEntries(h);
+          })
+          .catch((e) => console.error("[history] re-read after encryption change failed", e));
+      }),
+    );
     track(
       win.listen(
         "sync:notes-merged",

@@ -198,6 +198,11 @@
   line-height: 1.4;
 }
 
+/* A line under a row's description that needs the user's attention. */
+.set-row-desc--warn {
+  color: #f59e0b;
+}
+
 /* ── Select ────────────────────────────────────────────────────── */
 
 .settings-select-wrap {

@@ -7,8 +7,11 @@
 //! the statement in flight, and a crash loses nothing that was acknowledged.
 //!
 //! Plain SQL on purpose: nothing here depends on a feature another SQLite-
-//! compatible engine lacks, so the engine is a dependency swap.
+//! compatible engine lacks, so the engine is a dependency swap. Encryption at
+//! rest (`cipher`) is done above the engine for the same reason.
 
+pub mod cipher;
+pub mod commands;
 pub mod db;
 pub mod import;
 pub mod schema;

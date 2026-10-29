@@ -553,25 +553,27 @@ fn read_secret(purpose: &str, user_id: &str) -> Result<Option<String>, String> {
 async fn write_secret(purpose: &'static str, user_id: &str, secret: &str) -> Result<(), String> {
     let user_id = user_id.to_string();
     let secret = secret.to_string();
-    tokio::task::spawn_blocking(move || {
-        let mut last = String::new();
-        // A leading zero so the first attempt runs immediately and the schedule
-        // describes only the waits after it.
-        for delay in std::iter::once(0).chain(KEYCHAIN_WRITE_BACKOFF_MS) {
-            if delay > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(delay));
-            }
-            match entry_for(purpose, &user_id)
-                .and_then(|entry| entry.set_password(&secret).map_err(|e| e.to_string()))
-            {
-                Ok(()) => return Ok(()),
-                Err(e) => last = e,
-            }
+    tokio::task::spawn_blocking(move || write_secret_blocking(purpose, &user_id, &secret))
+        .await
+        .unwrap_or_else(|e| Err(format!("keychain task: {e}")))
+}
+
+/// [`write_secret`] on the calling thread, for callers that are already off
+/// the async runtime.
+fn write_secret_blocking(purpose: &str, user_id: &str, secret: &str) -> Result<(), String> {
+    let mut last = String::new();
+    // A leading zero so the first attempt runs immediately and the schedule
+    // describes only the waits after it.
+    for delay in std::iter::once(0).chain(KEYCHAIN_WRITE_BACKOFF_MS) {
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
         }
-        Err(last)
-    })
-    .await
-    .unwrap_or_else(|e| Err(format!("keychain task: {e}")))
+        match entry_for(purpose, user_id).and_then(|entry| entry.set_password(secret).map_err(|e| e.to_string())) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
 }
 
 /// Delete one secret. Absent is success - the caller wanted it gone.
@@ -594,13 +596,18 @@ pub fn load_device_private_key(user_id: &str) -> Result<Option<Zeroizing<[u8; 32
     let Some(encoded) = read_secret("device_key", user_id)? else {
         return Ok(None);
     };
-    let bytes = B64.decode(&encoded).map_err(|e| format!("base64: {e}"))?;
+    decode_key(&encoded).map(Some)
+}
+
+/// A stored key back into bytes, refusing any length but the one expected.
+fn decode_key(encoded: &str) -> Result<Zeroizing<[u8; 32]>, String> {
+    let bytes = B64.decode(encoded).map_err(|e| format!("base64: {e}"))?;
     if bytes.len() != 32 {
         return Err(format!("expected 32-byte key, got {} bytes", bytes.len()));
     }
     let mut key = Zeroizing::new([0u8; 32]);
     key.copy_from_slice(&bytes);
-    Ok(Some(key))
+    Ok(key)
 }
 
 /// Store the refresh token in the OS keychain.
@@ -625,6 +632,29 @@ pub fn delete_keychain_entries(user_id: &str) {
 /// The account slot for secrets that belong to the install rather than to any
 /// one user. Not a user id, and cannot collide with one: user ids are UUIDs.
 const INSTALL_SCOPE: &str = "_install";
+
+// ── Encryption at rest ──────────────────────────────────────────────
+//
+// The key `storage::cipher` seals the database's text columns with. Per
+// install, not per user: the file is one per install too.
+
+/// `Ok(None)` when there is no key; `Err` when the store would not answer.
+pub fn load_db_key() -> Result<Option<Zeroizing<[u8; 32]>>, String> {
+    let Some(encoded) = read_secret("db_key", INSTALL_SCOPE)? else {
+        return Ok(None);
+    };
+    decode_key(&encoded).map(Some)
+}
+
+/// Blocking, with the same retries as every other keychain write; the callers
+/// run on a blocking thread.
+pub fn store_db_key(key: &[u8; 32]) -> Result<(), String> {
+    write_secret_blocking("db_key", INSTALL_SCOPE, &B64.encode(key))
+}
+
+pub fn delete_db_key() {
+    delete_secret("db_key", INSTALL_SCOPE);
+}
 
 /// A random per-install value standing in for a machine id the OS will not give
 /// us (a container, a blank registry, a hardened host).

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::storage::cipher::Cipher;
 use crate::storage::Db;
 
 /// Global monotonically increasing ID counter for notes.
@@ -44,6 +45,10 @@ pub struct Note {
     /// User-defined group tags (shared with clipboard groups).
     #[serde(default)]
     pub groups: Vec<String>,
+    /// Whether the row on disk holds this note's text sealed (section 7.1).
+    /// Set by the write that stored it, never a request.
+    #[serde(default)]
+    pub encrypted: bool,
 }
 
 impl Default for Note {
@@ -64,42 +69,77 @@ impl Note {
             updated_at: now,
             pinned: false,
             groups: Vec::new(),
+            encrypted: false,
         }
     }
 }
 
 // ── NoteStore ───────────────────────────────────────────────────────
 
-/// One `notes` row as the struct, in `SELECT id, title, content, created_at,
-/// updated_at, pinned, groups` order.
-fn row_to_note(r: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
+const SELECT_NOTE: &str = "id, title, content, created_at, updated_at, pinned, groups, enc";
+
+/// One `notes` row as the struct, in [`SELECT_NOTE`] order. `Ok(None)` is a
+/// sealed row this launch cannot open, logged and left in the table.
+fn row_to_note(r: &rusqlite::Row<'_>, cipher: Option<&Cipher>) -> rusqlite::Result<Option<Note>> {
+    let id: String = r.get(0)?;
+    let mut title: String = r.get(1)?;
+    let mut content: String = r.get(2)?;
     let groups: String = r.get(6)?;
-    Ok(Note {
-        id: r.get(0)?,
-        title: r.get(1)?,
-        content: r.get(2)?,
+    let encrypted: bool = r.get(7)?;
+    if encrypted {
+        let opened = cipher
+            .ok_or_else(|| "no key loaded".to_string())
+            .and_then(|c| Ok((c.open("notes", &id, "title", &title)?, c.open("notes", &id, "content", &content)?)));
+        match opened {
+            Ok((t, c)) => {
+                title = t;
+                content = c;
+            }
+            Err(e) => {
+                log::warn!(target: "storage", "note {id} skipped: {e}");
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(Note {
+        id,
+        title,
+        content,
         created_at: r.get::<_, i64>(3)? as u64,
         updated_at: r.get::<_, i64>(4)? as u64,
         pinned: r.get(5)?,
         groups: serde_json::from_str(&groups).unwrap_or_default(),
-    })
+        encrypted,
+    }))
 }
 
-fn upsert_note(tx: &rusqlite::Transaction<'_>, n: &Note) -> rusqlite::Result<()> {
+/// Write `n` as its row, inserting or replacing, sealed when `cipher` is set.
+fn upsert_note(tx: &rusqlite::Transaction<'_>, n: &Note, cipher: Option<&Cipher>) -> rusqlite::Result<()> {
+    let seal = |column: &str, text: &str| -> rusqlite::Result<String> {
+        match cipher {
+            Some(c) => c
+                .seal("notes", &n.id, column, text)
+                .map_err(|m| rusqlite::Error::ToSqlConversionFailure(m.into())),
+            None => Ok(text.to_string()),
+        }
+    };
+    let title = seal("title", &n.title)?;
+    let content = seal("content", &n.content)?;
     tx.execute(
-        "INSERT INTO notes (id, title, content, created_at, updated_at, pinned, groups)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO notes (id, title, content, created_at, updated_at, pinned, groups, enc)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(id) DO UPDATE SET title = excluded.title, content = excluded.content,
              created_at = excluded.created_at, updated_at = excluded.updated_at,
-             pinned = excluded.pinned, groups = excluded.groups",
+             pinned = excluded.pinned, groups = excluded.groups, enc = excluded.enc",
         params![
             n.id,
-            n.title,
-            n.content,
+            title,
+            content,
             n.created_at as i64,
             n.updated_at as i64,
             n.pinned,
             serde_json::to_string(&n.groups).unwrap_or_else(|_| "[]".into()),
+            cipher.is_some(),
         ],
     )?;
     Ok(())
@@ -112,6 +152,8 @@ fn upsert_note(tx: &rusqlite::Transaction<'_>, n: &Note) -> rusqlite::Result<()>
 pub struct NoteStore {
     notes: Vec<Note>,
     db: Option<Arc<Db>>,
+    /// Encryption at rest, as on `ClipboardHistory`.
+    cipher: Option<Arc<Cipher>>,
 }
 
 impl NoteStore {
@@ -126,27 +168,37 @@ impl NoteStore {
         self.db = Some(db);
     }
 
-    /// Replace memory with the `notes` table, most recently updated first.
+    /// Set, or clear, the cipher rows are written with from now on.
+    pub fn set_cipher(&mut self, cipher: Option<Arc<Cipher>>) {
+        self.cipher = cipher;
+    }
+
+    /// Replace memory with the `notes` table, most recently updated first. A
+    /// sealed row the cipher will not open is skipped, not dropped.
     pub fn load_from_db(&mut self) -> bool {
         let Some(db) = self.db.clone() else {
             return false;
         };
+        let cipher = self.cipher.clone();
         let Some(rows) = db.read("load notes", |c| {
-            let mut st = c.prepare(
-                "SELECT id, title, content, created_at, updated_at, pinned, groups
-                 FROM notes ORDER BY updated_at DESC",
-            )?;
-            let rows = st.query_map([], row_to_note)?;
+            let mut st = c.prepare(&format!("SELECT {SELECT_NOTE} FROM notes ORDER BY updated_at DESC"))?;
+            let rows = st.query_map([], |r| row_to_note(r, cipher.as_deref()))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
         }) else {
             return false;
         };
+        let total = rows.len();
+        let rows: Vec<Note> = rows.into_iter().flatten().collect();
+        if rows.len() < total {
+            log::warn!(target: "storage", "{} notes skipped: sealed and not opened by this launch's key", total - rows.len());
+        }
         advance_id_past(&rows);
         self.notes = rows;
         true
     }
 
-    /// Write every note held, in one transaction. For the one-time import.
+    /// Write every note held, in one transaction. For the one-time import,
+    /// and for turning encryption at rest on or off.
     pub fn persist_all(&mut self) -> bool {
         let ids: Vec<String> = self.notes.iter().map(|n| n.id.clone()).collect();
         self.write_rows(&ids)
@@ -156,13 +208,22 @@ impl NoteStore {
         let Some(db) = self.db.clone() else {
             return false;
         };
-        db.write("write notes", |tx| {
-            for n in self.notes.iter().filter(|n| ids.contains(&n.id)) {
-                upsert_note(tx, n)?;
+        let cipher = self.cipher.clone();
+        let landed = db
+            .write("write notes", |tx| {
+                for n in self.notes.iter().filter(|n| ids.contains(&n.id)) {
+                    upsert_note(tx, n, cipher.as_deref())?;
+                }
+                Ok(())
+            })
+            .is_some();
+        if landed {
+            let encrypted = cipher.is_some();
+            for n in self.notes.iter_mut().filter(|n| ids.contains(&n.id)) {
+                n.encrypted = encrypted;
             }
-            Ok(())
-        })
-        .is_some()
+        }
+        landed
     }
 
     /// Write the pin flag and groups of these notes, the columns the metadata
@@ -403,6 +464,34 @@ mod tests {
     }
 
     /// The merge keeps the newer copy, and only a copy that was taken is written.
+    #[test]
+    fn a_cipher_seals_note_rows_and_the_same_key_opens_them() {
+        let db = Db::open_in_memory();
+        let cipher = Arc::new(Cipher::generate());
+        let mut store = with_db(&db);
+        store.set_cipher(Some(Arc::clone(&cipher)));
+        let note = store.create();
+        assert!(store.update(&note.id, "Title".into(), "<p>body</p>".into()));
+        let raw: (String, String, bool) = db
+            .read("raw", |c| {
+                c.query_row("SELECT title, content, enc FROM notes WHERE id = ?1", [&note.id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+            })
+            .unwrap();
+        assert!(raw.2 && raw.0 != "Title" && raw.1 != "<p>body</p>");
+
+        let mut again = with_db(&db);
+        again.set_cipher(Some(cipher));
+        again.load_from_db();
+        let loaded = again.find(&note.id).unwrap();
+        assert_eq!((loaded.title.as_str(), loaded.content.as_str(), loaded.encrypted), ("Title", "<p>body</p>", true));
+
+        let mut no_key = with_db(&db);
+        no_key.load_from_db();
+        assert!(no_key.all().is_empty());
+    }
+
     #[test]
     fn upsert_synced_is_last_write_wins_in_the_table_too() {
         let db = Db::open_in_memory();

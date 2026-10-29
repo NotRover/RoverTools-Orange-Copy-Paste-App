@@ -16,6 +16,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::storage::cipher::Cipher;
 use crate::storage::Db;
 
 // Constants
@@ -220,6 +221,16 @@ pub struct ClipboardEntry {
     /// Optional display label (e.g. "Image Mar 17, 2:45 PM" for clipboard images).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Whether the row on disk holds this entry's text sealed (section 7.1).
+    /// Set by the write that stored it, never a request; the UI shows it as
+    /// the shield badge.
+    ///
+    /// Last, and absent when false: an older build's MessagePack file is
+    /// positional, with `label` dropped when `None`, so a field after `label`
+    /// that is present when `label` is not would be read as the label. The
+    /// import only ever reads such files, and never a sealed entry.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub encrypted: bool,
     /// Fast content fingerprint for image deduplication.  Computed from the
     /// original data-URL at creation time so it survives externalisation to
     /// a file path.  Not persisted — only relevant within a single session.
@@ -268,6 +279,7 @@ impl ClipboardEntry {
             pinned: false,
             groups: Vec::new(),
             label,
+            encrypted: false,
             content_hash,
         }
     }
@@ -333,42 +345,84 @@ pub struct ClipboardHistory {
     /// Where every mutation writes through to. `None` only before startup has
     /// attached it, and in tests of the in-memory behaviour.
     db: Option<Arc<Db>>,
+    /// Encryption at rest. Set, every row written is sealed under it and every
+    /// sealed row is opened with it; unset, rows are written in plain text.
+    cipher: Option<Arc<Cipher>>,
 }
 
-/// One `entries` row as the struct, in `SELECT id, kind, content, ts, pinned,
-/// label, groups` order.
-fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<ClipboardEntry> {
+const SELECT_ENTRY: &str = "id, kind, content, ts, pinned, label, groups, enc";
+
+/// One `entries` row as the struct, in [`SELECT_ENTRY`] order. `Ok(None)` is a
+/// sealed row this launch cannot open - no key, or not this key - which is
+/// logged and left in the table for a launch that can.
+fn row_to_entry(r: &rusqlite::Row<'_>, cipher: Option<&Cipher>) -> rusqlite::Result<Option<ClipboardEntry>> {
+    let id: String = r.get(0)?;
     let kind: String = r.get(1)?;
+    let mut content: String = r.get(2)?;
+    let mut label: Option<String> = r.get(5)?;
     let groups: String = r.get(6)?;
-    Ok(ClipboardEntry {
-        id: r.get(0)?,
+    let encrypted: bool = r.get(7)?;
+    if encrypted {
+        let opened = cipher
+            .ok_or_else(|| "no key loaded".to_string())
+            .and_then(|c| {
+                let content = c.open("entries", &id, "content", &content)?;
+                let label = label.as_deref().map(|l| c.open("entries", &id, "label", l)).transpose()?;
+                Ok((content, label))
+            });
+        match opened {
+            Ok((c, l)) => {
+                content = c;
+                label = l;
+            }
+            Err(e) => {
+                log::warn!(target: "storage", "entry {id} skipped: {e}");
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(ClipboardEntry {
+        id,
         kind: EntryKind::from_label(&kind),
-        content: r.get(2)?,
+        content,
         timestamp: r.get::<_, i64>(3)? as u64,
         pinned: r.get(4)?,
-        label: r.get(5)?,
+        label,
         groups: serde_json::from_str(&groups).unwrap_or_default(),
+        encrypted,
         content_hash: None,
-    })
+    }))
 }
 
-const UPSERT_ENTRY: &str = "INSERT INTO entries (id, kind, content, ts, pinned, label, groups)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+const UPSERT_ENTRY: &str = "INSERT INTO entries (id, kind, content, ts, pinned, label, groups, enc)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
      ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, content = excluded.content,
-         ts = excluded.ts, pinned = excluded.pinned, label = excluded.label, groups = excluded.groups";
+         ts = excluded.ts, pinned = excluded.pinned, label = excluded.label, groups = excluded.groups,
+         enc = excluded.enc";
 
-/// Write `e` as its row, inserting or replacing.
-fn upsert_entry(tx: &rusqlite::Transaction<'_>, e: &ClipboardEntry) -> rusqlite::Result<()> {
+/// Write `e` as its row, inserting or replacing, sealed when `cipher` is set.
+fn upsert_entry(tx: &rusqlite::Transaction<'_>, e: &ClipboardEntry, cipher: Option<&Cipher>) -> rusqlite::Result<()> {
+    let seal = |column: &str, text: &str| -> rusqlite::Result<String> {
+        match cipher {
+            Some(c) => c
+                .seal("entries", &e.id, column, text)
+                .map_err(|m| rusqlite::Error::ToSqlConversionFailure(m.into())),
+            None => Ok(text.to_string()),
+        }
+    };
+    let content = seal("content", &e.content)?;
+    let label = e.label.as_deref().map(|l| seal("label", l)).transpose()?;
     tx.execute(
         UPSERT_ENTRY,
         params![
             e.id,
             e.kind.label(),
-            e.content,
+            content,
             e.timestamp as i64,
             e.pinned,
-            e.label,
+            label,
             serde_json::to_string(&e.groups).unwrap_or_else(|_| "[]".into()),
+            cipher.is_some(),
         ],
     )?;
     Ok(())
@@ -404,24 +458,42 @@ impl ClipboardHistory {
         self.db = Some(db);
     }
 
+    /// Set, or clear, the cipher rows are written with from now on. Rows
+    /// already on disk stay as they are until written again; `persist_all`
+    /// rewrites them all.
+    pub fn set_cipher(&mut self, cipher: Option<Arc<Cipher>>) {
+        self.cipher = cipher;
+    }
+
+    /// Whether rows written now are sealed.
+    pub fn cipher_active(&self) -> bool {
+        self.cipher.is_some()
+    }
+
     /// Replace memory with the `entries` table, newest first. `false` when the
     /// read failed or no database is attached; memory is then left alone.
+    /// A sealed row the cipher will not open is skipped, not dropped.
     pub fn load_from_db(&mut self) -> bool {
         let Some(db) = self.db.clone() else {
             return false;
         };
+        let cipher = self.cipher.clone();
         let Some(rows) = db.read("load entries", |c| {
-            let mut st = c.prepare(
+            let mut st = c.prepare(&format!(
                 // rowid breaks a same-millisecond tie the way memory ordered
                 // them: the later insert first.
-                "SELECT id, kind, content, ts, pinned, label, groups FROM entries
-                 ORDER BY ts DESC, rowid DESC",
-            )?;
-            let rows = st.query_map([], row_to_entry)?;
+                "SELECT {SELECT_ENTRY} FROM entries ORDER BY ts DESC, rowid DESC"
+            ))?;
+            let rows = st.query_map([], |r| row_to_entry(r, cipher.as_deref()))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
         }) else {
             return false;
         };
+        let total = rows.len();
+        let rows: Vec<ClipboardEntry> = rows.into_iter().flatten().collect();
+        if rows.len() < total {
+            log::warn!(target: "storage", "{} entries skipped: sealed and not opened by this launch's key", total - rows.len());
+        }
         advance_id_past(&rows);
         self.entries = rows;
         self.externalize_images();
@@ -429,7 +501,8 @@ impl ClipboardHistory {
     }
 
     /// Write every entry held, in one transaction. For the one-time import of
-    /// a file-based history; idempotent, since rows are keyed by id.
+    /// a file-based history, and for turning encryption at rest on or off;
+    /// idempotent, since rows are keyed by id.
     pub fn persist_all(&mut self) -> bool {
         let ids: Vec<String> = self.entries.iter().map(|e| e.id.clone()).collect();
         self.write_rows(&ids)
@@ -440,16 +513,21 @@ impl ClipboardHistory {
         let Some(db) = self.db.clone() else {
             return false;
         };
+        let cipher = self.cipher.clone();
         let landed = db
             .write("write entries", |tx| {
                 // Oldest first, so a batch's rowids order it the way memory does.
                 for e in self.entries.iter().rev().filter(|e| ids.iter().any(|i| *i == e.id)) {
-                    upsert_entry(tx, e)?;
+                    upsert_entry(tx, e, cipher.as_deref())?;
                 }
                 Ok(())
             })
             .is_some();
         if landed {
+            let encrypted = cipher.is_some();
+            for e in self.entries.iter_mut().filter(|e| ids.iter().any(|i| *i == e.id)) {
+                e.encrypted = encrypted;
+            }
             self.reap_gone_files();
         }
         landed
@@ -539,9 +617,11 @@ impl ClipboardHistory {
                 }
             }
         }
-        self.entries.insert(0, entry.clone());
-        self.write_rows(std::slice::from_ref(&entry.id));
-        entry
+        self.entries.insert(0, entry);
+        let id = self.entries[0].id.clone();
+        self.write_rows(std::slice::from_ref(&id));
+        // After the write, so the copy handed back says whether it was sealed.
+        self.entries[0].clone()
     }
 
     /// Prepend an entry only when it differs from the current top entry.
@@ -1387,6 +1467,43 @@ mod tests {
 
     /// Clear all drops the unsaved rows and keeps the saved ones, in the table
     /// as in memory.
+    /// With a cipher set, the row on disk is sealed and the entry says so; the
+    /// same key opens it, no key skips it and leaves it, and clearing the
+    /// cipher rewrites it in plain text.
+    #[test]
+    fn a_cipher_seals_rows_and_the_flag_follows_the_write() {
+        let db = Db::open_in_memory();
+        let cipher = Arc::new(Cipher::generate());
+        let mut hist = with_db(&db);
+        hist.set_cipher(Some(Arc::clone(&cipher)));
+        let pushed = hist.push(text_with_id("a"));
+        assert!(pushed.encrypted);
+        let raw: (String, bool) = db
+            .read("raw", |c| c.query_row("SELECT content, enc FROM entries WHERE id = 'a'", [], |r| Ok((r.get(0)?, r.get(1)?))))
+            .unwrap();
+        assert!(raw.1 && raw.0 != "text a");
+
+        let mut same_key = with_db(&db);
+        same_key.set_cipher(Some(Arc::clone(&cipher)));
+        same_key.load_from_db();
+        assert_eq!(same_key.find("a").map(|e| e.content.as_str()), Some("text a"));
+        assert!(same_key.find("a").unwrap().encrypted);
+
+        let mut no_key = with_db(&db);
+        no_key.load_from_db();
+        assert!(no_key.all().is_empty());
+        let still: i64 = db.read("count", |c| c.query_row("SELECT count(*) FROM entries", [], |r| r.get(0))).unwrap();
+        assert_eq!(still, 1);
+
+        hist.set_cipher(None);
+        assert!(hist.persist_all());
+        assert!(!hist.find("a").unwrap().encrypted);
+        let raw: (String, bool) = db
+            .read("raw", |c| c.query_row("SELECT content, enc FROM entries WHERE id = 'a'", [], |r| Ok((r.get(0)?, r.get(1)?))))
+            .unwrap();
+        assert_eq!(raw, ("text a".to_string(), false));
+    }
+
     #[test]
     fn clear_drops_rows_and_keeps_saved_ones() {
         let db = Db::open_in_memory();
