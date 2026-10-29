@@ -3,13 +3,13 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  UsersThree,
-  BellSimple,
-  CheckCircle,
-  WarningCircle,
-  Megaphone,
-  Alarm,
-} from "@phosphor-icons/react";
+  IconAlarm,
+  IconAlertCircle,
+  IconCircleCheck,
+  IconSpeakerphone,
+  IconUsers,
+} from "@tabler/icons-react";
+import { BellIcon } from "../../icons";
 import { deferDestructive } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
 import type { AppNotification, NotificationKind } from "../../../types";
@@ -83,15 +83,15 @@ function relativeTime(ms: number): string {
 function glyphFor(kind: NotificationKind) {
   switch (kind) {
     case "space_invite":
-      return { icon: <UsersThree size={15} weight="duotone" />, tone: "accent" };
+      return { icon: <IconUsers size={15} />, tone: "accent" };
     case "space_activity":
-      return { icon: <CheckCircle size={15} weight="duotone" />, tone: "good" };
+      return { icon: <IconCircleCheck size={15} />, tone: "good" };
     case "sync_warning":
-      return { icon: <WarningCircle size={15} weight="duotone" />, tone: "warn" };
+      return { icon: <IconAlertCircle size={15} />, tone: "warn" };
     case "announcement":
-      return { icon: <Megaphone size={15} weight="duotone" />, tone: "accent" };
+      return { icon: <IconSpeakerphone size={15} />, tone: "accent" };
     default:
-      return { icon: <Alarm size={15} weight="duotone" />, tone: "plain" };
+      return { icon: <IconAlarm size={15} />, tone: "plain" };
   }
 }
 
@@ -359,7 +359,7 @@ const NotificationsPopout: React.FC<NotificationsPopoutProps> = ({
       <div className="ntf-list">
         {groups.length === 0 && (
           <div className="ntf-empty">
-            <BellSimple size={26} weight="duotone" />
+            <BellIcon size={26} />
             <p className="ntf-empty-title">You are all caught up</p>
             <p className="ntf-empty-body">
               Space invites and sync warnings show up here.

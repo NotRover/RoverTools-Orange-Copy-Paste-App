@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { groupColor } from "../../../types";
 import type { Space } from "../../../types";
-import { ShareNetwork, Check, CloudArrowUp, CloudSlash } from "@phosphor-icons/react";
+import { IconCheck, IconCloudOff, IconCloudUp, IconShare } from "@tabler/icons-react";
 import {
   CheckIcon,
   CopyIcon,
@@ -235,7 +235,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
             onClose();
           }}
         >
-          {inCloud ? <CloudSlash size={13} /> : <CloudArrowUp size={13} />}
+          {inCloud ? <IconCloudOff size={13} /> : <IconCloudUp size={13} />}
           <span>{inCloud ? "Remove from cloud" : "Upload to cloud"}</span>
         </button>
       )}
@@ -255,7 +255,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
               setFlyoutOpen((v) => (v === "spaces" ? null : "spaces"));
             }}
           >
-            <ShareNetwork size={13} />
+            <IconShare size={13} />
             <span style={{ flex: 1 }}>Share to space</span>
             {/* A count, not a parenthetical: the number says how many spaces this
                 item is already in, which is state rather than part of the label. */}
@@ -291,7 +291,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
                       onClick={() => onToggleSpace?.(space.id)}
                     >
                       <span className="card-menu-space-check">
-                        {active && <Check size={10} weight="bold" />}
+                        {active && <IconCheck size={10} />}
                       </span>
                       <span className="card-menu-space-name">{space.name}</span>
                       {waiting && (

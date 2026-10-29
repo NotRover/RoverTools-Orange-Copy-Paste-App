@@ -19,8 +19,7 @@ import {
   TYPE_LABELS,
 } from "../../../entry-types/EntryTypePill";
 import { ExpandIcon, CheckIcon, ClipboardIcon } from "../../../icons";
-import { CloudArrowUp, CloudCheck, ShieldCheck } from "@phosphor-icons/react";
-import { ShareNetwork } from "@phosphor-icons/react";
+import { IconCloudCheck, IconCloudUp, IconShare, IconShieldCheck } from "@tabler/icons-react";
 
 const CHIP_GAP_PX = 4;
 
@@ -397,7 +396,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
                   : `Shared to ${sharedSpaceNames.join(", ")}`
             }
           >
-            <ShareNetwork size={15} />
+            <IconShare size={14} stroke={2.5} />
             {sharedSpaceNames.length > 1 && (
               <span className="card-share-count">
                 {sharedSpaceNames.length}
@@ -410,7 +409,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             className="card-sync-icon card-sync-icon--synced"
             data-tooltip="Synced"
           >
-            <CloudCheck size={15} />
+            <IconCloudCheck size={14} stroke={2.5} />
           </span>
         )}
         {syncState === "pending" && (
@@ -418,7 +417,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             className="card-sync-icon card-sync-icon--pending"
             data-tooltip="Waiting to upload"
           >
-            <CloudArrowUp size={15} />
+            <IconCloudUp size={14} stroke={2.5} />
           </span>
         )}
         {entry.encrypted && (
@@ -426,7 +425,7 @@ const ChipBar: React.FC<ChipBarProps> = ({
             className="card-sync-icon card-sync-icon--encrypted"
             data-tooltip="Encrypted on this PC"
           >
-            <ShieldCheck size={15} />
+            <IconShieldCheck size={14} stroke={2.5} />
           </span>
         )}
         {justPinned ? (

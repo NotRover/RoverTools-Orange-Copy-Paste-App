@@ -3,6 +3,7 @@ import {
   KeyboardIcon,
   ClipboardPasteIcon,
   ClipboardIcon,
+  CopyIcon,
   PinIcon,
   TagIcon,
   SystemGroupsIcon,
@@ -61,7 +62,7 @@ const SECTIONS: ShortcutSection[] = [
   },
   {
     title: "Copy Popup",
-    icon: <ClipboardIcon size={13} />,
+    icon: <CopyIcon size={13} />,
     entries: [
       { keys: ["P"], description: "Pin / unpin the copied entry" },
       { keys: ["S"], description: "Save / unsave the copied entry" },

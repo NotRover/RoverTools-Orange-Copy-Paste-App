@@ -8,34 +8,34 @@ import React, {
   useState,
 } from "react";
 import {
-  TextBolderIcon,
-  TextItalicIcon,
-  TextStrikethroughIcon,
-  CodeIcon,
-  TextHOneIcon,
-  TextHTwoIcon,
-  TextHThreeIcon,
-  QuotesIcon,
-  CodeBlockIcon,
-  CheckSquareOffsetIcon,
-  MinusIcon,
-  ListBulletsIcon,
-  ListNumbersIcon,
-  TableIcon,
-  LinkSimpleIcon,
-  CardsThreeIcon,
-  CaretDownIcon,
-  TextUnderlineIcon,
-  LightbulbIcon,
-  TextAlignLeftIcon,
-  TextAlignCenterIcon,
-  TextAlignRightIcon,
-  PaletteIcon,
-  HighlighterIcon,
-  DownloadSimpleIcon,
-  CopyIcon,
-  LockSimpleIcon,
-} from "@phosphor-icons/react";
+  IconAlignCenter,
+  IconAlignLeft,
+  IconAlignRight,
+  IconBlockquote,
+  IconBold,
+  IconBulb,
+  IconCards,
+  IconChevronDown,
+  IconCode,
+  IconCopy,
+  IconDownload,
+  IconH1,
+  IconH2,
+  IconH3,
+  IconHighlight,
+  IconItalic,
+  IconLink,
+  IconList,
+  IconListCheck,
+  IconListNumbers,
+  IconLock,
+  IconMinus,
+  IconPalette,
+  IconSourceCode,
+  IconStrikethrough,
+  IconTable,
+  IconUnderline,
+} from "@tabler/icons-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, ClipboardEntry } from "../../../../types";
 import { fileNameFromPath, groupColor } from "../../../../types";
@@ -130,10 +130,10 @@ const HIGHLIGHT_COLORS: Swatch[] = [
 
 type HeadingLevel = 1 | 2 | 3;
 
-const HEADINGS: { level: HeadingLevel; label: string; Icon: typeof TextHOneIcon }[] = [
-  { level: 1, label: "Heading 1", Icon: TextHOneIcon },
-  { level: 2, label: "Heading 2", Icon: TextHTwoIcon },
-  { level: 3, label: "Heading 3", Icon: TextHThreeIcon },
+const HEADINGS: { level: HeadingLevel; label: string; Icon: typeof IconH1 }[] = [
+  { level: 1, label: "Heading 1", Icon: IconH1 },
+  { level: 2, label: "Heading 2", Icon: IconH2 },
+  { level: 3, label: "Heading 3", Icon: IconH3 },
 ];
 
 const CALLOUT_TONES: { tone: CalloutTone; label: string }[] = [
@@ -144,10 +144,10 @@ const CALLOUT_TONES: { tone: CalloutTone; label: string }[] = [
   { tone: "neutral", label: "Neutral" },
 ];
 
-const ALIGNMENTS: { value: AlignValue; label: string; Icon: typeof TextAlignLeftIcon }[] = [
-  { value: "left", label: "Align left", Icon: TextAlignLeftIcon },
-  { value: "center", label: "Align center", Icon: TextAlignCenterIcon },
-  { value: "right", label: "Align right", Icon: TextAlignRightIcon },
+const ALIGNMENTS: { value: AlignValue; label: string; Icon: typeof IconAlignLeft }[] = [
+  { value: "left", label: "Align left", Icon: IconAlignLeft },
+  { value: "center", label: "Align center", Icon: IconAlignCenter },
+  { value: "right", label: "Align right", Icon: IconAlignRight },
 ];
 
 /** Every panel the toolbar can have open. One at a time, by construction. */
@@ -810,9 +810,8 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
   );
 
   const caret = (id: MenuId) => (
-    <CaretDownIcon
+    <IconChevronDown
       size={11}
-      weight="bold"
       className={`ns-fmt-btn-caret${openMenu === id ? " ns-fmt-btn-caret--open" : ""}`}
     />
   );
@@ -849,18 +848,18 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                     data-tooltip="Save the note out, or copy it as Markdown"
                     data-tooltip-pos="below"
                   >
-                    <DownloadSimpleIcon size={13} weight="bold" />
+                    <IconDownload size={13} />
                     Export
                   </button>
                 }
               >
                 <MenuItem onClick={handleExportMarkdown}>
-                  <DownloadSimpleIcon size={12} weight="bold" />
+                  <IconDownload size={12} />
                   Save as .md
                 </MenuItem>
                 <div className="ns-popover-sep" />
                 <MenuItem onClick={handleCopyMarkdown}>
-                  <CopyIcon size={12} weight="bold" />
+                  <IconCopy size={12} />
                   Copy as Markdown
                 </MenuItem>
               </ToolbarPopover>
@@ -959,7 +958,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {readOnly && (
           <div className="ns-readonly-bar">
-            <LockSimpleIcon size={12} />
+            <IconLock size={12} />
             <span>
               {ownerName ? `${ownerName} shared this note.` : "Shared with you."}{" "}
               Only they can edit it.
@@ -979,7 +978,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Bold (Ctrl+B)"
               data-tooltip-pos="below"
             >
-              <TextBolderIcon size={13} weight="bold" />
+              <IconBold size={13} />
             </button>
             <button
               className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`}
@@ -987,7 +986,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Italic (Ctrl+I)"
               data-tooltip-pos="below"
             >
-              <TextItalicIcon size={13} weight="bold" />
+              <IconItalic size={13} />
             </button>
             <button
               className={`ns-fmt-btn${active.underline ? " ns-fmt-btn--active" : ""}`}
@@ -995,7 +994,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Underline (Ctrl+U)"
               data-tooltip-pos="below"
             >
-              <TextUnderlineIcon size={13} weight="bold" />
+              <IconUnderline size={13} />
             </button>
             <button
               className={`ns-fmt-btn${active.strike ? " ns-fmt-btn--active" : ""}`}
@@ -1003,7 +1002,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Strikethrough"
               data-tooltip-pos="below"
             >
-              <TextStrikethroughIcon size={13} weight="bold" />
+              <IconStrikethrough size={13} />
             </button>
             <button
               className={`ns-fmt-btn${active.code ? " ns-fmt-btn--active" : ""}`}
@@ -1011,7 +1010,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Inline code (Ctrl+E)"
               data-tooltip-pos="below"
             >
-              <CodeIcon size={13} weight="bold" />
+              <IconCode size={13} />
             </button>
           </div>
 
@@ -1029,7 +1028,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip-pos="below"
                   style={active.textColor ? { color: active.textColor } : undefined}
                 >
-                  <PaletteIcon size={13} weight="bold" />
+                  <IconPalette size={13} />
                 </button>
               }
             >
@@ -1053,7 +1052,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                     active.highlight ? { background: active.highlight } : undefined
                   }
                 >
-                  <HighlighterIcon size={13} weight="bold" />
+                  <IconHighlight size={13} />
                 </button>
               }
             >
@@ -1077,7 +1076,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip="Heading size"
                   data-tooltip-pos="below"
                 >
-                  <HeadingIcon size={14} weight="bold" />
+                  <HeadingIcon size={14} />
                   {caret("heading")}
                 </button>
               }
@@ -1088,7 +1087,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   active={preferredHeadingLevel === level}
                   onClick={() => applyHeadingLevel(level)}
                 >
-                  <Icon size={13} weight="bold" />
+                  <Icon size={13} />
                   <span className={`ns-heading-size-text ns-heading-size-text--h${level}`}>
                     {label}
                   </span>
@@ -1102,7 +1101,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Quote"
               data-tooltip-pos="below"
             >
-              <QuotesIcon size={13} weight="bold" />
+              <IconBlockquote size={13} />
             </button>
 
             <ToolbarPopover
@@ -1116,7 +1115,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip="Callout"
                   data-tooltip-pos="below"
                 >
-                  <LightbulbIcon size={13} weight="bold" />
+                  <IconBulb size={13} />
                   {caret("callout")}
                 </button>
               }
@@ -1138,7 +1137,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Code block"
               data-tooltip-pos="below"
             >
-              <CodeBlockIcon size={13} weight="bold" />
+              <IconSourceCode size={13} />
             </button>
             <button
               className={`ns-fmt-btn${bk === "todo" || bk === "todoChecked" ? " ns-fmt-btn--active" : ""}`}
@@ -1146,7 +1145,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Checklist"
               data-tooltip-pos="below"
             >
-              <CheckSquareOffsetIcon size={13} weight="bold" />
+              <IconListCheck size={13} />
             </button>
             <button
               className={`ns-fmt-btn${active.inTable ? " ns-fmt-btn--active" : ""}`}
@@ -1154,7 +1153,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Insert table"
               data-tooltip-pos="below"
             >
-              <TableIcon size={13} weight="bold" />
+              <IconTable size={13} />
             </button>
             <button
               className="ns-fmt-btn"
@@ -1162,7 +1161,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
               data-tooltip="Horizontal rule"
               data-tooltip-pos="below"
             >
-              <MinusIcon size={13} weight="bold" />
+              <IconMinus size={13} />
             </button>
           </div>
 
@@ -1179,17 +1178,17 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip="Lists"
                   data-tooltip-pos="below"
                 >
-                  <ListBulletsIcon size={13} weight="bold" />
+                  <IconList size={13} />
                   {caret("lists")}
                 </button>
               }
             >
               <MenuItem active={bk === "ul"} onClick={() => pick({ kind: "bulletList" })}>
-                <ListBulletsIcon size={13} weight="bold" />
+                <IconList size={13} />
                 Bullet list
               </MenuItem>
               <MenuItem active={bk === "ol"} onClick={() => pick({ kind: "orderedList" })}>
-                <ListNumbersIcon size={13} weight="bold" />
+                <IconListNumbers size={13} />
                 Numbered list
               </MenuItem>
             </ToolbarPopover>
@@ -1205,7 +1204,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip="Alignment"
                   data-tooltip-pos="below"
                 >
-                  <AlignIcon size={13} weight="bold" />
+                  <AlignIcon size={13} />
                   {caret("align")}
                 </button>
               }
@@ -1216,7 +1215,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   active={alignValue === value}
                   onClick={() => pick({ kind: "align", value })}
                 >
-                  <Icon size={13} weight="bold" />
+                  <Icon size={13} />
                   {label}
                 </MenuItem>
               ))}
@@ -1237,7 +1236,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip="Insert link"
                   data-tooltip-pos="below"
                 >
-                  <LinkSimpleIcon size={12} weight="bold" />
+                  <IconLink size={12} />
                 </button>
               }
             >
@@ -1302,7 +1301,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
                   data-tooltip="Insert a clipboard entry or a group"
                   data-tooltip-pos="below"
                 >
-                  <CardsThreeIcon size={15} weight="bold" />
+                  <IconCards size={15} />
                   {caret("embed")}
                 </button>
               }

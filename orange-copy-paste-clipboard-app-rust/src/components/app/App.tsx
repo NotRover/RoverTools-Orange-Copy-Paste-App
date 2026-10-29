@@ -43,7 +43,7 @@ import {
   type ToastGlyph,
   type ToastRequest,
 } from "./toast/toastBus";
-import { Cloud, CloudWarning } from "@phosphor-icons/react";
+import { IconCloud, IconCloudExclamation } from "@tabler/icons-react";
 import TooltipPortal from "./tooltip/TooltipPortal";
 import UpdateBanner from "./update-banner/UpdateBanner";
 import { useHealthWarning } from "../../hooks/useHealthWarning";
@@ -261,9 +261,9 @@ function toastGlyph(glyph: ToastGlyph | undefined, tone?: string) {
     case "warning":
       return <WarningIcon />;
     case "cloud-off":
-      return <CloudWarning size={13} />;
+      return <IconCloudExclamation size={13} />;
     default:
-      return <Cloud size={13} />;
+      return <IconCloud size={13} />;
   }
 }
 

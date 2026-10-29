@@ -1188,3 +1188,28 @@ export const GoogleIcon: React.FC<IconProps> = ({ size = 16, className }) => (
     <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
   </svg>
 );
+
+/* ── Bell (notifications) ──
+ * A rounded, flared bell; `filled` paints the body for the active state. */
+
+export const BellIcon: React.FC<FillableIconProps> = ({
+  size = 21,
+  className,
+  filled = false,
+  strokeWidth = 2,
+}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill={filled ? "currentColor" : "none"}
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M12 3.5a6.5 6.5 0 0 1 6.5 6.5v3.2c0 1.5.6 2.6 1.6 3.6.4.4.1 1.2-.5 1.2H4.4c-.6 0-.9-.8-.5-1.2 1-1 1.6-2.1 1.6-3.6V10A6.5 6.5 0 0 1 12 3.5z" />
+    <path d="M9.5 20.5a2.5 2.5 0 0 0 5 0" fill="none" />
+  </svg>
+);

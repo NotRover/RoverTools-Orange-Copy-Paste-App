@@ -14,11 +14,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon, ChevronRightIcon } from "../../icons";
-import {
-  DotsThree,
-  MagnifyingGlassMinus,
-  MagnifyingGlassPlus,
-} from "@phosphor-icons/react";
+import { IconDots, IconZoomIn, IconZoomOut } from "@tabler/icons-react";
 import "./view-toolbar.css";
 
 /** The bar itself: the way out, then the middle, then the actions. */
@@ -129,7 +125,7 @@ export const ToolbarZoom: React.FC<{
       data-tooltip="Zoom out (Ctrl and minus)"
       data-tooltip-pos="below"
     >
-      <MagnifyingGlassMinus size={13} />
+      <IconZoomOut size={13} />
     </button>
     <button
       className={`vt-btn vt-zoom-level${atDefault ? "" : " vt-btn--on"}`}
@@ -147,7 +143,7 @@ export const ToolbarZoom: React.FC<{
       data-tooltip="Zoom in (Ctrl and plus)"
       data-tooltip-pos="below"
     >
-      <MagnifyingGlassPlus size={13} />
+      <IconZoomIn size={13} />
     </button>
   </div>
 );
@@ -237,6 +233,6 @@ export const ToolbarMoreButton: React.FC<{
     data-tooltip="More actions"
     data-tooltip-pos="below"
   >
-    <DotsThree size={16} weight="bold" />
+    <IconDots size={16} />
   </button>
 );

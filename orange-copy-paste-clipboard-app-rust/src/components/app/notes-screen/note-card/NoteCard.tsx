@@ -8,7 +8,7 @@ import OwnerChip from "../../clipboard-screen/entry-card/OwnerChip";
 import { deriveNoteTitle } from "../notes-utils";
 import { useRelativeTime } from "../../../../hooks/useRelativeTime";
 import NotePreview from "../NotePreview";
-import { CloudArrowUp, CloudCheck, ShareNetwork } from "@phosphor-icons/react";
+import { IconCloudCheck, IconCloudUp, IconShare } from "@tabler/icons-react";
 import "./note-card.css";
 
 interface NoteCardProps {
@@ -122,7 +122,7 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
               className="ns-card-sync ns-card-sync--shared"
               data-tooltip={`Shared to ${sharedSpaceNames.join(", ")}`}
             >
-              <ShareNetwork size={15} />
+              <IconShare size={15} />
               {sharedSpaceNames.length > 1 && (
                 <span className="ns-card-sync-count">
                   {sharedSpaceNames.length}
@@ -136,9 +136,9 @@ const NoteCardImpl: React.FC<NoteCardProps> = ({
               data-tooltip={syncState === "synced" ? "Synced" : "Sync pending"}
             >
               {syncState === "synced" ? (
-                <CloudCheck size={15} />
+                <IconCloudCheck size={15} />
               ) : (
-                <CloudArrowUp size={15} />
+                <IconCloudUp size={15} />
               )}
             </span>
           )}

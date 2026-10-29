@@ -2,14 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { groupColor } from "../../../../types";
 import type { Space } from "../../../../types";
 import {
-  ShareNetwork,
-  Check,
-  Cloud,
-  CloudArrowUp,
-  CloudSlash,
-  Prohibit,
-  Copy,
-} from "@phosphor-icons/react";
+  IconBan,
+  IconCheck,
+  IconCloud,
+  IconCloudOff,
+  IconCloudUp,
+  IconCopy,
+  IconShare,
+} from "@tabler/icons-react";
 import {
   TrashIcon,
   PinIcon,
@@ -183,7 +183,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
           data-tooltip={copyDisabledReason ?? "Copy selected"}
           data-tooltip-pos="below"
         >
-          <Copy size={11} />
+          <IconCopy size={11} />
           <span>Copy</span>
         </button>
       )}
@@ -278,7 +278,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
             data-tooltip="Share with a space"
             data-tooltip-pos="below"
           >
-            <ShareNetwork size={10} />
+            <IconShare size={10} />
             <span>Share</span>
             <ChevronDownIcon
               size={8}
@@ -289,7 +289,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
           {spacesOpen && (
             <div className="bulk-popup-groups-flyout">
               <div className="bulk-popup-flyout-header">
-                <ShareNetwork size={9} />
+                <IconShare size={9} />
                 <span>Share to space</span>
               </div>
               <div className="bulk-popup-flyout-spaces">
@@ -311,7 +311,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                       onClick={() => onBulkToggleSpace?.(space.id, !active)}
                     >
                       <span className="bulk-popup-space-check">
-                        {active && <Check size={9} weight="bold" />}
+                        {active && <IconCheck size={9} />}
                       </span>
                       <span className="bulk-popup-row-label">{space.name}</span>
                       {waiting && (
@@ -335,7 +335,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
             data-tooltip="Upload or remove from your account"
             data-tooltip-pos="below"
           >
-            <Cloud size={11} />
+            <IconCloud size={11} />
             <span>Cloud</span>
             <ChevronDownIcon
               size={8}
@@ -346,7 +346,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
           {cloudOpen && (
             <div className="bulk-popup-groups-flyout">
               <div className="bulk-popup-flyout-header">
-                <Cloud size={9} />
+                <IconCloud size={9} />
                 <span>Cloud copy</span>
               </div>
               <div className="bulk-popup-flyout-spaces">
@@ -357,7 +357,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                     setCloudOpen(false);
                   }}
                 >
-                  <CloudArrowUp size={11} />
+                  <IconCloudUp size={11} />
                   <span className="bulk-popup-row-label">Upload to cloud</span>
                 </button>
                 <button
@@ -367,7 +367,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                     setCloudOpen(false);
                   }}
                 >
-                  <CloudSlash size={11} />
+                  <IconCloudOff size={11} />
                   <span className="bulk-popup-row-label">
                     Remove from cloud
                   </span>
@@ -394,7 +394,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
           data-tooltip="Remove selected from this space"
           data-tooltip-pos="below"
         >
-          <Prohibit size={10} />
+          <IconBan size={10} />
           <span>Remove</span>
         </button>
       )}

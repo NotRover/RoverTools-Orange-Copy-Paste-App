@@ -25,7 +25,7 @@ import {
 import { loadImagePreview } from "../../hooks/useFileMeta";
 import { EntryTypePill } from "../entry-types/EntryTypePill";
 import { DegradedPill } from "../DegradedPill";
-import { ShareNetwork, DotsSixVertical } from "@phosphor-icons/react";
+import { IconGripVertical, IconShare } from "@tabler/icons-react";
 import {
   TrashIcon,
   CloseIcon,
@@ -608,7 +608,7 @@ const CopyPopup: React.FC = () => {
               : undefined
           }
         >
-          <ShareNetwork size={10} weight="bold" />
+          <IconShare size={10} />
           {s.name}
         </span>
       ),
@@ -642,10 +642,9 @@ const CopyPopup: React.FC = () => {
               onHeaderDrag(e);
             }}
           >
-            <DotsSixVertical
+            <IconGripVertical
               className="popup-grip"
               size={14}
-              weight="bold"
               aria-hidden="true"
             />
             <div className="popup-header-left">
@@ -835,7 +834,7 @@ const CopyPopup: React.FC = () => {
               disabled={!entryId}
             >
               <span>Share</span>
-              <ShareNetwork size={13} weight="bold" />
+              <IconShare size={13} />
             </button>
 
             <span className="popup-menu-divider" />

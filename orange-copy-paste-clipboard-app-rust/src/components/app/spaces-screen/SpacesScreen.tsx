@@ -78,29 +78,30 @@ import type {
   OwnerFilter,
 } from "../clipboard-screen/search-filter/FilterParts";
 import {
-  Plus,
-  Key,
-  Users,
-  ShareNetwork,
-  X,
-  Check,
-  ChatCircle,
-  Copy,
-  CaretDown,
-  Prohibit,
-  Circle,
-  Note as NoteIcon,
-  File,
-  MagnifyingGlass,
-  Clipboard,
-  Funnel,
-  PushPin,
-  ArrowsOutSimple,
-  SquaresFour,
-  ArrowDownLeft,
-  ArrowUpRight,
-  LockSimple as LockSimpleIcon,
-} from "@phosphor-icons/react";
+  IconArrowDownLeft,
+  IconArrowUpRight,
+  IconArrowsMaximize,
+  IconBan,
+  IconCheck,
+  IconChevronDown,
+  IconCircleFilled,
+  IconClipboard,
+  IconCopy,
+  IconFile,
+  IconFilter,
+  IconKey,
+  IconLayoutGrid,
+  IconMessageCircle,
+  IconMessageCircleFilled,
+  IconPinFilled,
+  IconPlus,
+  IconSearch,
+  IconShare,
+  IconUsers,
+  IconX,
+  IconNote as NoteIcon,
+  IconLock as LockSimpleIcon,
+} from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import "../card-menu/CardMenu.css";
 import {
@@ -378,13 +379,13 @@ const FeedCardMenu: React.FC<{
           className={`card-menu-item card-menu-item--copy${copied ? " card-menu-item--success" : ""}`}
           onClick={closeAfter(onCopy)}
         >
-          {copied ? <Check size={13} /> : <Copy size={13} />}
+          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
           <span>{copied ? "Copied!" : "Copy"}</span>
         </button>
       )}
       {onOpen && (
         <button className="card-menu-item" onClick={closeAfter(onOpen)}>
-          <ArrowsOutSimple size={13} />
+          <IconArrowsMaximize size={13} />
           <span>Open</span>
         </button>
       )}
@@ -394,7 +395,7 @@ const FeedCardMenu: React.FC<{
           className="card-menu-item card-menu-item--danger-soft"
           onClick={closeAfter(onRemove)}
         >
-          <Prohibit size={13} />
+          <IconBan size={13} />
           <span>Remove from space</span>
         </button>
       )}
@@ -529,7 +530,7 @@ const FeedFilterDropdown: React.FC<{
         data-tooltip="Filters"
         data-tooltip-pos="below"
       >
-        <Funnel size={12} />
+        <IconFilter size={12} />
         {sf.activeFilterCount > 0 && (
           <span className="cs-tb-badge">{sf.activeFilterCount}</span>
         )}
@@ -699,9 +700,9 @@ const DirectionBadge: React.FC<{ incoming: boolean }> = ({ incoming }) => (
     data-tooltip-pos="right"
   >
     {incoming ? (
-      <ArrowDownLeft size={11} weight="bold" />
+      <IconArrowDownLeft size={11} />
     ) : (
-      <ArrowUpRight size={11} weight="bold" />
+      <IconArrowUpRight size={11} />
     )}
   </span>
 );
@@ -807,14 +808,14 @@ const RemovedRow: React.FC<{
   return (
     <div className="sp-removed-row">
       <span className="sp-removed-icon">
-        <Prohibit size={11} weight="bold" />
+        <IconBan size={11} />
       </span>
       <DirectionBadge incoming={incoming} />
       <OwnerBadge owner={owner} incoming={incoming} />
       <span
         className={`sp-list-source-badge sp-list-source-badge--${isNote ? "note" : "clip"}`}
       >
-        {isNote ? <NoteIcon size={10} /> : <Clipboard size={10} />}
+        {isNote ? <NoteIcon size={10} /> : <IconClipboard size={10} />}
       </span>
       <span className="sp-removed-text">{removedText(item, byMe, remover, incoming, what)}</span>
       <span
@@ -867,7 +868,7 @@ const CommentChip: React.FC<{
       data-tooltip-pos="top"
       aria-label={count === 0 ? "Add a comment" : `${count} comments`}
     >
-      <ChatCircle size={10} weight={mark?.unread ? "fill" : "regular"} />
+      {mark?.unread ? <IconMessageCircleFilled size={10} /> : <IconMessageCircle size={10} />}
       {count > 0 && <span className="sp-cmt-chip-n">{count}</span>}
     </button>
   );
@@ -979,7 +980,7 @@ const ClipFeedCard: React.FC<{
           <DirectionBadge incoming={incoming} />
           {showSourceBadge && (
             <span className="sp-list-source-badge sp-list-source-badge--clip">
-              <Clipboard size={10} />
+              <IconClipboard size={10} />
             </span>
           )}
           <span className="sp-list-type-wrap">
@@ -1000,7 +1001,7 @@ const ClipFeedCard: React.FC<{
               className={`sp-list-action${copied ? " sp-list-action--done" : ""}`}
               onClick={handleCopy}
             >
-              {copied ? <Check size={10} weight="bold" /> : <Copy size={10} />}
+              {copied ? <IconCheck size={10} /> : <IconCopy size={10} />}
             </button>
           )}
         </div>
@@ -1051,7 +1052,7 @@ const ClipFeedCard: React.FC<{
       <div className="card-file-preview">
         {paths.slice(0, 3).map((p) => (
           <div key={p} className="card-file-preview-item">
-            <File size={9} />
+            <IconFile size={9} />
             <span className="card-file-preview-name">
               {fileNameFromPath(p)}
             </span>
@@ -1079,7 +1080,7 @@ const ClipFeedCard: React.FC<{
             <div className="card-chips">
               {showSourceBadge && (
                 <span className="card-type-chip sp-source-chip--clip">
-                  <Clipboard size={9} weight="bold" />
+                  <IconClipboard size={9} />
                   <span className="card-type-label">Clipboard</span>
                 </span>
               )}
@@ -1093,7 +1094,7 @@ const ClipFeedCard: React.FC<{
             </div>
             {copied ? (
               <span className="card-time card-time--copied">
-                <Check size={9} weight="bold" />
+                <IconCheck size={9} />
                 Copied
               </span>
             ) : (
@@ -1108,7 +1109,7 @@ const ClipFeedCard: React.FC<{
                 data-tooltip="Copy"
                 data-tooltip-pos="top"
               >
-                <Copy size={10} />
+                <IconCopy size={10} />
               </button>
             )}
           </div>
@@ -1273,7 +1274,7 @@ const NoteFeedCard: React.FC<{
             <span
               className={`ns-card-time${note.pinned ? " ns-card-time--pinned" : ""}`}
             >
-              {note.pinned && <PushPin size={8} weight="fill" />}
+              {note.pinned && <IconPinFilled size={8} />}
               {timeAgoFor(note.updated_at, `note:${note.id}`)}
             </span>
           </div>
@@ -1461,7 +1462,7 @@ const CreateForm: React.FC<{
           {loading ? "Creating..." : "Create"}
         </button>
         <button className="sp-inline-btn" onClick={onCancel}>
-          <X size={10} />
+          <IconX size={10} />
         </button>
       </div>
     </div>
@@ -1502,7 +1503,7 @@ const JoinForm: React.FC<{
           {loading ? "Joining..." : "Join"}
         </button>
         <button className="sp-inline-btn" onClick={onCancel}>
-          <X size={10} />
+          <IconX size={10} />
         </button>
       </div>
     </div>
@@ -1954,9 +1955,9 @@ const SpaceSettings: React.FC<{
                     data-tooltip={m.online ? "Online now" : "Offline"}
                     data-tooltip-pos="left"
                   >
-                    <Circle
+                    <IconCircleFilled
                       size={8}
-                      weight="fill"
+
                       color={m.online ? "#22c55e" : "#6b7280"}
                     />
                   </span>
@@ -1982,7 +1983,7 @@ const SpaceSettings: React.FC<{
                   data-tooltip="Copy code"
                   data-tooltip-pos="top"
                 >
-                  {copied === "code" ? <Check size={12} /> : <Copy size={12} />}
+                  {copied === "code" ? <IconCheck size={12} /> : <IconCopy size={12} />}
                   <span className="sp-btn-label">
                     {copied === "code" ? "Copied" : "Copy code"}
                   </span>
@@ -1997,9 +1998,9 @@ const SpaceSettings: React.FC<{
                   data-tooltip-pos="top"
                 >
                   {copied === "link" ? (
-                    <Check size={12} />
+                    <IconCheck size={12} />
                   ) : (
-                    <ShareNetwork size={12} />
+                    <IconShare size={12} />
                   )}
                   <span className="sp-btn-label">
                     {copied === "link" ? "Copied" : "Copy link"}
@@ -3627,7 +3628,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           data-tooltip="All items"
           data-tooltip-pos="below"
         >
-          <SquaresFour size={12} weight="regular" />
+          <IconLayoutGrid size={12} />
         </button>
         <button
           className={`sp-feed-seg-btn${feedFilter === "clipboard" ? " sp-feed-seg-btn--active" : ""}`}
@@ -3635,7 +3636,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           data-tooltip="Clipboard only"
           data-tooltip-pos="below"
         >
-          <Clipboard size={11} />
+          <IconClipboard size={11} />
         </button>
         <button
           className={`sp-feed-seg-btn${feedFilter === "notes" ? " sp-feed-seg-btn--active" : ""}`}
@@ -3844,7 +3845,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
               <div className="sp-feed-scroll">
                 {feedItems.length === 0 ? (
                   <div className="sp-feed-empty">
-                    <MagnifyingGlass size={38} />
+                    <IconSearch size={38} />
                     <span className="sp-feed-empty-title">
                       {isFiltering ? "No results" : "Nothing shared yet"}
                     </span>
@@ -3893,7 +3894,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                 {items.length}
                               </span>
                             )}
-                            <CaretDown
+                            <IconChevronDown
                               className="sp-timeline-day-chevron"
                               size={10}
                             />
@@ -4052,7 +4053,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
         ) : (
           <div className="sp-no-selection">
             <div className="sp-no-selection-inner">
-              <Users size={40} />
+              <IconUsers size={40} />
               <span className="sp-no-selection-title">
                 {spaces.length === 0 ? "No spaces yet" : "Pick a space"}
               </span>
@@ -4171,7 +4172,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
           {spaces.length === 0 && !loaded ? null : spaces.length === 0 ? (
             <div className="sp-panel-empty">
               <span className="sp-panel-empty-icon">
-                <Users size={22} />
+                <IconUsers size={22} />
               </span>
               <span className="sp-panel-empty-title">
                 {!signedIn
@@ -4246,7 +4247,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                               data-tooltip="Copies new items to your clipboard"
                               data-tooltip-pos="left"
                             >
-                              <Clipboard size={9} />
+                              <IconClipboard size={9} />
                             </span>
                           )}
                           {rules > 0 && (
@@ -4255,7 +4256,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                               data-tooltip="Shares matching new items automatically"
                               data-tooltip-pos="left"
                             >
-                              <Funnel size={9} />
+                              <IconFilter size={9} />
                             </span>
                           )}
                         </span>
@@ -4361,7 +4362,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 }
                 data-tooltip-pos="top"
               >
-                <Plus size={11} />
+                <IconPlus size={11} />
                 Create
               </button>
               <button
@@ -4380,7 +4381,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 }
                 data-tooltip-pos="top"
               >
-                <Key size={11} />
+                <IconKey size={11} />
                 Join
               </button>
             </div>

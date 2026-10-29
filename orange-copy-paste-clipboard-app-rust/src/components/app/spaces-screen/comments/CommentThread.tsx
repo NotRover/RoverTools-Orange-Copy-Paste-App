@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { PaperPlaneRight, X } from "@phosphor-icons/react";
+import { IconSendFilled, IconX } from "@tabler/icons-react";
 
 import { TrashIcon } from "../../../icons";
 
@@ -409,7 +409,7 @@ const Composer: React.FC<{
           data-tooltip="Post"
           data-tooltip-pos="top"
         >
-          <PaperPlaneRight size={12} weight="fill" />
+          <IconSendFilled size={12} />
         </button>
       </div>
       {/* Silent until the limit is close enough to matter - a counter sitting
@@ -616,7 +616,7 @@ const CommentThread: React.FC<{
         {shown.length > 0 && <span className="cmt-head-n">{shown.length}</span>}
         {onClose && (
           <button className="cmt-close" onClick={onClose} aria-label="Close">
-            <X size={11} weight="bold" />
+            <IconX size={11} />
           </button>
         )}
       </div>

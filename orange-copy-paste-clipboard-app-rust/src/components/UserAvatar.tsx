@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { User } from "@phosphor-icons/react";
+import { IconUser } from "@tabler/icons-react";
 import "./UserAvatar.css";
 
 /** Initials for a person's label: "Ada Lovelace" → "AL", "ada" → "AD". */
@@ -47,7 +47,7 @@ export function UserAvatar({
   }
   return (
     <span className={className}>
-      {label ? avatarInitials(label) : <User size={glyphSize} />}
+      {label ? avatarInitials(label) : <IconUser size={glyphSize} />}
     </span>
   );
 }

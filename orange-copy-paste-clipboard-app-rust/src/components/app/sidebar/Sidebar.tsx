@@ -1,12 +1,11 @@
 import React from "react";
 import {
-  CloudCheck,
-  CloudWarning,
-  CloudArrowUp,
-  CloudSlash,
-  UserCircle,
-  BellSimple,
-} from "@phosphor-icons/react";
+  IconCloudCheck,
+  IconCloudExclamation,
+  IconCloudOff,
+  IconCloudUp,
+  IconUserCircle,
+} from "@tabler/icons-react";
 import type { AppScreen, AppTheme, SyncIndicator } from "../../../types";
 import {
   ClipboardIcon,
@@ -15,6 +14,7 @@ import {
   SunIcon,
   MoonIcon,
   GearIcon,
+  BellIcon,
 } from "../../icons";
 import "./Sidebar.css";
 
@@ -48,10 +48,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   // own - a signed-out cloud that looks like every other inactive nav icon says
   // nothing, and reading "connected" with no account behind it is worse.
   const syncIcon =
-    syncState === "connected" ? <CloudCheck   size={20} weight="duotone" /> :
-    syncState === "syncing"   ? <CloudArrowUp size={20} weight="duotone" /> :
-    syncState === "offline"   ? <CloudWarning size={20} weight="duotone" /> :
-                                <CloudSlash   size={20} weight="regular"  />;
+    syncState === "connected" ? <IconCloudCheck   size={20} /> :
+    syncState === "syncing"   ? <IconCloudUp size={20} /> :
+    syncState === "offline"   ? <IconCloudExclamation size={20} /> :
+                                <IconCloudOff   size={20}  />;
 
   // Status colour — suppressed while the Spaces screen is active, which has its
   // own active style. Signed out is deliberately muted rather than uncoloured:
@@ -148,7 +148,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-notif-bell=""
         aria-expanded={notificationsOpen}
       >
-        <BellSimple size={21} weight={notificationsOpen ? "fill" : "regular"} />
+        <BellIcon size={21} filled={notificationsOpen} />
         {unreadNotifications > 0 && (
           <span className="nav-badge">
             {unreadNotifications > 9 ? "9+" : unreadNotifications}
@@ -162,7 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         data-tooltip="Account & Sync"
         data-tooltip-pos="right"
       >
-        <UserCircle size={22} weight={screen === "account" ? "fill" : "regular"} />
+        <IconUserCircle size={22} />
       </button>
 
       <button

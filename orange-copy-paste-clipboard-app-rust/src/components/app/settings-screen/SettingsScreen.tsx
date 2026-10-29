@@ -3,19 +3,19 @@ import { useClickOutside } from "../../../hooks/useClickOutside";
 import { invoke } from "@tauri-apps/api/core";
 import { readSlots, scheduleSettingsSync } from "../../../types";
 import {
-  CaretDown,
-  Check,
-  FolderOpen,
-  SlidersHorizontal,
-  ClipboardText,
-  ClockCounterClockwise,
-  ArrowClockwise,
-  DownloadSimple,
-  Bell,
-  SpeakerHigh,
-  Play,
-  ShieldCheck,
-} from "@phosphor-icons/react";
+  IconAdjustmentsHorizontal,
+  IconCheck,
+  IconChevronDown,
+  IconClipboardText,
+  IconDownload,
+  IconFolderOpen,
+  IconHistory,
+  IconPlayerPlayFilled,
+  IconRefresh,
+  IconShieldCheck,
+  IconVolume,
+} from "@tabler/icons-react";
+import { BellIcon } from "../../icons";
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
 import {
@@ -64,7 +64,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ value, options, onChange })
         type="button"
       >
         <span>{value}</span>
-        <CaretDown className="settings-select-chevron" size={10} weight="bold" />
+        <IconChevronDown className="settings-select-chevron" size={10} />
       </button>
       {open && (
         <div className="settings-select-list">
@@ -76,7 +76,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({ value, options, onChange })
               onMouseDown={() => { onChange(n); setOpen(false); }}
             >
               {n}
-              {n === value && <Check size={10} weight="bold" />}
+              {n === value && <IconCheck size={10} />}
             </button>
           ))}
         </div>
@@ -354,7 +354,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── General ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><SlidersHorizontal size={15} /></span>
+            <span className="set-section-icon"><IconAdjustmentsHorizontal size={15} /></span>
             <h3 className="set-section-title">General</h3>
           </div>
           <div className="set-group">
@@ -403,7 +403,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Confirmations ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><ShieldCheck size={15} /></span>
+            <span className="set-section-icon"><IconShieldCheck size={15} /></span>
             <h3 className="set-section-title">Confirmations</h3>
           </div>
           <div className="set-group">
@@ -449,7 +449,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Notifications ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><Bell size={15} /></span>
+            <span className="set-section-icon"><BellIcon size={15} /></span>
             <h3 className="set-section-title">Notifications</h3>
           </div>
           <div className="set-group">
@@ -483,7 +483,7 @@ const SettingsScreen: React.FC = () => {
                       className={`settings-checkbox${notifCopy ? " checked" : ""}`}
                       onClick={() => toggleBoolSetting(notifCopy, setNotifCopy, "notif_copy")}
                     >
-                      {notifCopy && <Check size={9} weight="bold" />}
+                      {notifCopy && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Copy operations</span>
@@ -495,7 +495,7 @@ const SettingsScreen: React.FC = () => {
                       className={`settings-checkbox${notifPaste ? " checked" : ""}`}
                       onClick={() => toggleBoolSetting(notifPaste, setNotifPaste, "notif_paste")}
                     >
-                      {notifPaste && <Check size={9} weight="bold" />}
+                      {notifPaste && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Paste operations</span>
@@ -511,7 +511,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Sounds ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><SpeakerHigh size={15} /></span>
+            <span className="set-section-icon"><IconVolume size={15} /></span>
             <h3 className="set-section-title">Sounds</h3>
           </div>
           <div className="set-group">
@@ -528,7 +528,7 @@ const SettingsScreen: React.FC = () => {
                     className="set-cue-test"
                     onClick={() => playCue(cue, true)}
                   >
-                    <Play size={8} weight="fill" />
+                    <IconPlayerPlayFilled size={8} />
                     {label}
                   </button>
                 ))}
@@ -561,7 +561,7 @@ const SettingsScreen: React.FC = () => {
                       className={`settings-checkbox${soundCopy ? " checked" : ""}`}
                       onClick={() => handleSoundCue("sound_copy")}
                     >
-                      {soundCopy && <Check size={9} weight="bold" />}
+                      {soundCopy && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Copying</span>
@@ -575,7 +575,7 @@ const SettingsScreen: React.FC = () => {
                       className={`settings-checkbox${soundPaste ? " checked" : ""}`}
                       onClick={() => handleSoundCue("sound_paste")}
                     >
-                      {soundPaste && <Check size={9} weight="bold" />}
+                      {soundPaste && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
                       <span className="settings-checkbox-label">Pasting</span>
@@ -593,7 +593,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Quick Paste ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><ClipboardText size={15} /></span>
+            <span className="set-section-icon"><IconClipboardText size={15} /></span>
             <h3 className="set-section-title">Quick Paste</h3>
           </div>
           <div className="set-group">
@@ -612,7 +612,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── History ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><ClockCounterClockwise size={15} /></span>
+            <span className="set-section-icon"><IconHistory size={15} /></span>
             <h3 className="set-section-title">History</h3>
           </div>
           <div className="set-group">
@@ -664,7 +664,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Data ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><FolderOpen size={15} /></span>
+            <span className="set-section-icon"><IconFolderOpen size={15} /></span>
             <h3 className="set-section-title">Data</h3>
           </div>
           <div className="set-group">
@@ -697,7 +697,7 @@ const SettingsScreen: React.FC = () => {
                 className="settings-action-btn"
                 onClick={() => invoke("open_data_folder")}
               >
-                <FolderOpen size={14} />
+                <IconFolderOpen size={14} />
                 Open
               </button>
             </div>
@@ -713,7 +713,7 @@ const SettingsScreen: React.FC = () => {
                 className="settings-action-btn"
                 onClick={() => invoke("open_log_folder")}
               >
-                <FolderOpen size={14} />
+                <IconFolderOpen size={14} />
                 Open
               </button>
             </div>
@@ -723,7 +723,7 @@ const SettingsScreen: React.FC = () => {
         {/* ── Updates ── */}
         <section className="set-section">
           <div className="set-section-head">
-            <span className="set-section-icon"><DownloadSimple size={15} /></span>
+            <span className="set-section-icon"><IconDownload size={15} /></span>
             <h3 className="set-section-title">Updates</h3>
           </div>
           <div className="set-group">
@@ -746,7 +746,7 @@ const SettingsScreen: React.FC = () => {
                     onClick={updater.install}
                     disabled={updateBusy}
                   >
-                    <ArrowClockwise size={14} />
+                    <IconRefresh size={14} />
                     Restart &amp; install
                   </button>
                 ) : updater.stage === "available" ? (
@@ -756,7 +756,7 @@ const SettingsScreen: React.FC = () => {
                     onClick={updater.download}
                     disabled={updateBusy}
                   >
-                    <DownloadSimple size={14} />
+                    <IconDownload size={14} />
                     Download
                   </button>
                 ) : (
@@ -766,7 +766,7 @@ const SettingsScreen: React.FC = () => {
                     onClick={handleCheckUpdates}
                     disabled={updateBusy}
                   >
-                    <ArrowClockwise size={14} />
+                    <IconRefresh size={14} />
                     {updater.stage === "checking" ? "Checking..." : "Check now"}
                   </button>
                 )}

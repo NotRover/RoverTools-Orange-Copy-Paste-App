@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from "react";
 import {
-  ArrowClockwise,
-  CaretDown,
-  DownloadSimple,
-  WarningCircle,
-  X,
-} from "@phosphor-icons/react";
+  IconAlertCircle,
+  IconChevronDown,
+  IconDownload,
+  IconRefresh,
+  IconX,
+} from "@tabler/icons-react";
 import type { Updater } from "../../../hooks/useUpdater";
 import { parseNotes, type ParsedNotes } from "./parseNotes";
 import "./UpdateBanner.css";
@@ -52,11 +52,11 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
     <div className="app-update" role="status" aria-live="polite" data-stage={stage}>
       <span className="app-update-icon" aria-hidden="true">
         {stage === "error" ? (
-          <WarningCircle size={15} weight="regular" />
+          <IconAlertCircle size={15} />
         ) : stage === "ready" ? (
-          <ArrowClockwise size={14} weight="regular" />
+          <IconRefresh size={14} />
         ) : (
-          <DownloadSimple size={14} weight="regular" />
+          <IconDownload size={14} />
         )}
       </span>
 
@@ -76,9 +76,8 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
                 aria-expanded={notesOpen}
               >
                 What's new
-                <CaretDown
+                <IconChevronDown
                   size={10}
-                  weight="bold"
                   className={notesOpen ? "is-open" : undefined}
                 />
               </button>
@@ -117,7 +116,7 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
         <div className="app-update-primary-wrap">
           {stage === "ready" ? (
             <button type="button" className="app-update-primary" onClick={install} disabled={busy}>
-              <ArrowClockwise size={13} weight="bold" />
+              <IconRefresh size={13} />
               Restart &amp; install
             </button>
           ) : (
@@ -127,7 +126,7 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
               onClick={download}
               disabled={busy}
             >
-              <DownloadSimple size={13} weight="bold" />
+              <IconDownload size={13} />
               {stage === "error" ? "Try again" : "Download"}
             </button>
           )}
@@ -169,7 +168,7 @@ const UpdateBanner: React.FC<{ updater: Updater }> = ({ updater }) => {
             data-tooltip="Remind me later"
             data-tooltip-pos="bottom"
           >
-            <X size={12} weight="bold" />
+            <IconX size={12} />
           </button>
         )}
       </div>

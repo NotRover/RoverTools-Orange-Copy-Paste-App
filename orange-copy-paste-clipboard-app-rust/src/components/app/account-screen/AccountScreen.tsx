@@ -28,22 +28,23 @@ import { TYPE_LABELS } from "../../entry-types/EntryTypePill";
 import { showOnlyKinds } from "../clipboard-screen/search-filter/SearchFilter";
 import { showOnlyNotesCloud } from "../notes-screen/notes-filter/NotesFilterDropdown";
 import {
-  CaretDown,
-  CaretRight,
-  CaretUp,
-  ChartBar,
-  Check,
-  Cloud,
-  CloudArrowUp,
-  CloudCheck,
-  Desktop,
-  DeviceMobile,
-  HardDrives,
-  Laptop,
-  Key,
-  Stack,
-  WarningCircle,
-} from "@phosphor-icons/react";
+  IconAlertCircle,
+  IconChartBar,
+  IconCheck,
+  IconChevronDown,
+  IconChevronRight,
+  IconChevronUp,
+  IconCloud,
+  IconCloudCheck,
+  IconCloudUp,
+  IconDeviceDesktop,
+  IconDeviceLaptop,
+  IconDeviceMobile,
+  IconKey,
+  IconKeyFilled,
+  IconServer,
+  IconStack2,
+} from "@tabler/icons-react";
 import { ClipboardIcon, GoogleIcon, NotesIcon } from "../../icons";
 import { deferDestructive } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
@@ -123,9 +124,9 @@ function restoreText({ restored, downloading }: RestoreOutcome): string {
 /** Pick a device glyph from the reported platform string. */
 function deviceIcon(platform: string) {
   const p = platform.toLowerCase();
-  if (p.includes("android") || p.includes("ios")) return DeviceMobile;
-  if (p.includes("mac") || p.includes("darwin")) return Laptop;
-  return Desktop;
+  if (p.includes("android") || p.includes("ios")) return IconDeviceMobile;
+  if (p.includes("mac") || p.includes("darwin")) return IconDeviceLaptop;
+  return IconDeviceDesktop;
 }
 
 // ── Account & Cloud Sync screen ───────────────────────────────────────
@@ -1300,7 +1301,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
           <div className="auth-card">
             <div className="auth-brand">
               <div className="auth-brand-badge">
-                <Key size={20} />
+                <IconKey size={20} />
               </div>
               <h3 className="auth-title">Save your recovery code</h3>
               <p className="auth-subtitle">
@@ -1412,7 +1413,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
           <div className="auth-card">
             <div className="auth-brand">
               <div className="auth-brand-badge">
-                <CloudCheck size={20} />
+                <IconCloudCheck size={20} />
               </div>
               <h3 className="auth-title">
                 {changeOpen ? "Change your password" : "Set a new password"}
@@ -1534,7 +1535,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
           /* ── Sync disabled: enable hero ── */
           <div className="acct-card acct-hero">
             <div className="acct-hero-badge">
-              <CloudCheck size={26} />
+              <IconCloudCheck size={26} />
             </div>
             <h3 className="acct-hero-title">Sync across your devices</h3>
             <p className="acct-hero-desc">
@@ -1556,7 +1557,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
           <div className="auth-card auth-card--waiting">
             <div className="auth-brand">
               <div className="auth-brand-badge">
-                <CloudArrowUp size={20} />
+                <IconCloudUp size={20} />
               </div>
               <h3 className="auth-title">Reconnecting to your account</h3>
               <p className="auth-subtitle">
@@ -1578,7 +1579,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
             <div className="auth-card">
               <div className="auth-brand">
                 <div className="auth-brand-badge">
-                  <CloudCheck size={20} />
+                  <IconCloudCheck size={20} />
                 </div>
                 <h3 className="auth-title">
                   {oauthStage === "password"
@@ -1676,7 +1677,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   {resetSent ? (
                     <div className="auth-reset-done">
                       <span className="auth-reset-check">
-                        <Check size={16} weight="bold" />
+                        <IconCheck size={16} />
                       </span>
                       <p>
                         If an account exists for <strong>{resetEmail}</strong>,
@@ -1864,7 +1865,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
               )}
 
               <div className="auth-secure">
-                <Key size={12} weight="fill" />
+                <IconKeyFilled size={12} />
                 End-to-end encrypted. Only you can read it, and space members can read what you share with them.
               </div>
             </div>
@@ -1922,9 +1923,9 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     >
                       {skippedCount} not synced
                       {showSkipped ? (
-                        <CaretUp size={10} weight="bold" />
+                        <IconChevronUp size={10} />
                       ) : (
-                        <CaretDown size={10} weight="bold" />
+                        <IconChevronDown size={10} />
                       )}
                     </button>
                   )}
@@ -1980,7 +1981,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                   is not the same kind of action as opening a dialog, and the line
                   is the only place that says what the code is for. */}
               <div className="acct-id-recovery">
-                <Key size={15} className="acct-id-recovery-icon" />
+                <IconKey size={15} className="acct-id-recovery-icon" />
                 <span className="acct-id-recovery-text">
                   {recoveryNeeded === false
                     ? "Recovery code saved. It is the only way back in without your password."
@@ -2011,7 +2012,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                 ) : (
                   skippedGroups.map(([reason, items]) => (
                     <div key={reason} className="acct-skipped-row">
-                      <WarningCircle size={13} className="acct-skipped-icon" />
+                      <IconAlertCircle size={13} className="acct-skipped-icon" />
                       <span className="acct-skipped-text">
                         <span className="acct-skipped-label">
                           {items.length === 1
@@ -2058,7 +2059,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
             <section className="acct-zone">
               <div className="acct-zone-head">
                 <span className="acct-zone-icon">
-                  <Cloud size={13} />
+                  <IconCloud size={13} />
                 </span>
                 <span className="acct-zone-label">Cloud sync</span>
               </div>
@@ -2236,7 +2237,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
             <section className="acct-zone">
               <div className="acct-zone-head">
                 <span className="acct-zone-icon">
-                  <Desktop size={13} />
+                  <IconDeviceDesktop size={13} />
                 </span>
                 <span className="acct-zone-label">Devices</span>
               </div>
@@ -2306,7 +2307,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
             <section className="acct-zone">
               <div className="acct-zone-head">
                 <span className="acct-zone-icon">
-                  <ChartBar size={13} />
+                  <IconChartBar size={13} />
                 </span>
                 <span className="acct-zone-label">Storage and activity</span>
               </div>
@@ -2392,9 +2393,8 @@ Keep this. It is the only way back into your synced items if you forget your pas
                             <span className="acct-comp-pct">
                               {Math.round((r.count / shownComp.total) * 100)}%
                             </span>
-                            <CaretRight
+                            <IconChevronRight
                               size={11}
-                              weight="bold"
                               className="acct-comp-go"
                             />
                           </button>
@@ -2432,7 +2432,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                       return (
                         <div className="acct-quota">
                           <div className="acct-quota-head">
-                            <HardDrives size={13} />
+                            <IconServer size={13} />
                             <span>Cloud file storage</span>
                             {/* The share is the part that says whether this
                                 matters; the bytes say by how much. */}
@@ -2479,7 +2479,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                       return (
                         <div className="acct-quota">
                           <div className="acct-quota-head">
-                            <Stack size={13} />
+                            <IconStack2 size={13} />
                             <span>Synced items</span>
                             <span className="acct-quota-value">
                               {pct < 1 && quota.entry_count > 0
@@ -2569,7 +2569,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
 
                       <div className="acct-row">
                         <span className="acct-row-icon">
-                          <CloudArrowUp size={13} />
+                          <IconCloudUp size={13} />
                         </span>
                         <div className="acct-row-main">
                           <span className="acct-row-name">
@@ -2588,7 +2588,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
 
                       <div className="acct-row">
                         <span className="acct-row-icon">
-                          <Desktop size={13} />
+                          <IconDeviceDesktop size={13} />
                         </span>
                         <div className="acct-row-main">
                           <span className="acct-row-name">Devices</span>
@@ -2608,7 +2608,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
             </section>
 
             <p className="auth-secure acct-secure-foot">
-              <Key size={12} weight="fill" />
+              <IconKeyFilled size={12} />
               End-to-end encrypted. Only you can read it, and space members can read what you share with them.
             </p>
           </>

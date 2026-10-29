@@ -46,13 +46,13 @@ import {
   ClipboardIcon,
 } from "../../../icons";
 import {
-  ShareNetwork,
-  CloudCheck,
-  CloudArrowUp,
-  DotsThree,
-  MagnifyingGlassPlus,
-  MagnifyingGlassMinus,
-} from "@phosphor-icons/react";
+  IconCloudCheck,
+  IconCloudUp,
+  IconDots,
+  IconShare,
+  IconZoomIn,
+  IconZoomOut,
+} from "@tabler/icons-react";
 import VideoPlayer from "../entry-card/VideoPlayer";
 import {
   useImagePreviews,
@@ -519,7 +519,7 @@ const EntryViewer: React.FC<{
                 data-tooltip="Zoom out"
                 data-tooltip-pos="below"
               >
-                <MagnifyingGlassMinus size={13} />
+                <IconZoomOut size={13} />
               </button>
               <button
                 className={`cv-btn cv-zoom-level${atDefault ? "" : " cv-btn--on"}`}
@@ -537,7 +537,7 @@ const EntryViewer: React.FC<{
                 data-tooltip="Zoom in"
                 data-tooltip-pos="below"
               >
-                <MagnifyingGlassPlus size={13} />
+                <IconZoomIn size={13} />
               </button>
             </div>
           )}
@@ -571,7 +571,7 @@ const EntryViewer: React.FC<{
             data-tooltip="More actions"
             data-tooltip-pos="below"
           >
-            <DotsThree size={16} weight="bold" />
+            <IconDots size={16} />
           </button>
         </div>
       </div>
@@ -618,7 +618,7 @@ const EntryViewer: React.FC<{
             key={name}
             className={`card-type-chip cv-chip--shared${waitingSpaceNames.includes(name) ? " cv-chip--waiting" : ""}`}
           >
-            <ShareNetwork size={9} weight="bold" />
+            <IconShare size={9} />
             <span className="card-type-label">
               {waitingSpaceNames.includes(name) ? `${name} (no key yet)` : name}
             </span>
@@ -626,13 +626,13 @@ const EntryViewer: React.FC<{
         ))}
         {syncState === "synced" && (
           <span className="card-type-chip cv-chip--synced">
-            <CloudCheck size={10} weight="bold" />
+            <IconCloudCheck size={10} />
             <span className="card-type-label">Synced</span>
           </span>
         )}
         {syncState === "pending" && (
           <span className="card-type-chip cv-chip--pending">
-            <CloudArrowUp size={10} weight="bold" />
+            <IconCloudUp size={10} />
             <span className="card-type-label">Waiting to upload</span>
           </span>
         )}

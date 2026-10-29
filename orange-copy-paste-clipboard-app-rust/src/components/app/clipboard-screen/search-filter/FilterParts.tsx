@@ -1,12 +1,12 @@
 import { sharedNow } from "../../../../clock";
 import React from "react";
 import {
-  ShareNetwork,
-  CloudCheck,
-  CloudSlash,
-  ArrowUp,
-  ArrowDown,
-} from "@phosphor-icons/react";
+  IconArrowDown,
+  IconArrowUp,
+  IconCloudCheck,
+  IconCloudOff,
+  IconShare,
+} from "@tabler/icons-react";
 import type { DisplayKind, Space } from "../../../../types";
 import { groupColor } from "../../../../types";
 import { TYPE_ICONS, TYPE_LABELS } from "../../../entry-types/EntryTypePill";
@@ -114,14 +114,14 @@ export const OwnerChips: React.FC<{
       on={value === "mine"}
       onToggle={() => set(value === "mine" ? "any" : "mine")}
       count={counts?.mine}
-      icon={<ArrowUp size={10} weight="bold" />}
+      icon={<IconArrowUp size={10} />}
     />
     <FilterChip
       label="From others"
       on={value === "others"}
       onToggle={() => set(value === "others" ? "any" : "others")}
       count={counts?.others}
-      icon={<ArrowDown size={10} weight="bold" />}
+      icon={<IconArrowDown size={10} />}
     />
   </>
 );
@@ -341,7 +341,7 @@ export const CloudSection: React.FC<CloudSectionProps> = ({
         className={`cs-seg-btn${cloudFilter === "in" ? " cs-seg-btn--on" : ""}`}
         onClick={() => setCloudFilter(cloudFilter === "in" ? "any" : "in")}
       >
-        <CloudCheck size={11} />
+        <IconCloudCheck size={11} />
         In cloud
         {counts?.inCloud !== undefined && (
           <span className="cs-seg-count">{counts.inCloud}</span>
@@ -351,7 +351,7 @@ export const CloudSection: React.FC<CloudSectionProps> = ({
         className={`cs-seg-btn${cloudFilter === "out" ? " cs-seg-btn--on" : ""}`}
         onClick={() => setCloudFilter(cloudFilter === "out" ? "any" : "out")}
       >
-        <CloudSlash size={11} />
+        <IconCloudOff size={11} />
         Local
         {counts?.localOnly !== undefined && (
           <span className="cs-seg-count">{counts.localOnly}</span>
@@ -376,7 +376,7 @@ export const CloudSection: React.FC<CloudSectionProps> = ({
               setShareFilter(shareFilter === "shared" ? "any" : "shared")
             }
           >
-            <ShareNetwork size={11} />
+            <IconShare size={11} />
             In a space
             {counts?.shared !== undefined && (
               <span className="cs-seg-count">{counts.shared}</span>
@@ -403,7 +403,7 @@ export const CloudSection: React.FC<CloudSectionProps> = ({
               on={selectedSpaceIds.has(s.id)}
               onToggle={() => toggleSpace(s.id)}
               count={counts?.spaces?.[s.id]}
-              icon={<ShareNetwork size={10} />}
+              icon={<IconShare size={10} />}
             />
           ))}
         </ChipRow>

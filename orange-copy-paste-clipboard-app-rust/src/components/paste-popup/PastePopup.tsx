@@ -26,7 +26,7 @@ import {
 } from "../../types";
 import { EntryTypePill, SaveIcon } from "../entry-types/EntryTypePill";
 import { DegradedPill } from "../DegradedPill";
-import { DotsSixVertical, Question } from "@phosphor-icons/react";
+import { IconGripVertical, IconHelp } from "@tabler/icons-react";
 import {
   CloseIcon,
   PinIcon,
@@ -410,10 +410,9 @@ const PastePopup: React.FC = () => {
     >
       {/* Header */}
       <div className="paste-header" onMouseDown={onHeaderDrag}>
-        <DotsSixVertical
+        <IconGripVertical
           className="paste-grip"
           size={14}
-          weight="bold"
           aria-hidden="true"
         />
         <div className="paste-header-left">
@@ -428,7 +427,7 @@ const PastePopup: React.FC = () => {
           aria-label="How to use quick paste"
           onMouseDown={stop}
         >
-          <Question size={13} weight="bold" aria-hidden="true" />
+          <IconHelp size={13} aria-hidden="true" />
           <div className="paste-help-pop" role="tooltip">
             <span className="paste-help-title">How to use</span>
             <ul className="paste-help-list">
