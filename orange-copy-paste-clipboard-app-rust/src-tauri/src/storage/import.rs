@@ -5,8 +5,9 @@
 //! wrote it, written into its table in one transaction, and only then renamed
 //! to `<name>.migrated`, so a launch that dies halfway reads it again next
 //! time and the row writes, keyed by id, land the same rows twice at worst.
-//! Nothing is deleted: the renamed files are the user's own backup until a
-//! later build removes them.
+//! Nothing is deleted on that launch: the renamed files are the user's backup
+//! until the next launch opens the database and loads from it, when
+//! [`remove_retired`] deletes them along with the files older builds left.
 //!
 //! The old build kept copies beside each file: `.bak` (the last good load),
 //! `.quarantine` (a snapshot a session that had panicked would not write over
@@ -145,11 +146,15 @@ pub fn history(
 /// the engine is built. A file that will not import is left in place and
 /// noted; the engine then starts from whatever its table holds, which for a
 /// first launch is nothing, and a restore sweep brings the account back.
-pub fn sync_records(app_data: &Path, db: &Arc<Db>) {
+///
+/// Returns whether any of the files was there.
+pub fn sync_records(app_data: &Path, db: &Arc<Db>) -> bool {
     use crate::sync::{id_map::IdMap, pending_queue::PendingQueue, pending_work::PendingWork, sync_state::SyncStateStore};
 
+    let mut found = false;
     let id_map = app_data.join("id_map.json");
     if id_map.exists() {
+        found = true;
         match IdMap::import_file(db, &id_map) {
             Ok(n) => {
                 retire(&id_map);
@@ -161,6 +166,7 @@ pub fn sync_records(app_data: &Path, db: &Arc<Db>) {
     let queue = app_data.join("sync_pending.json");
     let inflight = queue.with_extension("inflight.json");
     if queue.exists() || inflight.exists() {
+        found = true;
         match PendingQueue::import_files(db, &queue) {
             Ok(n) => {
                 retire(&queue);
@@ -172,6 +178,7 @@ pub fn sync_records(app_data: &Path, db: &Arc<Db>) {
     }
     let work = app_data.join("sync_pending_work.json");
     if work.exists() {
+        found = true;
         match PendingWork::import_file(db, &work) {
             Ok(n) => {
                 retire(&work);
@@ -182,6 +189,7 @@ pub fn sync_records(app_data: &Path, db: &Arc<Db>) {
     }
     let state = app_data.join("sync_state.json");
     if state.exists() {
+        found = true;
         match SyncStateStore::import_file(db, &state) {
             Ok(_) => {
                 retire(&state);
@@ -189,6 +197,54 @@ pub fn sync_records(app_data: &Path, db: &Arc<Db>) {
             }
             Err(e) => crate::health::note("import: sync_state.json did not import", &format!("  {e}")),
         }
+    }
+    found
+}
+
+/// Files and folders older builds wrote that nothing reads now. Deleted on
+/// sight; none holds anything the database or the folders below do not.
+const DEAD: [&str; 6] = [
+    // The JSON stores from before MessagePack.
+    "history.json",
+    "pinned_entries.json",
+    // Note images before they moved under note-attachments/.
+    "note-images",
+    // The per-boot marker and the local sync settings copy.
+    "boot_id.txt",
+    "sync_settings_local.json",
+    // The fault log before logs/app.log.
+    "crash.log",
+];
+
+/// Delete what the import left behind, once a later launch has opened the
+/// database and loaded from it: every `*.migrated` file, and the files older
+/// builds wrote that nothing reads. Runs only when the database is the file on
+/// disk and this launch imported nothing, so the retired copies outlive the
+/// launch that made them by one successful start. Anything else in the
+/// folder, a user's own file included, is left alone.
+pub fn remove_retired(app_data: &Path) {
+    let mut removed = Vec::new();
+    for name in DEAD {
+        let path = app_data.join(name);
+        let gone = if path.is_dir() {
+            std::fs::remove_dir_all(&path).is_ok()
+        } else {
+            std::fs::remove_file(&path).is_ok()
+        };
+        if gone {
+            removed.push(name.to_string());
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(app_data) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(MIGRATED) && std::fs::remove_file(entry.path()).is_ok() {
+                removed.push(name);
+            }
+        }
+    }
+    if !removed.is_empty() {
+        log::info!(target: "storage", "removed files older builds left: {}", removed.join(", "));
     }
 }
 
@@ -240,4 +296,39 @@ pub fn notifications(app_data: &Path, store: &mut NotificationStore, db: &Arc<Db
         &format!("  {count} notifications; notifications.bin kept as notifications.bin.migrated"),
     );
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The retired copies and the dead files go; a file the app does not know
+    /// stays, and so does everything the folder is meant to keep.
+    #[test]
+    fn remove_retired_deletes_only_what_older_builds_left() {
+        let dir = std::env::temp_dir().join(format!("rovertools-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("note-images")).unwrap();
+        std::fs::create_dir_all(dir.join("images")).unwrap();
+        for name in [
+            "history.bin.migrated",
+            "id_map.json.migrated",
+            "crash.log",
+            "boot_id.txt",
+            "notes.bin.pre-showcase",
+            "settings.json",
+            "app.db",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+
+        remove_retired(&dir);
+
+        for gone in ["history.bin.migrated", "id_map.json.migrated", "crash.log", "boot_id.txt", "note-images"] {
+            assert!(!dir.join(gone).exists(), "{gone} kept");
+        }
+        for kept in ["notes.bin.pre-showcase", "settings.json", "app.db", "images"] {
+            assert!(dir.join(kept).exists(), "{kept} deleted");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

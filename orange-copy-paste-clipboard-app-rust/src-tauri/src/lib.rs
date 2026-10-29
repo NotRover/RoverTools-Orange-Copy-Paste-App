@@ -565,9 +565,13 @@ fn setup_runtime(
     // The database, before any store loads. A file that will not open leaves
     // the app on a private in-memory database for the session - everything
     // works, nothing persists - and the write notice tells the user.
+    let mut db_on_disk = false;
     let db = match app_data.as_ref().map(|d| d.join(crate::storage::DB_FILE)) {
         Some(path) => match crate::storage::Db::open(&path) {
-            Ok(db) => db,
+            Ok(db) => {
+                db_on_disk = true;
+                db
+            }
             Err(e) => {
                 crate::health::note_store_write_failed("open app.db", &e);
                 crate::storage::Db::open_in_memory()
@@ -577,8 +581,11 @@ fn setup_runtime(
     };
     let _ = app.state::<AppState>().db.set(Arc::clone(&db));
     let db = Some(db);
+    // Whether any file of an older build was imported this launch. The retired
+    // copies are removed on the next launch, not this one.
+    let mut imported = false;
     if let (Some(dir), Some(db)) = (&app_data, &db) {
-        crate::storage::import::sync_records(dir, db);
+        imported |= crate::storage::import::sync_records(dir, db);
     }
 
     // Load history: from the database, or from the files of an older build the
@@ -594,7 +601,9 @@ fn setup_runtime(
                 .unwrap_or(false)
         });
         let mut hist = history.lock();
-        if !crate::storage::import::history(dir, &mut hist, db, legacy_keep) {
+        if crate::storage::import::history(dir, &mut hist, db, legacy_keep) {
+            imported = true;
+        } else {
             hist.attach_db(Arc::clone(db));
             hist.load_from_db();
         }
@@ -605,15 +614,27 @@ fn setup_runtime(
     if let (Some(dir), Some(db)) = (&app_data, &db) {
         let state_ref: tauri::State<'_, AppState> = app.state();
         let mut notes = state_ref.notes.lock();
-        if !crate::storage::import::notes(dir, &mut notes, db) {
+        if crate::storage::import::notes(dir, &mut notes, db) {
+            imported = true;
+        } else {
             notes.attach_db(Arc::clone(db));
             notes.load_from_db();
         }
         drop(notes);
         let mut feed = state_ref.notifications.lock();
-        if !crate::storage::import::notifications(dir, &mut feed, db) {
+        if crate::storage::import::notifications(dir, &mut feed, db) {
+            imported = true;
+        } else {
             feed.attach_db(Arc::clone(db));
             feed.load_from_db();
+        }
+    }
+    // The launch after the import, on the real file, is proof enough that the
+    // database holds what the files did: the retired copies go, with the
+    // files older builds left that nothing reads.
+    if let Some(dir) = &app_data {
+        if db_on_disk && !imported {
+            crate::storage::import::remove_retired(dir);
         }
     }
 

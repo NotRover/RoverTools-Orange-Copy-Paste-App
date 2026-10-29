@@ -2200,8 +2200,22 @@ the saved copy winning by id, and with the old build's Keep history off treats
 `history.bin` as stale, unless a `.pre-upgrade` or `.folded` marker says a later build
 already folded the two.
 
-Builds before this one also wrote `boot_id.txt` and `sync_settings_local.json`. Nothing
-reads either now.
+**What the folder keeps** (`storage::import::remove_retired`). On the first launch
+after the import, once the database opened from disk and nothing was left to import,
+every `*.migrated` file is deleted, and so are the files older builds wrote that
+nothing reads: `history.json`, `pinned_entries.json`, `note-images/`, `boot_id.txt`,
+`sync_settings_local.json` and `crash.log`. Anything else in the folder
+is left alone. After that, `{app_data}` holds exactly:
+
+| Entry | What |
+| --- | --- |
+| `app.db`, `app.db-wal`, `app.db-shm` | The database and SQLite's write-ahead log and shared memory (section 7.1) |
+| `images/` | Clipboard image files |
+| `received-files/` | Files extracted from synced file entries |
+| `note-attachments/` | Images and files attached to notes |
+| `logs/` | `app.log` and up to two rotated copies (section 4.8) |
+| `settings.json` | App preferences |
+| `window-state.json` | Main window geometry |
 
 **Sync note**: the sync tables are not safe to clear by hand. The queue holds deletes
 the server has not had yet, and the id map holds the markers that keep items deleted
