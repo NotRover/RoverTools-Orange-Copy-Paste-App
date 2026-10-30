@@ -42,6 +42,8 @@ export interface Note {
 }
 
 export type AppScreen = "clipboard" | "notes" | "spaces" | "shortcuts" | "account" | "settings";
+/** Window event a screen dispatches to open another; `detail` is the `AppScreen`. */
+export const NAVIGATE_EVENT = "app:navigate";
 export type AppTheme = "dark" | "light";
 
 /** Sync connection state surfaced by the sidebar status indicator. */
@@ -273,6 +275,76 @@ interface SkippedEntry {
   label: string;
   reason: string;
   at: number;
+}
+
+/** Developer options (Settings > Developer). Mirrors `sync/developer.rs`. */
+export interface BackendProfile {
+  server_url: string;
+  supabase_url: string;
+  supabase_anon_key: string;
+  reset_page_url: string;
+  allow_private_http: boolean;
+  /** Hex SHA-256 of the server certificate, empty for none. */
+  server_cert_sha256: string;
+}
+
+export interface DevConfig {
+  developer_mode: boolean;
+  profile: BackendProfile;
+  official: BackendProfile;
+  is_official: boolean;
+  /** A profile change is refused while true. */
+  signed_in: boolean;
+  update_feed_url: string;
+  update_pubkey: string;
+  expected_api_version: string;
+}
+
+export interface Discovered {
+  api_version: string;
+  service_version: string;
+  supabase_url: string;
+  supabase_anon_key: string;
+  reset_page_url: string;
+}
+
+export interface BackendTestReport {
+  ok: boolean;
+  steps: { name: string; ok: boolean; detail: string }[];
+  api_version: string | null;
+  service_version: string | null;
+  rtt_ms: number | null;
+  cert: { sha256: string; trusted_by_roots: boolean; matched_pin: boolean } | null;
+}
+
+export interface DevConnectionStatus {
+  server_url: string;
+  supabase_url: string;
+  pinned: boolean;
+  expected_api_version: string;
+  engine_running: boolean;
+  signed_in: boolean;
+  ws_connected: boolean;
+  ws: {
+    connected_since: number | null;
+    last_disconnect: number | null;
+    connections: number;
+  };
+  device_id: string | null;
+  cursor: number | null;
+  last_synced_at: number | null;
+  pending_count: number;
+  in_flight: number;
+  pending_work: number;
+  probe: {
+    ok: boolean;
+    rtt_ms: number | null;
+    service_version: string | null;
+    api_version: string | null;
+    db: boolean | null;
+    redis: boolean | null;
+    error: string | null;
+  };
 }
 
 export interface SyncStatusInfo {

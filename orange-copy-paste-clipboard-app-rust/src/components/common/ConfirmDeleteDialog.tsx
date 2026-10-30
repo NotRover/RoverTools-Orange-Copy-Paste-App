@@ -22,6 +22,8 @@ interface Props {
   title?: string;
   message?: React.ReactNode;
   confirmLabel?: string;
+  /** Hide the "Don't ask again" box, for a confirmation that must always ask. */
+  noOptOut?: boolean;
 }
 
 /** Origin used until the real lookup resolves, and when no keys are passed. */
@@ -50,6 +52,7 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
   title,
   message,
   confirmLabel = "Delete",
+  noOptOut = false,
 }) => {
   const [dontAsk, setDontAsk] = useState(false);
   const [origin, setOrigin] = useState<DeleteOrigin>(OWN_ONLY);
@@ -134,14 +137,18 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
             )}
         </div>
         <div className="cdd-footer">
-          <label className="cdd-check">
-            <input
-              type="checkbox"
-              checked={dontAsk}
-              onChange={(e) => setDontAsk(e.target.checked)}
-            />
-            <span>Don't ask again</span>
-          </label>
+          {noOptOut ? (
+            <span />
+          ) : (
+            <label className="cdd-check">
+              <input
+                type="checkbox"
+                checked={dontAsk}
+                onChange={(e) => setDontAsk(e.target.checked)}
+              />
+              <span>Don't ask again</span>
+            </label>
+          )}
           <div className="cdd-actions">
             <button className="cdd-btn cdd-btn--cancel" onClick={onCancel}>
               Cancel

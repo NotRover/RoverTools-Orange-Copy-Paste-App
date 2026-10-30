@@ -5,11 +5,13 @@ import { readSlots, scheduleSettingsSync } from "../../../types";
 import {
   IconAdjustmentsHorizontal,
   IconCheck,
+  IconCode,
   IconChevronDown,
   IconClipboardText,
   IconDownload,
   IconFolderOpen,
   IconHistory,
+  IconListDetails,
   IconPlayerPlayFilled,
   IconRefresh,
   IconShieldCheck,
@@ -29,6 +31,10 @@ import {
 } from "../../../hooks/useCardClickAction";
 import { configureSounds, playCue } from "../../../sounds";
 import { parseNotes, hasParsedNotes } from "../update-banner/parseNotes";
+import DeveloperSection from "./DeveloperSection";
+import { ChangedMark } from "./ChangedMark";
+import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
+import SettingsNav, { type SettingsPage } from "./SettingsNav";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -91,12 +97,17 @@ const ToggleRow: React.FC<{
   label: string;
   desc: string;
   active: boolean;
+  /** The value a fresh install has; the row is marked while `active` differs. */
+  defaultActive: boolean;
   onToggle: () => void;
   disabled?: boolean;
-}> = ({ label, desc, active, onToggle, disabled }) => (
+}> = ({ label, desc, active, defaultActive, onToggle, disabled }) => (
   <div className="set-row">
     <div className="set-row-info">
-      <span className="set-row-label">{label}</span>
+      <span className="set-row-label">
+        {label}
+        <ChangedMark show={active !== defaultActive} />
+      </span>
       <span className="set-row-desc">{desc}</span>
     </div>
     <button
@@ -110,6 +121,112 @@ const ToggleRow: React.FC<{
     </button>
   </div>
 );
+
+// ── Pages ─────────────────────────────────────────────────────────────
+//
+// "All settings" is the default: every section in one continuous scroll,
+// each under its own header. Picking a section in the list shows that one
+// alone. A search shows every section at once, filtered to the rows that
+// match, whichever page is chosen.
+
+const SECTION_PAGES: SettingsPage[] = [
+  {
+    id: "general",
+    label: "General",
+    blurb: "How the window, the tray and startup behave on this device.",
+    Icon: IconAdjustmentsHorizontal,
+    sections: ["set-general"],
+  },
+  {
+    id: "confirmations",
+    label: "Confirmations",
+    blurb: "Which actions ask before they go ahead.",
+    Icon: IconShieldCheck,
+    sections: ["set-confirmations"],
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    blurb: "The in-app popup and desktop notices on copy and paste.",
+    Icon: BellIcon,
+    sections: ["set-notifications"],
+  },
+  {
+    id: "sounds",
+    label: "Sounds",
+    blurb: "Cues for copy, paste and closing, and a way to hear them.",
+    Icon: IconVolume,
+    sections: ["set-sounds"],
+  },
+  {
+    id: "quick-paste",
+    label: "Quick Paste",
+    blurb: "The paste popup and its number-key slots.",
+    Icon: IconClipboardText,
+    sections: ["set-quick-paste"],
+  },
+  {
+    id: "history",
+    label: "History",
+    blurb: "What the app keeps between restarts and how cards respond to a click.",
+    Icon: IconHistory,
+    sections: ["set-history"],
+  },
+  {
+    id: "data",
+    label: "Data",
+    blurb: "Encryption on this PC, the data folder and the app log.",
+    Icon: IconFolderOpen,
+    sections: ["set-data"],
+  },
+  {
+    id: "updates",
+    label: "Updates",
+    blurb: "Check, download and install new versions, or opt into betas.",
+    Icon: IconDownload,
+    sections: ["set-updates"],
+  },
+];
+const DEVELOPER_PAGE: SettingsPage = {
+  id: "developer",
+  label: "Developer",
+  blurb: "Your own server, the sync connection and a custom update feed, behind a switch.",
+  Icon: IconCode,
+  sections: ["set-developer"],
+};
+const ALL_PAGE_ID = "all";
+
+// What a fresh install has. The rows compare against these for their
+// asterisk, and the page list marks a section while any of its settings
+// differs, so the list is right before the section has ever been shown.
+const DEFAULTS = {
+  closeToTray: false,
+  runOnStartup: false,
+  startMinimized: false,
+  showSplash: true,
+  showSyncBadges: true,
+  confirmSyncDelete: true,
+  confirmSpaceRemove: true,
+  confirmCloudRemove: true,
+  osNotifications: true,
+  notificationEnabled: true,
+  notifCopy: true,
+  notifPaste: true,
+  sound: true,
+  soundCopy: false,
+  soundPaste: false,
+  pasteSlots: 3,
+  keepHistory: true,
+  clickToView: false,
+  autosave: true,
+  pasteKeepOpenAfterCopy: true,
+  encryptAtRest: false,
+  autoCheckUpdates: true,
+  autoInstallUpdates: false,
+  betaChannel: false,
+  developerMode: false,
+} as const;
+const PAGE_STORAGE_KEY = "sc-settings-page";
 
 // ── Main component ────────────────────────────────────────────────────
 
@@ -132,6 +249,9 @@ const SettingsScreen: React.FC = () => {
   const [autosave, setAutosave] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
+  const [developerMode, setDeveloperMode] = useState(false);
+  // Turning Developer options on asks first; off never does.
+  const [devConfirm, setDevConfirm] = useState(false);
   const [confirmSyncDelete, setConfirmSyncDelete] = useState(true);
   const [confirmSpaceRemove, setConfirmSpaceRemove] = useState(true);
   const [confirmCloudRemove, setConfirmCloudRemove] = useState(true);
@@ -179,6 +299,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("paste_keep_open_after_copy", setPasteKeepOpenAfterCopy, true);
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
+    loadBool("developer_mode", setDeveloperMode, false);
     loadBool(CONFIRM_SYNC_DELETE_KEY, setConfirmSyncDelete, true);
     loadBool(CONFIRM_SPACE_REMOVE_KEY, setConfirmSpaceRemove, true);
     loadBool(CONFIRM_CLOUD_REMOVE_KEY, setConfirmCloudRemove, true);
@@ -341,18 +462,100 @@ const SettingsScreen: React.FC = () => {
 
   const updateBusy = updater.stage === "checking" || updater.stage === "downloading" || updater.stage === "installing";
 
+  // ── Pages and search ────────────────────────────────────────────
+  const sectionPages = [...SECTION_PAGES, DEVELOPER_PAGE];
+  const allPage: SettingsPage = {
+    id: ALL_PAGE_ID,
+    label: "Settings",
+    blurb: "Every setting on this device, in one scroll. Pick a category to see only its controls.",
+    Icon: IconListDetails,
+    sections: sectionPages.flatMap((p) => p.sections),
+  };
+  const pages = [allPage, ...sectionPages];
+  const [page, setPage] = useState<string>(
+    () => localStorage.getItem(PAGE_STORAGE_KEY) ?? ALL_PAGE_ID,
+  );
+  const [query, setQuery] = useState("");
+  const searching = query.trim().length > 0;
+  // The Developer tools report their own state (a custom server, a feed).
+  const [devChanged, setDevChanged] = useState(false);
+  const current = {
+    closeToTray, runOnStartup, startMinimized, showSplash, showSyncBadges,
+    confirmSyncDelete, confirmSpaceRemove, confirmCloudRemove,
+    osNotifications, notificationEnabled, notifCopy, notifPaste,
+    sound, soundCopy, soundPaste, pasteSlots,
+    keepHistory, clickToView, autosave, pasteKeepOpenAfterCopy,
+    encryptAtRest, autoCheckUpdates, autoInstallUpdates, betaChannel, developerMode,
+  };
+  const differs = (...keys: (keyof typeof DEFAULTS)[]) =>
+    keys.some((k) => current[k] !== DEFAULTS[k]);
+  const changedSections = [
+    differs("closeToTray", "runOnStartup", "startMinimized", "showSplash", "showSyncBadges") && "set-general",
+    differs("confirmSyncDelete", "confirmSpaceRemove", "confirmCloudRemove") && "set-confirmations",
+    differs("osNotifications", "notificationEnabled", "notifCopy", "notifPaste") && "set-notifications",
+    differs("sound", "soundCopy", "soundPaste") && "set-sounds",
+    differs("pasteSlots") && "set-quick-paste",
+    differs("keepHistory", "clickToView", "autosave", "pasteKeepOpenAfterCopy") && "set-history",
+    differs("encryptAtRest") && "set-data",
+    differs("autoCheckUpdates", "autoInstallUpdates", "betaChannel") && "set-updates",
+    (differs("developerMode") || devChanged) && "set-developer",
+  ].filter((id): id is string => typeof id === "string");
+  // A page that is no longer offered (Developer options turned off while on
+  // it) falls back to the first one.
+  const currentPage = pages.find((p) => p.id === page) ?? allPage;
+  const selectPage = (id: string) => {
+    setPage(id);
+    localStorage.setItem(PAGE_STORAGE_KEY, id);
+    screenRef.current?.scrollTo({ top: 0 });
+  };
+  const visible = (id: string) => searching || currentPage.sections.includes(id);
+
+  // Search filters by what a row says: its label and description, and for
+  // the stacked rows whatever else they show. Rows are marked rather than
+  // unmounted so their state (an open select, a running update) survives;
+  // the stylesheet hides a marked row, and a group or section left with no
+  // visible row along with it.
+  const screenRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = screenRef.current;
+    if (!root) return;
+    const needle = query.trim().toLowerCase();
+    for (const row of root.querySelectorAll<HTMLElement>(".set-row")) {
+      const hide = needle !== "" && !(row.textContent ?? "").toLowerCase().includes(needle);
+      if (hide) row.dataset.hidden = "true";
+      else delete row.dataset.hidden;
+    }
+  });
+
   // ── Render ──────────────────────────────────────────────────────
   return (
-    <div className="settings-screen">
+    <div className="settings-screen" ref={screenRef}>
+      <div
+        className={`settings-layout${searching ? " settings-layout--search" : ""}${
+          !searching && currentPage.sections.length === 1 ? " settings-layout--single" : ""
+        }`}
+      >
+      <SettingsNav
+        pages={pages}
+        active={currentPage.id}
+        marked={changedSections}
+        onSelect={selectPage}
+        query={query}
+        onQuery={setQuery}
+      />
       <div className="settings-inner">
         <header className="scr-head">
-          <span className="scr-eyebrow">Preferences</span>
-          <h2 className="scr-title">Settings</h2>
-          <p className="scr-subtitle">Tune how Orange Copy Paste behaves on this device.</p>
+          <span className="scr-eyebrow">Settings</span>
+          <h2 className="scr-title">{searching ? "Search" : currentPage.label}</h2>
+          <p className="scr-subtitle">
+            {searching ? `Settings matching "${query.trim()}" on every page.` : currentPage.blurb}
+          </p>
         </header>
+        {searching && <p className="set-search-empty">No setting matches. Try another word.</p>}
 
         {/* ── General ── */}
-        <section className="set-section">
+        {visible("set-general") && (
+        <section className="set-section" id="set-general">
           <div className="set-section-head">
             <span className="set-section-icon"><IconAdjustmentsHorizontal size={15} /></span>
             <h3 className="set-section-title">General</h3>
@@ -362,12 +565,14 @@ const SettingsScreen: React.FC = () => {
               label="Close to system tray"
               desc="Closing the window minimizes the app to the system tray instead of quitting."
               active={closeToTray}
+              defaultActive={DEFAULTS.closeToTray}
               onToggle={handleCloseToTrayToggle}
             />
             <ToggleRow
               label="Run on startup"
               desc={`Launch the app when you sign in to this computer.${import.meta.env.DEV ? " Disabled in dev builds." : ""}`}
               active={runOnStartup}
+              defaultActive={DEFAULTS.runOnStartup}
               onToggle={handleRunOnStartupToggle}
               disabled={autostartEnableBlocked}
             />
@@ -375,18 +580,21 @@ const SettingsScreen: React.FC = () => {
               label="Start minimized"
               desc="Start hidden in the system tray instead of showing the main window."
               active={startMinimized}
+              defaultActive={DEFAULTS.startMinimized}
               onToggle={handleStartMinimizedToggle}
             />
             <ToggleRow
               label="Show splash screen on startup"
               desc="Display a brief startup screen when the app launches."
               active={showSplash}
+              defaultActive={DEFAULTS.showSplash}
               onToggle={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
             />
             <ToggleRow
               label="Show sync badges on cards"
               desc="The cloud icon that marks whether an entry has reached the server. Turning it off changes nothing about what syncs."
               active={showSyncBadges}
+              defaultActive={DEFAULTS.showSyncBadges}
               onToggle={() => {
                 const next = !showSyncBadges;
                 toggleBoolSetting(showSyncBadges, setShowSyncBadges, "show_sync_badges");
@@ -399,9 +607,10 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
+        )}
 
-        {/* ── Confirmations ── */}
-        <section className="set-section">
+        {visible("set-confirmations") && (
+        <section className="set-section" id="set-confirmations">
           <div className="set-section-head">
             <span className="set-section-icon"><IconShieldCheck size={15} /></span>
             <h3 className="set-section-title">Confirmations</h3>
@@ -411,6 +620,7 @@ const SettingsScreen: React.FC = () => {
               label="Confirm before deleting synced items"
               desc="Ask first when deleting an item that has a cloud copy, since the delete also removes it from your other devices."
               active={confirmSyncDelete}
+              defaultActive={DEFAULTS.confirmSyncDelete}
               onToggle={() =>
                 toggleBoolSetting(
                   confirmSyncDelete,
@@ -423,6 +633,7 @@ const SettingsScreen: React.FC = () => {
               label="Confirm before removing from a space"
               desc="Ask first when taking an item out of a space, since it is removed for everyone in that space."
               active={confirmSpaceRemove}
+              defaultActive={DEFAULTS.confirmSpaceRemove}
               onToggle={() =>
                 toggleBoolSetting(
                   confirmSpaceRemove,
@@ -435,6 +646,7 @@ const SettingsScreen: React.FC = () => {
               label="Confirm before removing everything from the cloud"
               desc="Ask first when Remove from cloud on the Account screen takes all your items off the server and your other devices."
               active={confirmCloudRemove}
+              defaultActive={DEFAULTS.confirmCloudRemove}
               onToggle={() =>
                 toggleBoolSetting(
                   confirmCloudRemove,
@@ -445,9 +657,13 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
+        )}
+
+        {/* ── Confirmations ── */}
 
         {/* ── Notifications ── */}
-        <section className="set-section">
+        {visible("set-notifications") && (
+        <section className="set-section" id="set-notifications">
           <div className="set-section-head">
             <span className="set-section-icon"><BellIcon size={15} /></span>
             <h3 className="set-section-title">Notifications</h3>
@@ -457,12 +673,16 @@ const SettingsScreen: React.FC = () => {
               label="Desktop notifications"
               desc="Show system notifications while the app is in the background."
               active={osNotifications}
+              defaultActive={DEFAULTS.osNotifications}
               onToggle={() => toggleBoolSetting(osNotifications, setOsNotifications, "os_notifications")}
             />
             <div className="set-row set-row--stack">
               <div className="set-row-header">
                 <div className="set-row-info">
-                  <span className="set-row-label">In-app popup</span>
+                  <span className="set-row-label">
+                    In-app popup
+                    <ChangedMark show={notificationEnabled !== DEFAULTS.notificationEnabled} />
+                  </span>
                   <span className="set-row-desc">
                     A small popup at the bottom-right.
                   </span>
@@ -486,7 +706,10 @@ const SettingsScreen: React.FC = () => {
                       {notifCopy && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
-                      <span className="settings-checkbox-label">Copy operations</span>
+                      <span className="settings-checkbox-label">
+                        Copy operations
+                        <ChangedMark show={notifCopy !== DEFAULTS.notifCopy} />
+                      </span>
                       <span className="settings-checkbox-desc">Show a notification when you copy.</span>
                     </div>
                   </label>
@@ -498,7 +721,10 @@ const SettingsScreen: React.FC = () => {
                       {notifPaste && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
-                      <span className="settings-checkbox-label">Paste operations</span>
+                      <span className="settings-checkbox-label">
+                        Paste operations
+                        <ChangedMark show={notifPaste !== DEFAULTS.notifPaste} />
+                      </span>
                       <span className="settings-checkbox-desc">Show a notification when you paste from the popup.</span>
                     </div>
                   </label>
@@ -507,9 +733,11 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
 
         {/* ── Sounds ── */}
-        <section className="set-section">
+        {visible("set-sounds") && (
+        <section className="set-section" id="set-sounds">
           <div className="set-section-head">
             <span className="set-section-icon"><IconVolume size={15} /></span>
             <h3 className="set-section-title">Sounds</h3>
@@ -540,7 +768,10 @@ const SettingsScreen: React.FC = () => {
             <div className="set-row set-row--stack">
               <div className="set-row-header">
                 <div className="set-row-info">
-                  <span className="set-row-label">Sounds</span>
+                  <span className="set-row-label">
+                    Sounds
+                    <ChangedMark show={sound !== DEFAULTS.sound} />
+                  </span>
                   <span className="set-row-desc">
                     Shared items, invites, and spaces opening up.
                   </span>
@@ -564,7 +795,10 @@ const SettingsScreen: React.FC = () => {
                       {soundCopy && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
-                      <span className="settings-checkbox-label">Copying</span>
+                      <span className="settings-checkbox-label">
+                        Copying
+                        <ChangedMark show={soundCopy !== DEFAULTS.soundCopy} />
+                      </span>
                       <span className="settings-checkbox-desc">
                         A click when you copy in the app.
                       </span>
@@ -578,7 +812,10 @@ const SettingsScreen: React.FC = () => {
                       {soundPaste && <IconCheck size={9} />}
                     </span>
                     <div className="settings-checkbox-info">
-                      <span className="settings-checkbox-label">Pasting</span>
+                      <span className="settings-checkbox-label">
+                        Pasting
+                        <ChangedMark show={soundPaste !== DEFAULTS.soundPaste} />
+                      </span>
                       <span className="settings-checkbox-desc">
                         A click when you paste from the popup.
                       </span>
@@ -589,9 +826,10 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
 
-        {/* ── Quick Paste ── */}
-        <section className="set-section">
+        {visible("set-quick-paste") && (
+        <section className="set-section" id="set-quick-paste">
           <div className="set-section-head">
             <span className="set-section-icon"><IconClipboardText size={15} /></span>
             <h3 className="set-section-title">Quick Paste</h3>
@@ -599,7 +837,10 @@ const SettingsScreen: React.FC = () => {
           <div className="set-group">
             <div className="set-row">
               <div className="set-row-info">
-                <span className="set-row-label">Number-key paste slots</span>
+                <span className="set-row-label">
+                  Number-key paste slots
+                  <ChangedMark show={pasteSlots !== DEFAULTS.pasteSlots} />
+                </span>
                 <span className="set-row-desc">
                   How many entries the quick paste popup numbers for one-key paste (keys 1-9, then 0).
                 </span>
@@ -608,9 +849,14 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
+
+
+        {/* ── Quick Paste ── */}
 
         {/* ── History ── */}
-        <section className="set-section">
+        {visible("set-history") && (
+        <section className="set-section" id="set-history">
           <div className="set-section-head">
             <span className="set-section-icon"><IconHistory size={15} /></span>
             <h3 className="set-section-title">History</h3>
@@ -620,12 +866,14 @@ const SettingsScreen: React.FC = () => {
               label="Keep history across restarts"
               desc="Unsaved entries stay when the app or PC restarts. Pinned and Saved entries, and anything in the cloud or a space, are always kept. Applies to this PC only."
               active={keepHistory}
+              defaultActive={DEFAULTS.keepHistory}
               onToggle={handleKeepToggle}
             />
             <ToggleRow
               label="Click a card to view it"
               desc="A double click copies instead. Off, a click copies and a double click opens it too."
               active={clickToView}
+              defaultActive={DEFAULTS.clickToView}
               onToggle={() => {
                 const next = !clickToView;
                 setClickToView(next);
@@ -644,12 +892,14 @@ const SettingsScreen: React.FC = () => {
               label="Auto-save copied entries"
               desc="Automatically add every new clipboard entry to the Saved group. Applies to this PC only."
               active={autosave}
+              defaultActive={DEFAULTS.autosave}
               onToggle={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
             />
             <ToggleRow
               label="Keep paste popup open after copying"
               desc="Copying an entry from the paste popup leaves it open. Pasting still closes it."
               active={pasteKeepOpenAfterCopy}
+              defaultActive={DEFAULTS.pasteKeepOpenAfterCopy}
               onToggle={() =>
                 toggleBoolSetting(
                   pasteKeepOpenAfterCopy,
@@ -660,9 +910,12 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
+        )}
+
 
         {/* ── Data ── */}
-        <section className="set-section">
+        {visible("set-data") && (
+        <section className="set-section" id="set-data">
           <div className="set-section-head">
             <span className="set-section-icon"><IconFolderOpen size={15} /></span>
             <h3 className="set-section-title">Data</h3>
@@ -672,6 +925,7 @@ const SettingsScreen: React.FC = () => {
               label="Encrypt history and notes on this PC"
               desc="The text of every entry and note in the local database is encrypted with a key kept in this PC's credential store. Images and files on disk are not. Turning this on or off rewrites every entry, which can take a few seconds."
               active={encryptAtRest}
+              defaultActive={DEFAULTS.encryptAtRest}
               onToggle={() => void handleEncryptToggle()}
               disabled={encryptBusy}
             />
@@ -719,9 +973,11 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
 
         {/* ── Updates ── */}
-        <section className="set-section">
+        {visible("set-updates") && (
+        <section className="set-section" id="set-updates">
           <div className="set-section-head">
             <span className="set-section-icon"><IconDownload size={15} /></span>
             <h3 className="set-section-title">Updates</h3>
@@ -803,12 +1059,14 @@ const SettingsScreen: React.FC = () => {
               label="Check for updates automatically"
               desc="Look for a newer version shortly after the app starts."
               active={autoCheckUpdates}
+              defaultActive={DEFAULTS.autoCheckUpdates}
               onToggle={handleAutoCheckToggle}
             />
             <ToggleRow
               label="Install updates automatically"
               desc="When a newer version is found at startup, download and install it on the spot, then reopen. Nothing installs while you are working. Needs automatic checks on."
               active={autoInstallUpdates}
+              defaultActive={DEFAULTS.autoInstallUpdates}
               disabled={!autoCheckUpdates}
               onToggle={() =>
                 toggleBoolSetting(autoInstallUpdates, setAutoInstallUpdates, "auto_install_updates")
@@ -818,10 +1076,47 @@ const SettingsScreen: React.FC = () => {
               label="Get beta versions"
               desc="Receive new features early, alongside every normal release. Betas are tested less, so expect the occasional rough edge. Turning this off stops future betas. It cannot move you back to an older version."
               active={betaChannel}
+              defaultActive={DEFAULTS.betaChannel}
               onToggle={handleBetaToggle}
             />
           </div>
         </section>
+        )}
+
+        {visible("set-developer") && (
+          <DeveloperSection
+            enabled={developerMode}
+            onChanged={setDevChanged}
+            toggle={
+              <ToggleRow
+                label="Developer options"
+                desc="Use your own server, inspect the sync connection, and read updates from another feed. The settings appear below once this is on."
+                active={developerMode}
+                defaultActive={DEFAULTS.developerMode}
+                onToggle={() => {
+                  if (developerMode) {
+                    toggleBoolSetting(developerMode, setDeveloperMode, "developer_mode");
+                  } else {
+                    setDevConfirm(true);
+                  }
+                }}
+              />
+            }
+          />
+        )}
+        <ConfirmDeleteDialog
+          open={devConfirm}
+          title="Turn on Developer options?"
+          message="These settings can point the app at another server, allow plain http on private networks, and read updates from another feed. Turn them on only if you run your own backend or build the app yourself."
+          confirmLabel="Turn on"
+          noOptOut
+          onCancel={() => setDevConfirm(false)}
+          onConfirm={() => {
+            setDevConfirm(false);
+            toggleBoolSetting(false, setDeveloperMode, "developer_mode");
+          }}
+        />
+      </div>
       </div>
     </div>
   );

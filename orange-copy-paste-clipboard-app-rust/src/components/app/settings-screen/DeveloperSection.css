@@ -1,0 +1,281 @@
+/* Developer section: the backend profile form, the connection panel and the
+   update feed override. Inputs follow .auth-input (AccountScreen.css) but are
+   defined here so the section does not depend on that screen being loaded. */
+
+.dev-section .set-group + .set-group {
+  margin-top: 10px;
+}
+
+/* Shown in place of the form while signed in: the reason, and the way out. */
+.dev-gate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.dev-gate .settings-action-btn {
+  flex-shrink: 0;
+}
+
+.dev-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.dev-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dev-field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.dev-field-hint {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.dev-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.dev-input::placeholder {
+  color: var(--text-muted);
+}
+
+.dev-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.dev-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dev-input--mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.dev-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dev-check input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.dev-check .dev-field-hint {
+  margin-top: 2px;
+}
+
+.dev-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dev-actions--end {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.dev-primary {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.dev-primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
+
+.settings-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dev-notice {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  word-break: break-word;
+}
+
+.dev-notice--ok {
+  border-color: color-mix(in srgb, #22c55e 45%, var(--border));
+}
+
+.dev-notice--err {
+  border-color: color-mix(in srgb, #ef4444 55%, var(--border));
+  color: #ef4444;
+}
+
+.dev-report {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.dev-report--ok {
+  border-color: color-mix(in srgb, #22c55e 45%, var(--border));
+}
+
+.dev-report-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.dev-report-rtt {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.dev-report-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dev-report-list li {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.dev-report-list li::before {
+  display: none;
+}
+
+.dev-report-name {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.dev-report-list li.ok .dev-report-name {
+  color: #22c55e;
+}
+
+.dev-report-list li.fail .dev-report-name {
+  color: #ef4444;
+}
+
+.dev-report-detail {
+  color: var(--text);
+  word-break: break-word;
+}
+
+.dev-report-cert {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.dev-report-cert code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.dev-link-btn {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.dev-link-btn:hover {
+  text-decoration: underline;
+}
+
+.dev-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .dev-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dev-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dev-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dev-stat-value {
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.dev-stat-value--mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+}

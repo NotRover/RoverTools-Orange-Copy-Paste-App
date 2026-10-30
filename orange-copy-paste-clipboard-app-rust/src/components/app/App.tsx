@@ -18,6 +18,7 @@ import {
   removeGroupColor,
   renameGroupColor,
   scheduleSettingsSync,
+  NAVIGATE_EVENT,
 } from "../../types";
 import Sidebar from "./sidebar/Sidebar";
 import StatusPill from "./status-pill/StatusPill";
@@ -726,7 +727,14 @@ const App: React.FC = () => {
         setScreen("account");
       }),
     );
+    // A screen asking for another one, by window event (Settings > Developer
+    // sends the user to Account to sign out).
+    const onNavigate = (e: Event) => {
+      if (!cancelled) setScreen((e as CustomEvent<AppScreen>).detail);
+    };
+    window.addEventListener(NAVIGATE_EVENT, onNavigate);
     return () => {
+      window.removeEventListener(NAVIGATE_EVENT, onNavigate);
       cancelled = true;
       unlisteners.forEach((fn) => fn());
     };

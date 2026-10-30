@@ -29,15 +29,252 @@
   --cta-hover: var(--accent-hover);
 }
 
-/* Centered content column */
+/* Page list beside the content, both against the left edge.
+
+   Left-aligned like Windows Settings and the VS Code settings editor: a fixed
+   margin, the list, a gap, then a content column with a reading-width cap.
+   Whatever is left stays empty on the right. The column is capped because a
+   description at 11px passes 75 characters a line at about 560px, and the
+   readability studies put comfortable reading at 50-75; a wider column
+   reads worse, not better. Windows Settings caps at 1064 with 36px margins,
+   VS Code's settings editor keeps a 200px table of contents and hides it
+   under 700px; this is the same shape at our window sizes. */
+
+.settings-layout {
+  display: grid;
+  /* 16px of screen margin and padding already sit to the left; this makes 28. */
+  grid-template-columns: 180px minmax(420px, 680px);
+  column-gap: 24px;
+  justify-content: start;
+  padding-left: 12px;
+  width: 100%;
+  align-items: start;
+}
 
 .settings-inner {
+  grid-column: 2;
   width: 100%;
-  max-width: 620px;
-  margin: 0 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 22px;
+}
+
+/* A page made of one group would repeat its name under the page title. */
+.settings-layout--single .set-section-head {
+  display: none;
+}
+
+/* ── Page list and search ─────────────────────────────────────── */
+
+.set-nav {
+  grid-column: 1;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Lines up the search box with the page title. */
+  padding-top: 24px;
+}
+
+.set-nav-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  height: 30px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.set-nav-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.set-nav-search svg {
+  flex-shrink: 0;
+}
+
+.set-nav-search input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+
+.set-nav-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.set-nav-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.set-nav-clear {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.set-nav-clear:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.set-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  transition: opacity 0.12s ease;
+}
+
+.set-nav-list--dim {
+  opacity: 0.55;
+}
+
+.set-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  outline: none;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+/* The first entry is the whole screen; a hairline sets it apart from the
+   categories under it. */
+.set-nav-item--all {
+  margin-bottom: 6px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.set-nav-item.set-nav-item--all.active,
+.set-nav-item.set-nav-item--all:hover {
+  border-radius: var(--radius-xs);
+  border-bottom-color: var(--border);
+}
+
+/* The same asterisk, in the top-right corner of an entry whose section
+   holds a changed setting. */
+.set-nav-item {
+  position: relative;
+}
+
+.set-nav-mark {
+  position: absolute;
+  /* The asterisk's ink sits at the top of its box, so the top offset is
+     smaller than the right one for the ink to sit the same distance from
+     both edges. */
+  top: 3px;
+  right: 5px;
+  color: #f59e0b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.set-nav-item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color 0.12s ease;
+}
+
+.set-nav-item:hover {
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+}
+
+.set-nav-item:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.set-nav-item.active {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.set-nav-item.active svg {
+  color: var(--accent);
+}
+
+/* ── Search results ───────────────────────────────────────────── */
+
+/* A row the query does not match, and any group or section left empty. */
+.set-row[data-hidden="true"] {
+  display: none;
+}
+
+.settings-layout--search .set-group:not(:has(.set-row:not([data-hidden="true"]))),
+.settings-layout--search .set-section:not(:has(.set-row:not([data-hidden="true"]))) {
+  display: none;
+}
+
+/* Shown only once every section has gone. */
+.set-search-empty {
+  display: none;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.settings-layout--search .settings-inner:not(:has(.set-row:not([data-hidden="true"]))) .set-search-empty {
+  display: block;
+}
+
+/* A narrow window stacks the list above the content as a row of chips. The
+   window's minimum is 640px, so the list is never hidden outright. */
+@media (max-width: 760px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 680px);
+  }
+
+  .set-nav {
+    grid-column: 1;
+    position: static;
+    padding-top: 0;
+    width: 100%;
+  }
+
+  .settings-inner {
+    grid-column: 1;
+  }
+
+  .set-nav-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
 }
 
 /* ── Page header (shared: scr-*) ───────────────────────────────── */
@@ -201,6 +438,14 @@
 /* A line under a row's description that needs the user's attention. */
 .set-row-desc--warn {
   color: #f59e0b;
+}
+
+/* The asterisk after a label whose setting is not at its default. */
+.set-mark {
+  margin-left: 3px;
+  color: #f59e0b;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* ── Select ────────────────────────────────────────────────────── */

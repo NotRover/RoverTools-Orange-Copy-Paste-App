@@ -136,6 +136,8 @@ src-tauri/
 │   │   ├── oauth.rs            # Google sign-in: loopback redirect server (ports 53170-53172)
 │   │   ├── device_id.rs        # Stable per-machine device fingerprint (not identity)
 │   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
+│   │   ├── tls.rs              # TLS for the sync server: public roots, or a pinned certificate
+│   │   ├── developer.rs        # Developer options: backend profile, connection test, status
 │   │   ├── pending_queue.rs    # sync_queue table: ops waiting to be pushed
 │   │   ├── pending_work.rs     # sync_work table: uploads and downloads under way
 │   │   ├── id_map.rs           # client_id -> server_id map (sync_entries table)
@@ -143,7 +145,7 @@ src-tauri/
 │   │   ├── crypto.rs           # password split (Argon2id + HKDF), UMK envelope, AES-256-GCM, X25519
 │   │   ├── types.rs            # Wire types mirrored from the backend contract
 │   │   ├── commands.rs         # Tauri commands: sync_login, sync_logout, sync_now, etc.
-│   │   └── config.rs           # Server/Supabase endpoints + sync-enabled flag
+│   │   └── config.rs           # Server/Supabase endpoints, transport rule, developer keys
 │   ├── runtime/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── clipboard_watcher.rs # Background polling thread (220ms)
@@ -1027,7 +1029,9 @@ for it.
 #### `ws_listener.rs` - WebSocket Listener
 
 Maintains a persistent `tokio-tungstenite` WebSocket connection to the backend's `/ws`
-endpoint. The connection handshake is part of the wire contract.
+endpoint. The connection handshake is part of the wire contract. The socket is opened
+through `tls.rs` with the same trust as the HTTP client (below), so a pinned certificate
+holds for both.
 
 On each received message, dispatches to:
 
@@ -1267,6 +1271,23 @@ _Server and state queries:_
 | `sync_get_entry_states` | Per-entry sync state for the card badges (`useEntrySyncStates()`) |
 | `sync_catch_up` | Cheap refresh after the window returns to the foreground |
 | `sync_get_connection` | Whether this build knows which deployment to talk to |
+
+_Developer options (`developer.rs`, the tools under the Developer options switch at the end of Settings):_
+
+| Command | Purpose |
+| --- | --- |
+| `dev_get_config` | The current backend profile, the compiled-in one, whether anyone is signed in, and the update-feed override |
+| `dev_discover` | `GET {server_url}/.well-known/orange-copy-paste.json`: the server's Supabase URL, publishable key, reset page and versions |
+| `dev_test_backend` | Try a profile without saving it: `/internal/healthz`, the `X-API-Version` header against the `v1` this client speaks, the discovery route, one WebSocket handshake, and `{supabase_url}/auth/v1/settings` with the key. Reports the certificate's SHA-256 and whether the public roots trust it |
+| `dev_set_backend` | Save a profile. Refused while signed in (the session, device record and keys belong to the current server); drops the sync client so the next one reads the new settings |
+| `dev_reset_backend` | Remove the overrides so the compiled-in deployment applies again. Same refusal |
+| `dev_set_update_override` | Set or clear `update_feed_url` and `update_pubkey` |
+| `dev_connection_status` | Engine snapshot (WebSocket state and history, device id, cursor, queue, in-flight pushes, recorded transfers) plus one live health round trip with its RTT |
+
+The endpoint values are public, so reading them out is fine; writing them is only ever
+done by these commands. `set_setting` refuses every key `SyncConfig::is_endpoint_key`
+names, so a script in the webview cannot repoint the app, loosen the transport rule or
+change where updates come from.
 
 _Devices and addressed invites:_
 
@@ -1566,6 +1587,11 @@ Sync adds these keys to the existing `settings.json` store:
 | `supabase_url`      | string | `DEFAULT_SUPABASE_URL`              | Supabase project URL - used for auth (GoTrue)                              |
 | `supabase_anon_key` | string | `DEFAULT_SUPABASE_ANON_KEY`         | Supabase anon (publishable) key - client-side auth only                    |
 | `reset_page_url`    | string | `DEFAULT_RESET_PAGE_URL`            | Where a password-reset mail lands; must match a Supabase Redirect URLs entry exactly |
+| `allow_private_http` | bool  | false                               | Accept plain `http://` endpoints on private-network hosts (see the transport rule below) |
+| `server_cert_sha256` | string | absent                             | Hex SHA-256 of the sync server's certificate. A leaf with this digest is accepted without a public root; applies to `sync_server_url` only |
+| `update_feed_url`   | string | absent                              | A custom update feed; replaces both the stable and the beta feed while set (section 4.8) |
+| `update_pubkey`     | string | absent                              | Minisign public key for that feed's bundles; absent keeps the built-in key |
+| `developer_mode`    | bool   | false                               | Whether the Developer group shows its tools under the switch. Turning it on asks first. A plain preference, unlike the keys above |
 | `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` - how personal cloud-sync entries move on this device |
 | `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
 | `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
@@ -1573,6 +1599,22 @@ Sync adds these keys to the existing `settings.json` store:
 The four `DEFAULT_*` values are compiled in from `src-tauri/src/sync/config.rs`, the single
 source for which deployment a build ships against. A key present and non-empty in
 `settings.json` wins over its constant; an absent or empty key falls back to it.
+
+**The transport rule** (`is_trusted_endpoint`). An endpoint override is taken only when it is
+`https://` anywhere, `http://` to the local machine (`localhost`, `127.0.0.1`, `[::1]`), or,
+with `allow_private_http` on, `http://` to a private-network host: RFC 1918, link-local,
+CGNAT `100.64/10` (Tailscale), IPv6 unique-local and link-local, `localhost`, a single-label
+name, or a name under `.local`, `.lan`, `.home`, `.internal` or `.home.arpa`. Anything else is
+logged and the compiled-in value is used instead. The Developer commands apply the same rule
+before writing, so a rejected URL never reaches the file.
+
+**Certificate pinning** (`tls.rs`). With `server_cert_sha256` set, the HTTP client and the
+WebSocket for `sync_server_url` are built on one `rustls` config whose verifier accepts a
+leaf certificate with that SHA-256 as it is, and otherwise defers to the WebPKI roots. The
+pin never applies to Supabase or blob storage. A connection test uses an observing variant
+of the same verifier, which is how the Developer page can show the fingerprint it saw
+and whether the roots would have trusted it, without ever accepting a certificate the
+real client would refuse.
 
 ### 4.7 Runtime Module
 
@@ -1728,6 +1770,11 @@ attached when they fired.
 
 `updater.rs` is the signed self-update flow. Updates are off in `tauri dev` by
 design, so this path is only exercised from published builds.
+
+The feed is the stable endpoint in `tauri.conf.json`, or `beta.json` on the beta channel.
+A custom feed from Developer options (`update_feed_url`, section 4.6 `config.rs`) replaces
+both while set, with `update_pubkey` as the signing key when the feed is a fork's rather
+than a mirror's. The signature check itself is never skipped.
 
 | Command | Purpose |
 | --- | --- |
@@ -1928,6 +1975,19 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - No icon - local-only (sync disabled, badges off, or entry predates sync enrollment)
 
 #### Settings Screen (`SettingsScreen.tsx`)
+
+The list beside the content (`SettingsNav.tsx`, with a search box above it) starts with
+"All settings", every section in one continuous scroll, then one entry per section;
+picking one shows that section alone, without its header. A row whose setting is not at
+its default carries a yellow asterisk (`ChangedMark.tsx`, with `data-changed` on the row),
+and the list marks every entry whose section holds one; the defaults are written on the
+rows themselves, nowhere else. The layout is left-aligned: a
+180px list, a 24px gap and a content column of 420-680px, with a row of chips above the
+content below a 760px window; groups always stack in one column. The chosen page is kept in `localStorage.sc-settings-page`. A query shows every section at once and marks each
+`.set-row` whose text does not contain it with `data-hidden`; the stylesheet hides marked
+rows and any group or section left without a visible one, so rows keep their state
+(an open select, a running update) instead of being unmounted. The Developer page is
+listed only while `developer_mode` is on.
 
 Among its settings (the screen is the full list):
 

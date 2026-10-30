@@ -234,6 +234,18 @@ pub struct SyncStatusInfo {
 }
 
 
+/// What the realtime socket has been through since the client was built.
+/// Milliseconds since the epoch, like every other timestamp on this surface.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct WsStats {
+    /// When the current connection came up; `None` while the socket is down.
+    pub connected_since: Option<u64>,
+    /// When the socket last dropped.
+    pub last_disconnect: Option<u64>,
+    /// Successful connections this run. Anything past the first is a reconnect.
+    pub connections: u32,
+}
+
 // ── Entry type discriminator ─────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

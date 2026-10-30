@@ -19,7 +19,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 
 use crate::state::AppState;
@@ -136,7 +136,8 @@ impl WsListener {
             .replacen("http://", "ws://", 1);
         let endpoint = format!("{}/ws", base.trim_end_matches('/'));
 
-        let (ws_stream, _) = connect_async(&endpoint)
+        let connector = crate::sync::tls::ws_connector(self.http.cert_pin);
+        let (ws_stream, _) = connect_async_tls_with_config(&endpoint, None, false, connector)
             .await
             .map_err(|e| format!("ws connect: {e}"))?;
         let (mut write, mut read) = ws_stream.split();

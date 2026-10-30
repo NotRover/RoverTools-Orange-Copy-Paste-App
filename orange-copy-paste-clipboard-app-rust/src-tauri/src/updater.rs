@@ -178,12 +178,52 @@ fn on_beta_channel(app: &tauri::AppHandle) -> bool {
         == Some("beta")
 }
 
+/// A feed the user pointed this install at from Developer options, with the
+/// minisign public key that feed's bundles are signed with. Set by
+/// `sync::developer::dev_set_update_override`; the keys are refused by the
+/// generic settings command, so a webview script cannot plant one.
+pub(crate) struct UpdateOverride {
+    pub feed_url: String,
+    /// `None` means the feed serves bundles signed with the built-in key, as a
+    /// mirror of the official feed would.
+    pub pubkey: Option<String>,
+}
+
+pub(crate) fn update_override(app: &tauri::AppHandle) -> Option<UpdateOverride> {
+    let feed_url = read_setting(app, crate::sync::config::KEY_UPDATE_FEED_URL)?
+        .as_str()
+        .filter(|s| !s.is_empty())?
+        .to_owned();
+    let pubkey = read_setting(app, crate::sync::config::KEY_UPDATE_PUBKEY)
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .filter(|s| !s.is_empty());
+    Some(UpdateOverride { feed_url, pubkey })
+}
+
 /// The updater pointed at the channel this install follows.
 ///
 /// Stable uses the endpoint compiled into `tauri.conf.json`; beta overrides it at
 /// runtime. Signature checking is unchanged either way — both feeds serve bundles
 /// signed with the same key, so a compromised feed still cannot install anything.
+///
+/// A custom feed from Developer options replaces both channels. A fork ships
+/// its own signing key, so the override can carry a public key too; without
+/// one the built-in key stays in force, which is what a plain mirror needs.
 fn updater_for(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    if let Some(custom) = update_override(app) {
+        let url = custom
+            .feed_url
+            .parse()
+            .map_err(|e| format!("custom update feed URL is invalid: {e}"))?;
+        let mut builder = app
+            .updater_builder()
+            .endpoints(vec![url])
+            .map_err(|e| e.to_string())?;
+        if let Some(pubkey) = custom.pubkey {
+            builder = builder.pubkey(pubkey);
+        }
+        return builder.build().map_err(|e| e.to_string());
+    }
     if !on_beta_channel(app) {
         return app.updater().map_err(|e| e.to_string());
     }

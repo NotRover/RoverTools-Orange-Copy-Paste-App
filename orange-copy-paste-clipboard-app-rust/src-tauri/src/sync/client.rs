@@ -798,6 +798,9 @@ pub struct QuotaResponse {
 pub struct SyncHttpClient {
     inner: reqwest::Client,
     pub base_url: String,
+    /// The pinned server certificate, if any, so the WebSocket can use the
+    /// same trust as the HTTP client. See `sync::tls`.
+    pub cert_pin: Option<[u8; 32]>,
     /// Supabase Auth handle, used to refresh the access token on 401.
     supabase: Arc<SupabaseAuth>,
     /// Short-lived Supabase JWT.  Replaced on the 401 → refresh flow.
@@ -873,7 +876,7 @@ fn retry_after_secs(resp: &reqwest::Response) -> Option<u64> {
 /// `reqwest::Error`'s own `Display` stops at "error sending request for url
 /// (...)" and hides the cause in `source()`, so every network problem - DNS,
 /// TLS, refused connection, timeout - reaches the UI looking identical.
-fn transport_detail(e: &reqwest::Error) -> String {
+pub(crate) fn transport_detail(e: &reqwest::Error) -> String {
     let head = if e.is_timeout() {
         "timed out"
     } else if e.is_connect() {
@@ -897,8 +900,12 @@ fn transport_detail(e: &reqwest::Error) -> String {
 }
 
 impl SyncHttpClient {
-    pub fn new(base_url: String, supabase: Arc<SupabaseAuth>) -> Arc<Self> {
-        Self::with_timeout(base_url, supabase, REQUEST_TIMEOUT_SECS)
+    pub fn new(
+        base_url: String,
+        supabase: Arc<SupabaseAuth>,
+        cert_pin: Option<[u8; 32]>,
+    ) -> Arc<Self> {
+        Self::with_timeout(base_url, supabase, REQUEST_TIMEOUT_SECS, cert_pin)
     }
 
     /// Same client with a custom request timeout.  Session restore uses a
@@ -909,14 +916,16 @@ impl SyncHttpClient {
         base_url: String,
         supabase: Arc<SupabaseAuth>,
         timeout_secs: u64,
+        cert_pin: Option<[u8; 32]>,
     ) -> Arc<Self> {
-        let inner = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .build()
-            .expect("reqwest client");
+        let inner = crate::sync::tls::http_client(
+            std::time::Duration::from_secs(timeout_secs),
+            cert_pin,
+        );
         Arc::new(Self {
             inner,
             base_url,
+            cert_pin,
             supabase,
             access_token: Mutex::new(None),
             refresh_token: Mutex::new(None),

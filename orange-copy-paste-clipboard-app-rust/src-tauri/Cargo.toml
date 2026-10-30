@@ -88,6 +88,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
 # Async WebSocket client (rustls TLS with bundled WebPKI certificate roots)
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+# The TLS config both of the above use for the sync server, so a pinned
+# certificate (sync/tls.rs) applies to HTTP and WebSocket alike. Same provider
+# (ring) as reqwest and tokio-tungstenite already pull in.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1.0"
 # Futures utilities (Stream/Sink combinators for the WS listener)
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # Argon2id — User Master Key derivation

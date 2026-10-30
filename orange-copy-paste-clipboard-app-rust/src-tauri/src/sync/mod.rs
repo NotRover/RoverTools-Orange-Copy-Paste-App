@@ -15,6 +15,7 @@ pub mod client;
 pub mod commands;
 pub mod config;
 pub mod crypto;
+pub mod developer;
 pub mod device_id;
 pub mod id_map;
 pub mod oauth;
@@ -22,6 +23,7 @@ pub mod pending_queue;
 pub mod pending_work;
 pub mod supabase;
 pub mod sync_state;
+pub mod tls;
 pub mod types;
 pub mod ws_listener;
 
@@ -51,8 +53,7 @@ use crate::sync::supabase::{SignUpOutcome, SupabaseAuth, SupabaseSession};
 use crate::sync::sync_state::SyncStateStore;
 use crate::sync::types::{
     EntryType, RemovalScope, RestoreOutcome, SendFilter, SkippedEntry, Space, SpaceComment,
-    SpaceCommentCount, SpaceMember, SyncMode, SyncStatusInfo, SyncUser,
-};
+    SpaceCommentCount, SpaceMember, SyncMode, SyncStatusInfo, SyncUser, WsStats};
 use crate::sync::ws_listener::WsListener;
 
 /// How long after the last `schedule_settings_sync()` call before the sync fires.
@@ -554,6 +555,9 @@ fn note_token_at_risk(headline: &str, detail: impl std::fmt::Display) {
 
 pub struct SyncClient {
     pub server_url: String,
+    /// SHA-256 of the sync server's certificate, when the user pinned one.
+    /// See [`tls`].
+    cert_pin: Option<[u8; 32]>,
     /// Where a password-reset mail lands, and so the `redirect_to` Supabase is
     /// asked for. Held apart from `server_url` because it is deliberately not on
     /// the API host - see `config::DEFAULT_RESET_PAGE_URL`.
@@ -627,6 +631,9 @@ pub struct SyncClient {
     sync_state: Arc<Mutex<SyncStateStore>>,
     /// Aggregate sync status for UI display.
     status: Arc<Mutex<SyncStatusInfo>>,
+    /// What the realtime socket has been through this run, for the Developer
+    /// section's connection panel.
+    ws_stats: Mutex<WsStats>,
     /// Cached space list (membership, members, presence) for the UI.
     spaces: Arc<Mutex<Vec<Space>>>,
     /// Space keyrings by space id, newest key first. In memory only, like the
@@ -843,6 +850,7 @@ impl SyncClient {
 
         Ok(Self {
             server_url: config.server_url,
+            cert_pin: config.server_cert_sha256,
             reset_page_url: config.reset_page_url,
             app,
             app_data,
@@ -865,6 +873,7 @@ impl SyncClient {
             settings_round,
             id_map,
             sync_state,
+            ws_stats: Mutex::new(WsStats::default()),
             status,
             spaces: Arc::new(Mutex::new(Vec::new())),
             space_keys: Arc::new(Mutex::new(HashMap::new())),
@@ -1008,7 +1017,7 @@ impl SyncClient {
         let email = session.user.email.clone();
 
         // Probe the account: does it already have a registered identity key?
-        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase), self.cert_pin);
         http.set_access_token(session.access_token.clone(), session.expires_in);
         http.set_refresh_token(session.refresh_token.clone());
         http.set_user_id(session.user.id.clone());
@@ -1164,7 +1173,7 @@ impl SyncClient {
         let email = session.user.email.clone();
         let access_token = session.access_token.clone();
 
-        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase), self.cert_pin);
         http.set_access_token(session.access_token, session.expires_in);
         http.set_refresh_token(session.refresh_token);
         http.set_user_id(user_id.clone());
@@ -1446,7 +1455,7 @@ impl SyncClient {
         };
 
         // 2. Build the authenticated backend client.
-        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase));
+        let http = SyncHttpClient::new(self.server_url.clone(), Arc::clone(&self.supabase), self.cert_pin);
         http.set_access_token(session.access_token, session.expires_in);
         http.set_refresh_token(session.refresh_token.clone());
         http.set_user_id(user_id.clone());
@@ -1812,6 +1821,7 @@ impl SyncClient {
             self.server_url.clone(),
             Arc::clone(&self.supabase),
             RESTORE_TIMEOUT_SECS,
+            self.cert_pin,
         );
         http.set_access_token(session.access_token, session.expires_in);
         http.set_refresh_token(session.refresh_token);
@@ -2146,7 +2156,40 @@ impl SyncClient {
     /// every connect and drop — it is the only writer, so the status pill and
     /// the actual connection can no longer disagree.
     pub(crate) fn set_connected(&self, connected: bool) {
-        self.status.lock().connected = connected;
+        let was = std::mem::replace(&mut self.status.lock().connected, connected);
+        let mut stats = self.ws_stats.lock();
+        let now = now_ms();
+        if connected && !was {
+            stats.connections += 1;
+            stats.connected_since = Some(now);
+        } else if !connected && was {
+            stats.connected_since = None;
+            stats.last_disconnect = Some(now);
+        }
+    }
+
+    /// A copy of the socket's history this run.
+    pub fn ws_stats(&self) -> WsStats {
+        self.ws_stats.lock().clone()
+    }
+
+    /// The pull cursor: the server timestamp the next delta pull starts from.
+    pub fn cursor(&self) -> Option<u64> {
+        self.sync_state.lock().data.last_server_ts
+    }
+
+    /// Entry keys with a push running right now.
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight.lock().len()
+    }
+
+    /// Uploads and downloads recorded as started and not finished.
+    pub fn pending_work_count(&self) -> usize {
+        self.pending_work.lock().keys().len()
+    }
+
+    pub fn cert_pin(&self) -> Option<[u8; 32]> {
+        self.cert_pin
     }
 
     fn start_ws_listener(&self) {
