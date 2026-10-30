@@ -11,7 +11,6 @@ import {
   IconDownload,
   IconFolderOpen,
   IconHistory,
-  IconListDetails,
   IconPlayerPlayFilled,
   IconRefresh,
   IconShieldCheck,
@@ -34,7 +33,7 @@ import { parseNotes, hasParsedNotes } from "../update-banner/parseNotes";
 import DeveloperSection from "./DeveloperSection";
 import { ChangedMark } from "./ChangedMark";
 import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
-import SettingsNav, { type SettingsPage } from "./SettingsNav";
+import SettingsNav, { type SettingsSection } from "./SettingsNav";
 import "./SettingsScreen.css";
 
 const SLOT_OPTIONS = [3, 4, 5, 6, 7, 8, 9, 10];
@@ -122,83 +121,27 @@ const ToggleRow: React.FC<{
   </div>
 );
 
-// ── Pages ─────────────────────────────────────────────────────────────
+// ── Sections ──────────────────────────────────────────────────────────
 //
-// "All settings" is the default: every section in one continuous scroll,
-// each under its own header. Picking a section in the list shows that one
-// alone. A search shows every section at once, filtered to the rows that
-// match, whichever page is chosen.
+// Every section is on the screen at once, in this order, each under its own
+// header. The list beside the content is a table of contents: picking an
+// entry scrolls to that section, and the entry for the section under the
+// top of the view is lit. A search shows only the rows that match.
 
-const SECTION_PAGES: SettingsPage[] = [
-  {
-    id: "general",
-    label: "General",
-    blurb: "How the window, the tray and startup behave on this device.",
-    Icon: IconAdjustmentsHorizontal,
-    sections: ["set-general"],
-  },
-  {
-    id: "confirmations",
-    label: "Confirmations",
-    blurb: "Which actions ask before they go ahead.",
-    Icon: IconShieldCheck,
-    sections: ["set-confirmations"],
-  },
-  {
-    id: "notifications",
-    label: "Notifications",
-    blurb: "The in-app popup and desktop notices on copy and paste.",
-    Icon: BellIcon,
-    sections: ["set-notifications"],
-  },
-  {
-    id: "sounds",
-    label: "Sounds",
-    blurb: "Cues for copy, paste and closing, and a way to hear them.",
-    Icon: IconVolume,
-    sections: ["set-sounds"],
-  },
-  {
-    id: "quick-paste",
-    label: "Quick Paste",
-    blurb: "The paste popup and its number-key slots.",
-    Icon: IconClipboardText,
-    sections: ["set-quick-paste"],
-  },
-  {
-    id: "history",
-    label: "History",
-    blurb: "What the app keeps between restarts and how cards respond to a click.",
-    Icon: IconHistory,
-    sections: ["set-history"],
-  },
-  {
-    id: "data",
-    label: "Data",
-    blurb: "Encryption on this PC, the data folder and the app log.",
-    Icon: IconFolderOpen,
-    sections: ["set-data"],
-  },
-  {
-    id: "updates",
-    label: "Updates",
-    blurb: "Check, download and install new versions, or opt into betas.",
-    Icon: IconDownload,
-    sections: ["set-updates"],
-  },
+const SECTIONS: SettingsSection[] = [
+  { id: "set-general", label: "General", Icon: IconAdjustmentsHorizontal },
+  { id: "set-confirmations", label: "Confirmations", Icon: IconShieldCheck },
+  { id: "set-notifications", label: "Notifications", Icon: BellIcon },
+  { id: "set-sounds", label: "Sounds", Icon: IconVolume },
+  { id: "set-quick-paste", label: "Quick Paste", Icon: IconClipboardText },
+  { id: "set-history", label: "History", Icon: IconHistory },
+  { id: "set-data", label: "Data", Icon: IconFolderOpen },
+  { id: "set-updates", label: "Updates", Icon: IconDownload },
+  { id: "set-developer", label: "Developer", Icon: IconCode },
 ];
-const DEVELOPER_PAGE: SettingsPage = {
-  id: "developer",
-  label: "Developer",
-  blurb: "Your own server, the sync connection and a custom update feed, behind a switch.",
-  Icon: IconCode,
-  sections: ["set-developer"],
-};
-const ALL_PAGE_ID = "all";
 
 // What a fresh install has. The rows compare against these for their
-// asterisk, and the page list marks a section while any of its settings
-// differs, so the list is right before the section has ever been shown.
+// asterisk, and the list marks a section while any of its settings differs.
 const DEFAULTS = {
   closeToTray: false,
   runOnStartup: false,
@@ -226,7 +169,6 @@ const DEFAULTS = {
   betaChannel: false,
   developerMode: false,
 } as const;
-const PAGE_STORAGE_KEY = "sc-settings-page";
 
 // ── Main component ────────────────────────────────────────────────────
 
@@ -462,19 +404,7 @@ const SettingsScreen: React.FC = () => {
 
   const updateBusy = updater.stage === "checking" || updater.stage === "downloading" || updater.stage === "installing";
 
-  // ── Pages and search ────────────────────────────────────────────
-  const sectionPages = [...SECTION_PAGES, DEVELOPER_PAGE];
-  const allPage: SettingsPage = {
-    id: ALL_PAGE_ID,
-    label: "Settings",
-    blurb: "Every setting on this device, in one scroll. Pick a category to see only its controls.",
-    Icon: IconListDetails,
-    sections: sectionPages.flatMap((p) => p.sections),
-  };
-  const pages = [allPage, ...sectionPages];
-  const [page, setPage] = useState<string>(
-    () => localStorage.getItem(PAGE_STORAGE_KEY) ?? ALL_PAGE_ID,
-  );
+  // ── Contents list and search ────────────────────────────────────
   const [query, setQuery] = useState("");
   const searching = query.trim().length > 0;
   // The Developer tools report their own state (a custom server, a feed).
@@ -500,22 +430,48 @@ const SettingsScreen: React.FC = () => {
     differs("autoCheckUpdates", "autoInstallUpdates", "betaChannel") && "set-updates",
     (differs("developerMode") || devChanged) && "set-developer",
   ].filter((id): id is string => typeof id === "string");
-  // A page that is no longer offered (Developer options turned off while on
-  // it) falls back to the first one.
-  const currentPage = pages.find((p) => p.id === page) ?? allPage;
-  const selectPage = (id: string) => {
-    setPage(id);
-    localStorage.setItem(PAGE_STORAGE_KEY, id);
-    screenRef.current?.scrollTo({ top: 0 });
+  const screenRef = useRef<HTMLDivElement>(null);
+
+  // Scroll-spy for the list: the lit entry is the last section whose top has
+  // passed a line a little below the top of the view, or the last section
+  // once the view is scrolled to the bottom (the short ones at the end would
+  // never reach the line otherwise). Picking an entry scrolls its section to
+  // the top of the view.
+  const [activeSection, setActiveSection] = useState(SECTIONS[0].id);
+  useEffect(() => {
+    const root = screenRef.current;
+    if (!root) return;
+    let frame = 0;
+    const spy = () => {
+      frame = 0;
+      const sections = [...root.querySelectorAll<HTMLElement>(".set-section")];
+      if (sections.length === 0) return;
+      const atBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
+      const line = root.getBoundingClientRect().top + 80;
+      let current = sections[0];
+      if (atBottom) current = sections[sections.length - 1];
+      else for (const el of sections) if (el.getBoundingClientRect().top <= line) current = el;
+      setActiveSection(current.id);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(spy);
+    };
+    spy();
+    root.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [searching]);
+  const jumpTo = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" });
   };
-  const visible = (id: string) => searching || currentPage.sections.includes(id);
 
   // Search filters by what a row says: its label and description, and for
   // the stacked rows whatever else they show. Rows are marked rather than
   // unmounted so their state (an open select, a running update) survives;
   // the stylesheet hides a marked row, and a group or section left with no
   // visible row along with it.
-  const screenRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const root = screenRef.current;
     if (!root) return;
@@ -530,31 +486,28 @@ const SettingsScreen: React.FC = () => {
   // ── Render ──────────────────────────────────────────────────────
   return (
     <div className="settings-screen" ref={screenRef}>
-      <div
-        className={`settings-layout${searching ? " settings-layout--search" : ""}${
-          !searching && currentPage.sections.length === 1 ? " settings-layout--single" : ""
-        }`}
-      >
+      <div className={`settings-layout${searching ? " settings-layout--search" : ""}`}>
       <SettingsNav
-        pages={pages}
-        active={currentPage.id}
+        sections={SECTIONS}
+        active={activeSection}
         marked={changedSections}
-        onSelect={selectPage}
+        onSelect={jumpTo}
         query={query}
         onQuery={setQuery}
       />
       <div className="settings-inner">
         <header className="scr-head">
-          <span className="scr-eyebrow">Settings</span>
-          <h2 className="scr-title">{searching ? "Search" : currentPage.label}</h2>
+          <span className="scr-eyebrow">Preferences</span>
+          <h2 className="scr-title">{searching ? "Search" : "Settings"}</h2>
           <p className="scr-subtitle">
-            {searching ? `Settings matching "${query.trim()}" on every page.` : currentPage.blurb}
+            {searching
+              ? `Settings matching "${query.trim()}".`
+              : "Tune how Orange Copy Paste behaves on this device."}
           </p>
         </header>
         {searching && <p className="set-search-empty">No setting matches. Try another word.</p>}
 
         {/* ── General ── */}
-        {visible("set-general") && (
         <section className="set-section" id="set-general">
           <div className="set-section-head">
             <span className="set-section-icon"><IconAdjustmentsHorizontal size={15} /></span>
@@ -607,9 +560,7 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
-        )}
 
-        {visible("set-confirmations") && (
         <section className="set-section" id="set-confirmations">
           <div className="set-section-head">
             <span className="set-section-icon"><IconShieldCheck size={15} /></span>
@@ -657,12 +608,10 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
-        )}
 
         {/* ── Confirmations ── */}
 
         {/* ── Notifications ── */}
-        {visible("set-notifications") && (
         <section className="set-section" id="set-notifications">
           <div className="set-section-head">
             <span className="set-section-icon"><BellIcon size={15} /></span>
@@ -733,10 +682,8 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
-        )}
 
         {/* ── Sounds ── */}
-        {visible("set-sounds") && (
         <section className="set-section" id="set-sounds">
           <div className="set-section-head">
             <span className="set-section-icon"><IconVolume size={15} /></span>
@@ -826,9 +773,7 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
-        )}
 
-        {visible("set-quick-paste") && (
         <section className="set-section" id="set-quick-paste">
           <div className="set-section-head">
             <span className="set-section-icon"><IconClipboardText size={15} /></span>
@@ -849,13 +794,11 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
-        )}
 
 
         {/* ── Quick Paste ── */}
 
         {/* ── History ── */}
-        {visible("set-history") && (
         <section className="set-section" id="set-history">
           <div className="set-section-head">
             <span className="set-section-icon"><IconHistory size={15} /></span>
@@ -910,11 +853,9 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
-        )}
 
 
         {/* ── Data ── */}
-        {visible("set-data") && (
         <section className="set-section" id="set-data">
           <div className="set-section-head">
             <span className="set-section-icon"><IconFolderOpen size={15} /></span>
@@ -973,10 +914,8 @@ const SettingsScreen: React.FC = () => {
             </div>
           </div>
         </section>
-        )}
 
         {/* ── Updates ── */}
-        {visible("set-updates") && (
         <section className="set-section" id="set-updates">
           <div className="set-section-head">
             <span className="set-section-icon"><IconDownload size={15} /></span>
@@ -1081,29 +1020,26 @@ const SettingsScreen: React.FC = () => {
             />
           </div>
         </section>
-        )}
 
-        {visible("set-developer") && (
-          <DeveloperSection
-            enabled={developerMode}
-            onChanged={setDevChanged}
-            toggle={
-              <ToggleRow
-                label="Developer options"
-                desc="Use your own server, inspect the sync connection, and read updates from another feed. The settings appear below once this is on."
-                active={developerMode}
-                defaultActive={DEFAULTS.developerMode}
-                onToggle={() => {
-                  if (developerMode) {
-                    toggleBoolSetting(developerMode, setDeveloperMode, "developer_mode");
-                  } else {
-                    setDevConfirm(true);
-                  }
-                }}
-              />
-            }
-          />
-        )}
+        <DeveloperSection
+          enabled={developerMode}
+          onChanged={setDevChanged}
+          toggle={
+            <ToggleRow
+              label="Developer options"
+              desc="Use your own server, inspect the sync connection, and read updates from another feed. The settings appear below once this is on."
+              active={developerMode}
+              defaultActive={DEFAULTS.developerMode}
+              onToggle={() => {
+                if (developerMode) {
+                  toggleBoolSetting(developerMode, setDeveloperMode, "developer_mode");
+                } else {
+                  setDevConfirm(true);
+                }
+              }}
+            />
+          }
+        />
         <ConfirmDeleteDialog
           open={devConfirm}
           title="Turn on Developer options?"

@@ -81,7 +81,6 @@ type UnsyncedPreview = {
 
 const MODE_OPTIONS: { value: SyncMode; label: string }[] = [
   { value: "realtime", label: "Realtime" },
-  { value: "passive", label: "Passive" },
   { value: "manual", label: "Manual" },
 ];
 
@@ -332,9 +331,7 @@ const AccountScreen: React.FC<AccountScreenProps> = ({
         refreshCloudCount();
         invoke<string>("sync_get_mode")
           .then((m) =>
-            setSyncMode(
-              m === "passive" || m === "manual" ? m : "realtime",
-            ),
+            setSyncMode(m === "manual" ? "manual" : "realtime"),
           )
           .catch(() => {});
         invoke<SyncDevice[]>("sync_list_devices")
@@ -2064,9 +2061,18 @@ Keep this. It is the only way back into your synced items if you forget your pas
                 <span className="acct-zone-label">Cloud sync</span>
               </div>
 
-              <div className="acct-card acct-mode">
+              {/* One card: the mode, the backlog and the restore are three rows of one subject. */}
+              <div className="acct-card acct-card--rows acct-mode-stack">
+              <div className="acct-mode">
                 <div className="acct-mode-head">
-                  <span className="acct-row-name">Automatic syncing</span>
+                  <div className="acct-mode-info">
+                    <span className="acct-row-name">Automatic syncing</span>
+                    <p className="acct-card-desc">
+                      {syncMode === "realtime"
+                        ? "Items from your other devices arrive as they are copied. What you copy here uploads right away."
+                        : "Nothing uploads on its own. Send items with Upload to cloud; Refresh brings down what your other devices sent."}
+                    </p>
+                  </div>
                   <div className="acct-seg">
                     {MODE_OPTIONS.map((opt) => (
                       <button
@@ -2080,23 +2086,15 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     ))}
                   </div>
                 </div>
-                <p className="acct-card-desc">
-                  {syncMode === "realtime"
-                    ? "Items from your other devices arrive the moment they are copied, and what you copy here uploads right away."
-                    : syncMode === "passive"
-                      ? "Items from your other devices arrive every 5 minutes, or when you press Refresh. What you copy here still uploads right away."
-                      : "Nothing new uploads on its own. Pick what to send with Upload to cloud, on an item or on a selection. Items already in the cloud stay up to date, removing one still removes it, and Refresh brings down what your other devices sent."}
-                </p>
                 <p className="acct-mode-note">
-                  Spaces are not affected. What you share to a space still goes
-                  out right away, and what other people share with you always
-                  arrives live.
+                  Spaces are not affected: what you share there still goes out, and
+                  what others share with you still arrives, right away.
                 </p>
               </div>
 
               {/* Items are only pushed as they are captured, so anything from
                   before this account signed in never leaves the device. */}
-              <div className="acct-card acct-mode">
+              <div className="acct-mode">
                 <div className="acct-mode-head">
                   <span className="acct-row-name">
                     Items this account has never seen
@@ -2191,14 +2189,13 @@ Keep this. It is the only way back into your synced items if you forget your pas
                 ) : (
                   <p className="acct-card-desc">
                     {pushResult ??
-                      "Sync picks up items as you copy them, so anything from before you signed in stays here. Upload sends those, encrypted."}
+                      "Items copied before you signed in stay on this PC. Upload sends them, encrypted."}
                   </p>
                 )}
                 {!pushResult && !progress && !plan && (
                   <p className="acct-mode-note">
-                    Remove from cloud does the opposite for everything: your
-                    items leave the server and your other devices, and only this
-                    device keeps them.
+                    Remove from cloud does the opposite: your items leave the server
+                    and your other devices, and only this PC keeps them.
                   </p>
                 )}
                 {progress?.mode === "upload" && (
@@ -2211,9 +2208,18 @@ Keep this. It is the only way back into your synced items if you forget your pas
 
               {/* Says what it does, because the button alone reads like it could
                   bring back deletes, and turns into the result once it has run. */}
-              <div className="acct-card acct-mode">
+              <div className="acct-mode">
                 <div className="acct-mode-head">
-                  <span className="acct-row-name">Restore from cloud</span>
+                  <div className="acct-mode-info">
+                    <span className="acct-row-name">Restore from cloud</span>
+                    <p
+                      className={`acct-card-desc${restoreNote ? ` acct-card-desc--${restoreNote.warn ? "warn" : "ok"}` : ""}`}
+                      role="status"
+                    >
+                      {restoreNote?.text ??
+                        "Downloads what your account holds that is missing on this PC. Deleted items stay deleted."}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     className="acct-btn acct-btn--sm"
@@ -2223,13 +2229,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                     {restoring ? "Restoring..." : "Restore"}
                   </button>
                 </div>
-                <p
-                  className={`acct-card-desc${restoreNote ? ` acct-card-desc--${restoreNote.warn ? "warn" : "ok"}` : ""}`}
-                  role="status"
-                >
-                  {restoreNote?.text ??
-                    "Downloads anything your account holds that is missing on this PC. Deleted items stay deleted."}
-                </p>
+              </div>
               </div>
             </section>
 

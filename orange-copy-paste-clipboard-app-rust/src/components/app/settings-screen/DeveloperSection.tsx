@@ -100,8 +100,10 @@ const DeveloperSection: React.FC<{
       <span className="set-section-icon"><IconCode size={15} /></span>
       <h3 className="set-section-title">Developer</h3>
     </div>
-    <div className="set-group">{toggle}</div>
-    {enabled && <DeveloperTools onChanged={onChanged} />}
+    <div className="set-group">
+      {toggle}
+      {enabled && <DeveloperTools onChanged={onChanged} />}
+    </div>
   </section>
 );
 
@@ -291,7 +293,6 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
   return (
     <>
       {/* ── Backend ── */}
-      <div className="set-group">
         <div className="set-row set-row--stack">
           <div className="set-row-header">
             <div className="set-row-info">
@@ -453,10 +454,8 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
           </>
           )}
         </div>
-      </div>
 
       {/* ── Connection ── */}
-      <div className="set-group">
         <div className="set-row set-row--stack">
           <div className="set-row-header">
             <div className="set-row-info">
@@ -560,10 +559,8 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
             </div>
           )}
         </div>
-      </div>
 
       {/* ── Updates ── */}
-      <div className="set-group">
         <div className="set-row set-row--stack">
           <div className="set-row-header">
             <div className="set-row-info">
@@ -612,7 +609,6 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
             </button>
           </div>
         </div>
-      </div>
     </>
   );
 };

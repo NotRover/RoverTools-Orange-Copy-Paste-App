@@ -284,7 +284,7 @@ impl WsListener {
         match msg.event.as_str() {
             // Entry fan-out: only Rust holds the keys, so decrypt + merge here
             // (tombstones — deleted_at set — are handled inside merge_pulled).
-            // `Live`: this is the WS path, where passive mode and
+            // `Live`: this is the WS path, where manual mode and
             // auto-copy apply.
             "sync:entry" => {
                 if let Ok(entry) = serde_json::from_value::<PulledEntry>(msg.payload.clone()) {

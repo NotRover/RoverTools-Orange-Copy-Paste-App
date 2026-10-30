@@ -1196,6 +1196,11 @@
 
 /* ── Cloud sync mode ── */
 
+/* The Cloud sync rows share one card, divided by hairlines. */
+.acct-mode-stack .acct-mode + .acct-mode {
+  border-top: 1px solid var(--border);
+}
+
 .acct-mode {
   display: flex;
   flex-direction: column;
@@ -1214,8 +1219,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   min-height: 26px;
+}
+
+/* Name over its one-line meaning, as a Settings row does; the control sits
+   beside the pair. */
+.acct-mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.acct-mode-head > .acct-seg,
+.acct-mode-head > .acct-btn,
+.acct-mode-head > .acct-id-actions {
+  flex-shrink: 0;
 }
 
 /* Sits a step below the description it follows, not a paragraph apart. */

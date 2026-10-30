@@ -29,30 +29,35 @@
   --cta-hover: var(--accent-hover);
 }
 
-/* Page list beside the content, both against the left edge.
+/* A centered content column, with the table of contents in the right gutter.
 
-   Left-aligned like Windows Settings and the VS Code settings editor: a fixed
-   margin, the list, a gap, then a content column with a reading-width cap.
-   Whatever is left stays empty on the right. The column is capped because a
+   The column has the same width and centering as the Account screen's
+   (.acct-inner), so the two screens line up. The gutters share whatever is
+   left; the right one never drops under the list's width, so on a window
+   too narrow for equal gutters the column sits a little left of center
+   rather than the list being clipped. The column is capped because a
    description at 11px passes 75 characters a line at about 560px, and the
    readability studies put comfortable reading at 50-75; a wider column
-   reads worse, not better. Windows Settings caps at 1064 with 36px margins,
-   VS Code's settings editor keeps a 200px table of contents and hides it
-   under 700px; this is the same shape at our window sizes. */
+   reads worse, not better. */
 
 .settings-layout {
   display: grid;
-  /* 16px of screen margin and padding already sit to the left; this makes 28. */
-  grid-template-columns: 180px minmax(420px, 680px);
-  column-gap: 24px;
-  justify-content: start;
-  padding-left: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 620px) minmax(180px, 1fr);
+  column-gap: 22px;
   width: 100%;
   align-items: start;
 }
 
+/* Where a section stops when the list scrolls to it. */
+.set-section {
+  scroll-margin-top: 26px;
+}
+
 .settings-inner {
+  /* Both in row 1: the list comes first in the DOM at column 3, and without
+     this the content would auto-flow to a second row under it. */
   grid-column: 2;
+  grid-row: 1;
   width: 100%;
   min-width: 0;
   display: flex;
@@ -60,15 +65,12 @@
   gap: 22px;
 }
 
-/* A page made of one group would repeat its name under the page title. */
-.settings-layout--single .set-section-head {
-  display: none;
-}
-
 /* ── Page list and search ─────────────────────────────────────── */
 
 .set-nav {
-  grid-column: 1;
+  grid-column: 3;
+  grid-row: 1;
+  width: 180px;
   position: sticky;
   top: 0;
   display: flex;
@@ -168,21 +170,6 @@
     border-color 0.12s ease;
 }
 
-/* The first entry is the whole screen; a hairline sets it apart from the
-   categories under it. */
-.set-nav-item--all {
-  margin-bottom: 6px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-}
-
-.set-nav-item.set-nav-item--all.active,
-.set-nav-item.set-nav-item--all:hover {
-  border-radius: var(--radius-xs);
-  border-bottom-color: var(--border);
-}
-
 /* The same asterisk, in the top-right corner of an entry whose section
    holds a changed setting. */
 .set-nav-item {
@@ -256,11 +243,13 @@
    window's minimum is 640px, so the list is never hidden outright. */
 @media (max-width: 760px) {
   .settings-layout {
-    grid-template-columns: minmax(0, 680px);
+    grid-template-columns: minmax(0, 620px);
+    justify-content: center;
   }
 
   .set-nav {
     grid-column: 1;
+    grid-row: 1;
     position: static;
     padding-top: 0;
     width: 100%;
@@ -268,6 +257,7 @@
 
   .settings-inner {
     grid-column: 1;
+    grid-row: 2;
   }
 
   .set-nav-list {

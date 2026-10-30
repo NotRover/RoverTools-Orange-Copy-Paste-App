@@ -725,7 +725,7 @@ fn setup_runtime(
     //
     // Through the same helper the commands use, not a second hand-rolled
     // construction: building the client is only half of starting sync, and the
-    // half this path used to skip - the passive pull and reminder loops - could
+    // half this path used to skip - the background pull and reminder loops - could
     // never be repaired later, because every command that would have started
     // them returns the client this path already installed. The gate stays out
     // here because the helper deliberately does not consult `enabled`; a

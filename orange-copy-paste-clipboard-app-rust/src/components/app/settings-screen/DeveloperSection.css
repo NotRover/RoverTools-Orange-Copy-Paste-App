@@ -2,10 +2,6 @@
    update feed override. Inputs follow .auth-input (AccountScreen.css) but are
    defined here so the section does not depend on that screen being loaded. */
 
-.dev-section .set-group + .set-group {
-  margin-top: 10px;
-}
-
 /* Shown in place of the form while signed in: the reason, and the way out. */
 .dev-gate {
   display: flex;

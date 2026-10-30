@@ -241,7 +241,7 @@ src/
    - Starts cloud sync, if it was enabled when the app last quit, through
      `sync::commands::get_or_create_client_with`, the same helper the commands
      use. **Why:** building a `SyncClient` is only half of starting sync; the
-     other half is the passive-pull and reminder loops. A second construction
+     other half is the background-pull and reminder loops. A second construction
      path could skip those loops, and nothing would start them later: every
      command that would returns the client this path already installed.
 5. Registers all Tauri command handlers.
@@ -1037,7 +1037,7 @@ On each received message, dispatches to:
 
 | Event                              | Action                                                                                                                                                        |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync:entry`                       | Unwrap the CEK (`personal` under UMK, else a carried space id through that space's keyring) -> decrypt -> insert or update in history/notes -> emit `sync:history-merged` or `sync:notes-merged`. Personal entries are skipped in passive mode; space entries always apply, and may auto-copy. Deletes arrive as tombstones on this event. |
+| `sync:entry`                       | Unwrap the CEK (`personal` under UMK, else a carried space id through that space's keyring) -> decrypt -> insert or update in history/notes -> emit `sync:history-merged` or `sync:notes-merged`. Personal entries are skipped in manual mode; space entries always apply, and may auto-copy. Deletes arrive as tombstones on this event. |
 | `device:online` / `device:offline` | Update sync status indicator via Tauri event                                                                                                                  |
 | `space:membership_changed`         | Refresh spaces, emit `space:membership-changed`; an owner whose members lost their keys mints a new space key and redistributes                                |
 | `space:rekey`                      | Reconcile: adopt the ring the server holds for us (checked against `key_fingerprint`), prepend a newly minted key if we own the space and one is owed, and wrap for any member who lacks one |
@@ -1140,8 +1140,8 @@ while it is minimized to the tray, where the window never refocuses:
   as its spaces reconcile. The socket only carries what arrives after it comes
   up. The flush + pull recovers a push that queued during the gap, and an entry
   another device sent while this one was down.
-- **The 5-minute background loop** runs in every non-manual mode, not only
-  passive. It is a single delta pull from `last_server_ts`. It returns nothing
+- **The 5-minute background loop** runs in realtime mode. It is a single delta pull
+  from `last_server_ts`. It returns nothing
   when the socket already kept up, but flushes a stuck queue that no socket event
   happened to trigger.
 - **Manual mode** is the only one held back: it flushes solely on Sync now.
@@ -1219,7 +1219,7 @@ All cryptography runs here. Nothing outside this module touches raw key material
 | `sync_now`             | `() -> ()`                                           | Flush the queue, pull the delta, then sweep if a restore is due                          |
 | `sync_restore_from_cloud` | `() -> RestoreOutcome`                            | Flush the queue, then sweep the whole account for rows missing here (Restore from cloud) |
 | `sync_set_enabled`     | `(enabled: bool) -> ()`                              | Toggle sync; persists to `settings.json`                                                 |
-| `sync_set_mode`        | `(mode: String) -> ()`                               | Cloud sync mode for this device, `realtime`, `passive` or `manual`; persists to `settings.json`     |
+| `sync_set_mode`        | `(mode: String) -> ()`                               | Cloud sync mode for this device, `realtime` or `manual`; persists to `settings.json`     |
 | `sync_get_mode`        | `() -> String`                                       | Current cloud sync mode                                                                  |
 | `sync_schedule_settings` | `() -> ()`                                         | Schedule a settings round after a user edit to a `ROAMING_STORAGE` key (see Settings Sync); nothing to do without a `SyncClient` |
 | `sync_settings`        | `(json: String, round: u64) -> ()`                   | One settings round (see Settings Sync). React invokes it on `sync:collect-settings`; `json` is its `localStorage` part, `round` the number the event carried |
@@ -1486,13 +1486,14 @@ personal cloud-sync entries and never a pull page, so a backfill cannot flood th
 clipboard. The write goes through the shared suppress-then-write helper, so the watcher
 dedupe invariant holds and the active-clipboard id stays correct.
 
-**Passive cloud sync.** `sync_mode` is device-local.
+**Manual cloud sync.** `sync_mode` is device-local, `realtime` or `manual`.
 
-- In `passive`, the WebSocket stays connected, so spaces, presence, invites and rekeys
+- In `manual`, the WebSocket stays connected, so spaces, presence, invites and rekeys
   stay live.
-- Personal entries arriving over the socket are not applied. The 5-minute loop and
-  manual `Sync now` pull them.
-- Pushes are always immediate.
+- Personal entries arriving over the socket are not applied, nothing is pulled on a
+  timer, and captures queue instead of uploading. `Sync now` sends and fetches.
+- A `passive` mode (live socket, personal entries applied by a 5-minute pull) existed
+  until 2026-10-30; a stored `passive` value now reads as `realtime`.
 
 **Why it is safe:** `last_server_ts` advances only in the pull path, never on a
 socket-applied entry. Anything skipped live is guaranteed to arrive on the next pull.
@@ -1592,7 +1593,7 @@ Sync adds these keys to the existing `settings.json` store:
 | `update_feed_url`   | string | absent                              | A custom update feed; replaces both the stable and the beta feed while set (section 4.8) |
 | `update_pubkey`     | string | absent                              | Minisign public key for that feed's bundles; absent keeps the built-in key |
 | `developer_mode`    | bool   | false                               | Whether the Developer group shows its tools under the switch. Turning it on asks first. A plain preference, unlike the keys above |
-| `sync_mode`         | string | `"realtime"`                        | `realtime`, `passive` or `manual` - how personal cloud-sync entries move on this device |
+| `sync_mode`         | string | `"realtime"`                        | `realtime` or `manual` - how personal cloud-sync entries move on this device; an old `passive` value reads as `realtime` |
 | `space_autocopy:{space_id}` | bool | false                       | Write entries arriving from that space to the clipboard, on this device only |
 | `space_send_filters` | object | `{}`                              | Per-space `SendFilter`; synced, unlike the two keys above                   |
 
@@ -1976,14 +1977,15 @@ Renders a single `ClipboardEntry` with type-specific previews:
 
 #### Settings Screen (`SettingsScreen.tsx`)
 
-The list beside the content (`SettingsNav.tsx`, with a search box above it) starts with
-"All settings", every section in one continuous scroll, then one entry per section;
-picking one shows that section alone, without its header. A row whose setting is not at
+Every section is on the screen at once, in one scroll. The list beside the content
+(`SettingsNav.tsx`, with a search box above it) is a table of contents: one entry per
+section, picking one scrolls to it, and a scroll-spy lights the entry for the section
+under the top of the view. A row whose setting is not at
 its default carries a yellow asterisk (`ChangedMark.tsx`, with `data-changed` on the row),
 and the list marks every entry whose section holds one; the defaults are written on the
-rows themselves, nowhere else. The layout is left-aligned: a
-180px list, a 24px gap and a content column of 420-680px, with a row of chips above the
-content below a 760px window; groups always stack in one column. The chosen page is kept in `localStorage.sc-settings-page`. A query shows every section at once and marks each
+rows themselves, nowhere else. The content column is centered at
+up to 620px, as on the Account screen, with the 180px list in the right gutter; below a
+760px window the list becomes a row of chips above the content; groups always stack in one column. The chosen page is kept in `localStorage.sc-settings-page`. A query shows every section at once and marks each
 `.set-row` whose text does not contain it with `data-hidden`; the stylesheet hides marked
 rows and any group or section left without a visible one, so rows keep their state
 (an open select, a running update) instead of being unmounted. The Developer page is
@@ -2000,7 +2002,7 @@ Among its settings (the screen is the full list):
 - **`Show sync badges on cards`**: toggle for the per-entry cloud icon on cards. Setting `show_sync_badges`.
 - **`Encrypt history and notes on this PC`**: off by default, per device. Seals the text columns of `app.db` under a key in the OS keychain (section 7.1). Setting `encrypt_at_rest`, written by `storage_set_encrypt_at_rest` rather than `set_setting`, since the rows have to be rewritten with it.
 
-> Cloud-sync auth (login/logout), the connected-devices list and presence, sync status and the realtime/passive/manual mode control live on the **Account screen** (`AccountScreen.tsx`), not here.
+> Cloud-sync auth (login/logout), the connected-devices list and presence, sync status and the realtime/manual mode control live on the **Account screen** (`AccountScreen.tsx`), not here.
 
 #### Notes Screen (`NotesScreen.tsx`)
 
@@ -2173,7 +2175,7 @@ WebSocket entry event received (event/payload shape: see wire contract)
          ▼
   Same as Pull path above for the single entry
   (skip if entry originated from this device_id;
-   skip personal entries in passive mode — the next pull will bring them)
+   skip personal entries in manual mode — Sync now will bring them)
 
   A delete arrives as the same event carrying a tombstone marker:
          │
@@ -2417,6 +2419,6 @@ The **promises** are the workspace root `docs/architecture.md` (Cross-Component 
 | 15  | **Device-specific settings are never synced**  | `sync_enabled`, `sync_server_url`, `sync_mode`, `space_autocopy:*`, autostart, and window geometry never enter the blob: `sync_settings` keeps only `ROAMING_JSON_KEYS` from `settings.json`, and passes `NO_LONGER_ROAMING` through as the account has them, never applying them. |
 | 16  | **Settings push is debounced**                 | `schedule_settings_sync()` resets a 2-second timer. Never call `PUT /settings` directly from a mutation - always go through a round, which pulls before it pushes.  |
 | 17  | **Auto-copy cannot flood the clipboard**       | Only WebSocket-delivered space entries may auto-copy - never a pull page, never a personal entry - and the write sets the suppress flag before touching the clipboard. |
-| 18  | **Passive mode never loses an entry**          | `last_server_ts` advances only in the pull path. An entry skipped live in passive mode must still arrive on the next interval or manual pull.                          |
+| 18  | **Manual mode never loses an entry**           | `last_server_ts` advances only in the pull path. An entry skipped live in manual mode must still arrive on the next Sync now.                                          |
 
 Related: the wire contract is `orange-copy-paste-clipboard-backend/docs/architecture.md`; who may do what is the root `docs/permissions.md`; past regressions and their root causes are in `docs/bugfix-history.md`.

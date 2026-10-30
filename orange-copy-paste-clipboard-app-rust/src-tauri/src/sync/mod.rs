@@ -71,9 +71,9 @@ const SETTINGS_DEBOUNCE_SECS: f64 = 2.0;
 /// drift a machine accumulates between time syncs and well short of an outage.
 const ARRIVAL_SKEW_GRACE_MS: u64 = 10 * 60 * 1000;
 
-/// How often the passive-mode pull loop wakes up.  Pushes are always immediate
-/// (the backup must not lose data); passive only batches what gets *applied*.
-const PASSIVE_PULL_INTERVAL_SECS: u64 = 300;
+/// How often the background pull loop wakes up in realtime mode: a delta pull
+/// that catches what the socket missed. Pushes are always immediate.
+const BACKGROUND_PULL_INTERVAL_SECS: u64 = 300;
 /// How often the reminder sweep looks at the account's standing state.
 ///
 /// Frequent enough that a nudge lands the same day it becomes true, and cheap
@@ -94,7 +94,7 @@ const ACTIVITY_REPEAT_MS: u64 = 30_000;
 /// filters roam across devices without the server ever seeing them.
 pub(crate) const SEND_FILTERS_KEY: &str = "space_send_filters";
 
-/// Settings key for the cloud-sync mode ("realtime" | "passive").  Device-local
+/// Settings key for the cloud-sync mode ("realtime" | "manual").  Device-local
 /// on purpose — it is a per-device ergonomic choice, like sync_enabled.
 pub(crate) const SYNC_MODE_KEY: &str = "sync_mode";
 
@@ -2822,8 +2822,8 @@ impl SyncClient {
     /// `client_id`).
     ///
     /// `src` says where the rows came from. `Live` (WebSocket delivery) gates
-    /// two behaviors: passive mode skips live *personal* entries (the cursor
-    /// only advances on pull, so the next interval/manual pull picks them up),
+    /// two behaviors: manual mode skips live *personal* entries (the cursor
+    /// only advances on pull, so Sync now picks them up),
     /// and auto-copy fires only for live space entries - never for a pull or a
     /// sweep. `Sweep` merges only rows missing here; see [`MergeSource`].
     pub(crate) fn merge_pulled(
@@ -2843,9 +2843,9 @@ impl SyncClient {
         };
         let state = self.app.state::<crate::state::AppState>();
         let my_device = self.sync_state.lock().data.device_id.clone();
-        // Both non-realtime modes hold personal entries back from live
-        // application; they differ in whether anything fetches them later.
-        let passive = *self.sync_mode.lock() != SyncMode::Realtime;
+        // Manual holds personal entries back from live application; Sync now
+        // fetches them.
+        let hold_personal = *self.sync_mode.lock() == SyncMode::Manual;
 
         let mut clip_changed = false;
         let mut notes_changed = false;
@@ -2910,9 +2910,9 @@ impl SyncClient {
                     continue;
                 }
             }
-            // Passive and manual: personal entries are not applied live. Space
-            // entries always are — spaces are realtime by definition.
-            if live && passive && e.space_ids.is_empty() {
+            // Manual: personal entries are not applied live. Space entries
+            // always are — spaces are realtime by definition.
+            if live && hold_personal && e.space_ids.is_empty() {
                 continue;
             }
 
@@ -4619,7 +4619,7 @@ impl SyncClient {
     /// holds for a week produces seven rows at most, and the count inside a row
     /// stays current without alerting again (upsert keeps the read flag).
     ///
-    /// Holds a `Weak` for the same reason the passive loop does: the sweep must
+    /// Holds a `Weak` for the same reason the pull loop does: the sweep must
     /// not keep a signed-out client alive.
     pub fn spawn_reminder_loop(self: &Arc<Self>) {
         let weak = Arc::downgrade(self);
@@ -4689,7 +4689,7 @@ impl SyncClient {
     /// cannot keep a logged-out client
     /// (and its runtime) alive; it ends when the client is dropped.
     ///
-    /// Not just passive mode. Realtime leans on the socket for both halves, but
+    /// Realtime leans on the socket for both halves, but
     /// the socket only delivers what arrives while it is up: a push that queued
     /// on a transient failure, or an entry another device sent during a gap the
     /// reconnect handler did not cover, would otherwise wait for the user to
@@ -4701,7 +4701,7 @@ impl SyncClient {
         let weak = Arc::downgrade(self);
         self.handle.spawn(async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(PASSIVE_PULL_INTERVAL_SECS)).await;
+                tokio::time::sleep(Duration::from_secs(BACKGROUND_PULL_INTERVAL_SECS)).await;
                 let Some(sync) = weak.upgrade() else { break };
                 let due = *sync.sync_mode.lock() != SyncMode::Manual
                     && sync.user.lock().is_some();

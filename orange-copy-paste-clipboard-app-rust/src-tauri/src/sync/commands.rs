@@ -1417,7 +1417,7 @@ pub fn space_get_send_filters(
         .unwrap_or_default()
 }
 
-/// Cloud-sync mode for personal entries ("realtime" | "passive").
+/// Cloud-sync mode for personal entries ("realtime" | "manual").
 /// Device-local; spaces stay realtime regardless.
 #[tauri::command]
 pub fn sync_set_mode(

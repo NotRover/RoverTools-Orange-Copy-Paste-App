@@ -25,9 +25,6 @@ pub enum SyncMode {
     /// Apply WebSocket-delivered personal entries the moment they arrive.
     #[default]
     Realtime,
-    /// Skip live application; a periodic pull (and Sync now) picks them up.
-    /// Pushes still happen immediately — passive never risks the backup.
-    Passive,
     /// Nothing personal moves on its own. Captures and edits queue instead of
     /// uploading, nothing is pulled on a timer, and Sync now is what sends and
     /// fetches. Spaces are unaffected: anything addressed to one still goes out
@@ -39,8 +36,9 @@ impl SyncMode {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "realtime" => Some(Self::Realtime),
-            "passive" => Some(Self::Passive),
             "manual" => Some(Self::Manual),
+            // "passive" (removed) parses as None, so a stored value falls back
+            // to the default through `unwrap_or_default` in the loader.
             _ => None,
         }
     }
@@ -48,7 +46,6 @@ impl SyncMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Realtime => "realtime",
-            Self::Passive => "passive",
             Self::Manual => "manual",
         }
     }
