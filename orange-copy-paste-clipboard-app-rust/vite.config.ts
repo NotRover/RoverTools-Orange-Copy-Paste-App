@@ -2,7 +2,6 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
@@ -37,24 +36,24 @@ export default defineConfig(async () => ({
     rollupOptions: {
       input: {
         // Main clipboard-history window
-        main: path.resolve(__dirname, "src/components/app/index.html"),
+        main: path.resolve(import.meta.dirname, "src/components/app/index.html"),
         // Copy-confirmation popup shown after clipboard capture
         "copy-popup": path.resolve(
-          __dirname,
+          import.meta.dirname,
           "src/components/copy-popup/copy-popup.html",
         ),
         // Quick-paste picker popup shown near the cursor
         "paste-popup": path.resolve(
-          __dirname,
+          import.meta.dirname,
           "src/components/paste-popup/paste-popup.html",
         ),
         // Notification popup (toast)
         notification: path.resolve(
-          __dirname,
+          import.meta.dirname,
           "src/components/notifications/notification.html",
         ),
         // Startup splash screen
-        splash: path.resolve(__dirname, "src/components/splash/splash.html"),
+        splash: path.resolve(import.meta.dirname, "src/components/splash/splash.html"),
       },
     },
   },
