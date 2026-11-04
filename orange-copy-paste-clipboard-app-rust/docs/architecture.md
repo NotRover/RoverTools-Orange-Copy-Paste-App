@@ -1700,6 +1700,8 @@ The frontend `Notification.tsx` component renders a dynamic label and icon (clip
 
 **Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function releases Shift and Ctrl. **Why:** if the user still held Shift from the shortcut, the OS would otherwise see Ctrl+Shift+V instead of Ctrl+V. The macOS event carries its own modifier flags, so no release is needed there.
 
+**Note on Linux, memory**: `main.rs` sets `WEBKIT_USE_SINGLE_WEB_PROCESS=1` before tauri starts, so WebKitGTK runs the four long-lived webviews (main, copy popup, paste popup, notification) in one web process instead of one each. Measure with proportional set size (`smem`, or GNOME System Monitor's own figure): a plain sum of resident sizes over the app, the web process and the network process double-counts the shared libraries. On Windows the WebView2 processes are the same cost listed under their own name.
+
 **Note on Linux**: `is_wayland()` returns true when `WAYLAND_DISPLAY` is set and non-empty, or when `XDG_SESSION_TYPE` is `wayland`. On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`. The cursor and monitor queries go through the app handle that `linux::init()` stores at setup; `cursor_pos()` runs the GDK read on the main thread and gives up after 500 ms rather than block the clipboard watcher. Wayland also hides the cursor from clients and ignores a client's own window position, so `cursor_available()` is false there, popups center on the active monitor and the toast lands where the compositor puts it; global hotkeys do not reach the app on native Wayland, which is what the `--trigger copy|paste` CLI launch (routed to the running instance by the single-instance plugin) is for.
 
 **Notes on macOS** (`platform/macos.rs`):
