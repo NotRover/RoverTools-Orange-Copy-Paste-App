@@ -1175,6 +1175,12 @@ pub fn run() {
                 // callers read. See platform/macos.rs.
                 crate::runtime::platform::macos::prime_screens();
             }
+            #[cfg(target_os = "linux")]
+            {
+                // The cursor and monitor queries go through tao, which needs
+                // the app handle. See platform/linux.rs.
+                crate::runtime::platform::linux::init(app.handle());
+            }
             setup_runtime(app, &history, &suppress)?;
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -1202,7 +1208,7 @@ pub fn run() {
             if show {
                 if let Some(w) = ah.get_webview_window("splash") {
                     let (px, py) = crate::runtime::platform::notification_position(340, 76);
-                    let _ = w.set_position(tauri::PhysicalPosition::new(px, py));
+                    let _ = w.set_position(crate::runtime::platform::position_at(px, py));
                     let _ = w.show();
                     // Non-interactive: never blocks a click in the corner it
                     // covers. Must run after show() (see notifications.rs).

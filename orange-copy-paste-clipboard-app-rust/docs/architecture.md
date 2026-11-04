@@ -160,7 +160,7 @@ src-tauri/
 │   │   │   ├── mod.rs           # cfg-gated module selection + cross-platform popup_position(), position_at()
 │   │   │   ├── windows.rs      # Win32: key simulation, cursor, monitors, DPI
 │   │   │   ├── macos.rs        # CGEvent / NSScreen: key simulation, cursor, work areas, pasteboard count, app hide
-│   │   │   └── linux.rs        # xdotool/wtype: key simulation, cursor, screen info
+│   │   │   └── linux.rs        # xdotool/wtype: key simulation; cursor and monitors via tao/GDK
 │   │   └── window_state.rs     # Saved window geometry (position, size)
 │   └── state/
 │       ├── mod.rs              # Re-exports
@@ -1693,13 +1693,13 @@ The frontend `Notification.tsx` component renders a dynamic label and icon (clip
 | `simulate_copy()`              | Releases Shift/Ctrl, sends Ctrl down, C down, C up, Ctrl up via `keybd_event`   | `CGEvent` key down/up for keycode 8 with the Command flag, posted to the HID tap; skipped and logged without the Accessibility permission | `xdotool key --clearmodifiers ctrl+c` (X11) or `wtype -M ctrl -P c -p c -m ctrl` (Wayland); `ydotool` if that fails |
 | `simulate_paste()`             | Releases Shift/Ctrl, sends Ctrl down, V down, V up, Ctrl up via `keybd_event`   | Same, keycode 9                                               | `xdotool key --clearmodifiers ctrl+v` (X11) or `wtype -M ctrl -P v -p v -m ctrl` (Wayland); `ydotool` if that fails |
 | `popup_position(w, h)`         | _(cross-platform in mod.rs)_ - near cursor, clamped to work area | _(same)_                                                     | _(same)_                                                     |
-| `cursor_pos()`                 | `GetCursorPos()` -> physical pixel coordinates                    | `CGEvent::location()` -> points, top-left origin             | `xdotool getmouselocation` -> parse x/y                       |
-| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `NSScreen.visibleFrame` of the screen under the point (menu bar and Dock excluded), flipped to top-left; `CGDisplayBounds` of the main display as the fallback | `xdpyinfo` -> parse `dimensions:` line                        |
-| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` -> DPI scaling factor                          | Returns `1.0` (positions are already logical)                | Returns `1.0` (Wayland compositors handle scaling)           |
+| `cursor_pos()`                 | `GetCursorPos()` -> physical pixel coordinates                    | `CGEvent::location()` -> points, top-left origin             | `AppHandle::cursor_position()` (GDK pointer, physical pixels); `xdotool getmouselocation` before setup; `(0, 0)` on Wayland |
+| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `NSScreen.visibleFrame` of the screen under the point (menu bar and Dock excluded), flipped to top-left; `CGDisplayBounds` of the main display as the fallback | `Monitor::work_area()` of the monitor whose bounds contain the point (GDK `workarea`: geometry minus panels and docks), else the primary monitor; 1920x1080 before setup |
+| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` -> DPI scaling factor                          | Returns `1.0` (positions are already logical)                | `Monitor::scale_factor()` of that monitor (`GDK_SCALE`); `1.0` before setup |
 
 **Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function releases Shift and Ctrl. **Why:** if the user still held Shift from the shortcut, the OS would otherwise see Ctrl+Shift+V instead of Ctrl+V. The macOS event carries its own modifier flags, so no release is needed there.
 
-**Note on Linux**: `is_wayland()` returns true when `WAYLAND_DISPLAY` is set and non-empty, or when `XDG_SESSION_TYPE` is `wayland`. On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`. Wayland also hides the cursor from clients, so `cursor_available()` is false there and popups center on the active monitor; global hotkeys do not reach the app on native Wayland, which is what the `--trigger copy|paste` CLI launch (routed to the running instance by the single-instance plugin) is for.
+**Note on Linux**: `is_wayland()` returns true when `WAYLAND_DISPLAY` is set and non-empty, or when `XDG_SESSION_TYPE` is `wayland`. On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`. The cursor and monitor queries go through the app handle that `linux::init()` stores at setup; `cursor_pos()` runs the GDK read on the main thread and gives up after 500 ms rather than block the clipboard watcher. Wayland also hides the cursor from clients and ignores a client's own window position, so `cursor_available()` is false there, popups center on the active monitor and the toast lands where the compositor puts it; global hotkeys do not reach the app on native Wayland, which is what the `--trigger copy|paste` CLI launch (routed to the running instance by the single-instance plugin) is for.
 
 **Notes on macOS** (`platform/macos.rs`):
 

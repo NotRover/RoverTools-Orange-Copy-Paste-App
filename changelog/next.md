@@ -29,5 +29,6 @@
 ### Improved
 
 ### Fixed
+- On Linux, the copy and paste notification now appears in the bottom-right corner of the screen your cursor is on, as on Windows. It used to assume a 1920x1080 screen, which put it near the middle of a larger display and ignored a second monitor.
 
 ### Internal
