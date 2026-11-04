@@ -258,9 +258,17 @@ async fn run_check(app: &tauri::AppHandle) -> Result<Option<UpdateInfo>, String>
         // The feed names a newer version but has no bundle for this platform:
         // a release whose build failed here and has not been retried yet. That
         // is "nothing for me", not a broken check. The feed lists the missing
-        // platform again once the retry run adds it.
+        // platform again once the retry run adds it. An install that knows its
+        // bundle type (NSIS, deb) looks up `{os}-{arch}-{type}` and then
+        // `{os}-{arch}`, and reports a miss on both as `TargetsNotFound`. An
+        // AppImage install, whose bundle the feed no longer carries, lands here
+        // too.
         Err(tauri_plugin_updater::Error::TargetNotFound(target)) => {
             log::info!(target: "updater", "feed has no bundle for {target}; nothing to offer");
+            None
+        }
+        Err(tauri_plugin_updater::Error::TargetsNotFound(targets)) => {
+            log::info!(target: "updater", "feed has no bundle for {targets:?}; nothing to offer");
             None
         }
         Err(e) => return Err(e.to_string()),
@@ -437,7 +445,8 @@ pub async fn updater_download(app: tauri::AppHandle) -> Result<UpdateInfo, Strin
 /// Install the downloaded bundle. This ends the process.
 ///
 /// On Windows the installer takes over and this process exits during the call;
-/// on Linux the AppImage is replaced in place and the restart below runs. Either
+/// on Linux the plugin installs the deb with `pkexec dpkg -i` (the system's
+/// password prompt) and the restart below runs the new binary. Either
 /// way there is nothing useful after it, so the app is never left half-swapped
 /// with a live window.
 #[tauri::command]

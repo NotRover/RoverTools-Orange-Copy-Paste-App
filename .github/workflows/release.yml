@@ -20,7 +20,7 @@ run-name: >-
 #   2. Bumps the version, and collects the commit subjects since the last release
 #      tag as the notes users will read.
 #   3. Builds signed Windows (NSIS), macOS (.app + .dmg, Apple silicon and
-#      Intel) and Linux (AppImage + deb) bundles.
+#      Intel) and Linux (deb) bundles.
 #   4. Assembles `latest.json` and publishes a GitHub Release on this repo,
 #      which is what the app's updater reads.
 #
@@ -428,13 +428,13 @@ jobs:
 
       - name: Pick the platforms
         # The build matrix, as JSON, filtered by the `platforms` input. NSIS is the
-        # Windows target the updater can install; the AppImage is the Linux one;
-        # the .app (shipped as .app.tar.gz) is the macOS one. The .deb and the
-        # .dmg ride along as manual downloads — a package manager install cannot
-        # be replaced by a self-update, and a .dmg is how a Mac user expects to
-        # install by hand. Both Mac architectures build on the Apple-silicon
-        # runner: the Intel one is a cross-compile (`--target`), which Tauri
-        # supports for macOS.
+        # Windows target the updater can install; the .deb is the Linux one (the
+        # updater installs it with `pkexec dpkg -i`); the .app (shipped as
+        # .app.tar.gz) is the macOS one, and the .dmg rides along as the manual
+        # download, which is how a Mac user expects to install by hand. No
+        # AppImage: the app ships one Linux format. Both Mac architectures
+        # build on the Apple-silicon runner: the Intel one is a cross-compile
+        # (`--target`), which Tauri supports for macOS.
         id: matrix
         env:
           PLATFORMS: ${{ inputs.platforms }}
@@ -442,7 +442,7 @@ jobs:
           set -euo pipefail
           all='[
             { "os": "windows-latest", "bundles": "nsis",         "artifact": "windows",       "target": "" },
-            { "os": "ubuntu-22.04",   "bundles": "appimage,deb", "artifact": "linux",         "target": "" },
+            { "os": "ubuntu-22.04",   "bundles": "deb",          "artifact": "linux",         "target": "" },
             { "os": "macos-latest",   "bundles": "app,dmg",      "artifact": "macos-aarch64", "target": "aarch64-apple-darwin" },
             { "os": "macos-latest",   "bundles": "app,dmg",      "artifact": "macos-x86_64",  "target": "x86_64-apple-darwin" }
           ]'
@@ -622,9 +622,6 @@ jobs:
             copy "$f" "${ASSET_PREFIX}_${VERSION}_x64-setup.exe"
           done < <(find "$bundle/nsis" -name '*-setup.exe' 2>/dev/null || true)
           while IFS= read -r f; do
-            copy "$f" "${ASSET_PREFIX}_${VERSION}_amd64.AppImage"
-          done < <(find "$bundle/appimage" -name '*.AppImage' 2>/dev/null || true)
-          while IFS= read -r f; do
             copy "$f" "${ASSET_PREFIX}_${VERSION}_amd64.deb"
           done < <(find "$bundle/deb" -name '*.deb' 2>/dev/null || true)
           # macOS: the updater installs the .app.tar.gz; the .dmg is the manual
@@ -638,7 +635,7 @@ jobs:
 
           # An updatable target with no .sig means the signing step silently did
           # nothing; publishing that ships a release no client will accept.
-          for f in "$out"/*-setup.exe "$out"/*.AppImage "$out"/*.app.tar.gz; do
+          for f in "$out"/*-setup.exe "$out"/*.deb "$out"/*.app.tar.gz; do
             [ -e "$f" ] || continue
             if [ ! -f "$f.sig" ]; then
               echo "::error::$f has no .sig — check createUpdaterArtifacts and the signing secrets."
@@ -701,7 +698,7 @@ jobs:
           set -euo pipefail
           mkdir -p release
           # New bundles on top of whatever a retry fetched: same name, new bytes.
-          find artifacts -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \
+          find artifacts -type f \( -name '*.exe' -o -name '*.deb' \
               -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.sig' \) \
             -exec cp -f {} release/ \;
 
@@ -709,8 +706,12 @@ jobs:
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
 
           # The feed the app reads. Only the self-updatable targets appear — a
-          # .deb or .dmg entry here would offer an update the client cannot
-          # install. The keys are the updater's `{os}-{arch}` names.
+          # .dmg entry here would offer an update the client cannot install.
+          # The keys are the updater's names: `{os}-{arch}`, or
+          # `{os}-{arch}-{bundle}` where one OS ships several. A deb install
+          # asks for `linux-x86_64-deb` first; there is deliberately no plain
+          # `linux-x86_64`, which is what an AppImage asks for, so an old
+          # AppImage install sees no update instead of a deb it cannot use.
           platforms=$(jq -n '{}')
           add_platform() {
             target="$1"; file="$2"
@@ -722,7 +723,7 @@ jobs:
           }
           echo "Feed platforms:"
           add_platform windows-x86_64 "RoverTools_${VERSION}_x64-setup.exe"
-          add_platform linux-x86_64   "RoverTools_${VERSION}_amd64.AppImage"
+          add_platform linux-x86_64-deb "RoverTools_${VERSION}_amd64.deb"
           add_platform darwin-aarch64 "RoverTools_${VERSION}_aarch64.app.tar.gz"
           add_platform darwin-x86_64  "RoverTools_${VERSION}_x64.app.tar.gz"
 
@@ -737,7 +738,7 @@ jobs:
           # An app on a missing platform sees no update rather than an error
           # (updater.rs treats an absent platform key as "nothing for me").
           missing=""
-          for t in windows-x86_64 linux-x86_64 darwin-aarch64 darwin-x86_64; do
+          for t in windows-x86_64 linux-x86_64-deb darwin-aarch64 darwin-x86_64; do
             if ! jq -e --arg t "$t" 'has($t)' <<< "$platforms" > /dev/null; then
               missing="${missing:+$missing, }$t"
             fi

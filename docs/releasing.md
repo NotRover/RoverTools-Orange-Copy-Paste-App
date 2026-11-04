@@ -39,7 +39,7 @@ flowchart TB
     dispatch(["You dispatch release.yml"]):::start
     dispatch ==> bump["Bump version in Cargo.toml<br/>(patch, minor, or major)"]:::step
     dispatch ==> notes["Notes from changelog/next.md<br/>renamed on release"]:::step
-    dispatch ==> build["Build signed NSIS (Windows)<br/>+ .app / .dmg (macOS, both chips)<br/>+ AppImage / deb (Linux)"]:::step
+    dispatch ==> build["Build signed NSIS (Windows)<br/>+ .app / .dmg (macOS, both chips)<br/>+ deb (Linux)"]:::step
     build ==> publish[("Publish a GitHub Release on this repo<br/>bundles + latest.json")]:::store
     publish ==> banner(["App checks the feed ~8s after launch,<br/>then every 6h, shows an update banner"]):::out
 
@@ -271,15 +271,17 @@ Two things to know:
 | Bundle | Self-updates | Why |
 |---|---|---|
 | NSIS (`.exe`) | **Yes** | The installer reruns and replaces the app in place |
-| AppImage | **Yes** | A single file the updater can swap |
 | `.app.tar.gz` (macOS) | **Yes** | The updater unpacks it over the installed `.app`; one per chip |
-| `.deb` | No | Owned by the package manager; published for manual install only |
+| `.deb` | **Yes** | The updater installs it with `pkexec dpkg -i`, behind the system's password prompt |
 | `.dmg` (macOS) | No | The manual install; the updater uses the archive above instead |
 
-The release builds no `.rpm` (the Linux build matrix entry lists only `appimage,deb`),
-though a local `tauri build` still makes one. `.deb` and `.dmg` never appear in
-`latest.json` - offering an update the client cannot install is worse than offering
-none. The macOS bundles are built on the Apple-silicon runner for both chips; the Intel
+The release builds no AppImage and no `.rpm` (the Linux build matrix entry lists only
+`deb`), though a local `tauri build` still makes an `.rpm`. The deb is keyed
+`linux-x86_64-deb` in `latest.json`, which is the key a deb install asks for first.
+There is deliberately no plain `linux-x86_64` entry: that is the key an AppImage
+install from 0.5.3 or earlier asks for, and it then sees no update rather than a
+deb it cannot install. `.dmg` never appears in `latest.json` - offering an update
+the client cannot install is worse than offering none. The macOS bundles are built on the Apple-silicon runner for both chips; the Intel
 one is a cross-compile, which is why the matrix names an explicit `--target` for them.
 
 ---
@@ -401,7 +403,8 @@ Install and update behavior that is by design, grouped by platform.
   the recorded path can name a replaced executable. When the setting is on, the app
   rewrites the entry from its own location at every launch (`reconcile_autostart`).
 - **Install ends the process.** On Windows the installer takes over and the app exits
-  mid-call; on Linux the AppImage is replaced and the app restarts itself. That is why
+  mid-call; on Linux the deb is installed after the system's password prompt and the app restarts
+  itself. That is why
   installing sits behind a second confirmation rather than following the download:
   nobody should lose their window to a background download finishing.
 
@@ -411,7 +414,7 @@ Install and update behavior that is by design, grouped by platform.
 
 The updater itself can only be checked with two releases:
 
-1. Release once. Install it from the published `.exe` (or `.dmg`, or AppImage) - not a
+1. Release once. Install it from the published `.exe` (or `.dmg`, or `.deb`) - not a
    local `tauri build`, which is unsigned and would not test the signing key.
 2. Release again.
 3. Launch the older install. Within ~8 seconds the banner should appear (a

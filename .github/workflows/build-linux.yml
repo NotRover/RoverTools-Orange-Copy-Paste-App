@@ -14,12 +14,10 @@ on:
       bundles:
         description: "Bundle formats to build"
         type: choice
-        default: deb,appimage
+        default: deb
         options:
-          - deb,appimage
           - deb
-          - appimage
-          - deb,rpm,appimage
+          - deb,rpm
       tag:
         description: "Release tag (leave blank to auto-generate vVERSION-build.RUN)"
         type: string
@@ -88,7 +86,6 @@ jobs:
           # Paths are relative to the repo root, not the job working-directory.
           path: |
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/deb/*.deb
-            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/appimage/*.AppImage
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: warn
           retention-days: 14
@@ -121,7 +118,6 @@ jobs:
           fail_on_unmatched_files: false
           files: |
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/deb/*.deb
-            orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/appimage/*.AppImage
             orange-copy-paste-clipboard-app-rust/src-tauri/target/release/bundle/rpm/*.rpm
 
       - name: Prune old builds (keep last 5)

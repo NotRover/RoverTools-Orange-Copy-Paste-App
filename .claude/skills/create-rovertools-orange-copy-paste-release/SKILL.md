@@ -190,16 +190,17 @@ Neither block needs a local `jq` or `base64` — `gh --jq` runs the whole expres
 itself, including the base64 decode, so these work on a bare machine:
 
 ```bash
-echo "stable channel:" && curl -fsSL https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64"'
+echo "stable channel:" && curl -fsSL https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases/latest/download/latest.json | grep -o '"version":"[^"]*"\|"windows-x86_64"\|"linux-x86_64[^"]*"'
 ```
 
 ```bash
 echo "beta channel:" && gh api repos/NotRover/RoverTools-Orange-Copy-Paste-App/contents/beta.json --jq '.content | gsub("\n";"") | @base64d | fromjson | "version=\(.version)  platforms=\(.platforms | keys | join(", "))"'
 ```
 
-Both must list `windows-x86_64` and `linux-x86_64`. A `.deb` entry would be a bug —
-package-manager installs cannot self-update, so they are published for manual download
-only and must never appear in a feed.
+Both must list `windows-x86_64` and `linux-x86_64-deb`. A plain `linux-x86_64` entry
+would be a bug: it is the key an old AppImage install asks for, and the deb behind it
+would fail to install there. A `.dmg` entry would be a bug too - it is the manual
+download, not an update.
 
 ```bash
 gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-App --limit 5 --json tagName,isLatest,isPrerelease --jq '.[] | "\(.tagName) latest=\(.isLatest) prerelease=\(.isPrerelease)"'

@@ -27,7 +27,13 @@
 ### New
 
 ### Improved
+- On Linux the app no longer draws its own startup notice or copy and paste popups. Those windows could not be placed reliably on every desktop. A clip that is too large for history, and the short wait for sync when you quit, now show as normal desktop notifications. Update checks work as before.
 
 ### Fixed
+- Updates now install on Linux. A copy installed from the deb package used to download the update and then fail with an error. It now installs the new deb after asking for your password, then reopens.
 
 ### Internal
+- Linux: dropped the XWayland default added in 0.5.3; GDK runs natively again.
+- The release workflow can now finish a release whose first publish stopped at a draft.
+- Linux ships as a deb only. The AppImage is no longer built; an AppImage install sees no update and has to install the deb once.
+- A feed with no entry for this install is treated as no update on every platform, not as a failed check.
