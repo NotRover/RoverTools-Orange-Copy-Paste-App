@@ -33,5 +33,6 @@
 - The app uses much less memory on Linux. Its windows now share one browser process instead of running one each, and after capturing an image it hands the memory back. On X11 it is also told when the clipboard changes, as on Windows, instead of reading it several times a second.
 - Image cards no longer glitch when you hover over them in the grid and tiles layouts. The top of the card used to show up clipped in the next column.
 - On Linux, the copy and paste notification now appears in the bottom-right corner of the screen your cursor is on, as on Windows. It used to assume a 1920x1080 screen, which put it near the middle of a larger display and ignored a second monitor.
+- On a Wayland desktop the startup splash and the notifications now show up. The app runs through XWayland there, because native Wayland lets no app place a window or keep it on top, which left both in the middle of the screen behind the main window. Set GDK_BACKEND=wayland before launching to go back to native Wayland.
 
 ### Internal

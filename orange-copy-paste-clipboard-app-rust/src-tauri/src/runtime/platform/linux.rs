@@ -30,7 +30,7 @@
 //! centered by tauri instead of anchored.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -44,7 +44,32 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 /// before the first popup or toast.
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
+    log_display_server();
     watch_clipboard_owner();
+}
+
+/// One log line naming the display server, so a report of a window in the
+/// wrong place (or not showing at all) can be read without asking. The
+/// session says what the desktop runs; the GDK backend says what this
+/// process actually talks to, which differs when an app is pushed through
+/// XWayland.
+fn log_display_server() {
+    use gtk::prelude::*;
+    let session = if session_is_wayland() { "wayland" } else { "x11" };
+    let Some(display) = gtk::gdk::Display::default() else {
+        log::info!(target: "app", "linux: session={session} gdk=none");
+        return;
+    };
+    let gdk_wayland = display.backend().is_wayland();
+    GDK_BACKEND.store(
+        if gdk_wayland { BACKEND_WAYLAND } else { BACKEND_X11 },
+        Ordering::Release,
+    );
+    log::info!(
+        target: "app",
+        "linux: session={session} gdk={}",
+        if gdk_wayland { "wayland" } else { "x11" }
+    );
 }
 
 // ── Clipboard change counter ─────────────────────────────────────────────────
@@ -110,12 +135,35 @@ pub fn release_free_memory() {
 
 // ── Display-server detection ─────────────────────────────────────────────────
 
-/// True when the current session is Wayland.
+/// What GDK connected to, recorded by [`init`]: one of the `BACKEND_*`
+/// values below, `BACKEND_UNKNOWN` until then.
+static GDK_BACKEND: AtomicU8 = AtomicU8::new(BACKEND_UNKNOWN);
+const BACKEND_UNKNOWN: u8 = 0;
+const BACKEND_X11: u8 = 1;
+const BACKEND_WAYLAND: u8 = 2;
+
+/// True when this process talks to a Wayland compositor directly.
+///
+/// The session type is not the answer: `main.rs` asks GDK for X11 first, so
+/// on a Wayland desktop the app normally runs through XWayland, where
+/// window placement, keep-above and the clipboard signal all work. What
+/// matters to every caller is which protocol GDK ended up on, so this reads
+/// the backend recorded at [`init`] and only falls back to the session
+/// variables before that.
+fn is_wayland() -> bool {
+    match GDK_BACKEND.load(Ordering::Acquire) {
+        BACKEND_X11 => false,
+        BACKEND_WAYLAND => true,
+        _ => session_is_wayland(),
+    }
+}
+
+/// True when the desktop session is Wayland, whatever this process uses.
 ///
 /// Checks `WAYLAND_DISPLAY` first (set by every Wayland compositor for its
 /// clients) and falls back to `XDG_SESSION_TYPE=wayland` for the rare case
 /// where the app is launched before `WAYLAND_DISPLAY` is inherited.
-fn is_wayland() -> bool {
+fn session_is_wayland() -> bool {
     if std::env::var("WAYLAND_DISPLAY")
         .map(|v| !v.is_empty())
         .unwrap_or(false)
