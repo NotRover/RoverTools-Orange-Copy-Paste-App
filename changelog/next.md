@@ -24,7 +24,7 @@
   set fails a real release on purpose.
 -->
 
-Settings is one page with a contents list, you can point the app at your own server, and the copy popup is instant again.
+Settings is one page with a contents list, devices carry their computer's name, you can point the app at your own server, and the copy popup is instant again.
 
 ### New
 - Developer options, at the end of Settings. Turn them on, after a confirmation, to point the app at your own server, inspect the sync connection, and read updates from your own feed. They are off by default and the default server does not change unless you tell it to.
@@ -34,6 +34,7 @@ Settings is one page with a contents list, you can point the app at your own ser
 - Search settings from the box above the list. It shows only the settings whose name or description contains what you typed.
 
 ### Improved
+- Devices on the Account screen are listed under the computer's own name, such as the one Windows or macOS shows in its settings, instead of a generic "Orange CP" label, with a Windows, Apple, Android or Linux logo beside it. A device already registered picks up its name the next time it starts.
 - Settings is one scrolling page again, with a contents list beside it. Pick a group in the list to jump to it, and the group you are looking at is lit as you scroll. The page is centered like the Account screen.
 - A yellow asterisk marks any setting you have changed from its default, on the setting and on its group in the list, so you can see at a glance what is not stock.
 - The Developer group and the Cloud sync card on the Account screen are each one card with divided rows instead of several stacked cards, and the Cloud sync rows say what they do in one line beside their control.
@@ -47,4 +48,6 @@ Settings is one page with a contents list, you can point the app at your own ser
 - Backend: a public discovery route at /.well-known/orange-copy-paste.json returns the server's public settings so a client can be set up from one URL; SUPABASE_ANON_KEY is a new server setting.
 - Certificate pinning and the plain-http rule live in the Rust sync config and TLS modules; the updater takes a feed and key override.
 - The tauri npm packages now match the crate version and the React plugin moved to Vite 8, so tauri dev starts again.
+- A note preview that holds a clip, group or file card is rendered as a div rather than a paragraph, which ends the nesting error React logged for every such card.
+- Dependency bumps: vite, @types/node, base64 and the cargo minor/patch group; the download-artifact action.
 - Docs: client architecture, self-hosting, settings and cloud-sync pages updated; bug #36 recorded.
