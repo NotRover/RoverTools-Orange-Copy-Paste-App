@@ -467,6 +467,10 @@ jobs:
     environment: release # the signing secrets
     permissions:
       contents: read
+    env:
+      # Whether, not what: a step `if` cannot read `secrets`, so the presence of
+      # the Apple certificate is lifted to a job-level flag here.
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
     strategy:
       # One platform failing must not cancel the others: whatever builds is
       # published, and the rest is added by a retry run.
@@ -508,7 +512,7 @@ jobs:
         # the bundle is built unsigned (see "Check prerequisites" in `prepare`).
         # A throwaway keychain that this job alone unlocks; the runner is
         # discarded afterwards.
-        if: ${{ startsWith(matrix.os, 'macos') && secrets.APPLE_CERTIFICATE != '' }}
+        if: ${{ startsWith(matrix.os, 'macos') && env.HAS_APPLE_CERT == 'true' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
