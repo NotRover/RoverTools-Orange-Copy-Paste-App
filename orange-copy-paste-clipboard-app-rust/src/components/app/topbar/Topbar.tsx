@@ -48,7 +48,7 @@ const Topbar: React.FC<TopbarProps> = ({
         {leftSlot}
       </div>
 
-      <div className="cs-inline-search">
+      <div className={`cs-inline-search${searchQuery ? " cs-inline-search--active" : ""}`}>
         <SearchIcon size={11} className="cs-inline-search-icon" />
         <input
           ref={inputRef}

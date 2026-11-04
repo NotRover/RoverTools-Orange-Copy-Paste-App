@@ -27,6 +27,7 @@
 ### New
 
 ### Improved
+- The search box above the history stays highlighted while a search is set, even after you click elsewhere, so a filtered list is never mistaken for the whole history.
 
 ### Fixed
 - The app uses much less memory on Linux. Its windows now share one browser process instead of running one each, and after capturing an image it hands the memory back. On X11 it is also told when the clipboard changes, as on Windows, instead of reading it several times a second.
