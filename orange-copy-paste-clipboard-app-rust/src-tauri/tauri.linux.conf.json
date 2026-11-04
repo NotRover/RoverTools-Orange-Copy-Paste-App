@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "url": "src/components/app/",
+        "title": "Orange Copy Paste",
+        "width": 920,
+        "height": 560,
+        "minWidth": 640,
+        "minHeight": 440,
+        "resizable": true,
+        "decorations": false,
+        "visible": false,
+        "backgroundColor": "#0e0e0e",
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

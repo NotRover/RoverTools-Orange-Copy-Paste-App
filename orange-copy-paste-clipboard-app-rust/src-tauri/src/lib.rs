@@ -1208,8 +1208,6 @@ pub fn run() {
             if show {
                 if let Some(w) = ah.get_webview_window("splash") {
                     let (px, py) = crate::runtime::platform::notification_position(340, 76);
-                    #[cfg(target_os = "linux")]
-                    log::info!(target: "app", "splash: shown at ({px}, {py})");
                     let _ = w.set_position(crate::runtime::platform::position_at(px, py));
                     let _ = w.show();
                     // Non-interactive: never blocks a click in the corner it

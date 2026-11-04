@@ -52,7 +52,7 @@ flowchart TB
     classDef ext fill:#141414,stroke:#4d4d4d,stroke-dasharray:5 3,color:#cfcfcf
 ```
 
-The app runs as a single Tauri process with five webview windows: main, splash, and the three popups in the diagram (see section 5.1). The Rust backend owns all clipboard operations, history storage and OS integrations. The React frontends call Tauri commands (request/response) and listen for events (push notifications). The `SyncClient` runs in a dedicated background Tokio runtime and is optional: the app works fully without it.
+The app runs as a single Tauri process with five webview windows: main, splash, and the three popups in the diagram (see section 5.1). Linux has three: no splash and no notification window (see section 8.1). The Rust backend owns all clipboard operations, history storage and OS integrations. The React frontends call Tauri commands (request/response) and listen for events (push notifications). The `SyncClient` runs in a dedicated background Tokio runtime and is optional: the app works fully without it.
 
 ---
 
@@ -1677,7 +1677,7 @@ The module also sets up a handler that hides all popups when the main window gai
 
 #### `notifications.rs` - Copy/Paste Notifications
 
-Manages the "notification" popup window that appears briefly at the bottom-right of the screen:
+Manages the "notification" popup window that appears briefly at the bottom-right of the screen. Linux has no such window: the copy and paste confirmations are off there, and the two toasts that ignore the preferences (a capture too large for history, and the wait for sync before a quit) go out as desktop notifications through the notification plugin.
 
 - `show_notification(app, entry, action)` - Positions the notification window and emits a `notification:show` event with a `NotificationPayload { kind, action }`.
 - `notify_if_enabled(app, entry)` - Shows a "Copied" notification if both the master toggle (`notification_enabled`) and per-type flag (`notif_copy`) are enabled.
@@ -1702,7 +1702,7 @@ The frontend `Notification.tsx` component renders a dynamic label and icon (clip
 
 **Note on Linux, memory**: `main.rs` sets `WEBKIT_USE_SINGLE_WEB_PROCESS=1` before tauri starts, so WebKitGTK runs the four long-lived webviews (main, copy popup, paste popup, notification) in one web process instead of one each. Measure with proportional set size (`smem`, or GNOME System Monitor's own figure): a plain sum of resident sizes over the app, the web process and the network process double-counts the shared libraries. On Windows the WebView2 processes are the same cost listed under their own name.
 
-**Note on Linux, display server**: `main.rs` sets `GDK_BACKEND=x11,wayland` before tauri starts unless the variable is already set, so on a Wayland desktop GDK connects through XWayland when it exists and falls back to native Wayland when it does not. X11 is preferred because native Wayland ignores a client's window position and keep-above (the toast and the startup splash landed centred, under the main window) and only reports the clipboard to a focused client. `GDK_BACKEND=wayland` in the environment is the user's way back. `is_wayland()` reports what GDK connected to, recorded by `linux::init()` from the default display's backend and logged as `linux: session=... gdk=...`; before `init` it falls back to the session (`WAYLAND_DISPLAY` set and non-empty, or `XDG_SESSION_TYPE=wayland`). On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`. The cursor and monitor queries go through the app handle that `linux::init()` stores at setup; `cursor_pos()` runs the GDK read on the main thread and gives up after 500 ms rather than block the clipboard watcher. Wayland also hides the cursor from clients and ignores a client's own window position, so `cursor_available()` is false there, popups center on the active monitor and the toast lands where the compositor puts it; global hotkeys do not reach the app on native Wayland, which is what the `--trigger copy|paste` CLI launch (routed to the running instance by the single-instance plugin) is for.
+**Note on Linux, display server**: GDK picks its own backend, native Wayland on a Wayland desktop. The app does not steer it, and it draws nothing that needs a client to place a window or keep one above the others: there is no splash and no notification window on Linux (section 8.1). A user who sets `GDK_BACKEND=x11` gets XWayland, and the code follows. `is_wayland()` reports what GDK connected to, recorded by `linux::init()` from the default display's backend and logged as `linux: session=... gdk=...`; before `init` it falls back to the session (`WAYLAND_DISPLAY` set and non-empty, or `XDG_SESSION_TYPE=wayland`). On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`. The cursor and monitor queries go through the app handle that `linux::init()` stores at setup; `cursor_pos()` runs the GDK read on the main thread and gives up after 500 ms rather than block the clipboard watcher. Wayland also hides the cursor from clients and ignores a client's own window position, so `cursor_available()` is false there and popups center on the active monitor; global hotkeys do not reach the app on native Wayland, which is what the `--trigger copy|paste` CLI launch (routed to the running instance by the single-instance plugin) is for.
 
 **Notes on macOS** (`platform/macos.rs`):
 
@@ -2391,6 +2391,8 @@ old files would be orphaned, not gone.
 
 Only `main` and `splash` are declared in `tauri.conf.json`. The three popups (copy-popup, paste-popup, notification) are created programmatically at startup in `runtime/popup_windows.rs`.
 
+On Linux, `tauri.linux.conf.json` replaces the window list with `main` alone, so the splash is never created, and `popup_windows.rs` skips the notification window. Both are transparent always-on-top windows placed in a corner, which native Wayland cannot do and some X11 window managers do badly; each would also cost a webview. Settings hides **Show splash screen on startup**, **In-app popup** and **Install updates automatically** there (the startup install runs inside the splash). The background update check and its banner do not depend on the splash.
+
 | Window       | Size    | Properties                                                                                              |
 | ------------ | ------- | ------------------------------------------------------------------------------------------------------- |
 | main         | 920x560 | Resizable (min 640x440), frameless, initially hidden (shown by window-state restore), dark bg `#0e0e0e` |
@@ -2414,7 +2416,7 @@ Applied to four windows: `main`, `copy-popup`, `paste-popup` and `notification` 
 
 - **Dev**: `bun run dev` -> Vite on `localhost:1420`
 - **Prod**: `bun run build` -> `tsc && vite build` -> `dist/`
-- **Bundle**: `tauri.conf.json` targets `nsis`, `deb`, `rpm`, `appimage`, `app` and `dmg` (macOS 10.15 and later). Which of them a release builds and publishes is in `docs/releasing.md` at the workspace root.
+- **Bundle**: `tauri.conf.json` targets `nsis`, `deb`, `rpm`, `app` and `dmg` (macOS 10.15 and later). Which of them a release builds and publishes is in `docs/releasing.md` at the workspace root.
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped symbols
 
 ---

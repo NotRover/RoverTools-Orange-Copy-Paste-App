@@ -1,10 +1,17 @@
 use std::sync::atomic::Ordering;
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
+#[cfg(not(target_os = "linux"))]
+use tauri::Emitter;
+#[cfg(target_os = "linux")]
+use tauri_plugin_notification::NotificationExt;
 
 use crate::clipboard::history::ClipboardEntry;
+#[cfg(not(target_os = "linux"))]
 use crate::runtime::platform::notification_position;
-use crate::state::{AppState, NotificationPayload, NOTIF_H, NOTIF_W};
+use crate::state::AppState;
+#[cfg(not(target_os = "linux"))]
+use crate::state::{NotificationPayload, NOTIF_H, NOTIF_W};
 
 fn show_notification(app: &tauri::AppHandle, entry: &ClipboardEntry, action: &str) {
     show_toast(app, entry.kind.label(), action, None, None);
@@ -13,6 +20,33 @@ fn show_notification(app: &tauri::AppHandle, entry: &ClipboardEntry, action: &st
 /// Show the app's own small toast. The one place that positions and reveals
 /// that window, so every caller gets the same Z-order and click-through dance.
 fn show_toast(
+    app: &tauri::AppHandle,
+    kind: &str,
+    action: &str,
+    detail: Option<String>,
+    note: Option<String>,
+) {
+    // No toast window on Linux (see `popup_windows.rs`). Only the alerts that
+    // bypass the preferences reach here there, and they go to the desktop's
+    // own notifications, which every Linux desktop shows reliably.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (kind, detail);
+        let mut builder = app.notification().builder().title(action);
+        if let Some(note) = note.as_deref() {
+            builder = builder.body(note);
+        }
+        if let Err(e) = builder.show() {
+            log::warn!(target: "os-notify", "{e}");
+        }
+        return;
+    }
+    #[cfg(not(target_os = "linux"))]
+    show_window_toast(app, kind, action, detail, note);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn show_window_toast(
     app: &tauri::AppHandle,
     kind: &str,
     action: &str,
@@ -89,6 +123,10 @@ pub(crate) fn notify_finishing_sync(app: &tauri::AppHandle, restarting: bool) {
 /// Show a copy notification if the user has the feature enabled
 /// and copy operations are not muted.
 pub(crate) fn notify_if_enabled(app: &tauri::AppHandle, entry: &ClipboardEntry) {
+    // The confirmations are the in-app popup's job, and Linux has none.
+    if cfg!(target_os = "linux") {
+        return;
+    }
     let state = app.state::<AppState>();
     if !state.notification_enabled.load(Ordering::Relaxed) {
         return;
@@ -101,6 +139,9 @@ pub(crate) fn notify_if_enabled(app: &tauri::AppHandle, entry: &ClipboardEntry) 
 /// Show a paste notification if the user has the feature enabled
 /// and paste operations are not muted.
 pub(crate) fn notify_paste_if_enabled(app: &tauri::AppHandle, entry: &ClipboardEntry) {
+    if cfg!(target_os = "linux") {
+        return;
+    }
     let state = app.state::<AppState>();
     if !state.notification_enabled.load(Ordering::Relaxed) {
         return;

@@ -7,6 +7,12 @@
 export const isMac: boolean =
   /mac/i.test(navigator.platform) || /Macintosh/.test(navigator.userAgent);
 
+/**
+ * Linux, where the app draws no splash and no in-app popup, so the settings
+ * for them are hidden. Android also reports "Linux" but never runs this.
+ */
+export const isLinux: boolean = !isMac && /linux/i.test(navigator.platform);
+
 /** The primary modifier, as a key label: Cmd on macOS, Ctrl elsewhere. */
 export const MOD: string = isMac ? "Cmd" : "Ctrl";
 

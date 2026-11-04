@@ -1,6 +1,8 @@
 use tauri::Manager;
 
-use crate::state::{COPY_POPUP_H, COPY_POPUP_W, NOTIF_H, NOTIF_W, PASTE_POPUP_H, PASTE_POPUP_W};
+use crate::state::{COPY_POPUP_H, COPY_POPUP_W, PASTE_POPUP_H, PASTE_POPUP_W};
+#[cfg(not(target_os = "linux"))]
+use crate::state::{NOTIF_H, NOTIF_W};
 
 const OFFSCREEN_POS: f64 = -9999.0;
 
@@ -137,6 +139,12 @@ pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
 /// matching the Electron configuration. `skip_taskbar` is a no-op on macOS,
 /// where the app runs as an accessory (no Dock icon) instead; see `lib.rs`.
 pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // Linux draws no toast of its own: a transparent always-on-top window is
+    // the part of this that Wayland does not do and some X11 window managers
+    // do badly, and every webview is another slice of a WebKit process. The
+    // two alerts that must reach the user go out as desktop notifications
+    // instead (see `runtime/notifications.rs`).
+    #[cfg(not(target_os = "linux"))]
     let specs = [
         PopupWindowSpec {
             label: "copy-popup",
@@ -157,6 +165,23 @@ pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn st
             url: "src/components/notifications/notification.html",
             width: NOTIF_W,
             height: NOTIF_H,
+            focused: false,
+        },
+    ];
+    #[cfg(target_os = "linux")]
+    let specs = [
+        PopupWindowSpec {
+            label: "copy-popup",
+            url: "src/components/copy-popup/copy-popup.html",
+            width: COPY_POPUP_W,
+            height: COPY_POPUP_H,
+            focused: true,
+        },
+        PopupWindowSpec {
+            label: "paste-popup",
+            url: "src/components/paste-popup/paste-popup.html",
+            width: PASTE_POPUP_W,
+            height: PASTE_POPUP_H,
             focused: false,
         },
     ];

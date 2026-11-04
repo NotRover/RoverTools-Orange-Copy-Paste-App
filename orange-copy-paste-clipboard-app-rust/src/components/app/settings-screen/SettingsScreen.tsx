@@ -17,6 +17,7 @@ import {
   IconVolume,
 } from "@tabler/icons-react";
 import { BellIcon } from "../../icons";
+import { isLinux } from "../../../platform";
 import { useUpdater } from "../../../hooks/useUpdater";
 import { SYNC_BADGE_SETTING_EVENT } from "../../../hooks/useEntrySyncStates";
 import {
@@ -417,8 +418,13 @@ const SettingsScreen: React.FC = () => {
     keepHistory, clickToView, autosave, pasteKeepOpenAfterCopy,
     encryptAtRest, autoCheckUpdates, autoInstallUpdates, betaChannel, developerMode,
   };
+  // Settings Linux does not show cannot mark a section as changed there: a
+  // value roamed in from another device would light a dot nothing explains.
+  const hiddenHere: (keyof typeof DEFAULTS)[] = isLinux
+    ? ["showSplash", "notificationEnabled", "notifCopy", "notifPaste", "autoInstallUpdates"]
+    : [];
   const differs = (...keys: (keyof typeof DEFAULTS)[]) =>
-    keys.some((k) => current[k] !== DEFAULTS[k]);
+    keys.some((k) => !hiddenHere.includes(k) && current[k] !== DEFAULTS[k]);
   const changedSections = [
     differs("closeToTray", "runOnStartup", "startMinimized", "showSplash", "showSyncBadges") && "set-general",
     differs("confirmSyncDelete", "confirmSpaceRemove", "confirmCloudRemove") && "set-confirmations",
@@ -536,13 +542,15 @@ const SettingsScreen: React.FC = () => {
               defaultActive={DEFAULTS.startMinimized}
               onToggle={handleStartMinimizedToggle}
             />
-            <ToggleRow
-              label="Show splash screen on startup"
-              desc="Display a brief startup screen when the app launches."
-              active={showSplash}
-              defaultActive={DEFAULTS.showSplash}
-              onToggle={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
-            />
+            {!isLinux && (
+              <ToggleRow
+                label="Show splash screen on startup"
+                desc="Display a brief startup screen when the app launches."
+                active={showSplash}
+                defaultActive={DEFAULTS.showSplash}
+                onToggle={() => toggleBoolSetting(showSplash, setShowSplash, "show_splash")}
+              />
+            )}
             <ToggleRow
               label="Show sync badges on cards"
               desc="The cloud icon that marks whether an entry has reached the server. Turning it off changes nothing about what syncs."
@@ -625,6 +633,7 @@ const SettingsScreen: React.FC = () => {
               defaultActive={DEFAULTS.osNotifications}
               onToggle={() => toggleBoolSetting(osNotifications, setOsNotifications, "os_notifications")}
             />
+            {!isLinux && (
             <div className="set-row set-row--stack">
               <div className="set-row-header">
                 <div className="set-row-info">
@@ -680,6 +689,7 @@ const SettingsScreen: React.FC = () => {
                 </div>
               )}
             </div>
+            )}
           </div>
         </section>
 
@@ -1001,16 +1011,19 @@ const SettingsScreen: React.FC = () => {
               defaultActive={DEFAULTS.autoCheckUpdates}
               onToggle={handleAutoCheckToggle}
             />
-            <ToggleRow
-              label="Install updates automatically"
-              desc="When a newer version is found at startup, download and install it on the spot, then reopen. Nothing installs while you are working. Needs automatic checks on."
-              active={autoInstallUpdates}
-              defaultActive={DEFAULTS.autoInstallUpdates}
-              disabled={!autoCheckUpdates}
-              onToggle={() =>
-                toggleBoolSetting(autoInstallUpdates, setAutoInstallUpdates, "auto_install_updates")
-              }
-            />
+            {/* The startup install runs in the splash, which Linux does not have. */}
+            {!isLinux && (
+              <ToggleRow
+                label="Install updates automatically"
+                desc="When a newer version is found at startup, download and install it on the spot, then reopen. Nothing installs while you are working. Needs automatic checks on."
+                active={autoInstallUpdates}
+                defaultActive={DEFAULTS.autoInstallUpdates}
+                disabled={!autoCheckUpdates}
+                onToggle={() =>
+                  toggleBoolSetting(autoInstallUpdates, setAutoInstallUpdates, "auto_install_updates")
+                }
+              />
+            )}
             <ToggleRow
               label="Get beta versions"
               desc="Receive new features early, alongside every normal release. Betas are tested less, so expect the occasional rough edge. Turning this off stops future betas. It cannot move you back to an older version."
