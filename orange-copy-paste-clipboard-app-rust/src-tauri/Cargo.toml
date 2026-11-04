@@ -118,6 +118,12 @@ gethostname = "1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Linux: the GTK clipboard's owner-change signal is the change counter the
+# clipboard watcher polls (runtime/platform/linux.rs). Same version tao links,
+# so this names a crate already in the tree rather than adding one.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 # macOS: CoreGraphics posts the Cmd+C / Cmd+V keystrokes and reads the cursor;
 # AppKit gives the usable screen area (NSScreen), the pasteboard change count
 # and app hide / unhide; CoreFoundation carries the Accessibility prompt. All

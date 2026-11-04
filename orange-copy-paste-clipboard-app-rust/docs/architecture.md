@@ -1629,7 +1629,8 @@ real client would refuse.
 
 - Dedicated thread with **220ms polling interval**.
 - **Windows and macOS**: a change token the OS bumps on every write (`GetClipboardSequenceNumber()`, `NSPasteboard.changeCount`). An unchanged clipboard costs one call per cycle and no read, and the token only advances once a capture succeeded, so a locked clipboard is retried.
-- **Linux**: no change token available. The watcher reads the clipboard every cycle and relies on the top-of-history dedupe.
+- **Linux/X11**: a count of the GTK clipboard's `owner-change` signals (`platform/linux.rs`), which GDK gets from XFixes for every write by any app. It is `None` until the first signal arrives, so a session that never delivers it keeps reading every cycle rather than never reading again. After an image capture the watcher calls `malloc_trim` so the decode and re-encode buffers go back to the OS.
+- **Linux/Wayland**: no change token. A client only hears about the clipboard while one of its surfaces has focus, so the watcher reads every cycle and relies on the top-of-history dedupe.
 - On change, calls `capture_clipboard_change()`:
   - Checks suppress flag (skips if set by user action).
   - Reads clipboard via `read_clipboard_capture()`.

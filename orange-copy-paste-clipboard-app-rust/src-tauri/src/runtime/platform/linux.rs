@@ -30,6 +30,7 @@
 //! centered by tauri instead of anchored.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -38,10 +39,73 @@ use tauri::{AppHandle, Monitor};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
-/// Keep the app handle the cursor and monitor queries go through. Called
-/// once from setup, before the first popup or toast.
+/// Keep the app handle the cursor and monitor queries go through, and start
+/// counting clipboard changes. Called once from setup, on the main thread,
+/// before the first popup or toast.
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
+    watch_clipboard_owner();
+}
+
+// ── Clipboard change counter ─────────────────────────────────────────────────
+
+/// Bumped on every `owner-change` the GTK clipboard reports; see
+/// [`clipboard_change_token`].
+static CLIPBOARD_CHANGES: AtomicU64 = AtomicU64::new(0);
+/// Set once the signal has fired at least once, which is the proof that this
+/// session delivers it.
+static CLIPBOARD_SIGNAL_SEEN: AtomicBool = AtomicBool::new(false);
+
+/// Connect to the GTK clipboard's `owner-change` signal. On X11, GDK asks
+/// the server (XFixes) to report every `SetSelectionOwner` on CLIPBOARD,
+/// which is every write by any app, so the counter is the Linux counterpart
+/// of the Win32 sequence number.
+///
+/// Not on Wayland: there a client only hears about the clipboard while one
+/// of its surfaces has keyboard focus, so a counter would go quiet exactly
+/// when the user is copying in another app. The watcher keeps polling there.
+fn watch_clipboard_owner() {
+    use gtk::prelude::*;
+
+    if is_wayland() || !gtk::is_initialized_main_thread() {
+        return;
+    }
+    let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+    // gtk-rs does not bind this signal (its event argument type is skipped),
+    // so it is connected by name; the arguments are not needed.
+    clipboard.connect_local("owner-change", false, |_| {
+        CLIPBOARD_CHANGES.fetch_add(1, Ordering::Relaxed);
+        CLIPBOARD_SIGNAL_SEEN.store(true, Ordering::Release);
+        None
+    });
+}
+
+/// The clipboard change counter, once it has proven itself: `None` until the
+/// first `owner-change` arrives (and always on Wayland), so a session where
+/// the signal never comes keeps the read-every-cycle behaviour instead of
+/// never reading again. Once a change has been seen, an unchanged clipboard
+/// costs the watcher one atomic load per cycle and no read, where before it
+/// read files, HTML, text and the image, decoding and re-encoding a copied
+/// picture every 220 ms.
+pub fn clipboard_change_token() -> Option<u64> {
+    if CLIPBOARD_SIGNAL_SEEN.load(Ordering::Acquire) {
+        Some(CLIPBOARD_CHANGES.load(Ordering::Relaxed))
+    } else {
+        None
+    }
+}
+
+/// Hand freed heap back to the OS. A clipboard image is decoded to RGBA and
+/// re-encoded to PNG on the way in, tens of megabytes for a screenshot, and
+/// glibc keeps what it freed in the process. On Windows the allocator
+/// returns it on its own, which is the difference between the two numbers
+/// in the task manager. Called after an image capture.
+pub fn release_free_memory() {
+    // SAFETY: malloc_trim takes a pad in bytes and touches only the
+    // allocator's own free lists.
+    unsafe {
+        libc::malloc_trim(0);
+    }
 }
 
 // ── Display-server detection ─────────────────────────────────────────────────
