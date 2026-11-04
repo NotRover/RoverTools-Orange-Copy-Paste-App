@@ -111,6 +111,8 @@ keyring = "2"
 zeroize = { version = "1", features = ["derive"] }
 # Open the system browser for the OAuth authorization hop
 open = "5"
+# The machine's own name, shown as this device's name in the device list
+gethostname = "1"
 
 #  Windows-only  key simulation (keybd_event / GetCursorPos / monitor info)
 #  NOTE: keep this target table LAST — any `dep = ...` lines after a target

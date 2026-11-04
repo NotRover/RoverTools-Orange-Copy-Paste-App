@@ -1549,9 +1549,13 @@ impl SyncClient {
             }
             _ => crypto::generate_device_keypair(),
         };
+        //
+        //    The name is this machine's own (`device_id::local_device_name`);
+        //    the label the UI passed in is only the fallback for a machine with
+        //    no readable name.
         let device_id = http
             .register_device(RegisterDeviceRequest {
-                device_name,
+                device_name: device_id::local_device_name().unwrap_or(device_name),
                 platform: std::env::consts::OS.to_string(),
                 app_version: env!("CARGO_PKG_VERSION").to_string(),
                 device_pubkey: Some(B64.encode(device_pub)),
@@ -1895,8 +1899,56 @@ impl SyncClient {
         *self.user.lock() = Some(user.clone());
         self.install_revoked_hook(&http);
         self.start_ws_listener();
+        self.refresh_device_record(
+            Arc::clone(&http),
+            stored_user,
+            stored_device,
+            B64.encode(device_pub),
+        );
 
         Ok(user)
+    }
+
+    /// Bring this device's row up to date with the machine it is running on.
+    ///
+    /// A restore skips registration, so a row's name and app version are only
+    /// as fresh as the last password sign-in - and a row registered by a build
+    /// that named every device "Orange CP - Win32" would keep that name for as
+    /// long as the session lasted. Registering again under the same device key
+    /// returns the same row with its name, platform and version rewritten; the
+    /// server never mints a second row for a key it already has.
+    ///
+    /// Best-effort and off the restore path: a failure costs a stale label,
+    /// nothing else. Skipped when the machine has no readable name, since
+    /// there is nothing better to write than what is there.
+    fn refresh_device_record(
+        &self,
+        http: Arc<SyncHttpClient>,
+        user_id: String,
+        device_id: String,
+        device_pub_b64: String,
+    ) {
+        let Some(device_name) = device_id::local_device_name() else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            let req = RegisterDeviceRequest {
+                device_name,
+                platform: std::env::consts::OS.to_string(),
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                device_pubkey: Some(device_pub_b64),
+                fingerprint: Some(device_id::fingerprint(&user_id).await),
+            };
+            match http.register_device(req).await {
+                Ok(res) if res.device_id != device_id => log::warn!(
+                    target: "sync",
+                    "device refresh answered with another row ({}, stored {device_id}); leaving the stored one",
+                    res.device_id
+                ),
+                Ok(_) => {}
+                Err(e) => log::warn!(target: "sync", "device refresh failed (name may be stale): {e}"),
+            }
+        });
     }
 
     /// Point the HTTP client's revoked-device hook at [`Self::end_session_revoked`].

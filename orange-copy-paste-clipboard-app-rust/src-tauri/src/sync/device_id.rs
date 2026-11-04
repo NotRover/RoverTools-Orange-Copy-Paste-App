@@ -46,6 +46,21 @@ fn derive(machine: &str, user_id: &str) -> String {
     crypto::sha256_hex(&material)
 }
 
+/// The name this machine goes by - the computer name on Windows, the hostname
+/// elsewhere - as the device name to register under, so a user with several
+/// machines can tell their rows apart. `None` when the OS has no readable
+/// name, in which case the caller keeps whatever label it already had.
+///
+/// Trimmed and cut to the server's column width (128). The name is sent as
+/// given, not derived: it is a label, not an identifier.
+pub fn local_device_name() -> Option<String> {
+    let name = gethostname::gethostname().to_string_lossy().trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.chars().take(128).collect())
+}
+
 /// The OS's own machine identifier, if it has one this user can read.
 #[cfg(windows)]
 fn machine_id() -> Option<String> {

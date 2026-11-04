@@ -134,7 +134,7 @@ src-tauri/
 │   │   ├── client.rs           # reqwest HTTP client, Bearer + X-Device-Id injection, 401 refresh
 │   │   ├── supabase.rs         # Supabase Auth (GoTrue): login, signup, refresh, recover, PKCE
 │   │   ├── oauth.rs            # Google sign-in: loopback redirect server (ports 53170-53172)
-│   │   ├── device_id.rs        # Stable per-machine device fingerprint (not identity)
+│   │   ├── device_id.rs        # Stable per-machine device fingerprint (not identity) and the machine's name
 │   │   ├── ws_listener.rs      # WebSocket connection, event dispatch to Tauri event system
 │   │   ├── tls.rs              # TLS for the sync server: public roots, or a pinned certificate
 │   │   ├── developer.rs        # Developer options: backend profile, connection test, status
@@ -1212,7 +1212,7 @@ All cryptography runs here. Nothing outside this module touches raw key material
 
 | Command                | Signature                                           | Description                                                                              |
 | ---------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `sync_login`           | `(email, password, device_name) -> Result<SyncUser>` | Sign in via **Supabase Auth**; `POST /auth/bootstrap` (derive UMK from `kdf_salt`); `POST /auth/devices` (register device); cache the Supabase session |
+| `sync_login`           | `(email, password, device_name) -> Result<SyncUser>` | Sign in via **Supabase Auth**; `POST /auth/bootstrap` (derive UMK from `kdf_salt`); `POST /auth/devices` (register the device under the machine's own name, `device_name` only when the OS has none); cache the Supabase session. A silent restore registers again the same way, so a row's name and app version follow the machine |
 | `sync_logout`          | `() -> ()`                                           | Sign out of Supabase; clear UMK; optionally deactivate the device                        |
 | `sync_get_user`        | `() -> Option<SyncUser>`                             | Returns cached login info if authenticated                                               |
 | `sync_get_status`      | `() -> SyncStatusInfo`                               | `{ connected, pending_count, skipped_count, skipped, last_synced_at }`                   |

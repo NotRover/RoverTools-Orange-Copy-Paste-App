@@ -38,14 +38,20 @@ import {
   IconCloudCheck,
   IconCloudUp,
   IconDeviceDesktop,
-  IconDeviceLaptop,
-  IconDeviceMobile,
   IconKey,
   IconKeyFilled,
   IconServer,
   IconStack2,
 } from "@tabler/icons-react";
-import { ClipboardIcon, GoogleIcon, NotesIcon } from "../../icons";
+import {
+  AndroidIcon,
+  AppleIcon,
+  ClipboardIcon,
+  GoogleIcon,
+  LinuxIcon,
+  NotesIcon,
+  WindowsIcon,
+} from "../../icons";
 import { deferDestructive } from "../toast/toastBus";
 import { usePendingRemovals } from "../../../hooks/pendingRemoval";
 import { useEntrySyncStates } from "../../../hooks/useEntrySyncStates";
@@ -120,11 +126,15 @@ function restoreText({ restored, downloading }: RestoreOutcome): string {
   return `Restored ${items(restored)}.${more}`;
 }
 
-/** Pick a device glyph from the reported platform string. */
+/** Pick the OS logo from the reported platform string (Rust's
+ *  `std::env::consts::OS`: "windows", "macos", "ios", "android", "linux").
+ *  Anything unrecognised shows a plain monitor. */
 function deviceIcon(platform: string) {
   const p = platform.toLowerCase();
-  if (p.includes("android") || p.includes("ios")) return IconDeviceMobile;
-  if (p.includes("mac") || p.includes("darwin")) return IconDeviceLaptop;
+  if (p.includes("windows") || p.includes("win32")) return WindowsIcon;
+  if (p.includes("mac") || p.includes("darwin") || p.includes("ios")) return AppleIcon;
+  if (p.includes("android")) return AndroidIcon;
+  if (p.includes("linux")) return LinuxIcon;
   return IconDeviceDesktop;
 }
 
@@ -2254,7 +2264,7 @@ Keep this. It is the only way back into your synced items if you forget your pas
                       return (
                         <div key={d.id} className="acct-row">
                           <span className="acct-row-icon">
-                            <DeviceGlyph size={15} />
+                            <DeviceGlyph size={20} />
                           </span>
                           <div className="acct-row-main">
                             <span className="acct-row-name">
