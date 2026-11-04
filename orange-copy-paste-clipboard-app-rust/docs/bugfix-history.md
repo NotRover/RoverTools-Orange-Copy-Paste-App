@@ -1527,3 +1527,42 @@ two renames of a re-extract, the entry's folder is briefly absent.
 **Invariant to keep**: **every entry in history is named by something on disk before the
 work that could lose it starts.** Write the record first, then act, then clear it; never
 the other way round.
+
+## #36 - The copy popup lagged the copy, and toasts outlived their own bar
+
+**Symptom.** Found 2026-11-04, fixed the same day, not yet released. The "Copied" popup
+and the desktop notification appeared noticeably after the copy, where they used to be
+instant. An in-app toast kept showing after the progress bar under it had run out, for
+as long as the app stayed busy.
+
+**Cause.** Two unrelated changes, one on each side of the bridge.
+
+- The watcher showed the popup last, after the history push. Until 0.5.0 a push was a
+  memory write and a dirty flag; since the move to sqlite in 0.5.0 (section 7.1 of `docs/architecture.md`) a
+  push commits the row, then the "Saved" group, then the sync queue, each a transaction
+  under `synchronous = FULL`, so each one waits on an fsync. The popup sat behind all of
+  them. Nothing in the popup needs the push: it shows the entry's kind, known before it.
+- `ToastNotification` armed its close timer in an effect keyed on `onDismiss`. Every
+  parent passes an inline closure, which is a new function on each render, so the effect
+  re-ran and the timer restarted on every app re-render, while the bar, a CSS animation
+  on an element that never remounts, drained once. The toast then closed only after the
+  app had been still for the full duration.
+
+**Fix.** `capture_clipboard_change` shows the notification right after the dedupe
+check and before the push, with the history lock released (the popup's window calls hop
+to the main thread, which may itself be waiting on the history). The push goes through
+`push_if_distinct_with_flag`, since the dedupe and the push are now two lock holds. The
+toast reads `onDismiss` through a ref and keys its timer on `duration` alone, so it is
+armed once per mount.
+
+**How a regression is caught.** No test; both are timing. The check is by hand in
+`tauri dev`: copy something and the popup must show before the card appears in the
+list, and a toast must close as its bar ends while the app is doing other work.
+
+**Not fixed.** A copy still waits on the fsyncs before the card shows in the history
+list; only the popup moved ahead of them. `synchronous = FULL` stays, by the durability
+promise in section 7.1.
+
+**Invariant to keep**: **nothing the user is waiting to see sits behind a disk commit.**
+Show first, then write; and a timer that must match a CSS animation is armed once, on
+mount, never on a callback identity.

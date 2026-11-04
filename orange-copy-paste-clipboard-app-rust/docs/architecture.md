@@ -193,7 +193,7 @@ src/
 │   │   ├── notifications/      # Notification centre popout (bell)
 │   │   ├── status-pill/        # Entry count summary bar
 │   │   ├── update-banner/      # In-app update prompt (check/download/install)
-│   │   ├── toast/              # Toast notifications (undo clear)
+│   │   ├── toast/              # In-app toasts (undo clear, sync notices); the close timer is armed once per mount
 │   │   └── tooltip/            # Tooltip portal
 │   ├── common/                 # Shared components (ConfirmDeleteDialog)
 │   ├── entry-types/            # EntryTypePill (shared type badge)
@@ -1628,9 +1628,14 @@ real client would refuse.
   - Checks suppress flag (skips if set by user action).
   - Reads clipboard via `read_clipboard_capture()`.
   - Deduplicates against top history entry.
-  - Pushes to history, emits `clipboard:new-entry` to all windows.
+  - Shows the copy notification if enabled, before anything touches the disk: a push
+    commits the row, the "Saved" group and the sync queue, each with an fsync, and a
+    popup placed after them lagged the copy by that much (bug #36). The history lock is
+    not held across it.
+  - Pushes to history through `push_if_distinct_with_flag` (the dedupe above and the
+    push are two lock holds, so the push checks again), emits `clipboard:new-entry` to
+    all windows.
   - Updates `active_clipboard_id` and emits `clipboard:active-id`.
-  - Shows copy notification if enabled.
 - Advances the sequence token only when capture succeeds. If the clipboard was locked, the next poll retries.
 
 #### `hotkeys.rs` - Global Shortcut Handlers
@@ -2205,6 +2210,9 @@ loses at most the mutation in progress.
 platter), `foreign_keys = ON`, `temp_store = MEMORY`, a 5s busy timeout. `Db::write`
 wraps every call in a transaction, so a mutation that touches two tables lands whole
 or not at all, and reports the outcome to the health write notice (section 4.8).
+`FULL` means every commit waits on an fsync, so nothing the user is watching for may
+sit behind a write: the copy popup goes up before the push (`clipboard_watcher.rs`, section 4.7), and anything
+else that needs to feel instant should follow that order rather than lowering the pragma.
 
 **Failure.** A write that fails updates memory anyway and is logged; the app keeps
 working with what it has, and the user is told once failures last. If `app.db` will
