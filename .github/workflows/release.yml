@@ -824,6 +824,15 @@ jobs:
             # leave its latest / prerelease standing as it was.
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber release/*
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file RELEASE_BODY.md
+            # `gh release create` makes a draft, uploads, then publishes it. A
+            # first publish that died in between (a GitHub 5xx) leaves a draft
+            # with the tag pushed and no assets, which nothing serves. Publish
+            # it now, with the channel it was cut for, before beta.json below
+            # points at it.
+            if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "true" ]; then
+              echo "$TAG is still a draft from a failed publish; publishing it."
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false "${visibility[@]}"
+            fi
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \

@@ -340,6 +340,11 @@ What it does:
 - Updates `beta.json` only when this version is the newest, so retrying an old release
   cannot roll the beta channel back. It also leaves the release's latest/prerelease flag
   as it was.
+- Publishes the release if it is still a draft. That is what a first publish leaves
+  behind when GitHub fails between creating the release and uploading to it: the release
+  commit and tag are on `main`, the release is a draft with no assets, and both feeds
+  still serve the previous version. Retry that tag with `platforms=all`; do not cut a new
+  version.
 
 A retry can also replace a bundle that did build, for the same reason: `platforms=all`
 on a release that already has everything rebuilds all four and overwrites them. The
