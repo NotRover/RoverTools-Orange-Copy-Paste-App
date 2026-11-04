@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import "./ToastNotification.css";
 
 // Types 
@@ -35,12 +35,20 @@ const ToastNotification: React.FC<ToastNotificationProps> = ({
   duration = 5000,
   onDismiss,
 }) => {
-  // Fire onDismiss after the timer, if one is set
+  // Fire onDismiss after the timer, if one is set.
+  //
+  // The callback is read through a ref so the timer is armed once per mount.
+  // Parents pass an inline closure, which is a new function on every render,
+  // and a timer keyed on it restarted each time the app re-rendered - while
+  // the bar, a CSS animation on an element that never remounts, kept draining.
+  // The toast then outlived its own bar by however long the app stayed busy.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
   useEffect(() => {
-    if (!duration || !onDismiss) return;
-    const id = setTimeout(onDismiss, duration);
+    if (!duration) return;
+    const id = setTimeout(() => onDismissRef.current?.(), duration);
     return () => clearTimeout(id);
-  }, [duration, onDismiss]);
+  }, [duration]);
 
   return (
     <div className="toast" role="status" aria-live="polite">

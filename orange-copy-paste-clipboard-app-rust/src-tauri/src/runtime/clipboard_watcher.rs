@@ -52,19 +52,22 @@ fn capture_clipboard_change(
         Capture::Nothing => return false,
     };
 
-    let maybe_new_entry = {
-        let mut hist = history.lock();
-        if hist.top_matches(&entry) {
-            None
-        } else {
-            Some(hist.push(entry))
-        }
-    };
+    if history.lock().top_matches(&entry) {
+        return true;
+    }
 
-    if let Some(ref new_entry) = maybe_new_entry {
+    // The toast goes up before anything touches the disk. A push writes its
+    // row through to the database, and with it the "Saved" group and the sync
+    // queue, each a committed transaction; put after those, the popup lagged
+    // the copy by every fsync in between. It only needs the kind, which is
+    // known here. The lock is not held across it: the window calls below hop
+    // to the main thread, which may itself be waiting on the history.
+    crate::runtime::notifications::notify_if_enabled(app, &entry);
+
+    let (new_entry, inserted) = history.lock().push_if_distinct_with_flag(entry);
+    if inserted {
         crate::clipboard::commands::set_active_clipboard_id(app, &new_entry.id);
-        after_new_entry(app, history, new_entry);
-        crate::runtime::notifications::notify_if_enabled(app, new_entry);
+        after_new_entry(app, history, &new_entry);
     }
     true
 }
