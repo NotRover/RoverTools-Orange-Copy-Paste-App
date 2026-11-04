@@ -1280,9 +1280,10 @@ _Developer options (`developer.rs`, the tools under the Developer options switch
 | `dev_discover` | `GET {server_url}/.well-known/orange-copy-paste.json`: the server's Supabase URL, publishable key, reset page and versions |
 | `dev_test_backend` | Try a profile without saving it: `/internal/healthz`, the `X-API-Version` header against the `v1` this client speaks, the discovery route, one WebSocket handshake, and `{supabase_url}/auth/v1/settings` with the key. Reports the certificate's SHA-256 and whether the public roots trust it |
 | `dev_set_backend` | Save a profile. Refused while signed in (the session, device record and keys belong to the current server); drops the sync client so the next one reads the new settings |
-| `dev_reset_backend` | Remove the overrides so the compiled-in deployment applies again. Same refusal |
+| `dev_reset_backend` | Remove the overrides so the compiled-in deployment applies again. Same refusal; the button is its own row between Connection and Update feed, so it is visible while the editor is gated, disabled with a "Sign out first" tooltip (or "Already on the default server"), and asks for confirmation |
 | `dev_set_update_override` | Set or clear `update_feed_url` and `update_pubkey` |
-| `dev_connection_status` | Engine snapshot (WebSocket state and history, device id, cursor, queue, in-flight pushes, recorded transfers) plus one live health round trip with its RTT |
+| `dev_connection_status` | Engine snapshot (WebSocket state and history, device id, cursor, queue, in-flight pushes, recorded transfers) plus one live health round trip with its RTT. The health body's `db` and `redis` fields are the strings `ok`/`error` (the backend's `HealthResponse`); a bool is read too |
+| `dev_ping_server` | `count` (1-10) health requests in a row under the same trust as sync, timed one by one; returns the successful round trips and the failure count. The icon button beside Reachable sends 5 and shows the average in place of the one-shot RTT until the next Refresh |
 
 The endpoint values are public, so reading them out is fine; writing them is only ever
 done by these commands. `set_setting` refuses every key `SyncConfig::is_endpoint_key`

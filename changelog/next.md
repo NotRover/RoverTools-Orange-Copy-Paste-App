@@ -27,9 +27,10 @@
 Settings is one page with a contents list, you can point the app at your own server, and the copy popup is instant again.
 
 ### New
-- Developer options, at the end of Settings. Turn them on, after a confirmation, to point the app at your own server, inspect the sync connection, and read updates from your own feed. They are off by default and the official server does not change unless you tell it to.
+- Developer options, at the end of Settings. Turn them on, after a confirmation, to point the app at your own server, inspect the sync connection, and read updates from your own feed. They are off by default and the default server does not change unless you tell it to.
 - Point the app at a self-hosted server with one URL. Enter the server, press Discover and it fetches the rest from the server, then Test connection checks it before you save. A self-signed certificate can be pinned by its fingerprint, and plain http is allowed on a private network when you turn that on.
-- The Connection panel under Developer options shows what the sync engine sees: whether the server answers and how fast, the WebSocket state, the sync cursor, the pending queue and your storage use.
+- The Connection panel under Developer options shows what the sync engine sees: whether the server answers and how fast, whether its database and Redis are up, the WebSocket state, the sync cursor, the pending queue and your storage use. The small button next to Reachable sends 5 requests in a row and shows their average.
+- Reset to default, above Update feed under Developer options, puts the app back on the server the app shipped with after a confirmation. It stays greyed out while you are signed in.
 - Search settings from the box above the list. It shows only the settings whose name or description contains what you typed.
 
 ### Improved

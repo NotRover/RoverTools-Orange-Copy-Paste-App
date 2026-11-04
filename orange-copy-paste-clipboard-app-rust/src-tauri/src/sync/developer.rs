@@ -190,6 +190,14 @@ pub struct Probe {
     pub error: Option<String>,
 }
 
+/// The round trips of a short burst of health requests, in order. A failed
+/// request is counted, not timed, so the samples are all successes.
+#[derive(Debug, Serialize)]
+pub struct PingReport {
+    pub samples_ms: Vec<u64>,
+    pub failed: u32,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ConnectionStatus {
     pub server_url: String,
@@ -348,8 +356,8 @@ pub async fn dev_test_backend(profile: BackendProfile) -> Result<TestReport, Str
             report.api_version = header(&resp, "x-api-version");
             let status = resp.status();
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            let db = body.get("db").and_then(|v| v.as_bool());
-            let redis = body.get("redis").and_then(|v| v.as_bool());
+            let db = dep_ok(body.get("db"));
+            let redis = dep_ok(body.get("redis"));
             let parts = format!(
                 "{status}, {rtt} ms, database {}, redis {}",
                 yes_no(db),
@@ -471,6 +479,17 @@ pub async fn dev_test_backend(profile: BackendProfile) -> Result<TestReport, Str
 
     report.ok = report.steps.iter().all(|s| s.ok);
     Ok(report)
+}
+
+/// One dependency's field from `/internal/healthz`. The backend writes it as
+/// the string `"ok"` or `"error"` (`HealthResponse`); a bool is accepted too so
+/// an older or third-party server is not read as "unknown".
+fn dep_ok(v: Option<&serde_json::Value>) -> Option<bool> {
+    match v {
+        Some(serde_json::Value::Bool(b)) => Some(*b),
+        Some(serde_json::Value::String(s)) => Some(s == "ok"),
+        _ => None,
+    }
 }
 
 fn yes_no(v: Option<bool>) -> &'static str {
@@ -643,8 +662,8 @@ pub async fn dev_connection_status(
                 rtt_ms: Some(rtt),
                 service_version: None,
                 api_version,
-                db: body.get("db").and_then(|v| v.as_bool()),
-                redis: body.get("redis").and_then(|v| v.as_bool()),
+                db: dep_ok(body.get("db")),
+                redis: dep_ok(body.get("redis")),
                 error: None,
             }
         }
@@ -687,4 +706,32 @@ pub async fn dev_connection_status(
         pending_work,
         probe,
     })
+}
+
+/// `count` health requests in a row to the configured server, under the same
+/// trust as sync, so the number is the one sync pays. Sequential rather than
+/// parallel: the point is the latency of one request, not the throughput.
+#[tauri::command]
+pub async fn dev_ping_server(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    count: u32,
+) -> Result<PingReport, String> {
+    let config = SyncConfig::load(&app);
+    let pin = state
+        .sync_client
+        .lock()
+        .as_ref()
+        .map(|s| s.cert_pin())
+        .unwrap_or(config.server_cert_sha256);
+    let count = count.clamp(1, 10);
+    let mut report = PingReport { samples_ms: Vec::with_capacity(count as usize), failed: 0 };
+    for _ in 0..count {
+        let (result, rtt, _) = probe_get(&config.server_url, "/internal/healthz", pin).await;
+        match result {
+            Ok(resp) if resp.status().is_success() => report.samples_ms.push(rtt),
+            _ => report.failed += 1,
+        }
+    }
+    Ok(report)
 }

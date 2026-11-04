@@ -1,16 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { IconCode, IconRefresh } from "@tabler/icons-react";
+import { IconActivity, IconCode, IconRefresh } from "@tabler/icons-react";
 import { NAVIGATE_EVENT } from "../../../types";
 import type {
   BackendProfile,
   BackendTestReport,
   DevConfig,
   DevConnectionStatus,
+  DevPingReport,
   Discovered,
   SyncQuota,
 } from "../../../types";
+import ConfirmDeleteDialog from "../../common/ConfirmDeleteDialog";
 import { ChangedMark } from "./ChangedMark";
 import "./DeveloperSection.css";
 
@@ -36,6 +38,16 @@ const ago = (ms: number | null | undefined) => {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+};
+
+const PING_COUNT = 5;
+
+/** Replaces the one-shot number once a test has run: "yes, avg 131 ms". */
+const describePing = (p: DevPingReport) => {
+  const n = p.samples_ms.length;
+  if (n === 0) return `no, ${p.failed} of ${p.failed} failed`;
+  const avg = Math.round(p.samples_ms.reduce((a, b) => a + b, 0) / n);
+  return p.failed ? `yes, avg ${avg} ms, ${p.failed} failed` : `yes, avg ${avg} ms`;
 };
 
 const sameProfile = (a: BackendProfile, b: BackendProfile) =>
@@ -71,13 +83,18 @@ const Field: React.FC<{
   </label>
 );
 
-const Stat: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({
-  label,
-  value,
-  mono,
-}) => (
+const Stat: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  /** A small control shown after the label. */
+  action?: React.ReactNode;
+}> = ({ label, value, mono, action }) => (
   <div className="dev-stat">
-    <span className="dev-stat-label">{label}</span>
+    <span className="dev-stat-label">
+      {label}
+      {action}
+    </span>
     <span className={`dev-stat-value${mono ? " dev-stat-value--mono" : ""}`}>{value}</span>
   </div>
 );
@@ -121,6 +138,9 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
   const [quota, setQuota] = useState<SyncQuota | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [ping, setPing] = useState<DevPingReport | null>(null);
+  const [pingBusy, setPingBusy] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
 
   const [feedUrl, setFeedUrl] = useState("");
   const [pubkey, setPubkey] = useState("");
@@ -156,6 +176,7 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
     try {
       const s = await invoke<DevConnectionStatus>("dev_connection_status");
       setStatus(s);
+      setPing(null);
       if (s.signed_in) {
         invoke<SyncQuota>("sync_get_quota")
           .then(setQuota)
@@ -250,14 +271,28 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
     }
   };
 
+  const pingServer = async () => {
+    setPingBusy(true);
+    try {
+      setPing(await invoke<DevPingReport>("dev_ping_server", { count: PING_COUNT }));
+    } catch (e) {
+      setPing(null);
+      setStatusError(errorText(e));
+    } finally {
+      setPingBusy(false);
+    }
+  };
+
   const reset = async () => {
+    setResetConfirm(false);
     setBusy("reset");
     setNotice(null);
     try {
       const c = await invoke<DevConfig>("dev_reset_backend");
       applyConfig(c);
       setReport(null);
-      setNotice({ kind: "ok", text: "Back on the official server." });
+      setPing(null);
+      setNotice({ kind: "ok", text: "Back on the default server." });
       refreshStatus();
     } catch (e) {
       setNotice({ kind: "err", text: errorText(e) });
@@ -279,7 +314,7 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
       setFeedNotice(
         c.update_feed_url
           ? "Saved. Check now in Updates reads the custom feed."
-          : "Saved. Updates come from the official feeds again.",
+          : "Saved. Updates come from the default feeds again.",
       );
     } catch (e) {
       setFeedNotice(errorText(e));
@@ -297,7 +332,7 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
           <div className="set-row-header">
             <div className="set-row-info">
               <span className="set-row-label">
-                Backend{config.is_official ? " (official)" : " (custom)"}
+                Backend{config.is_official ? " (default)" : " (custom)"}
                 <ChangedMark show={!config.is_official} />
               </span>
               <span className="set-row-desc">
@@ -362,7 +397,7 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
               onChange={(v) => update({ reset_page_url: v })}
               placeholder="https://your-site/reset"
               mono
-              hint="Where a reset email sends the user. Leave empty to keep the official page."
+              hint="Where a reset email sends the user. Leave empty to keep the default page."
             />
             <label className="dev-check">
               <input
@@ -436,14 +471,6 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
             </button>
             <button
               type="button"
-              className="settings-action-btn"
-              onClick={reset}
-              disabled={busy !== null || config.is_official}
-            >
-              {busy === "reset" ? "Resetting..." : "Reset to official"}
-            </button>
-            <button
-              type="button"
               className="settings-action-btn dev-primary"
               onClick={save}
               disabled={busy !== null || !dirty}
@@ -454,6 +481,16 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
           </>
           )}
         </div>
+
+      <ConfirmDeleteDialog
+        open={resetConfirm}
+        title="Reset to the default server?"
+        message="The custom server, Supabase settings, certificate pin and plain-http rule are removed and the app connects to the default server again. Nothing on the custom server is deleted."
+        confirmLabel="Reset"
+        noOptOut
+        onCancel={() => setResetConfirm(false)}
+        onConfirm={reset}
+      />
 
       {/* ── Connection ── */}
         <div className="set-row set-row--stack">
@@ -480,10 +517,27 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
               <Stat label="Server" value={status.server_url} mono />
               <Stat
                 label="Reachable"
+                action={
+                  <button
+                    type="button"
+                    className="dev-stat-btn"
+                    onClick={pingServer}
+                    disabled={pingBusy}
+                    aria-label="Test latency"
+                    data-tooltip={`Test latency: ${PING_COUNT} requests in a row`}
+                    data-tooltip-pos="top"
+                  >
+                    <IconActivity size={11} />
+                  </button>
+                }
                 value={
-                  status.probe.ok
-                    ? `yes, ${status.probe.rtt_ms} ms`
-                    : status.probe.error ?? "no"
+                  pingBusy
+                    ? "yes, pinging..."
+                    : ping
+                      ? describePing(ping)
+                      : status.probe.ok
+                        ? `yes, ${status.probe.rtt_ms} ms`
+                        : status.probe.error ?? "no"
                 }
               />
               <Stat
@@ -560,6 +614,34 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
           )}
         </div>
 
+      {/* ── Reset ── */}
+        <div className="set-row">
+          <div className="set-row-info">
+            <span className="set-row-label">Reset to default</span>
+            <span className="set-row-desc">
+              Forget the custom server, its Supabase settings, the certificate pin and the
+              plain-http rule, and connect to the server the app shipped with. The update
+              feed is not touched.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="settings-action-btn"
+            onClick={() => setResetConfirm(true)}
+            disabled={busy !== null || locked || config.is_official}
+            data-tooltip={
+              config.is_official
+                ? "Already on the default server"
+                : locked
+                  ? "Sign out first"
+                  : undefined
+            }
+            data-tooltip-pos="left"
+          >
+            {busy === "reset" ? "Resetting..." : "Reset to default"}
+          </button>
+        </div>
+
       {/* ── Updates ── */}
         <div className="set-row set-row--stack">
           <div className="set-row-header">
@@ -569,9 +651,9 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
                 <ChangedMark show={config.update_feed_url !== ""} />
               </span>
               <span className="set-row-desc">
-                Read updates from your own feed instead of the official stable and beta
+                Read updates from your own feed instead of the default stable and beta
                 feeds. A fork signs its bundles with its own key; paste that key here. A
-                plain mirror of the official feed can leave it empty.
+                plain mirror of the default feed can leave it empty.
               </span>
             </div>
           </div>
@@ -583,7 +665,7 @@ const DeveloperTools: React.FC<{ onChanged: (changed: boolean) => void }> = ({ o
                 setFeedUrl(v);
                 setFeedNotice(null);
               }}
-              placeholder="https://example.com/latest.json (empty for official)"
+              placeholder="https://example.com/latest.json (empty for default)"
               mono
             />
             <Field

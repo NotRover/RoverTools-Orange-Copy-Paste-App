@@ -347,6 +347,12 @@ export interface DevConnectionStatus {
   };
 }
 
+/** A burst of health requests: the round trips that succeeded, and how many did not. */
+export interface DevPingReport {
+  samples_ms: number[];
+  failed: number;
+}
+
 export interface SyncStatusInfo {
   connected: boolean;
   pending_count: number;

@@ -1071,6 +1071,7 @@ pub fn run() {
             crate::sync::developer::dev_reset_backend,
             crate::sync::developer::dev_set_update_override,
             crate::sync::developer::dev_connection_status,
+            crate::sync::developer::dev_ping_server,
             crate::sync::commands::sync_schedule_settings,
             crate::sync::commands::sync_settings,
             crate::sync::commands::sync_settings_refused,
