@@ -311,7 +311,8 @@
   flex-shrink: 0;
 }
 
-.cs-inline-search:focus-within .cs-inline-search-icon {
+.cs-inline-search:focus-within .cs-inline-search-icon,
+.cs-inline-search--active .cs-inline-search-icon {
   color: var(--accent);
 }
 
@@ -336,6 +337,28 @@
 .cs-inline-search-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+/* A query is set: keep the field marked after focus leaves, so a filtered
+   list is never mistaken for the whole history. */
+.cs-inline-search--active .cs-inline-search-input {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  color: var(--text);
+  font-weight: 500;
+}
+
+.cs-inline-search--active .cs-inline-search-input:focus {
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.cs-inline-search--active .cs-inline-search-clear {
+  background: var(--accent);
+  color: #fff;
+}
+
+.cs-inline-search--active .cs-inline-search-clear:hover {
+  filter: brightness(1.15);
 }
 
 .cs-inline-search-clear {

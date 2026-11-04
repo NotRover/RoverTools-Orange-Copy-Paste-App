@@ -20,11 +20,93 @@
 //! the synthetic paste/copy keystroke is skipped).
 //!
 //! ## Cursor / monitor
-//! X11 exposes the global pointer and screen geometry via `xdotool` / `xdpyinfo`.
-//! Wayland deliberately hides both from clients, so we fall back to safe
-//! defaults and let Tauri/WRY place windows on its own.
+//! The cursor and the monitor table come from GDK through tao, the same source
+//! tauri's own `center()` uses, so the work area is the one of the monitor
+//! under the cursor (minus panels and docks) rather than the whole X screen.
+//! That needs the app handle, which [`init`] stores at setup; `xdotool` is the
+//! fallback for the cursor until then. Wayland deliberately hides the global
+//! pointer from clients and ignores a client's own position, so there the
+//! cursor reads `(0, 0)`, `cursor_available()` is false, and windows are
+//! centered by tauri instead of anchored.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use tauri::{AppHandle, Monitor};
+
+static APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// Keep the app handle the cursor and monitor queries go through, and start
+/// counting clipboard changes. Called once from setup, on the main thread,
+/// before the first popup or toast.
+pub fn init(app: &AppHandle) {
+    let _ = APP.set(app.clone());
+    watch_clipboard_owner();
+}
+
+// ── Clipboard change counter ─────────────────────────────────────────────────
+
+/// Bumped on every `owner-change` the GTK clipboard reports; see
+/// [`clipboard_change_token`].
+static CLIPBOARD_CHANGES: AtomicU64 = AtomicU64::new(0);
+/// Set once the signal has fired at least once, which is the proof that this
+/// session delivers it.
+static CLIPBOARD_SIGNAL_SEEN: AtomicBool = AtomicBool::new(false);
+
+/// Connect to the GTK clipboard's `owner-change` signal. On X11, GDK asks
+/// the server (XFixes) to report every `SetSelectionOwner` on CLIPBOARD,
+/// which is every write by any app, so the counter is the Linux counterpart
+/// of the Win32 sequence number.
+///
+/// Not on Wayland: there a client only hears about the clipboard while one
+/// of its surfaces has keyboard focus, so a counter would go quiet exactly
+/// when the user is copying in another app. The watcher keeps polling there.
+fn watch_clipboard_owner() {
+    use gtk::prelude::*;
+
+    if is_wayland() || !gtk::is_initialized_main_thread() {
+        return;
+    }
+    let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+    // gtk-rs does not bind this signal (its event argument type is skipped),
+    // so it is connected by name; the arguments are not needed.
+    clipboard.connect_local("owner-change", false, |_| {
+        CLIPBOARD_CHANGES.fetch_add(1, Ordering::Relaxed);
+        CLIPBOARD_SIGNAL_SEEN.store(true, Ordering::Release);
+        None
+    });
+}
+
+/// The clipboard change counter, once it has proven itself: `None` until the
+/// first `owner-change` arrives (and always on Wayland), so a session where
+/// the signal never comes keeps the read-every-cycle behaviour instead of
+/// never reading again. Once a change has been seen, an unchanged clipboard
+/// costs the watcher one atomic load per cycle and no read, where before it
+/// read files, HTML, text and the image, decoding and re-encoding a copied
+/// picture every 220 ms.
+pub fn clipboard_change_token() -> Option<u64> {
+    if CLIPBOARD_SIGNAL_SEEN.load(Ordering::Acquire) {
+        Some(CLIPBOARD_CHANGES.load(Ordering::Relaxed))
+    } else {
+        None
+    }
+}
+
+/// Hand freed heap back to the OS. A clipboard image is decoded to RGBA and
+/// re-encoded to PNG on the way in, tens of megabytes for a screenshot, and
+/// glibc keeps what it freed in the process. On Windows the allocator
+/// returns it on its own, which is the difference between the two numbers
+/// in the task manager. Called after an image capture.
+pub fn release_free_memory() {
+    // SAFETY: malloc_trim takes a pad in bytes and touches only the
+    // allocator's own free lists.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
 
 // ── Display-server detection ─────────────────────────────────────────────────
 
@@ -130,7 +212,7 @@ pub fn simulate_paste() {
 
 /// Whether the global cursor position can be read on this session.
 ///
-/// True on X11 (queryable via `xdotool`), false on Wayland — the compositor
+/// True on X11 (GDK reports it), false on Wayland — the compositor
 /// deliberately hides the global pointer from clients, so callers should place
 /// windows by centering rather than anchoring to the cursor.
 pub fn cursor_available() -> bool {
@@ -139,70 +221,104 @@ pub fn cursor_available() -> bool {
 
 /// Return the cursor position in physical screen coordinates.
 ///
-/// X11 exposes the global pointer via `xdotool`.  Wayland does not expose the
-/// global cursor to clients at all, so we fall back to `(0, 0)` and let
+/// X11 exposes the global pointer; GDK reads it (through tao) and `xdotool`
+/// is the fallback before setup has stored the app handle. Wayland does not
+/// expose the global cursor to clients at all, so we return `(0, 0)` and let
 /// Tauri/WRY place popups using its own logic.
 pub fn cursor_pos() -> (i32, i32) {
-    // Skip the query entirely on Wayland — xdotool can't read the global
-    // pointer there and would just spawn a failing process each popup.
+    // Skip the queries entirely on Wayland: GDK reports (0, 0) there and
+    // xdotool would just spawn a failing process each popup.
     if is_wayland() {
         return (0, 0);
     }
-
-    if let Ok(output) = Command::new("xdotool")
-        .args(["getmouselocation", "--shell"])
-        .output()
-    {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut x = 0i32;
-            let mut y = 0i32;
-            for line in stdout.lines() {
-                if let Some(val) = line.strip_prefix("X=") {
-                    x = val.trim().parse().unwrap_or(0);
-                } else if let Some(val) = line.strip_prefix("Y=") {
-                    y = val.trim().parse().unwrap_or(0);
-                }
-            }
-            return (x, y);
-        }
+    if let Some(pos) = gdk_cursor_pos() {
+        return pos;
     }
-    (0, 0)
+    xdotool_cursor_pos().unwrap_or((0, 0))
 }
 
-/// DPI scale factor for the monitor containing the given point.
-///
-/// On Linux, Tauri/WRY handles scaling internally, so we return `1.0` and let
-/// the toolkit do the work.
-pub fn scale_factor_for_point(_x: i32, _y: i32) -> f64 {
-    1.0
+/// The pointer as GDK reports it, in physical pixels. GDK is not thread-safe
+/// and the callers run on the clipboard watcher as often as on the main
+/// thread, so the query is run on the main thread and waited for; a stalled
+/// main thread makes this give up rather than hang the watcher.
+fn gdk_cursor_pos() -> Option<(i32, i32)> {
+    let app = APP.get()?;
+    let (tx, rx) = mpsc::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(handle.cursor_position().ok());
+    })
+    .ok()?;
+    rx.recv_timeout(Duration::from_millis(500))
+        .ok()
+        .flatten()
+        .map(|p| (p.x.round() as i32, p.y.round() as i32))
+}
+
+/// `xdotool getmouselocation --shell`, parsed.
+fn xdotool_cursor_pos() -> Option<(i32, i32)> {
+    let output = Command::new("xdotool")
+        .args(["getmouselocation", "--shell"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut x = 0i32;
+    let mut y = 0i32;
+    for line in stdout.lines() {
+        if let Some(val) = line.strip_prefix("X=") {
+            x = val.trim().parse().unwrap_or(0);
+        } else if let Some(val) = line.strip_prefix("Y=") {
+            y = val.trim().parse().unwrap_or(0);
+        }
+    }
+    Some((x, y))
+}
+
+/// The monitor whose bounds contain the point, else the primary one, else
+/// the first one tao knows about. `None` before setup has run.
+fn monitor_for_point(x: i32, y: i32) -> Option<Monitor> {
+    let app = APP.get()?;
+    let monitors = app.available_monitors().ok()?;
+    let under = monitors.iter().find(|m| {
+        let p = m.position();
+        let s = m.size();
+        x >= p.x && x < p.x + s.width as i32 && y >= p.y && y < p.y + s.height as i32
+    });
+    if let Some(m) = under {
+        return Some(m.clone());
+    }
+    app.primary_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| monitors.into_iter().next())
+}
+
+/// DPI scale factor for the monitor containing the given point, as GDK
+/// reports it (`GDK_SCALE`); `1.0` before setup has run.
+pub fn scale_factor_for_point(x: i32, y: i32) -> f64 {
+    monitor_for_point(x, y)
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0)
 }
 
 /// Work area bounds `(left, top, right, bottom)` for the monitor containing
-/// the given point.
-///
-/// Reads the root-window geometry via `xdpyinfo` on X11 (also works under
-/// XWayland).  Falls back to a generous 1920×1080 default on Wayland or when
-/// `xdpyinfo` is unavailable.
-pub fn work_area_for_point(_x: i32, _y: i32) -> (i32, i32, i32, i32) {
-    if let Ok(output) = Command::new("xdpyinfo").output() {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-                // Line looks like: "dimensions:    1920x1080 pixels (508x285 millimeters)"
-                if trimmed.starts_with("dimensions:") {
-                    if let Some(dims) = trimmed.split_whitespace().nth(1) {
-                        let parts: Vec<&str> = dims.split('x').collect();
-                        if parts.len() == 2 {
-                            let w: i32 = parts[0].parse().unwrap_or(1920);
-                            let h: i32 = parts[1].parse().unwrap_or(1080);
-                            return (0, 0, w, h);
-                        }
-                    }
-                }
-            }
+/// the given point, in physical pixels: the monitor's geometry minus panels
+/// and docks, from GDK's `workarea`. Falls back to a 1920x1080 screen at the
+/// origin before setup has run.
+pub fn work_area_for_point(x: i32, y: i32) -> (i32, i32, i32, i32) {
+    match monitor_for_point(x, y) {
+        Some(m) => {
+            let wa = m.work_area();
+            (
+                wa.position.x,
+                wa.position.y,
+                wa.position.x + wa.size.width as i32,
+                wa.position.y + wa.size.height as i32,
+            )
         }
+        None => (0, 0, 1920, 1080),
     }
-    (0, 0, 1920, 1080)
 }

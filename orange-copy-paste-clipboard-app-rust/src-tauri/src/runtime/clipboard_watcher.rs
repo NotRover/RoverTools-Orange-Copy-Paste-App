@@ -11,10 +11,12 @@ use crate::state::app_state::AppState;
 const WATCH_INTERVAL_MS: u64 = 220;
 
 /// A number the OS bumps on every clipboard write, where it keeps one: the
-/// Win32 sequence number, the macOS pasteboard change count. Comparing it is
-/// far cheaper than reading the clipboard, so the watcher only reads when it
-/// changes. `None` where there is no such counter (Linux), and the watcher
-/// reads every cycle and relies on the top-of-history dedupe instead.
+/// Win32 sequence number, the macOS pasteboard change count, and on Linux/X11
+/// a count of the GTK clipboard's `owner-change` signals. Comparing it is far
+/// cheaper than reading the clipboard, so the watcher only reads when it
+/// changes. `None` where there is no such counter (Wayland, and X11 until the
+/// first change is seen), and the watcher reads every cycle and relies on
+/// the top-of-history dedupe instead.
 #[cfg(windows)]
 fn clipboard_change_token() -> Option<u64> {
     Some(unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() } as u64)
@@ -25,7 +27,12 @@ fn clipboard_change_token() -> Option<u64> {
     Some(crate::runtime::platform::macos::clipboard_change_count())
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+fn clipboard_change_token() -> Option<u64> {
+    crate::runtime::platform::linux::clipboard_change_token()
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 fn clipboard_change_token() -> Option<u64> {
     None
 }
@@ -64,6 +71,13 @@ fn capture_clipboard_change(
 
     if history.lock().top_matches(&entry) {
         return true;
+    }
+
+    // The image just read was decoded and re-encoded on the way in; give the
+    // freed heap back before it sits in the process for the rest of the day.
+    #[cfg(target_os = "linux")]
+    if entry.kind == crate::clipboard::history::EntryKind::Image {
+        crate::runtime::platform::linux::release_free_memory();
     }
 
     // The toast goes up before anything touches the disk. A push writes its
