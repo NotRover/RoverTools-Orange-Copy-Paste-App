@@ -49,7 +49,7 @@ fn build_popup_window(
 pub(crate) fn place_popup_for_show(win: &tauri::WebviewWindow, w: i32, h: i32) {
     if crate::runtime::platform::cursor_available() {
         let (px, py) = crate::runtime::platform::popup_position(w, h);
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+        let _ = win.set_position(crate::runtime::platform::position_at(px, py));
     } else {
         let _ = win.center();
     }
@@ -104,6 +104,25 @@ pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
         ));
         let _ = win.hide();
     }
+    // macOS keeps this app active after its last window hides, so the next
+    // keystroke - including the Cmd+V a paste is about to post - would come to
+    // us. Hiding the app hands focus back to whichever app had it before the
+    // popup. Only when nothing of ours is left on screen: with the main window
+    // open, focus should stay there, as it does on Windows.
+    #[cfg(target_os = "macos")]
+    if !any_app_window_visible(app) {
+        crate::runtime::platform::macos::deactivate(app);
+    }
+}
+
+/// Whether any window the user can interact with is showing. The toast is
+/// click-through and never focused, so it does not count.
+#[cfg(target_os = "macos")]
+fn any_app_window_visible(app: &tauri::AppHandle) -> bool {
+    ["main", "copy-popup", "paste-popup"].iter().any(|label| {
+        app.get_webview_window(label)
+            .is_some_and(|w| w.is_visible().unwrap_or(false))
+    })
 }
 
 pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
@@ -115,7 +134,8 @@ pub(crate) fn hide_all_popups(app: &tauri::AppHandle) {
 
 /// Create the copy-popup and paste-popup windows eagerly but hidden.
 /// Both are frameless, transparent, always-on-top, and non-focusable —
-/// matching the Electron configuration.
+/// matching the Electron configuration. `skip_taskbar` is a no-op on macOS,
+/// where the app runs as an accessory (no Dock icon) instead; see `lib.rs`.
 pub(crate) fn setup_popup_windows(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let specs = [
         PopupWindowSpec {

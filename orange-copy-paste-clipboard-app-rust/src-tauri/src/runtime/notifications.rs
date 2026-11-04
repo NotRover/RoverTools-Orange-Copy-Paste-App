@@ -28,8 +28,13 @@ fn show_toast(
             detail,
             note,
         };
+        // After a popup handed focus back (`hide_popup` on macOS) the app is
+        // hidden, and a hidden app's windows do not appear. Unhide it without
+        // taking focus, or this toast is queued until the user next opens us.
+        #[cfg(target_os = "macos")]
+        crate::runtime::platform::macos::unhide_quietly(app);
         // Position first, then show, then set always-on-top to force Z-order.
-        let _ = win.set_position(tauri::PhysicalPosition::new(px, py));
+        let _ = win.set_position(crate::runtime::platform::position_at(px, py));
         let _ = win.show();
         // Make the notification click-through. This MUST run after `show()`:
         // the window is created hidden/unrealized, and on GTK/Linux calling

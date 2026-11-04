@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./splash.css";
 import { installWebviewGuards } from "../../webview-guards";
+import { MOD } from "../../platform";
 
 // ── Timing ──────────────────────────────────────────────────────────────────
 // The splash checks the update feed on launch. The app's own automatic check
@@ -52,8 +53,8 @@ const LOGO_DARK_MODE  = encodeURI("/Smart Clipboard Logo Dark.svg");
 // highlighted token is the key or control, the line is what it does. Shortcuts
 // mirror the reference on the Shortcuts screen.
 const TIPS: { token: string; text: string }[] = [
-  { token: "Ctrl+Shift+V", text: "opens quick paste" },
-  { token: "Ctrl+Shift+C", text: "saves a copy to history" },
+  { token: `${MOD}+Shift+V`, text: "opens quick paste" },
+  { token: `${MOD}+Shift+C`, text: "saves a copy to history" },
   { token: "Pin",          text: "keeps a clip in the popup" },
   { token: "Save",         text: "keeps a clip past restarts" },
   { token: "1-9",          text: "pastes that slot in the popup" },

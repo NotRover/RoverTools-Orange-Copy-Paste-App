@@ -1,4 +1,5 @@
-//! Clipboard file-list utilities (CF_HDROP on Windows).
+//! Clipboard file-list utilities: CF_HDROP on Windows, arboard's file list
+//! (NSPasteboard file URLs, `text/uri-list`) on macOS and Linux.
 
 #[cfg(windows)]
 const CF_HDROP: u32 = 15;
@@ -8,9 +9,11 @@ pub fn any_file_format_available() -> bool {
     unsafe { windows_sys::Win32::System::DataExchange::IsClipboardFormatAvailable(CF_HDROP) != 0 }
 }
 
+/// arboard has no "is there a file list" probe short of reading it, and a
+/// list of paths is small, so this reads.
 #[cfg(not(windows))]
 pub fn any_file_format_available() -> bool {
-    false
+    read_files_from_clipboard().is_some()
 }
 
 #[cfg(windows)]
@@ -69,7 +72,20 @@ pub fn read_files_from_clipboard() -> Option<Vec<String>> {
 
 #[cfg(not(windows))]
 pub fn read_files_from_clipboard() -> Option<Vec<String>> {
-    None
+    let mut cb = arboard::Clipboard::new().ok()?;
+    let files: Vec<String> = cb
+        .get()
+        .file_list()
+        .ok()?
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if files.is_empty() {
+        None
+    } else {
+        Some(files)
+    }
 }
 
 /// Every path the system clipboard holds as files right now, for the exit
@@ -193,6 +209,15 @@ pub fn write_files_to_clipboard(paths: &[String]) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-pub fn write_files_to_clipboard(_paths: &[String]) -> Result<(), String> {
-    Err("File clipboard writes are currently only supported on Windows".into())
+pub fn write_files_to_clipboard(paths: &[String]) -> Result<(), String> {
+    let paths: Vec<&std::path::Path> = paths
+        .iter()
+        .filter(|p| !p.trim().is_empty())
+        .map(std::path::Path::new)
+        .collect();
+    if paths.is_empty() {
+        return Err("No valid file paths provided".into());
+    }
+    let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set().file_list(&paths).map_err(|e| e.to_string())
 }

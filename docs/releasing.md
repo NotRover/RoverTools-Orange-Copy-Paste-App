@@ -39,7 +39,7 @@ flowchart TB
     dispatch(["You dispatch release.yml"]):::start
     dispatch ==> bump["Bump version in Cargo.toml<br/>(patch, minor, or major)"]:::step
     dispatch ==> notes["Notes from changelog/next.md<br/>renamed on release"]:::step
-    dispatch ==> build["Build signed NSIS (Windows)<br/>+ AppImage / deb (Linux)"]:::step
+    dispatch ==> build["Build signed NSIS (Windows)<br/>+ .app / .dmg (macOS, both chips)<br/>+ AppImage / deb (Linux)"]:::step
     build ==> publish[("Publish a GitHub Release on this repo<br/>bundles + latest.json")]:::store
     publish ==> banner(["App checks the feed ~8s after launch,<br/>then every 6h, shows an update banner"]):::out
 
@@ -89,6 +89,32 @@ workflow can read those.
 
 The release publishes to this same repo, so the workflow's built-in `GITHUB_TOKEN`
 handles it; no personal access token needed.
+
+### 2.3 Optional: Apple signing and notarization
+
+The minisign key above is what the updater trusts, on every platform. Apple's own
+signature is a separate thing: it is what Gatekeeper checks when a Mac user opens a
+downloaded `.dmg`. Without it the macOS bundles still build, still carry a minisign
+signature and still self-update; the one cost is that a *downloaded* copy is refused as
+"damaged" or "cannot be checked for malicious software" until the user clears the
+quarantine flag (the install page on the website tells them how). In-app updates do
+not hit this: the updater downloads the archive itself, so there is no quarantine flag.
+
+To sign and notarize, add these to the same `release` environment. The workflow warns
+at its first step when they are missing or incomplete, and does not fail.
+
+| Secret | What it is |
+|---|---|
+| `APPLE_CERTIFICATE` | The Developer ID Application certificate, exported from Keychain as `.p12` and base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
+| `APPLE_CERTIFICATE_PASSWORD` | The password set on export |
+| `APPLE_SIGNING_IDENTITY` | The certificate's name, `Developer ID Application: <name> (<team id>)` |
+| `APPLE_ID` | The Apple account the certificate belongs to |
+| `APPLE_PASSWORD` | An app-specific password for that account (not the account password) |
+| `APPLE_TEAM_ID` | The ten-character team id |
+
+The first three sign; all six notarize. Tauri's bundler reads them from the
+environment and does both during `tauri build`, so there is no separate step to
+maintain. A Developer ID certificate needs a paid Apple Developer membership.
 
 Only the account named in `RELEASER` at the top of the workflow can start a release.
 Anyone else's run stops at its first step.
@@ -246,12 +272,15 @@ Two things to know:
 |---|---|---|
 | NSIS (`.exe`) | **Yes** | The installer reruns and replaces the app in place |
 | AppImage | **Yes** | A single file the updater can swap |
+| `.app.tar.gz` (macOS) | **Yes** | The updater unpacks it over the installed `.app`; one per chip |
 | `.deb` | No | Owned by the package manager; published for manual install only |
+| `.dmg` (macOS) | No | The manual install; the updater uses the archive above instead |
 
 The release builds no `.rpm` (the Linux build matrix entry lists only `appimage,deb`),
-though a local `tauri build` still makes one. `.deb` never appears in `latest.json` - offering an update the client cannot
-install is worse than offering none. macOS is not built at all; that needs a
-`.app.tar.gz` target plus Apple notarization.
+though a local `tauri build` still makes one. `.deb` and `.dmg` never appear in
+`latest.json` - offering an update the client cannot install is worse than offering
+none. The macOS bundles are built on the Apple-silicon runner for both chips; the Intel
+one is a cross-compile, which is why the matrix names an explicit `--target` for them.
 
 ---
 
@@ -275,6 +304,47 @@ stays complete.
 
 Use `-f dry_run=true` to build and verify without publishing. Worth doing after editing
 the workflow itself; not needed for an ordinary release.
+
+### 7.2 One platform failing does not sink the release
+
+The build jobs run independently (`fail-fast: false`) and `publish` runs as long as
+`prepare` succeeded. A release with one failed build is still published with the bundles
+that built: `latest.json` lists only those, the run summary and the release body name the
+missing platform, and an installed app on that platform sees no update rather than an
+error (the updater treats an absent platform key as nothing to offer).
+
+The version is spent either way, because the bump and tag land on `main` before the
+builds start. That is why the missing platform is added to the *same* release rather than
+to the next version: see the retry below.
+
+### 7.3 Retrying a release
+
+A retry rebuilds some or all platforms from the current `main` and adds them to an
+existing release, without a bump, notes or commit:
+
+```bash
+gh workflow run release.yml -f retry_tag=v0.5.2 -f platforms=linux
+```
+
+What it does:
+
+- Checks the release exists and takes its version from the tag; the notes are read back
+  from the release's own `latest.json` (its body if that file is missing), so
+  `changelog/next.md` is not touched.
+- Builds the chosen platforms (`all`, `windows`, `linux` or `macos`) from the commit the
+  run checks out: `main`, with whatever fix landed after the tag. The tag stays on the
+  original commit, and the release body gets a line saying which bundles were rebuilt and
+  from which commit.
+- Uploads the new bundles to the release, replacing same-named assets, and rebuilds
+  `latest.json` from everything the release then holds.
+- Updates `beta.json` only when this version is the newest, so retrying an old release
+  cannot roll the beta channel back. It also leaves the release's latest/prerelease flag
+  as it was.
+
+A retry can also replace a bundle that did build, for the same reason: `platforms=all`
+on a release that already has everything rebuilds all four and overwrites them. The
+`platforms` input works on a normal release too, but a release that leaves platforms out
+on purpose still ends up partial for those users until a retry fills it in.
 
 ### 7.1 Asset names have no spaces, deliberately
 
@@ -301,6 +371,22 @@ Install and update behavior that is by design, grouped by platform.
 - **Installs are per-user** (`nsis.installMode: currentUser`). This keeps the install
   path stable across versions and avoids a UAC prompt on every update.
 
+### macOS
+
+- **Two downloads, one per chip.** `aarch64` for Apple silicon, `x64` for Intel. The
+  updater keys on `darwin-aarch64` / `darwin-x86_64` in `latest.json`, so an install
+  only ever sees updates for its own chip.
+- **An unsigned build is refused by Gatekeeper on download.** See section 2.3 for what
+  the Apple secrets change. Until they are set, the release body tells Mac users what
+  to expect and the website's install page has the one-line fix.
+- **The app asks for Accessibility on first launch.** Pasting from the popup posts a
+  Cmd+V into the app you came from, which macOS only allows for apps the user has
+  listed under Privacy & Security > Accessibility. The system prompt appears at first
+  launch; until it is granted the app captures and shows popups as usual and leaves the
+  Cmd+V to the user.
+- **Install means the app restarts.** The updater unpacks the archive over the running
+  `.app` and relaunches it, so the same second confirmation as everywhere else applies.
+
 ### All platforms
 
 - **Updates are disabled in debug builds.** A dev build reports the Cargo.toml version,
@@ -320,8 +406,8 @@ Install and update behavior that is by design, grouped by platform.
 
 The updater itself can only be checked with two releases:
 
-1. Release once. Install it from the published `.exe` - not a local `tauri build`,
-   which is unsigned and would not test the signing key.
+1. Release once. Install it from the published `.exe` (or `.dmg`, or AppImage) - not a
+   local `tauri build`, which is unsigned and would not test the signing key.
 2. Release again.
 3. Launch the older install. Within ~8 seconds the banner should appear (a
    running app re-checks every 6 hours, so restarting is the fast way to see it).

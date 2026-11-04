@@ -5,7 +5,8 @@ name: Release (manual)
 # anyway: "#6" tells you nothing, and the one thing you want to see at a glance
 # is whether a run was a beta, a rehearsal, or the real thing.
 run-name: >-
-  release · ${{ inputs.bump }} ·
+  release · ${{ inputs.retry_tag != '' && format('retry {0}', inputs.retry_tag) || inputs.bump }} ·
+  ${{ inputs.platforms }} ·
   ${{ inputs.prerelease && 'beta' || 'stable' }} ·
   ${{ inputs.dry_run && 'dry run' || 'publish' }}
 
@@ -18,19 +19,39 @@ run-name: >-
 #      are missing — before spending a build.
 #   2. Bumps the version, and collects the commit subjects since the last release
 #      tag as the notes users will read.
-#   3. Builds signed Windows (NSIS) and Linux (AppImage + deb) bundles.
+#   3. Builds signed Windows (NSIS), macOS (.app + .dmg, Apple silicon and
+#      Intel) and Linux (AppImage + deb) bundles.
 #   4. Assembles `latest.json` and publishes a GitHub Release on this repo,
 #      which is what the app's updater reads.
 #
-# Two escape hatches, both off by default:
+# One platform failing does not sink the others: the release is published with
+# the bundles that built, latest.json lists only those, and the run says which
+# are missing. The missing ones are added later with a retry run.
+#
+# Escape hatches, all off by default:
 #   dry_run     build and verify, publish nothing. For after editing this file.
 #   prerelease  publish as a beta: offered only to installs that opted in under
 #               Settings → Updates, invisible to the stable feed. Promoting it
 #               later is an edit of the same bundles, not another build.
+#   platforms   build a subset. Mostly for a retry, so only the platform that
+#               failed is rebuilt.
+#   retry_tag   add bundles to an EXISTING release instead of cutting a new
+#               version: no bump, no notes, no commit. The bundles are built from
+#               the code this run checks out (main, with whatever fix landed since
+#               the tag), uploaded to that release, and latest.json is rebuilt
+#               from everything the release then holds. The tag itself stays on
+#               the original commit; the release body records the retry.
 #
 # Required secrets, best kept in the `release` environment (see docs/releasing.md):
 #   TAURI_SIGNING_PRIVATE_KEY           minisign private key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
+# Optional, for macOS code signing and notarization (without them the macOS
+# bundles are still minisign-signed and updatable, but Gatekeeper refuses a
+# downloaded copy until the user clears the quarantine flag):
+#   APPLE_CERTIFICATE                   base64 of the Developer ID .p12
+#   APPLE_CERTIFICATE_PASSWORD          its password
+#   APPLE_SIGNING_IDENTITY              "Developer ID Application: Name (TEAMID)"
+#   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID   notarization (app-specific password)
 # Releases publish to this same repo with the built-in GITHUB_TOKEN; no PAT needed.
 #
 # Only RELEASER may run this. Anyone else's run stops at its first step.
@@ -54,6 +75,19 @@ on:
         description: "Beta: publish, but keep it out of the update feed"
         type: boolean
         default: false
+      platforms:
+        description: "Platforms to build (a retry can rebuild only the one that failed)"
+        type: choice
+        default: all
+        options:
+          - all
+          - windows
+          - linux
+          - macos
+      retry_tag:
+        description: "Retry: add bundles to this existing release (e.g. v0.5.2) instead of cutting a new version"
+        type: string
+        default: ""
 
 env:
   # Releases publish to this same repo (`github.repository`). Its GitHub Releases
@@ -80,6 +114,11 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: v${{ steps.version.outputs.version }}
+      retry: ${{ inputs.retry_tag != '' }}
+      # A retry keeps the release's own channel; the `prerelease` input is for
+      # a new release only.
+      prerelease: ${{ inputs.retry_tag != '' && steps.retry.outputs.prerelease || inputs.prerelease }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Only the releaser can release
         env:
@@ -108,10 +147,22 @@ jobs:
         env:
           HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
           HAS_SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+          HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          HAS_APPLE_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
         run: |
           set -uo pipefail
           fail=0
           bad() { echo "::error::$1"; fail=1; }
+
+          # macOS signing is optional: the minisign signature is what the updater
+          # checks, and the Apple one is what Gatekeeper checks. Say which build
+          # this is going to be, so an unsigned macOS release is a choice and not
+          # a surprise.
+          if [ "$HAS_APPLE_CERT" != "true" ]; then
+            echo "::warning::APPLE_CERTIFICATE is not set. The macOS bundles will not be code-signed; a downloaded copy needs the quarantine flag cleared before it opens (docs/releasing.md section 8)."
+          elif [ "$HAS_APPLE_NOTARY" != "true" ]; then
+            echo "::warning::APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID are not all set. The macOS bundles will be signed but not notarized; Gatekeeper still warns on a downloaded copy."
+          fi
 
           # A build with the placeholder key succeeds and is then rejected by
           # every client — the one failure that is invisible until users are stuck.
@@ -125,6 +176,38 @@ jobs:
           [ "$fail" -eq 0 ] || exit 1
           echo "All prerequisites present."
 
+      - name: Check the release being retried
+        # A retry targets a release that exists. Its version is the tag's, and
+        # its notes are the ones it was published with (read back from its own
+        # latest.json, or its body when the feed file is missing), so a retry
+        # never needs changelog/next.md and never touches it.
+        id: retry
+        if: ${{ inputs.retry_tag != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RETRY_TAG: ${{ inputs.retry_tag }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$RETRY_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::retry_tag '$RETRY_TAG' is not a release tag (vX.Y.Z)."
+            exit 1
+          fi
+          if ! gh release view "$RETRY_TAG" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null; then
+            echo "::error::No release named $RETRY_TAG. A retry adds to an existing release; cut a new one with retry_tag empty."
+            exit 1
+          fi
+          prerelease=$(gh release view "$RETRY_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "$RETRY_TAG is a $([ "$prerelease" = "true" ] && echo beta || echo stable) release."
+          if gh release download "$RETRY_TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --output existing-latest.json 2>/dev/null; then
+            jq -r '.notes' existing-latest.json > RELEASE_NOTES.md
+          else
+            gh release view "$RETRY_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' \
+              | sed '/^---$/,$d' > RELEASE_NOTES.md
+          fi
+          echo "── notes carried over from $RETRY_TAG ──"
+          cat RELEASE_NOTES.md
+
       - name: Collect release notes
         # First thing after the prerequisite gate, and before anything is built or
         # bumped: an empty changelog should fail the run in seconds, not after a
@@ -132,6 +215,7 @@ jobs:
         # `/update-changelog` — before the release. The workflow only reads and
         # publishes them; nothing is derived from commit subjects. See docs/releasing.md
         # and changelog/README.md.
+        if: ${{ inputs.retry_tag == '' }}
         env:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
@@ -203,8 +287,15 @@ jobs:
         id: version
         env:
           BUMP: ${{ inputs.bump }}
+          RETRY_TAG: ${{ inputs.retry_tag }}
         run: |
           set -euo pipefail
+          # A retry builds the version the release already has.
+          if [ -n "$RETRY_TAG" ]; then
+            echo "Retrying $RETRY_TAG"
+            echo "version=${RETRY_TAG#v}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           current=$(grep -m1 '^version = ' "$APP_DIR/src-tauri/Cargo.toml" | sed -E 's/version = "(.*)"/\1/')
           echo "Current version: $current"
 
@@ -256,6 +347,8 @@ jobs:
           fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             mode="dry run — builds and verifies, publishes nothing"
+          elif [ -n "${{ inputs.retry_tag }}" ]; then
+            mode="retry — adds the ${{ inputs.platforms }} bundles to the existing $TAG release, built from $(git rev-parse --short HEAD)"
           else
             mode="publish"
           fi
@@ -284,8 +377,9 @@ jobs:
 
       - name: Stamp the changelog
         # Only on a real publish: a dry run reads next.md for the notes but leaves the
-        # directory untouched, so nothing is committed for a rehearsal.
-        if: ${{ !inputs.dry_run }}
+        # directory untouched, so nothing is committed for a rehearsal, and a retry
+        # has no notes of its own.
+        if: ${{ !inputs.dry_run && inputs.retry_tag == '' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
           BUMP: ${{ inputs.bump }}
@@ -318,7 +412,7 @@ jobs:
           echo "── changelog/next.md reset to the empty template, CHANGELOG.md rebuilt ──"
 
       - name: Commit and tag
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.retry_tag == '' }}
         env:
           TAG: v${{ steps.version.outputs.version }}
         run: |
@@ -332,6 +426,37 @@ jobs:
           git push origin HEAD:${{ github.ref_name }}
           git push origin "$TAG"
 
+      - name: Pick the platforms
+        # The build matrix, as JSON, filtered by the `platforms` input. NSIS is the
+        # Windows target the updater can install; the AppImage is the Linux one;
+        # the .app (shipped as .app.tar.gz) is the macOS one. The .deb and the
+        # .dmg ride along as manual downloads — a package manager install cannot
+        # be replaced by a self-update, and a .dmg is how a Mac user expects to
+        # install by hand. Both Mac architectures build on the Apple-silicon
+        # runner: the Intel one is a cross-compile (`--target`), which Tauri
+        # supports for macOS.
+        id: matrix
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          all='[
+            { "os": "windows-latest", "bundles": "nsis",         "artifact": "windows",       "target": "" },
+            { "os": "ubuntu-22.04",   "bundles": "appimage,deb", "artifact": "linux",         "target": "" },
+            { "os": "macos-latest",   "bundles": "app,dmg",      "artifact": "macos-aarch64", "target": "aarch64-apple-darwin" },
+            { "os": "macos-latest",   "bundles": "app,dmg",      "artifact": "macos-x86_64",  "target": "x86_64-apple-darwin" }
+          ]'
+          case "$PLATFORMS" in
+            all)     filter='.' ;;
+            windows) filter='map(select(.artifact == "windows"))' ;;
+            linux)   filter='map(select(.artifact == "linux"))' ;;
+            macos)   filter='map(select(.artifact | startswith("macos")))' ;;
+            *) echo "::error::Unknown platforms '$PLATFORMS'."; exit 1 ;;
+          esac
+          matrix=$(jq -c "$filter | { include: . }" <<< "$all")
+          echo "$matrix" | jq .
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   # ── 2. Build signed bundles ────────────────────────────────────────────────
   build:
     needs: prepare
@@ -343,18 +468,12 @@ jobs:
     permissions:
       contents: read
     strategy:
+      # One platform failing must not cancel the others: whatever builds is
+      # published, and the rest is added by a retry run.
       fail-fast: false
-      matrix:
-        include:
-          # NSIS is the Windows target the updater can install; the AppImage is
-          # the Linux one. The .deb rides along as a manual download — a package
-          # manager install cannot be replaced by a self-update.
-          - os: windows-latest
-            bundles: nsis
-            artifact: windows
-          - os: ubuntu-22.04
-            bundles: appimage,deb
-            artifact: linux
+      # Chosen in `prepare` ("Pick the platforms"), which is also where the
+      # entries are documented.
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -379,6 +498,33 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          # The macOS entries name an explicit target (one is a cross-compile);
+          # the others build for the host and need nothing extra.
+          targets: ${{ matrix.target }}
+
+      - name: Import the Apple signing certificate
+        # Only on the macOS runners, and only when the secret exists: without it
+        # the bundle is built unsigned (see "Check prerequisites" in `prepare`).
+        # A throwaway keychain that this job alone unlocks; the runner is
+        # discarded afterwards.
+        if: ${{ startsWith(matrix.os, 'macos') && secrets.APPLE_CERTIFICATE != '' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password=$(openssl rand -hex 16)
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm "$RUNNER_TEMP/certificate.p12"
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -410,17 +556,43 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: bun run tauri build --bundles ${{ matrix.bundles }}
+          # Read by Tauri's bundler on macOS. Empty on the other runners, and
+          # an empty identity means "do not sign" rather than an error.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # bash on every runner: the Windows default is pwsh, and the step below
+        # is a shell conditional.
+        shell: bash
+        run: |
+          target=""
+          if [ -n "${{ matrix.target }}" ]; then target="--target ${{ matrix.target }}"; fi
+          bun run tauri build --bundles ${{ matrix.bundles }} $target
 
       - name: Collect and rename bundles
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARTIFACT: ${{ matrix.artifact }}
         run: |
           set -euo pipefail
           out=staging
           mkdir -p "$out"
-          bundle="$APP_DIR/src-tauri/target/release/bundle"
+          # A `--target` build lands under target/<triple>/release.
+          if [ -n "$TARGET" ]; then
+            bundle="$APP_DIR/src-tauri/target/$TARGET/release/bundle"
+          else
+            bundle="$APP_DIR/src-tauri/target/release/bundle"
+          fi
+          # The macOS asset suffix is the architecture, which is what a Mac user
+          # picks a download by.
+          case "$ARTIFACT" in
+            macos-aarch64) arch=aarch64 ;;
+            macos-x86_64)  arch=x64 ;;
+            *)             arch="" ;;
+          esac
 
           # Renaming to a space-free prefix, keeping each .sig next to its bundle.
           # A signature covers bytes, not filenames, so renaming is safe.
@@ -444,10 +616,18 @@ jobs:
           while IFS= read -r f; do
             copy "$f" "${ASSET_PREFIX}_${VERSION}_amd64.deb"
           done < <(find "$bundle/deb" -name '*.deb' 2>/dev/null || true)
+          # macOS: the updater installs the .app.tar.gz; the .dmg is the manual
+          # download. Tauri writes the archive next to the .app.
+          while IFS= read -r f; do
+            copy "$f" "${ASSET_PREFIX}_${VERSION}_${arch}.app.tar.gz"
+          done < <(find "$bundle/macos" -name '*.app.tar.gz' 2>/dev/null || true)
+          while IFS= read -r f; do
+            copy "$f" "${ASSET_PREFIX}_${VERSION}_${arch}.dmg"
+          done < <(find "$bundle/dmg" -name '*.dmg' 2>/dev/null || true)
 
           # An updatable target with no .sig means the signing step silently did
           # nothing; publishing that ships a release no client will accept.
-          for f in "$out"/*-setup.exe "$out"/*.AppImage; do
+          for f in "$out"/*-setup.exe "$out"/*.AppImage "$out"/*.app.tar.gz; do
             [ -e "$f" ] || continue
             if [ ! -f "$f.sig" ]; then
               echo "::error::$f has no .sig — check createUpdaterArtifacts and the signing secrets."
@@ -468,32 +648,58 @@ jobs:
   publish:
     needs: [prepare, build]
     name: publish ${{ needs.prepare.outputs.tag }}
-    if: ${{ !inputs.dry_run }}
+    # Runs when at least `prepare` succeeded, whatever happened to the builds: a
+    # platform that failed is left out of the release and named in the summary,
+    # and the ones that built still ship. `!cancelled()` rather than `always()`
+    # so a cancelled run publishes nothing.
+    if: ${{ !cancelled() && !inputs.dry_run && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write # create the release, commit beta.json
+    outputs:
+      missing: ${{ steps.assemble.outputs.missing }}
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
 
+      - name: Fetch what the release already holds
+        # On a retry the release exists and keeps every bundle it has; the ones
+        # built in this run replace same-named assets and the rest are kept, so
+        # latest.json below is rebuilt from the union.
+        if: ${{ needs.prepare.outputs.retry == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern "${ASSET_PREFIX}_*" || true
+          echo "Already on $TAG:"
+          ls -la release
+
       - name: Assemble release assets and latest.json
+        id: assemble
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p release
-          find artifacts -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.sig' \) \
-            -exec cp {} release/ \;
+          # New bundles on top of whatever a retry fetched: same name, new bytes.
+          find artifacts -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \
+              -o -name '*.app.tar.gz' -o -name '*.dmg' -o -name '*.sig' \) \
+            -exec cp -f {} release/ \;
 
           notes=$(cat artifacts/release-notes/RELEASE_NOTES.md)
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
 
-          # The feed the app reads. Only the two self-updatable targets appear —
-          # a .deb entry here would offer an update the client cannot install.
+          # The feed the app reads. Only the self-updatable targets appear — a
+          # .deb or .dmg entry here would offer an update the client cannot
+          # install. The keys are the updater's `{os}-{arch}` names.
           platforms=$(jq -n '{}')
           add_platform() {
             target="$1"; file="$2"
@@ -506,10 +712,28 @@ jobs:
           echo "Feed platforms:"
           add_platform windows-x86_64 "RoverTools_${VERSION}_x64-setup.exe"
           add_platform linux-x86_64   "RoverTools_${VERSION}_amd64.AppImage"
+          add_platform darwin-aarch64 "RoverTools_${VERSION}_aarch64.app.tar.gz"
+          add_platform darwin-x86_64  "RoverTools_${VERSION}_x64.app.tar.gz"
 
           if [ "$(jq 'length' <<< "$platforms")" -eq 0 ]; then
-            echo "::error::latest.json would have no platforms — nothing to serve."
+            echo "::error::latest.json would have no platforms — nothing to serve. Every build failed; fix it and retry this tag."
             exit 1
+          fi
+
+          # Which of the four updatable targets are not in this release. Named
+          # here, in the summary and in the release body, so a partial release is
+          # a known state and not a surprise found by a user on that platform.
+          # An app on a missing platform sees no update rather than an error
+          # (updater.rs treats an absent platform key as "nothing for me").
+          missing=""
+          for t in windows-x86_64 linux-x86_64 darwin-aarch64 darwin-x86_64; do
+            if ! jq -e --arg t "$t" 'has($t)' <<< "$platforms" > /dev/null; then
+              missing="${missing:+$missing, }$t"
+            fi
+          done
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+          if [ -n "$missing" ]; then
+            echo "::warning::Not in this release: $missing. Fix the build and run this workflow again with retry_tag=$TAG and platforms set to what failed."
           fi
 
           jq -n \
@@ -528,7 +752,9 @@ jobs:
           # workflow token's contents:write is enough — no PAT.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          RETRY: ${{ needs.prepare.outputs.retry }}
+          MISSING: ${{ steps.assemble.outputs.missing }}
         run: |
           set -euo pipefail
           # `releases/latest/download/latest.json` resolves to the newest
@@ -552,6 +778,20 @@ jobs:
           # (the app fetches the installer itself, so no Mark of the Web), which
           # is exactly why the footer would be noise in the updater's notes.
           cp artifacts/release-notes/RELEASE_NOTES.md RELEASE_BODY.md
+          # The body is rebuilt on every publish and retry, so the platform list
+          # below always matches the assets the release holds right now.
+          if [ -n "$MISSING" ]; then
+            {
+              echo
+              echo "**Not in this release yet:** $MISSING. Those builds failed; they will be added to this release once fixed."
+            } >> RELEASE_BODY.md
+          fi
+          if [ "$RETRY" = "true" ]; then
+            {
+              echo
+              echo "_Rebuilt on $(date -u +%Y-%m-%d): the ${{ inputs.platforms }} bundles come from commit ${GITHUB_SHA:0:7}, later than the tag._"
+            } >> RELEASE_BODY.md
+          fi
           cat >> RELEASE_BODY.md <<'FOOTER'
 
           ---
@@ -562,14 +802,25 @@ jobs:
 
           You'll see this once, on a manual install. Updates from inside the app don't
           trigger it.
+
+          **On a Mac, pick the `.dmg` for your chip:** `aarch64` for Apple silicon (M1 and
+          later), `x64` for Intel. If macOS says the app is damaged or cannot be checked,
+          it is because the build is not notarized; see the install page on the website.
           FOOTER
 
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TAG" \
-            --notes-file RELEASE_BODY.md \
-            "${visibility[@]}" \
-            release/*
+          if [ "$RETRY" = "true" ]; then
+            # The release exists: replace or add the assets, refresh the body,
+            # leave its latest / prerelease standing as it was.
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber release/*
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file RELEASE_BODY.md
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --notes-file RELEASE_BODY.md \
+              "${visibility[@]}" \
+              release/*
+          fi
 
       - name: Update the beta channel feed
         # Written on EVERY publish, beta or stable, so beta.json always names the
@@ -581,11 +832,24 @@ jobs:
         # *release* would either hijack that or have to be excluded from pruning by
         # hand. A committed file has neither problem. It lands on this repo's default
         # branch, which is what the beta endpoint (raw .../HEAD/beta.json) reads.
+        id: beta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
+          # A retry of an older release must not roll the beta channel back to
+          # it. Only the newest version (this one, or one it ties with) may
+          # write the file; the feed on the release itself was updated above.
+          current=$(gh api "repos/$GITHUB_REPOSITORY/contents/beta.json" --jq '.content' 2>/dev/null \
+            | base64 -d | jq -r '.version' 2>/dev/null || true)
+          if [ -n "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+            echo "beta.json serves $current, newer than $VERSION — left alone."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "updated=true" >> "$GITHUB_OUTPUT"
           # Updating an existing file needs its blob sha; creating one must omit it.
           sha=$(gh api "repos/$GITHUB_REPOSITORY/contents/beta.json" --jq '.sha' 2>/dev/null || true)
           args=(--method PUT "repos/$GITHUB_REPOSITORY/contents/beta.json"
@@ -603,15 +867,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          PRERELEASE: ${{ inputs.prerelease }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          BETA_UPDATED: ${{ steps.beta.outputs.updated }}
+          MISSING: ${{ steps.assemble.outputs.missing }}
         run: |
           set -euo pipefail
           stable="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
 
           # A prerelease is not reachable through the `latest` URL — that is the
           # point of it — so verify the feed at its own tag and then confirm the
-          # invisibility actually holds.
-          if [ "$PRERELEASE" = "true" ]; then
+          # invisibility actually holds. A retry of a release that is no longer
+          # the newest is the same case: its feed lives at its tag.
+          if [ "$PRERELEASE" = "true" ] || [ "$BETA_UPDATED" != "true" ]; then
             feed="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/latest.json"
           else
             # The same URL the app uses, so a broken redirect or a mangled asset
@@ -639,9 +906,21 @@ jobs:
           # subscribers there get both. Read through the API rather than the raw
           # CDN: raw.githubusercontent caches for minutes, so a fresh commit would
           # flake here for reasons that have nothing to do with the release.
-          beta=$(gh api "repos/$GITHUB_REPOSITORY/contents/beta.json" --jq '.content' | base64 -d | jq -r '.version')
-          [ "$beta" = "$VERSION" ] || { echo "::error::beta.json serves $beta, expected $VERSION"; exit 1; }
-          echo "ok: beta channel serves $beta"
+          if [ "$BETA_UPDATED" = "true" ]; then
+            beta=$(gh api "repos/$GITHUB_REPOSITORY/contents/beta.json" --jq '.content' | base64 -d | jq -r '.version')
+            [ "$beta" = "$VERSION" ] || { echo "::error::beta.json serves $beta, expected $VERSION"; exit 1; }
+            echo "ok: beta channel serves $beta"
+          fi
+
+          {
+            echo "## Published $TAG"
+            echo
+            echo "Feed platforms: $(jq -r '.platforms | keys | join(", ")' <<< "$served")"
+            if [ -n "$MISSING" ]; then
+              echo
+              echo "**Missing: $MISSING.** Fix the build, then run this workflow with \`retry_tag=$TAG\` and \`platforms\` set to what failed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$PRERELEASE" = "true" ]; then
             # The guarantee worth checking: installed apps on the STABLE channel

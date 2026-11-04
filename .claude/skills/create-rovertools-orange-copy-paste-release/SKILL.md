@@ -238,3 +238,4 @@ gh release list --repo NotRover/RoverTools-Orange-Copy-Paste-App --limit 5 --jso
 | `stable feed is serving it` on a beta run | The prerelease flag did not take. Fix with `gh release edit <tag> --prerelease=true` before anyone launches. |
 | `beta.json serves <older>` | The beta-feed step failed or was skipped. Beta subscribers are stuck on the previous release until it is rewritten. |
 | Release commit rejected on push | Branch protection on `main` blocks the Actions bot. |
+| One platform's build failed, the rest published | By design: the release is out with the bundles that built and `latest.json` names only those; the run summary lists what is missing. Once the fix is on `main`, add the missing bundles to the same release with `gh workflow run release.yml -f retry_tag=<tag> -f platforms=<windows\|linux\|macos>` (no bump, no notes, no commit; see `docs/releasing.md` section 7.3). Do not cut a new version for it. |

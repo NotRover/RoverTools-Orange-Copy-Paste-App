@@ -87,7 +87,23 @@ fn format_image_label(timestamp_ms: u64) -> String {
     }
     #[cfg(not(windows))]
     {
-        format!("Image {}", timestamp_ms)
+        // The same label, from libc's local time.
+        let secs = (timestamp_ms / 1000) as libc::time_t;
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::localtime_r(&secs, &mut tm);
+        }
+        let months = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let month = months.get(tm.tm_mon as usize).unwrap_or(&"???");
+        let (h12, ampm) = match tm.tm_hour {
+            0 => (12, "AM"),
+            1..=11 => (tm.tm_hour, "AM"),
+            12 => (12, "PM"),
+            _ => (tm.tm_hour - 12, "PM"),
+        };
+        format!("Image {} {}, {}:{:02} {}", month, tm.tm_mday, h12, tm.tm_min, ampm)
     }
 }
 

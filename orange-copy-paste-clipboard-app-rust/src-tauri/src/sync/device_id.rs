@@ -78,9 +78,25 @@ fn machine_id() -> Option<String> {
         .ok()
 }
 
+/// The IOPlatformUUID: set at first boot, survives OS reinstalls, readable by
+/// any user through `ioreg`. The line reads `"IOPlatformUUID" = "<uuid>"`.
+#[cfg(target_os = "macos")]
+fn machine_id() -> Option<String> {
+    let output = std::process::Command::new("ioreg")
+        .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find(|line| line.contains("IOPlatformUUID"))
+        .and_then(|line| line.split('"').nth(3))
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
 /// `/etc/machine-id` is the systemd one; the dbus copy is the fallback on
 /// systems that predate it or do not run systemd.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn machine_id() -> Option<String> {
     ["/etc/machine-id", "/var/lib/dbus/machine-id"]
         .iter()

@@ -253,7 +253,18 @@ fn updater_for(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, 
 /// that gets pulled stops being offered.
 async fn run_check(app: &tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
     let updater = updater_for(app)?;
-    let found = updater.check().await.map_err(|e| e.to_string())?;
+    let found = match updater.check().await {
+        Ok(found) => found,
+        // The feed names a newer version but has no bundle for this platform:
+        // a release whose build failed here and has not been retried yet. That
+        // is "nothing for me", not a broken check. The feed lists the missing
+        // platform again once the retry run adds it.
+        Err(tauri_plugin_updater::Error::TargetNotFound(target)) => {
+            log::info!(target: "updater", "feed has no bundle for {target}; nothing to offer");
+            None
+        }
+        Err(e) => return Err(e.to_string()),
+    };
 
     let Some(update) = found else {
         *PENDING.lock() = None;

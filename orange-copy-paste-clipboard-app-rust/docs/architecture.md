@@ -1,6 +1,6 @@
 # RoverTools' Orange Copy Paste - Client Architecture
 
-A Tauri v2 + React desktop clipboard manager for **Windows and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
+A Tauri v2 + React desktop clipboard manager for **Windows, macOS and Linux** with real-time monitoring, global hotkeys, multi-window popups, and optional cloud sync with end-to-end encryption.
 
 **Owns:** how this app works inside. Windows and runtime, app state, Tauri commands and
 events, local persistence, the capture pipeline, and the client half of the sync engine -
@@ -63,10 +63,11 @@ The app runs as a single Tauri process with five webview windows: main, splash, 
 | Component                    | Version | Purpose                                                                        |
 | ---------------------------- | ------- | ------------------------------------------------------------------------------ |
 | Tauri                        | 2       | App framework, windowing, IPC                                                  |
-| tauri-plugin-global-shortcut | 2       | Ctrl+Shift+C / Ctrl+Shift+V                                                    |
+| tauri-plugin-global-shortcut | 2       | Ctrl+Shift+C / Ctrl+Shift+V (Cmd+Shift on macOS)                               |
 | tauri-plugin-autostart       | 2       | Launch on OS startup                                                           |
-| arboard                      | 3       | Cross-platform clipboard (text + images); bypassed on Windows for image writes |
+| arboard                      | 3       | Cross-platform clipboard (text, images, file lists, HTML); bypassed on Windows for everything but text |
 | windows-sys                  | 0.59    | Win32 APIs (clipboard formats, key simulation, monitors) - Windows only        |
+| core-graphics, objc2-app-kit | 0.25, 0.3 | macOS only: CGEvent keystrokes and cursor, NSScreen work areas, NSPasteboard change count, app hide/unhide |
 | image                        | 0.25    | PNG encode/decode for clipboard images                                         |
 | base64                       | 0.22    | Data-URL encoding                                                              |
 | parking_lot                  | 0.12    | Mutex without poisoning                                                        |
@@ -149,15 +150,16 @@ src-tauri/
 │   ├── runtime/
 │   │   ├── mod.rs              # Module re-exports
 │   │   ├── clipboard_watcher.rs # Background polling thread (220ms)
-│   │   ├── hotkeys.rs          # Global shortcut handlers (Ctrl+Shift+C/V)
+│   │   ├── hotkeys.rs          # Global shortcut handlers (Ctrl+Shift+C/V; Cmd+Shift on macOS)
 │   │   ├── notifications.rs    # Copy/paste notification toast logic
-│   │   ├── os_notify.rs        # OS desktop toast (Windows/Linux), distinct from the in-app popup
+│   │   ├── os_notify.rs        # OS desktop toast, distinct from the in-app popup
 │   │   ├── popup_windows.rs    # Window creation, show/hide, focus handlers
 │   │   ├── commands.rs         # Window control commands (close/resize popups)
 │   │   ├── tray.rs             # System tray icon and menu
 │   │   ├── platform/
-│   │   │   ├── mod.rs           # cfg-gated module selection + cross-platform popup_position()
+│   │   │   ├── mod.rs           # cfg-gated module selection + cross-platform popup_position(), position_at()
 │   │   │   ├── windows.rs      # Win32: key simulation, cursor, monitors, DPI
+│   │   │   ├── macos.rs        # CGEvent / NSScreen: key simulation, cursor, work areas, pasteboard count, app hide
 │   │   │   └── linux.rs        # xdotool/wtype: key simulation, cursor, screen info
 │   │   └── window_state.rs     # Saved window geometry (position, size)
 │   └── state/
@@ -222,7 +224,7 @@ src/
 
 **`lib.rs`** - Orchestrates the entire startup sequence:
 
-1. **`kill_previous_instance()`** - Terminates a running copy so its global hotkeys are released. It runs only in a debug build or on the app's own restart (update or health recovery). A plain relaunch or a `--trigger`/deep-link launch is forwarded to the running instance by the single-instance plugin instead. On Windows it uses `tasklist`/`taskkill`; on Linux, `pgrep`/`kill -9`. It waits first: see [Shutdown and the rotation window](#shutdown-and-the-rotation-window).
+1. **`kill_previous_instance()`** - Terminates a running copy so its global hotkeys are released. It runs only in a debug build or on the app's own restart (update or health recovery). A plain relaunch or a `--trigger`/deep-link launch is forwarded to the running instance by the single-instance plugin instead. On Windows it uses `tasklist`/`taskkill`; on macOS and Linux, `pgrep`/`kill -9`. It waits first: see [Shutdown and the rotation window](#shutdown-and-the-rotation-window).
 2. **`create_shared_history()`** - Creates `Arc<Mutex<ClipboardHistory>>`.
 3. **`AppState { .. }`** - `run()` builds `AppState` inline from the shared history and suppress flag.
 4. **`setup_runtime()`** - Called inside `tauri::Builder::setup`:
@@ -498,25 +500,28 @@ copy/paste popups do not re-read the file. See `src-tauri/src/clipboard/commands
 
 **Internal helpers:**
 
-- `read_clipboard_capture()` - Reads the OS clipboard in priority order: files (CF_HDROP) -> HTML (CF_HTML) -> text -> images (CF_PNG, registered formats, CF_DIB fallback). Returns a `Capture`: `Entry`, `TooLarge` (over `MAX_TEXT_BYTES`) or `Nothing`. Every capture path goes through it.
-- `write_entry_to_clipboard(entry)` - Writes a `ClipboardEntry` back to the OS clipboard. Text goes via arboard (with retry), files via CF_HDROP. **Images**: on Windows it uses the Win32 API directly (`write_image_to_clipboard`) and bypasses arboard; on Linux and other platforms it uses the arboard RGBA path.
+- `read_clipboard_capture()` - Reads the OS clipboard in priority order: files -> HTML -> text -> images. On Windows that is CF_HDROP, CF_HTML, CF_UNICODETEXT and CF_PNG / registered formats / CF_DIB, each measured on the handle before it is read; on macOS and Linux arboard reads the file list, the HTML and the text, and only the post-read size check applies. Returns a `Capture`: `Entry`, `TooLarge` (over `MAX_TEXT_BYTES`) or `Nothing`. Every capture path goes through it.
+- `write_entry_to_clipboard(entry)` - Writes a `ClipboardEntry` back to the OS clipboard. Text goes via arboard (with retry). Files go via CF_HDROP on Windows and arboard's file list elsewhere. **Images**: a file-backed image is written as a file on every platform, so the paste target gets the original bytes; an in-memory data URL goes through the Win32 API directly on Windows (`write_image_to_clipboard`, bypassing arboard) and through arboard's RGBA path on macOS and Linux.
 - `open_clipboard_with_retry()` - Opens an arboard `Clipboard` handle in up to 6 attempts, 50ms apart, to ride out contention with the watcher thread or other apps.
 - `set_active_clipboard_id(app, id)` - Updates `active_clipboard_id` in `AppState` and emits `clipboard:active-id` to the frontend. Called from `copy_entry`, `paste_entry`, the clipboard watcher and the copy shortcut handler.
 
-#### `files.rs` - Windows File Clipboard (CF_HDROP)
+#### `files.rs` - File Clipboard
 
-Reads and writes file lists via `CF_HDROP` clipboard format using Win32 APIs:
+Reads and writes file lists. On Windows through the `CF_HDROP` format with Win32 APIs; on macOS and Linux through arboard's file list (NSPasteboard file URLs, `text/uri-list`):
 
-- **Read**: `OpenClipboard` -> `GetClipboardData(CF_HDROP)` -> `DragQueryFileW` to extract paths.
-- **Write**: Build `DROPFILES` struct + UTF-16 filename block -> `GlobalAlloc` -> `SetClipboardData(CF_HDROP)`.
+- **Read (Windows)**: `OpenClipboard` -> `GetClipboardData(CF_HDROP)` -> `DragQueryFileW` to extract paths.
+- **Write (Windows)**: Build `DROPFILES` struct + UTF-16 filename block -> `GlobalAlloc` -> `SetClipboardData(CF_HDROP)`.
+- **macOS / Linux**: `Clipboard::get().file_list()` and `Clipboard::set().file_list()`. There is no "is a file list present" probe short of reading it, so `any_file_format_available` reads.
 - **Serialization**: File paths stored as newline-delimited strings in `ClipboardEntry.content`.
 
-#### `html.rs` - Rich Text Clipboard (CF_HTML)
+#### `html.rs` - Rich Text Clipboard
 
-Reads and writes HTML content via the `CF_HTML` registered clipboard format:
+Reads and writes HTML. On Windows through the `CF_HTML` registered format; on macOS and Linux through arboard (`public.html`, `text/html`), which carries no header:
 
-- **Read**: Extracts the HTML fragment from the `CF_HTML` format header (StartFragment/EndFragment markers).
-- **Write**: Constructs a `CF_HTML` header with proper byte offsets and writes the fragment via Win32 APIs.
+- **Read (Windows)**: Extracts the HTML fragment from the `CF_HTML` format header (StartFragment/EndFragment markers).
+- **Write (Windows)**: Constructs a `CF_HTML` header with proper byte offsets and writes the fragment via Win32 APIs.
+- **macOS / Linux**: `Clipboard::get().html()` and `Clipboard::set().html(html, Some(plain))`.
+- On every platform the same `is_rich_content` test decides whether the HTML is worth a separate entry (tables, or images with real text); plain styled text falls through to the text capture.
 - HTML entries store both the HTML fragment and a plain-text fallback separated by `\n---PLAINTEXT---\n`.
 
 #### `image.rs` - Multi-Format Image Clipboard
@@ -540,7 +545,7 @@ Uses the Win32 API directly and bypasses arboard:
 
 **Why:** arboard's internal proxy thread races the clipboard watcher on Windows and fails with OS error 1418.
 
-**Writing (Linux/other)** - uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()`, which does not have that race off Windows.
+**Writing (macOS/Linux)** - a file-backed image is handed over as a file (see `write_entry_to_clipboard`); a data URL uses `data_url_to_rgba()` to decode the image, then writes via arboard's `set_image()`, which does not have that race off Windows.
 
 ### 4.4 Notes Module
 
@@ -1623,8 +1628,8 @@ real client would refuse.
 #### `clipboard_watcher.rs` - Background Polling Thread
 
 - Dedicated thread with **220ms polling interval**.
-- **Windows**: Uses `GetClipboardSequenceNumber()` to detect changes cheaply via a change token.
-- **Linux**: No change token available. The watcher reads the clipboard every cycle and compares it against the last captured content.
+- **Windows and macOS**: a change token the OS bumps on every write (`GetClipboardSequenceNumber()`, `NSPasteboard.changeCount`). An unchanged clipboard costs one call per cycle and no read, and the token only advances once a capture succeeded, so a locked clipboard is retried.
+- **Linux**: no change token available. The watcher reads the clipboard every cycle and relies on the top-of-history dedupe.
 - On change, calls `capture_clipboard_change()`:
   - Checks suppress flag (skips if set by user action).
   - Reads clipboard via `read_clipboard_capture()`.
@@ -1681,20 +1686,29 @@ The frontend `Notification.tsx` component renders a dynamic label and icon (clip
 
 #### `platform/` - OS Abstraction
 
-`platform/mod.rs` selects the correct submodule at compile time via `#[cfg]` gates and re-exports a uniform API. It also contains the cross-platform `popup_position()` function.
+`platform/mod.rs` selects the correct submodule at compile time via `#[cfg]` gates and re-exports a uniform API. It also contains the cross-platform `popup_position()` and `notification_position()`, and `position_at(x, y)`, which turns a pair from this module into the `tauri::Position` the platform needs: physical pixels on Windows and Linux, logical points on macOS. Callers never pick the unit themselves.
 
-| Function                       | Windows (`platform/windows.rs`)                                  | Linux (`platform/linux.rs`)                                  |
-| ------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------ |
-| `simulate_copy()`              | Releases Shift/Ctrl, sends Ctrl down, C down, C up, Ctrl up via `keybd_event`   | `xdotool key --clearmodifiers ctrl+c` (X11) or `wtype -M ctrl -P c -p c -m ctrl` (Wayland); `ydotool` if that fails |
-| `simulate_paste()`             | Releases Shift/Ctrl, sends Ctrl down, V down, V up, Ctrl up via `keybd_event`   | `xdotool key --clearmodifiers ctrl+v` (X11) or `wtype -M ctrl -P v -p v -m ctrl` (Wayland); `ydotool` if that fails |
-| `popup_position(w, h)`         | _(cross-platform in mod.rs)_ - near cursor, clamped to work area | _(same)_                                                     |
-| `cursor_pos()`                 | `GetCursorPos()` -> physical pixel coordinates                    | `xdotool getmouselocation` -> parse x/y                       |
-| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `xdpyinfo` -> parse `dimensions:` line                        |
-| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` -> DPI scaling factor                          | Returns `1.0` (Wayland compositors handle scaling)           |
+| Function                       | Windows (`platform/windows.rs`)                                  | macOS (`platform/macos.rs`)                                  | Linux (`platform/linux.rs`)                                  |
+| ------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `simulate_copy()`              | Releases Shift/Ctrl, sends Ctrl down, C down, C up, Ctrl up via `keybd_event`   | `CGEvent` key down/up for keycode 8 with the Command flag, posted to the HID tap; skipped and logged without the Accessibility permission | `xdotool key --clearmodifiers ctrl+c` (X11) or `wtype -M ctrl -P c -p c -m ctrl` (Wayland); `ydotool` if that fails |
+| `simulate_paste()`             | Releases Shift/Ctrl, sends Ctrl down, V down, V up, Ctrl up via `keybd_event`   | Same, keycode 9                                               | `xdotool key --clearmodifiers ctrl+v` (X11) or `wtype -M ctrl -P v -p v -m ctrl` (Wayland); `ydotool` if that fails |
+| `popup_position(w, h)`         | _(cross-platform in mod.rs)_ - near cursor, clamped to work area | _(same)_                                                     | _(same)_                                                     |
+| `cursor_pos()`                 | `GetCursorPos()` -> physical pixel coordinates                    | `CGEvent::location()` -> points, top-left origin             | `xdotool getmouselocation` -> parse x/y                       |
+| `work_area_for_point(x, y)`    | `MonitorFromPoint` + `GetMonitorInfoW`                           | `NSScreen.visibleFrame` of the screen under the point (menu bar and Dock excluded), flipped to top-left; `CGDisplayBounds` of the main display as the fallback | `xdpyinfo` -> parse `dimensions:` line                        |
+| `scale_factor_for_point(x, y)` | `GetDpiForMonitor` -> DPI scaling factor                          | Returns `1.0` (positions are already logical)                | Returns `1.0` (Wayland compositors handle scaling)           |
 
-**Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function releases Shift and Ctrl. **Why:** if the user still held Shift from the shortcut, the OS would otherwise see Ctrl+Shift+V instead of Ctrl+V.
+**Note on simulate_paste (Windows)**: Before sending Ctrl+V, the function releases Shift and Ctrl. **Why:** if the user still held Shift from the shortcut, the OS would otherwise see Ctrl+Shift+V instead of Ctrl+V. The macOS event carries its own modifier flags, so no release is needed there.
 
-**Note on Linux**: `is_wayland()` returns true when `WAYLAND_DISPLAY` is set and non-empty, or when `XDG_SESSION_TYPE` is `wayland`. On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`.
+**Note on Linux**: `is_wayland()` returns true when `WAYLAND_DISPLAY` is set and non-empty, or when `XDG_SESSION_TYPE` is `wayland`. On Wayland the app tries `wtype`, then `ydotool`; on X11 it tries `xdotool`, then `ydotool`. Wayland also hides the cursor from clients, so `cursor_available()` is false there and popups center on the active monitor; global hotkeys do not reach the app on native Wayland, which is what the `--trigger copy|paste` CLI launch (routed to the running instance by the single-instance plugin) is for.
+
+**Notes on macOS** (`platform/macos.rs`):
+
+- **Accessibility.** Posting a keystroke into another app needs the app listed under Privacy & Security > Accessibility. `request_input_permission()` asks once, from `setup` (the system prompt appears at first launch); `simulate_*` re-checks `AXIsProcessTrusted` each time and no-ops with a log line when refused. Capture, popups and the clipboard write do not depend on it.
+- **Screens are cached.** `NSScreen` is main-thread-only and the callers are not (the watcher thread, a paste command's thread). `prime_screens()` fills a table from the main thread at setup and whenever a caller happens to be on it (the hotkey handlers); off-thread callers read the table. A display change is picked up on the next main-thread call.
+- **Focus goes back through `NSApp hide:`.** macOS leaves an app active after its last window hides, so a Cmd+V posted after the paste popup closes would land in this app. `hide_popup` calls `macos::deactivate` (tauri's `AppHandle::hide`) once no interactive window of ours is visible, which returns focus to the previous app. A hidden app's windows do not appear, so `show_toast` calls `macos::unhide_quietly` (`NSApplication::unhideWithoutActivation`) first; with the main window open nothing is hidden and focus stays there, as on Windows.
+- **Accessory activation policy.** `lib.rs` sets `ActivationPolicy::Accessory` in `setup`: no Dock icon, no Cmd+Tab entry, the window is reached from the menu-bar icon. This is the tray-app behavior Windows has. `skip_taskbar` is a no-op on macOS.
+- **Global hotkeys are Cmd+Shift+C / Cmd+Shift+V** (`Modifiers::SUPER` in `hotkeys.rs`). The labels follow in `src/platform.ts`.
+- **Machine id** for the device fingerprint is the `IOPlatformUUID` from `ioreg`; **Open folder** uses `open`, **reveal** uses `open -R`.
 
 #### `tray.rs` - System Tray
 
@@ -2327,7 +2341,7 @@ state causes a full re-pull from the server on the next startup.
 
 ### 7.3 `{app_data}` location and the identifier-rename migration
 
-Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: on Windows `%APPDATA%\<identifier>\`, on Linux `~/.local/share/<identifier>/`. The identifier is `io.github.notrover.orange-copy-paste`.
+Tauri resolves `{app_data}` from the bundle `identifier` in `tauri.conf.json`: on Windows `%APPDATA%\<identifier>\`, on macOS `~/Library/Application Support/<identifier>/`, on Linux `~/.local/share/<identifier>/`. The identifier is `io.github.notrover.orange-copy-paste`.
 
 **Temporary migration.** The identifier was `com.spect.orange-copy-paste` up to v0.3.7;
 v0.3.8 renamed it.
@@ -2397,7 +2411,7 @@ Applied to four windows: `main`, `copy-popup`, `paste-popup` and `notification` 
 
 - **Dev**: `bun run dev` -> Vite on `localhost:1420`
 - **Prod**: `bun run build` -> `tsc && vite build` -> `dist/`
-- **Bundle**: `tauri.conf.json` targets `nsis`, `deb`, `rpm` and `appimage`. Which of them a release builds and publishes is in `docs/releasing.md` at the workspace root.
+- **Bundle**: `tauri.conf.json` targets `nsis`, `deb`, `rpm`, `appimage`, `app` and `dmg` (macOS 10.15 and later). Which of them a release builds and publishes is in `docs/releasing.md` at the workspace root.
 - **Release profile**: `opt-level = "z"`, LTO, single codegen unit, stripped symbols
 
 ---
