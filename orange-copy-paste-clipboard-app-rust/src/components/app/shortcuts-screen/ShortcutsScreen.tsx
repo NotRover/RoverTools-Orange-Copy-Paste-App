@@ -9,6 +9,7 @@ import {
   SystemGroupsIcon,
   SearchIcon,
 } from "../../icons";
+import { ALT, MOD } from "../../../platform";
 // Reuses the shared scr-* page header and set-section-* heading styles.
 import "../settings-screen/SettingsScreen.css";
 import "./ShortcutsScreen.css";
@@ -32,15 +33,15 @@ const SECTIONS: ShortcutSection[] = [
     icon: <KeyboardIcon size={13} />,
     entries: [
       {
-        keys: ["Ctrl", "C"],
+        keys: [MOD, "C"],
         description:
           "Capture (copy) selection to clipboard history without popup",
       },
       {
-        keys: ["Ctrl", "Shift", "C"],
+        keys: [MOD, "Shift", "C"],
         description: "Capture (copy) selection to clipboard history",
       },
-      { keys: ["Ctrl", "Shift", "V"], description: "Open quick-paste popup" },
+      { keys: [MOD, "Shift", "V"], description: "Open quick-paste popup" },
     ],
   },
   {
@@ -54,7 +55,7 @@ const SECTIONS: ShortcutSection[] = [
       },
       { keys: ["Up", "Down"], description: "Move through the list" },
       { keys: ["Enter"], description: "Paste selected entry" },
-      { keys: ["Alt", "Enter"], description: "Paste and remove from Recent" },
+      { keys: [ALT, "Enter"], description: "Paste and remove from Recent" },
       { keys: ["Tab"], description: "Toggle Recent / Pinned" },
       { keys: ["Space"], description: "Show / hide the preview (search box empty)" },
       { keys: ["Esc"], description: "Close popup" },

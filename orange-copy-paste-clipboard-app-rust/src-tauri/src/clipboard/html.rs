@@ -1,5 +1,7 @@
 //! Clipboard HTML utilities: reading CF_HTML from the OS clipboard and
-//! writing it back with the required Windows header format.
+//! writing it back with the required Windows header format. On macOS and
+//! Linux arboard carries the HTML (`public.html`, `text/html`) with no header
+//! to build or parse; the "is it rich" test is shared.
 //!
 //! ## Windows CF_HTML format
 //!
@@ -114,7 +116,12 @@ pub fn read_html_from_clipboard() -> Option<String> {
 
 #[cfg(not(windows))]
 pub fn read_html_from_clipboard() -> Option<String> {
-    None
+    let mut cb = arboard::Clipboard::new().ok()?;
+    let html = cb.get().html().ok()?;
+    if html.trim().is_empty() || !is_rich_content(&html) {
+        return None;
+    }
+    Some(html)
 }
 
 /// Write HTML content back to the clipboard as CF_HTML + CF_UNICODETEXT.
@@ -199,13 +206,17 @@ pub fn write_html_to_clipboard(html_fragment: &str, plain_text: &str) -> Result<
 }
 
 #[cfg(not(windows))]
-pub fn write_html_to_clipboard(_html_fragment: &str, _plain_text: &str) -> Result<(), String> {
-    Err("HTML clipboard write not supported on this platform".into())
+pub fn write_html_to_clipboard(html_fragment: &str, plain_text: &str) -> Result<(), String> {
+    let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    cb.set()
+        .html(html_fragment, Some(plain_text))
+        .map_err(|e| e.to_string())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
-// These back the CF_HTML read/write paths, which only exist on Windows, so
-// they are gated to avoid dead-code warnings on other platforms.
+// The header helpers back the CF_HTML read/write paths, which only exist on
+// Windows, so they are gated to avoid dead-code warnings on other platforms.
+// `is_rich_content` and `strip_tags` decide what counts as rich on every OS.
 
 /// Parse a numeric value from a CF_HTML header line like "StartFragment:000000123".
 #[cfg(windows)]
@@ -229,7 +240,6 @@ fn parse_header_value(raw: &str, key: &str) -> Option<usize> {
 /// This intentionally rejects:
 ///   • Pure `<img>` tags with no text (let the image capture path handle it).
 ///   • Plain text wrapped in `<span style="...">` (the text capture is better).
-#[cfg(windows)]
 fn is_rich_content(html: &str) -> bool {
     let lower = html.to_lowercase();
 
@@ -251,7 +261,6 @@ fn is_rich_content(html: &str) -> bool {
 
 /// Crude tag stripper — removes everything between `<` and `>` to yield
 /// the raw text content of an HTML fragment.
-#[cfg(windows)]
 fn strip_tags(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut inside = false;

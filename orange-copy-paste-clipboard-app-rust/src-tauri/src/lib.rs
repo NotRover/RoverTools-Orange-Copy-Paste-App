@@ -1159,6 +1159,22 @@ pub fn run() {
             if let Some((headline, detail)) = webview_migration {
                 crate::health::note(headline, &detail);
             }
+            #[cfg(target_os = "macos")]
+            {
+                // A tray app, as on Windows: no Dock icon and no Cmd+Tab entry.
+                // The window is reached from the menu bar icon. Must be set
+                // before the event loop runs.
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                // The system's Accessibility prompt, once, at first launch
+                // rather than in the middle of the first paste. Nothing waits
+                // on the answer: until it is granted the app captures and
+                // shows popups as usual and only the synthetic Cmd+C / Cmd+V
+                // is skipped.
+                crate::runtime::platform::macos::request_input_permission();
+                // NSScreen is main-thread-only; fill the table the off-thread
+                // callers read. See platform/macos.rs.
+                crate::runtime::platform::macos::prime_screens();
+            }
             setup_runtime(app, &history, &suppress)?;
             {
                 use tauri_plugin_deep_link::DeepLinkExt;

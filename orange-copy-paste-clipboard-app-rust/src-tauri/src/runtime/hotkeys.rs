@@ -15,9 +15,17 @@ use crate::{
     },
 };
 
-/// `Ctrl+Shift+<code>` global shortcut.
-fn ctrl_shift(code: Code) -> tauri_plugin_global_shortcut::Shortcut {
-    tauri_plugin_global_shortcut::Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), code)
+/// The popup shortcut for `code`: `Cmd+Shift` on macOS, where Ctrl+Shift+C is
+/// nobody's copy key and Cmd is what every other shortcut in the app uses, and
+/// `Ctrl+Shift` everywhere else. The Shortcuts screen and the splash tips
+/// label them the same way (`src/platform.ts`).
+fn popup_shortcut(code: Code) -> tauri_plugin_global_shortcut::Shortcut {
+    let primary = if cfg!(target_os = "macos") {
+        Modifiers::SUPER
+    } else {
+        Modifiers::CONTROL
+    };
+    tauri_plugin_global_shortcut::Shortcut::new(Some(primary | Modifiers::SHIFT), code)
 }
 
 fn toggle_popup_if_visible(app: &tauri::AppHandle, label: &str) -> bool {
@@ -63,7 +71,8 @@ fn show_copy_popup(app: &tauri::AppHandle, entry: &ClipboardEntry) {
     }
 }
 
-/// Register `Ctrl+Shift+C` (copy popup) and `Ctrl+Shift+V` (paste popup).
+/// Register `Ctrl+Shift+C` (copy popup) and `Ctrl+Shift+V` (paste popup);
+/// `Cmd+Shift` on macOS.
 pub(crate) fn register_global_shortcuts(
     app: &tauri::App,
     history: Arc<Mutex<ClipboardHistory>>,
@@ -71,7 +80,7 @@ pub(crate) fn register_global_shortcuts(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let gs = app.global_shortcut();
 
-    let sc_copy = ctrl_shift(Code::KeyC);
+    let sc_copy = popup_shortcut(Code::KeyC);
     let _ = gs.unregister(sc_copy);
     let ah = app.handle().clone();
     let hist = Arc::clone(&history);
@@ -81,7 +90,7 @@ pub(crate) fn register_global_shortcuts(
         }
     })?;
 
-    let sc_paste = ctrl_shift(Code::KeyV);
+    let sc_paste = popup_shortcut(Code::KeyV);
     let _ = gs.unregister(sc_paste);
     let ah = app.handle().clone();
     gs.on_shortcut(sc_paste, move |_app, _sc, event| {

@@ -48,6 +48,7 @@ import {
   TrashIcon,
 } from "../../icons";
 import "./ClipboardScreen.css";
+import { MOD } from "../../../platform";
 
 // Layout & sort types
 
@@ -486,7 +487,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
         <ClipboardIcon size={48} strokeWidth={1.2} className="empty-icon" />
         <p className="empty-title">No clipboard history yet</p>
         <p className="empty-subtitle">
-          Press <strong>Ctrl+Shift+C</strong> to capture anything here.
+          Press <strong>{MOD}+Shift+C</strong> to capture anything here.
         </p>
       </div>
     );

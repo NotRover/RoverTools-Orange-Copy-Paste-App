@@ -114,6 +114,26 @@ open = "5"
 # The machine's own name, shown as this device's name in the device list
 gethostname = "1"
 
+# Local-time image labels on Linux and macOS (`localtime_r`); Windows uses Win32.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# macOS: CoreGraphics posts the Cmd+C / Cmd+V keystrokes and reads the cursor;
+# AppKit gives the usable screen area (NSScreen), the pasteboard change count
+# and app hide / unhide; CoreFoundation carries the Accessibility prompt. All
+# already in the tree under tao and arboard.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25"
+core-foundation = "0.10"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSPasteboard",
+    "NSResponder",
+    "NSScreen",
+] }
+
 #  Windows-only  key simulation (keybd_event / GetCursorPos / monitor info)
 #  NOTE: keep this target table LAST — any `dep = ...` lines after a target
 #  table header belong to that table, so cross-platform deps must precede it.

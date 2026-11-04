@@ -1,6 +1,6 @@
 # Orange Copy Paste: desktop app
 
-The Orange Copy Paste desktop app for **Windows and Linux**: a clipboard history you can search, popups at the cursor for capturing and pasting, a notes editor, and optional end-to-end encrypted sync and sharing. This folder is the app's source, built with React 19 and TypeScript on a Rust and Tauri 2 core.
+The Orange Copy Paste desktop app for **Windows, macOS and Linux**: a clipboard history you can search, popups at the cursor for capturing and pasting, a notes editor, and optional end-to-end encrypted sync and sharing. This folder is the app's source, built with React 19 and TypeScript on a Rust and Tauri 2 core.
 
 ![The clipboard history screen](../docs/images/clipboard-history.png)
 
@@ -107,7 +107,7 @@ src-tauri/src/                     the core (Rust)
 |- notes/                          commands, note model, storage
 |- sync/                           sync engine, encryption, server and Supabase clients, offline queue
 |- runtime/                        watcher, hotkeys, popups, tray, notifications
-|  `- platform/                    Windows and Linux key injection and screen geometry
+|  `- platform/                    Windows, macOS and Linux key injection and screen geometry
 |- state/                          shared app state
 |- health.rs                       watchdog, safe file writes, quarantine
 `- updater.rs                      signed self-update

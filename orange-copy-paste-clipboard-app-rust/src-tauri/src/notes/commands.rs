@@ -105,7 +105,17 @@ fn reveal_in_folder(path: &std::path::Path) -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        // Finder's "reveal": opens the folder with the file selected.
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let dir = path.parent().ok_or("attachment has no folder")?;
         open::that_detached(dir).map_err(|e| e.to_string())

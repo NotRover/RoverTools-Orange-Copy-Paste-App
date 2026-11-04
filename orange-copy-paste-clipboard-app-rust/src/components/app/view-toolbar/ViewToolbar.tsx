@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon, ChevronRightIcon } from "../../icons";
 import { IconDots, IconZoomIn, IconZoomOut } from "@tabler/icons-react";
 import "./view-toolbar.css";
+import { MOD } from "../../../platform";
 
 /** The bar itself: the way out, then the middle, then the actions. */
 export const ViewToolbar: React.FC<{
@@ -122,7 +123,7 @@ export const ToolbarZoom: React.FC<{
       className="vt-btn vt-btn--icon"
       onClick={onOut}
       aria-label="Zoom out"
-      data-tooltip="Zoom out (Ctrl and minus)"
+      data-tooltip={`Zoom out (${MOD} and minus)`}
       data-tooltip-pos="below"
     >
       <IconZoomOut size={13} />
@@ -140,7 +141,7 @@ export const ToolbarZoom: React.FC<{
       className="vt-btn vt-btn--icon"
       onClick={onIn}
       aria-label="Zoom in"
-      data-tooltip="Zoom in (Ctrl and plus)"
+      data-tooltip={`Zoom in (${MOD} and plus)`}
       data-tooltip-pos="below"
     >
       <IconZoomIn size={13} />

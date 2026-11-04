@@ -150,7 +150,11 @@ fn open_folder(dir: &std::path::Path) -> bool {
     {
         std::process::Command::new("explorer").arg(dir).spawn().is_ok()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(dir).spawn().is_ok()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         std::process::Command::new("xdg-open").arg(dir).spawn().is_ok()
     }

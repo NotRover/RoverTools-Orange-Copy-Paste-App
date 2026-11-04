@@ -839,14 +839,22 @@ pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), Str
             }
             #[cfg(not(windows))]
             {
-                let (w, h, bytes) = data_url_to_rgba(&entry.content).map_err(|e| e.to_string())?;
-                let mut cb = open_clipboard_with_retry()?;
-                cb.set_image(arboard::ImageData {
-                    width: w,
-                    height: h,
-                    bytes: Cow::Owned(bytes),
-                })
-                .map_err(|e| e.to_string())?;
+                if entry.content.starts_with("data:") {
+                    let (w, h, bytes) =
+                        data_url_to_rgba(&entry.content).map_err(|e| e.to_string())?;
+                    let mut cb = open_clipboard_with_retry()?;
+                    cb.set_image(arboard::ImageData {
+                        width: w,
+                        height: h,
+                        bytes: Cow::Owned(bytes),
+                    })
+                    .map_err(|e| e.to_string())?;
+                } else {
+                    // File-backed image: hand over the file, as on Windows, so
+                    // the paste target gets the original bytes and no decode
+                    // runs here.
+                    write_files_to_clipboard(std::slice::from_ref(&entry.content))?;
+                }
             }
         }
         EntryKind::File => {
@@ -1025,7 +1033,6 @@ pub(crate) fn read_clipboard_capture() -> Capture {
     // so that re-copying writes CF_HDROP back and the files can be pasted in
     // Explorer and other apps that expect file paths.  The frontend handles
     // showing the correct "Image" chip for single-image file entries.
-    #[cfg(windows)]
     if crate::clipboard::files::any_file_format_available() {
         if let Some(paths) = read_files_from_clipboard() {
             // A path is small; a selection of a few hundred thousand is not.
@@ -1076,6 +1083,25 @@ pub(crate) fn read_clipboard_capture() -> Capture {
             }
             return Capture::Entry(ClipboardEntry::new_html(html_fragment, plain));
         }
+    }
+
+    // The same rich-text capture off Windows, where arboard hands over the
+    // HTML with no header and no way to measure it first: the post-read cap
+    // is the only guard, as for plain text below.
+    #[cfg(not(windows))]
+    if let Some(html_fragment) = crate::clipboard::html::read_html_from_clipboard() {
+        let plain = Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok())
+            .unwrap_or_default();
+        let total = html_fragment.len() + plain.len();
+        if total > MAX_TEXT_BYTES {
+            return Capture::TooLarge {
+                what: "rich text",
+                bytes: total,
+            };
+        }
+        return Capture::Entry(ClipboardEntry::new_html(html_fragment, plain));
     }
 
     // Plain text.  Measured off the OS handle first, so a payload this app will

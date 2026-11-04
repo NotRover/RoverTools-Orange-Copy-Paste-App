@@ -91,6 +91,7 @@ import {
 import CardMenu from "../../card-menu/CardMenu";
 import ToolbarPopover from "./ToolbarPopover";
 import "./note-editor.css";
+import { MOD } from "../../../../platform";
 
 /** Persisted reading size for the editor. A plain UI preference, so it goes in
  *  the generic settings store and needs nothing on the Rust side. */
@@ -975,7 +976,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               className={`ns-fmt-btn${active.bold ? " ns-fmt-btn--active" : ""}`}
               onClick={() => dispatch({ kind: "bold" })}
-              data-tooltip="Bold (Ctrl+B)"
+              data-tooltip={`Bold (${MOD}+B)`}
               data-tooltip-pos="below"
             >
               <IconBold size={13} />
@@ -983,7 +984,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               className={`ns-fmt-btn${active.italic ? " ns-fmt-btn--active" : ""}`}
               onClick={() => dispatch({ kind: "italic" })}
-              data-tooltip="Italic (Ctrl+I)"
+              data-tooltip={`Italic (${MOD}+I)`}
               data-tooltip-pos="below"
             >
               <IconItalic size={13} />
@@ -991,7 +992,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               className={`ns-fmt-btn${active.underline ? " ns-fmt-btn--active" : ""}`}
               onClick={() => dispatch({ kind: "underline" })}
-              data-tooltip="Underline (Ctrl+U)"
+              data-tooltip={`Underline (${MOD}+U)`}
               data-tooltip-pos="below"
             >
               <IconUnderline size={13} />
@@ -1007,7 +1008,7 @@ const NoteEditor: React.FC<NoteEditorProps> = ({
             <button
               className={`ns-fmt-btn${active.code ? " ns-fmt-btn--active" : ""}`}
               onClick={() => dispatch({ kind: "code" })}
-              data-tooltip="Inline code (Ctrl+E)"
+              data-tooltip={`Inline code (${MOD}+E)`}
               data-tooltip-pos="below"
             >
               <IconCode size={13} />

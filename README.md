@@ -1,6 +1,6 @@
 # Orange Copy Paste
 
-A clipboard manager for Windows and Linux. It keeps a searchable history of what you copy, pastes any recent entry with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> and a number key, and has notes next to your history. With an optional account, history and notes sync to your other computers and can be shared with other people in spaces. Everything that syncs is **end-to-end encrypted**: the server stores it and relays it, but cannot read it.
+A clipboard manager for Windows, macOS and Linux. It keeps a searchable history of what you copy, pastes any recent entry with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> and a number key, and has notes next to your history. With an optional account, history and notes sync to your other computers and can be shared with other people in spaces. Everything that syncs is **end-to-end encrypted**: the server stores it and relays it, but cannot read it.
 
 ![The clipboard history screen](docs/images/clipboard-history.png)
 
@@ -13,7 +13,7 @@ Download the latest build from the [releases page](https://github.com/NotRover/R
 - **Windows 10 or 11:** the file ending in `-setup.exe`. It installs for your user only, without admin rights.
 - **Linux:** `.deb` or AppImage. X11 works best; Wayland needs one setup step for the hotkeys, described in the [Linux notes](https://orange-copy-paste-app.pages.dev/docs/linux/).
 
-The app updates itself from the same releases page. macOS is not supported yet.
+The app updates itself from the same releases page. On a Mac, pick the `.dmg` for your chip.
 
 Then follow [Install and first run](https://orange-copy-paste-app.pages.dev/docs/getting-started/): in about five minutes you copy three things, paste one by its number, and pin it. The full user guide is at [orange-copy-paste-app.pages.dev/docs](https://orange-copy-paste-app.pages.dev/docs/).
 
@@ -140,7 +140,7 @@ Testing sync end to end needs a running server, a Supabase project and two accou
 
 ## Releasing
 
-A release is one run of `.github/workflows/release.yml`. It publishes [`changelog/next.md`](changelog/) as the release notes, bumps the version, builds signed Windows and Linux bundles, and publishes them as a GitHub Release on this repository, where the in-app updater finds them. The inputs, the stable and beta channels, and signing-key setup are in [`docs/releasing.md`](docs/releasing.md). Releases never touch the sync server, which deploys on its own.
+A release is one run of `.github/workflows/release.yml`. It publishes [`changelog/next.md`](changelog/) as the release notes, bumps the version, builds signed Windows, macOS and Linux bundles, and publishes them as a GitHub Release on this repository, where the in-app updater finds them. The inputs, the stable and beta channels, and signing-key setup are in [`docs/releasing.md`](docs/releasing.md). Releases never touch the sync server, which deploys on its own.
 
 ## Conventions
 
