@@ -118,7 +118,9 @@
   font-weight: 600;
 }
 
-.ee-rich p {
+/* `.ee-p` is a preview paragraph that holds a card, drawn as a <div> because
+   a <p> cannot contain one. Styled wherever a paragraph is. */
+.ee-rich :is(p, .ee-p) {
   margin: 0.55em 0;
 }
 
@@ -138,7 +140,7 @@
 .ee-rich li {
   margin: 0.15em 0;
 }
-.ee-rich li > p {
+.ee-rich li > :is(p, .ee-p) {
   margin: 0.15em 0;
 }
 .ee-rich ul:not([data-type="taskList"]) {
@@ -200,7 +202,7 @@
   flex: 1 1 auto;
   min-width: 0;
 }
-.ee-rich ul[data-type="taskList"] li > div > p {
+.ee-rich ul[data-type="taskList"] li > div > :is(p, .ee-p) {
   margin: 0;
 }
 .ee-rich ul[data-type="taskList"] input[type="checkbox"] {
@@ -317,7 +319,7 @@
   line-height: 1.35;
   position: relative;
 }
-.ee-rich :is(th, td) > p {
+.ee-rich :is(th, td) > :is(p, .ee-p) {
   margin: 0;
 }
 .ee-rich th {

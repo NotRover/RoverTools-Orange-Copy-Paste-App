@@ -60,6 +60,9 @@ function renderChildren(
   return nodes.map((n, i) => renderNode(n, entries, `${keyPrefix}.${i}`));
 }
 
+/** Inline nodes whose rendering is block-level markup. */
+const CARD_NODES = new Set(["clipCard", "groupCard", "fileCard"]);
+
 function renderNode(
   node: JSONContent,
   entries: ClipboardEntry[],
@@ -70,12 +73,18 @@ function renderNode(
     align && align !== "left" ? { textAlign: align as any } : undefined;
 
   switch (node.type) {
-    case "paragraph":
+    case "paragraph": {
+      // A card is a <div> (its rows, its body) and a <p> may not contain
+      // one: React warns on every preview that holds a card, and the HTML
+      // parser would close the paragraph early. So a paragraph that carries
+      // a card is a <div> styled as a paragraph; the rest stay <p>.
+      const Tag = node.content?.some((c) => CARD_NODES.has(c.type ?? "")) ? "div" : "p";
       return (
-        <p key={key} style={style}>
+        <Tag key={key} className={Tag === "div" ? "ee-p" : undefined} style={style}>
           {renderChildren(node.content, entries, key)}
-        </p>
+        </Tag>
       );
+    }
     case "heading": {
       const level = (node.attrs?.level as number) || 1;
       const Tag = `h${Math.min(Math.max(level, 1), 6)}` as any;
