@@ -88,6 +88,21 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   const spacesWrapRef = useRef<HTMLDivElement>(null);
   const cloudWrapRef = useRef<HTMLDivElement>(null);
 
+  // An action ends select mode once it has run. One-shot chips exit at once.
+  // The groups and spaces menus let you tick several, so they exit when the
+  // menu closes, and only if something was ticked.
+  const thenExit = (fn?: () => void) => () => {
+    fn?.();
+    onExitSelectMode();
+  };
+  const ticked = useRef(false);
+  const menuOpen = groupsOpen || spacesOpen;
+  useEffect(() => {
+    if (menuOpen || !ticked.current) return;
+    ticked.current = false;
+    onExitSelectMode();
+  }, [menuOpen, onExitSelectMode]);
+
   useEffect(() => {
     if (!cloudOpen) return;
     const handler = (e: MouseEvent) => {
@@ -177,7 +192,9 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
         <button
           className={`bulk-popup-chip bulk-popup-chip--copy${copyDisabledReason ? " bulk-popup-chip--disabled" : ""}`}
           onClick={() => {
-            if (!copyDisabledReason) onBulkCopy();
+            if (copyDisabledReason) return;
+            onBulkCopy();
+            onExitSelectMode();
           }}
           aria-disabled={!!copyDisabledReason}
           data-tooltip={copyDisabledReason ?? "Copy selected"}
@@ -192,7 +209,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       {onBulkTogglePin && (
       <button
         className={`bulk-popup-chip bulk-popup-chip--pin${allPinned ? " bulk-popup-chip--pin-active" : ""}`}
-        onClick={onBulkTogglePin}
+        onClick={thenExit(onBulkTogglePin)}
         data-tooltip={allPinned ? "Unpin selected" : "Pin selected"}
         data-tooltip-pos="below"
       >
@@ -205,7 +222,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       {onBulkToggleSave && (
       <button
         className={`bulk-popup-chip bulk-popup-chip--save${allSaved ? " bulk-popup-chip--save-active" : ""}`}
-        onClick={onBulkToggleSave}
+        onClick={thenExit(onBulkToggleSave)}
         data-tooltip={allSaved ? "Unsave selected" : "Save selected"}
         data-tooltip-pos="below"
       >
@@ -249,11 +266,11 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                         background: active ? gc.bg : undefined,
                         color: gc.fg,
                       }}
-                      onClick={() =>
-                        active
-                          ? onBulkRemoveGroup?.(group)
-                          : onBulkAddGroup?.(group)
-                      }
+                      onClick={() => {
+                        ticked.current = true;
+                        if (active) onBulkRemoveGroup?.(group);
+                        else onBulkAddGroup?.(group);
+                      }}
                     >
                       <span
                         className="bulk-popup-flyout-dot"
@@ -308,7 +325,10 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                           : undefined
                       }
                       data-tooltip-pos={waiting ? "left" : undefined}
-                      onClick={() => onBulkToggleSpace?.(space.id, !active)}
+                      onClick={() => {
+                        ticked.current = true;
+                        onBulkToggleSpace?.(space.id, !active);
+                      }}
                     >
                       <span className="bulk-popup-space-check">
                         {active && <IconCheck size={9} />}
@@ -355,6 +375,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                   onClick={() => {
                     onBulkSync?.();
                     setCloudOpen(false);
+                    onExitSelectMode();
                   }}
                 >
                   <IconCloudUp size={11} />
@@ -365,6 +386,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
                   onClick={() => {
                     onBulkUnsync?.();
                     setCloudOpen(false);
+                    onExitSelectMode();
                   }}
                 >
                   <IconCloudOff size={11} />
@@ -390,7 +412,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       {onBulkRemoveFromSpace && (
         <button
           className="bulk-popup-chip bulk-popup-chip--delete"
-          onClick={onBulkRemoveFromSpace}
+          onClick={thenExit(onBulkRemoveFromSpace)}
           data-tooltip="Remove selected from this space"
           data-tooltip-pos="below"
         >
@@ -403,7 +425,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
       {onBulkDelete && (
         <button
           className="bulk-popup-chip bulk-popup-chip--delete"
-          onClick={onBulkDelete}
+          onClick={thenExit(onBulkDelete)}
           data-tooltip="Delete selected"
           data-tooltip-pos="below"
         >

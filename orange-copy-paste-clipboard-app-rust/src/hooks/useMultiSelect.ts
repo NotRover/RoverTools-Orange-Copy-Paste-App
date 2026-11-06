@@ -26,6 +26,24 @@ interface MultiSelectState {
   pruneStaleIds: (activeIds: Set<string>) => void;
 }
 
+/** Where a click keeps select mode on: the cards themselves, the select
+ *  button with its bulk bar and flyouts, and a confirm dialog the bar opened.
+ *  A primary click anywhere else ends select mode. */
+const KEEPS_SELECTION =
+  ".entry-card, .ns-card, .bulk-select-wrap, .card-menu-dropdown, [role='dialog']";
+
+export function clickEndsSelection(e: MouseEvent): boolean {
+  if (e.button !== 0) return false;
+  const target = e.target;
+  if (!(target instanceof Element)) return true;
+  // A press on a scrollbar targets the scrolling element; past its client
+  // box means the bar, which is scrolling the list, not leaving it.
+  if (e.offsetX >= target.clientWidth || e.offsetY >= target.clientHeight) {
+    if (target.clientWidth > 0 && target.clientHeight > 0) return false;
+  }
+  return !target.closest(KEEPS_SELECTION);
+}
+
 export function useMultiSelect(): MultiSelectState {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

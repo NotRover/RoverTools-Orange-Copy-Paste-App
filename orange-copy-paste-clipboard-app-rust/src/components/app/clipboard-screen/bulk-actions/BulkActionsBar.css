@@ -319,8 +319,23 @@
   cursor: pointer;
 }
 
+/* A selected card glows from its left edge, the same mark an entry on the
+   clipboard has outside select mode (that one is dropped while selecting).
+   The glow is a layer over the card's own surface, so the card stays opaque. Two classes, because
+   `.entry-card` sets the `background` shorthand, which resets the image,
+   and EntryCard.css loads after this file. */
+.entry-card.entry-card--selected {
+  background-image: linear-gradient(90deg, var(--clip-glow), transparent 60%);
+}
+
 .entry-card--selected:hover {
   transform: none;
+}
+
+/* While selecting, orange means selected. A copied entry keeps its chip
+   but drops its glow, so it does not read as picked. */
+.entry-card--selectable.entry-card--in-clipboard:not(.entry-card--selected) {
+  background-image: none;
 }
 
 .entry-card-checkbox {

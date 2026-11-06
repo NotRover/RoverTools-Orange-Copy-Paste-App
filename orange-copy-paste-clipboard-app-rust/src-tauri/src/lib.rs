@@ -910,7 +910,7 @@ pub fn run() {
         move_repeats: Arc::new(AtomicBool::new(true)),
         show_splash: Arc::new(AtomicBool::new(true)),
         splash_updating: Arc::new(AtomicBool::new(false)),
-        active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),
+        active_clipboard_ids: Arc::new(parking_lot::Mutex::new(Vec::new())),
         notes: Arc::new(parking_lot::Mutex::new(crate::notes::NoteStore::new())),
         notifications: Arc::new(parking_lot::Mutex::new(
             crate::notifications::NotificationStore::new(),
@@ -981,7 +981,7 @@ pub fn run() {
             crate::clipboard::commands::bulk_pin_entries,
             crate::clipboard::commands::bulk_add_group,
             crate::clipboard::commands::bulk_remove_group,
-            crate::clipboard::commands::get_active_clipboard_id,
+            crate::clipboard::commands::get_active_clipboard_ids,
             crate::runtime::commands::close_copy_popup,
             crate::runtime::commands::present_copy_popup,
             crate::runtime::commands::close_paste_popup,

@@ -288,7 +288,7 @@ const App: React.FC = () => {
   }, [screen]);
 
   // ID of the entry currently in the OS clipboard
-  const [activeClipboardId, setActiveClipboardId] = useState("");
+  const [activeClipboardIds, setActiveClipboardIds] = useState<string[]>([]);
 
   // null = sync inactive/not logged in; true/false = WS connected state
   const [syncConnected, setSyncConnected] = useState<boolean | null>(null);
@@ -556,13 +556,13 @@ const App: React.FC = () => {
 
     let unlistenActiveId: (() => void) | undefined;
 
-    invoke<string>("get_active_clipboard_id").then((id) => {
-      if (!cancelled) setActiveClipboardId(id);
+    invoke<string[]>("get_active_clipboard_ids").then((ids) => {
+      if (!cancelled) setActiveClipboardIds(ids);
     });
 
-    listen<string>("clipboard:active-id", (event) => {
+    listen<string[]>("clipboard:active-ids", (event) => {
       if (cancelled) return;
-      setActiveClipboardId(event.payload);
+      setActiveClipboardIds(event.payload);
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenActiveId = fn;
@@ -968,7 +968,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleCopy = useCallback(async (id: string) => {
-    setActiveClipboardId(id);
+    setActiveClipboardIds([id]);
     await invoke("copy_entry", { id });
   }, []);
 
@@ -1638,7 +1638,7 @@ const App: React.FC = () => {
             onBulkUnsave={handleBulkUnsave}
             onBulkAddGroup={handleBulkAddGroup}
             onBulkRemoveGroup={handleBulkRemoveGroup}
-            activeClipboardId={activeClipboardId}
+            activeClipboardIds={activeClipboardIds}
           />
         )}
 

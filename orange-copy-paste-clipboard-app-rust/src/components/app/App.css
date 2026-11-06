@@ -15,6 +15,8 @@
   --accent-hover: #ff5535;
   --accent-dim: #ff3e1c1a;
   --accent-dim-strong: #ff3e1c2e;
+  /* Edge glow on entries that are on the clipboard. */
+  --clip-glow: rgba(255, 62, 28, 0.12);
   /* Destructive red, deliberately not the accent: the accent is already a
      red-orange, so a delete button styled with it read as a normal action. */
   --danger: #ef4444;
@@ -45,6 +47,7 @@
   --accent-hover: #e0300f;
   --accent-dim: rgba(255, 62, 28, 0.08);
   --accent-dim-strong: rgba(255, 62, 28, 0.15);
+  --clip-glow: rgba(255, 62, 28, 0.16);
   --danger: #dc2626;
   --danger-dim: rgba(220, 38, 38, 0.09);
   --success: #16a34a;

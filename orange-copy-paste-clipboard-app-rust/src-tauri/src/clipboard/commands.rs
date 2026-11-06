@@ -539,8 +539,9 @@ pub fn copy_entries(ids: Vec<String>, state: State<'_, AppState>, app: tauri::Ap
 
     match written {
         Ok(()) => {
-            // Point the active id at the newest of the batch, like a manual copy.
-            set_active_clipboard_id(&app, &selected[0].id);
+            // Every entry of the batch is on the clipboard now.
+            let ids: Vec<String> = selected.iter().map(|e| e.id.clone()).collect();
+            set_active_clipboard_ids(&app, ids);
             crate::notifications::cue(&app, crate::notifications::Cue::Copy);
             true
         }
@@ -800,16 +801,21 @@ fn open_clipboard_with_retry() -> Result<Clipboard, String> {
     ))
 }
 
-/// Update the active clipboard entry ID and notify the frontend.
+/// One entry is now on the OS clipboard.
 pub(crate) fn set_active_clipboard_id(app: &tauri::AppHandle, id: &str) {
+    set_active_clipboard_ids(app, vec![id.to_owned()]);
+}
+
+/// Replace the set of entries on the OS clipboard and notify the frontend.
+pub(crate) fn set_active_clipboard_ids(app: &tauri::AppHandle, ids: Vec<String>) {
     let state: tauri::State<'_, AppState> = app.state();
-    *state.active_clipboard_id.lock() = id.to_owned();
-    let _ = app.emit("clipboard:active-id", id);
+    *state.active_clipboard_ids.lock() = ids.clone();
+    let _ = app.emit("clipboard:active-ids", ids);
 }
 
 #[tauri::command]
-pub fn get_active_clipboard_id(state: State<'_, AppState>) -> String {
-    state.active_clipboard_id.lock().clone()
+pub fn get_active_clipboard_ids(state: State<'_, AppState>) -> Vec<String> {
+    state.active_clipboard_ids.lock().clone()
 }
 
 pub(crate) fn write_entry_to_clipboard(entry: &ClipboardEntry) -> Result<(), String> {

@@ -67,8 +67,9 @@ pub struct AppState {
     /// the fallback close timer holds off instead of tearing the toast down
     /// mid-download. Cleared when the auto-update finishes or fails.
     pub splash_updating: Arc<AtomicBool>,
-    /// ID of the entry currently in the OS clipboard.
-    pub active_clipboard_id: Arc<Mutex<String>>,
+    /// IDs of the entries currently in the OS clipboard: one after a normal
+    /// copy, every entry of a batch after a bulk copy, newest first.
+    pub active_clipboard_ids: Arc<Mutex<Vec<String>>>,
     /// Thread-safe notes store.
     pub notes: Arc<Mutex<NoteStore>>,
     /// Notification centre feed - invites, space activity, reminders.

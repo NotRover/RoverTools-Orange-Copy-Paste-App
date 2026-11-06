@@ -28,7 +28,8 @@
 - Copying something already in your history moves that entry to the top instead of adding it again, so repeat copies no longer fill the list with duplicates. The entry keeps its pin, groups and label. To keep every copy, turn off Move repeat copies to the top in Settings.
 
 ### Improved
-- Right-click an entry or a note and choose Select to start selecting with that item already picked. You no longer have to turn on select mode first.
+- Right-click an entry or a note and choose Select to start selecting with that item already picked. You no longer have to turn on select mode first. Clicking anywhere outside the entries or notes ends the selection. Selected items glow orange from the left edge, the same way entries on your clipboard do. While you select, only selected items glow. Pin, Save, Copy, Delete and the other actions in the selection bar end the selection once they run, and the Groups and Share menus end it when you close them, so you can tick several first.
+- Entries on your clipboard glow orange from the left edge instead of having an orange border. After you copy several entries at once, every one of them is marked In clipboard, not just the newest.
 - The paste popup appears in place, at its final size, on the first frame. It used to grow, jump up near the bottom of the screen, and scale and fade in before it settled.
 - On Linux the app no longer draws its own startup notice or copy and paste popups. Those windows could not be placed reliably on every desktop. A clip that is too large for history, and the short wait for sync when you quit, now show as normal desktop notifications. Update checks work as before.
 

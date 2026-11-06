@@ -328,7 +328,7 @@ AppState
 ├── move_repeats: Arc<AtomicBool>           ← a repeat copy moves its entry to the top, default on
 ├── show_splash: Arc<AtomicBool>            ← show the startup splash on launch
 ├── splash_updating: Arc<AtomicBool>        ← splash is mid auto-update; holds its close timer
-├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
+├── active_clipboard_ids: Arc<Mutex<Vec<String>>> ← IDs of the entries in the OS clipboard (several after a bulk copy)
 ├── notes: Arc<Mutex<NoteStore>>            ← shared notes store
 ├── notifications: Arc<Mutex<NotificationStore>> ← notification centre feed
 ├── sync_client: Mutex<Option<Arc<SyncClient>>> ← None when sync disabled or not yet authed
@@ -463,7 +463,7 @@ ClipboardEntry {
 | `copy_entry`               | `(id) -> bool`                 | Write entry to OS clipboard, set suppress flag, update active clipboard ID, show copy notification   |
 | `copy_entries`            | `(ids) -> bool`               | Copy a multi-entry selection as one clipboard payload (text block or one file drop) |
 | `paste_entry`              | `(id) -> bool`                 | Write to clipboard, hide popup, simulate Ctrl+V, update active clipboard ID, show paste notification |
-| `get_active_clipboard_id`  | `() -> String`                 | Return ID of entry currently in the OS clipboard                                                     |
+| `get_active_clipboard_ids` | `() -> Vec<String>`            | Return IDs of the entries currently in the OS clipboard (one, or a bulk copy's whole batch)          |
 | `set_entry_groups`         | `(id, groups) -> bool`         | Set group tags for an entry, auto-save                                                               |
 | `purge_group_from_entries` | `(group) -> bool`              | Remove a group tag from all entries                                                                  |
 | `rename_group_in_entries`  | `(old_name, new_name) -> bool` | Rename a group tag across all entries                                                                |
@@ -504,7 +504,7 @@ copy/paste popups do not re-read the file. See `src-tauri/src/clipboard/commands
 - `read_clipboard_capture()` - Reads the OS clipboard in priority order: files -> HTML -> text -> images. On Windows that is CF_HDROP, CF_HTML, CF_UNICODETEXT and CF_PNG / registered formats / CF_DIB, each measured on the handle before it is read; on macOS and Linux arboard reads the file list, the HTML and the text, and only the post-read size check applies. Returns a `Capture`: `Entry`, `TooLarge` (over `MAX_TEXT_BYTES`) or `Nothing`. Every capture path goes through it.
 - `write_entry_to_clipboard(entry)` - Writes a `ClipboardEntry` back to the OS clipboard. Text goes via arboard (with retry). Files go via CF_HDROP on Windows and arboard's file list elsewhere. **Images**: a file-backed image is written as a file on every platform, so the paste target gets the original bytes; an in-memory data URL goes through the Win32 API directly on Windows (`write_image_to_clipboard`, bypassing arboard) and through arboard's RGBA path on macOS and Linux.
 - `open_clipboard_with_retry()` - Opens an arboard `Clipboard` handle in up to 6 attempts, 50ms apart, to ride out contention with the watcher thread or other apps.
-- `set_active_clipboard_id(app, id)` - Updates `active_clipboard_id` in `AppState` and emits `clipboard:active-id` to the frontend. Called from `copy_entry`, `paste_entry`, the clipboard watcher and the copy shortcut handler.
+- `set_active_clipboard_ids(app, ids)` - Replaces `active_clipboard_ids` in `AppState` and emits `clipboard:active-ids` to the frontend. `copy_entries` passes every entry of the batch. `set_active_clipboard_id(app, id)` is the one-entry form, called from `copy_entry`, `paste_entry`, the clipboard watcher and the copy shortcut handler.
 
 #### `files.rs` - File Clipboard
 
@@ -1644,7 +1644,7 @@ real client would refuse.
     lock holds, so the capture checks again). On `Added` it emits `clipboard:new-entry`
     and pushes the entry to sync; on `Moved` it emits `clipboard:entry-moved` and sends
     the new timestamp as an update to the same id, so other devices reorder too.
-  - On `Added` or `Moved`, updates `active_clipboard_id` and emits `clipboard:active-id`.
+  - On `Added` or `Moved`, updates `active_clipboard_ids` and emits `clipboard:active-ids`.
 - Advances the sequence token only when capture succeeds. If the clipboard was locked, the next poll retries.
 
 #### `hotkeys.rs` - Global Shortcut Handlers
@@ -1656,7 +1656,7 @@ real client would refuse.
 3. Simulate Ctrl+C (with 120ms delays before/after).
 4. Read the clipboard.
 5. Take it into history through `capture`, as the watcher does.
-6. Update `active_clipboard_id`, emit `clipboard:active-id`.
+6. Update `active_clipboard_ids`, emit `clipboard:active-ids`.
 7. Only if step 5 added or moved an entry: emit `clipboard:new-entry` or `clipboard:entry-moved` and show the copy popup with the entry preview.
 
 **Ctrl+Shift+V** (`handle_paste_shortcut`):
@@ -1826,7 +1826,7 @@ summarizes the emitted events; the code is authoritative.
 | `clipboard:entry-deleted` | `clipboard/commands.rs` | An entry (or bulk selection) was removed |
 | `clipboard:entry-pinned` | `clipboard/commands.rs` | An entry's pinned flag changed |
 | `clipboard:entry-groups-changed` | `clipboard/commands.rs` | An entry's group tags changed |
-| `clipboard:active-id` | `clipboard/commands.rs` | The entry now in the OS clipboard changed |
+| `clipboard:active-ids` | `clipboard/commands.rs` | The entries now in the OS clipboard changed (payload: list of IDs) |
 | `clipboard:copied` | `runtime/hotkeys.rs` | Ctrl+Shift+C captured an entry (copy popup) |
 | `paste-popup:entries` | `runtime/hotkeys.rs` | Entries for the paste popup |
 | `notification:show` | `runtime/notifications.rs` | Show the copy/paste toast |
@@ -1950,8 +1950,8 @@ rejection string.
 
 1. Subscribe to `clipboard:new-entry` events (prepend to state, deduplicated by ID) and `clipboard:entry-moved` (move that ID's card to the front with the new payload).
 2. Subscribe to `clipboard:entry-deleted` events (remove from state).
-3. Subscribe to `clipboard:active-id` events (update `activeClipboardId` state).
-4. Fetch `get_history` and `get_active_clipboard_id` from Rust, **merge** with any entries already received via events. A rejected `get_history` is logged and retried twice, a second apart. If the last try also fails and no other read has landed meanwhile, a persistent error toast (key `history-load`) says so, rather than an empty list that reads as no history.
+3. Subscribe to `clipboard:active-ids` events (update `activeClipboardIds` state).
+4. Fetch `get_history` and `get_active_clipboard_ids` from Rust, **merge** with any entries already received via events. A rejected `get_history` is logged and retried twice, a second apart. If the last try also fails and no other read has landed meanwhile, a persistent error toast (key `history-load`) says so, rather than an empty list that reads as no history.
 
 **Focus resync:**
 Listens to `tauri://focus` on the main window. On focus, it re-fetches the full history from Rust to catch up on events missed while the app was in the background. This re-read and the one after `sync:history-merged` keep the current list when they fail, and take down the `history-load` toast when they succeed. Until one succeeds, a failed focus re-read raises that toast again, because the app shows one toast at a time and a later one may have replaced it.
@@ -1991,7 +1991,8 @@ Renders a single `ClipboardEntry` with type-specific previews:
 - Click -> copy to clipboard, 1.5s "Copied!" feedback.
 - Right-click -> context menu (Copy, Pin/Unpin, Save, Groups, Expand/Collapse, Delete) via `CardMenu`.
 - Relative timestamps update every 15 seconds.
-- **"In clipboard" indicator**: The entry currently in the OS clipboard gets an accent-colored border and chip. `AppState` tracks the id (`active_clipboard_id`) and pushes it to the frontend with the `clipboard:active-id` event. `copy_entry`, `paste_entry`, the clipboard watcher and the copy shortcut handler update it.
+- **"In clipboard" indicator**: Every entry currently in the OS clipboard gets an accent glow from its left edge and an "In clipboard" chip; a bulk copy marks the whole batch. In select mode the glow is dropped so only selected cards are orange. `AppState` tracks the ids (`active_clipboard_ids`) and pushes them to the frontend with the `clipboard:active-ids` event. `copy_entry`, `copy_entries`, `paste_entry`, the clipboard watcher and the copy shortcut handler update it.
+- **Select mode ends after an action**: a bulk-bar action (copy, pin, save, cloud, delete, remove from space) runs and then leaves select mode. The groups and spaces menus leave it when the menu closes after a tick, so several can be ticked at once. A click outside the cards and the bar, or `Esc`, also leaves it.
 
 **Footer chip overflow**: The chip bar (type, pinned, saved, in-clipboard, user groups) uses `flex-wrap`. A measurement pass works out how many group chips fit on the first row and renders a "+N" overflow button for the rest. When all groups fit, no overflow button appears.
 
@@ -2123,7 +2124,7 @@ flowchart TB
     rust["Rust Backend"]
     rust --> newe["clipboard:new-entry"]
     rust --> dele["clipboard:entry-deleted"]
-    rust --> active["clipboard:active-id"]
+    rust --> active["clipboard:active-ids"]
     newe --> prepend["prepend to entries[]"]
     dele --> filter["filter out by id"]
     active --> updateid["update activeClipboardId"]

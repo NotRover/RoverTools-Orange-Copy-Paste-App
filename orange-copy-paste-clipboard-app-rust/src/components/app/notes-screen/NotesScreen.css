@@ -359,9 +359,8 @@
   cursor: pointer;
 }
 
-.ns-card--selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
+.ns-card.ns-card--selected {
+  background-image: linear-gradient(90deg, var(--clip-glow), transparent 60%);
 }
 
 .ns-card--selected:hover {

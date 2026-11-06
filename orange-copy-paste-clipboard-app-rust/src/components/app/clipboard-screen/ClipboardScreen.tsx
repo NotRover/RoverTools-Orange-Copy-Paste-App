@@ -26,7 +26,7 @@ import {
   useSpaceShares,
   useRemoteEntryKeys,
 } from "../../../hooks/useSpaceShares";
-import { useMultiSelect } from "../../../hooks/useMultiSelect";
+import { clickEndsSelection, useMultiSelect } from "../../../hooks/useMultiSelect";
 import { useClickOutside } from "../../../hooks/useClickOutside";
 import { useLayoutTransition } from "../../../hooks/useLayoutTransition";
 import { useSelectionSummary } from "../../../hooks/useSelectionSummary";
@@ -163,9 +163,11 @@ interface ClipboardScreenProps {
   onBulkUnsave?: (ids: string[]) => void;
   onBulkAddGroup?: (ids: string[], group: string) => void;
   onBulkRemoveGroup?: (ids: string[], group: string) => void;
-  /** ID of the entry currently in the OS clipboard. */
-  activeClipboardId?: string;
+  /** IDs of the entries currently in the OS clipboard (several after a bulk copy). */
+  activeClipboardIds?: string[];
 }
+
+const NO_IDS: string[] = [];
 
 const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   entries,
@@ -186,7 +188,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   onBulkUnsave,
   onBulkAddGroup,
   onBulkRemoveGroup,
-  activeClipboardId,
+  activeClipboardIds = NO_IDS,
 }) => {
   const { layout, fading, selectLayout } = useLayoutTransition<ClipboardLayout>(
     "sc-layout",
@@ -357,14 +359,21 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     multiSelect.pruneStaleIds(activeIds);
   }, [entries, multiSelect.isSelecting]);
 
-  // Exit multi-select on Escape key
+  // Exit multi-select on Escape, or on a click anywhere but a card or the bar
   useEffect(() => {
     if (!multiSelect.isSelecting) return;
-    const handler = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") multiSelect.exitSelectMode();
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    const onDown = (e: MouseEvent) => {
+      if (clickEndsSelection(e)) multiSelect.exitSelectMode();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
   }, [multiSelect.isSelecting]);
 
   // Bulk-selection state (common groups, all-pinned, all-saved) for the toolbar.
@@ -445,7 +454,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
           entry={viewingEntry}
           onClose={() => setViewingId(null)}
           onCopy={onCopy}
-          isInClipboard={viewingEntry.id === activeClipboardId}
+          isInClipboard={activeClipboardIds.includes(viewingEntry.id)}
           syncState={
             syncBadgesVisible
               ? entrySyncStates[`clipboard:${viewingEntry.id}`]
@@ -722,7 +731,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                             onRangeSelect={handleRangeSelect}
                             onView={setViewingId}
                             clickAction={clickAction}
-                            isInClipboard={entry.id === activeClipboardId}
+                            isInClipboard={activeClipboardIds.includes(entry.id)}
                             syncState={
                               syncBadgesVisible
                                 ? entrySyncStates[`clipboard:${entry.id}`]

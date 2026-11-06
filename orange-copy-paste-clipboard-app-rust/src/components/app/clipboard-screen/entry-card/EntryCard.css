@@ -30,12 +30,11 @@
   border-color: var(--border-light);
 }
 
-.entry-card--in-clipboard {
-  border-color: var(--accent);
-}
-
-.entry-card--in-clipboard:hover {
-  border-color: var(--accent);
+/* What is on the clipboard: orange fading in from the left edge, a layer
+   over the card's own surface. Two classes so the `.entry-card` background
+   shorthand cannot reset it. Several cards carry it after a bulk copy. */
+.entry-card.entry-card--in-clipboard {
+  background-image: linear-gradient(90deg, var(--clip-glow), transparent 60%);
 }
 
 /* Opacity only, for the same reason as the hover lift above. */
