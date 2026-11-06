@@ -23,8 +23,8 @@ pub mod macos;
 
 #[cfg(windows)]
 pub use self::windows::{
-    cursor_available, cursor_pos, scale_factor_for_point, simulate_copy, simulate_paste,
-    work_area_for_point,
+    cursor_available, cursor_pos, disable_show_animation, hide_window, scale_factor_for_point,
+    show_without_focus, simulate_copy, simulate_paste, work_area_for_point,
 };
 
 #[cfg(target_os = "linux")]

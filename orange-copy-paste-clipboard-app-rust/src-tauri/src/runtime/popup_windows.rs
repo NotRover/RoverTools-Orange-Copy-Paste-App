@@ -23,7 +23,7 @@ fn build_popup_window(
     // GDK window is `None` until first shown, so calling that method now panics
     // inside tao. Click-through (only the notification needs it) is applied in
     // `notifications.rs` *after* `show()`, once the window is realized.
-    tauri::WebviewWindowBuilder::new(app, spec.label, tauri::WebviewUrl::App(spec.url.into()))
+    let _win = tauri::WebviewWindowBuilder::new(app, spec.label, tauri::WebviewUrl::App(spec.url.into()))
         .title("")
         .inner_size(spec.width, spec.height)
         .position(OFFSCREEN_POS, OFFSCREEN_POS)
@@ -36,6 +36,10 @@ fn build_popup_window(
         .focused(spec.focused)
         .visible(false)
         .build()?;
+    #[cfg(windows)]
+    if let Ok(hwnd) = _win.hwnd() {
+        crate::runtime::platform::disable_show_animation(hwnd.0 as isize);
+    }
 
     Ok(())
 }
@@ -105,6 +109,12 @@ pub(crate) fn hide_popup(app: &tauri::AppHandle, label: &str) {
             OFFSCREEN_POS as i32,
         ));
         let _ = win.hide();
+        // The toast is shown behind tao's back (`show_without_focus`), so tao
+        // may think it is already hidden and skip the hide above.
+        #[cfg(windows)]
+        if let Ok(hwnd) = win.hwnd() {
+            crate::runtime::platform::hide_window(hwnd.0 as isize);
+        }
     }
     // macOS keeps this app active after its last window hides, so the next
     // keystroke - including the Cmd+V a paste is about to post - would come to

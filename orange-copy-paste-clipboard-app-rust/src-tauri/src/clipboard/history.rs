@@ -184,6 +184,17 @@ pub(crate) fn content_matches(a: &ClipboardEntry, b: &ClipboardEntry) -> bool {
     false
 }
 
+/// What [`ClipboardHistory::capture`] did with a capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Captured {
+    /// A new entry was prepended.
+    Added,
+    /// An existing entry with the same content was moved to the top.
+    Moved,
+    /// The newest entry already holds this content; nothing changed.
+    Unchanged,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
@@ -640,17 +651,42 @@ impl ClipboardHistory {
         self.entries[0].clone()
     }
 
-    /// Prepend an entry only when it differs from the current top entry.
-    /// Returns the existing top entry when duplicate, or the inserted entry,
-    /// plus whether insertion actually happened.
-    pub fn push_if_distinct_with_flag(&mut self, entry: ClipboardEntry) -> (ClipboardEntry, bool) {
+    /// Take a capture into history.
+    ///
+    /// Content that already tops the history is left alone. Content held
+    /// further down is, with `move_repeats`, moved to the top: the existing
+    /// entry takes the capture's timestamp and keeps everything else (its id,
+    /// pin, groups, label, and for an image the file already on disk), so a
+    /// repeat copy does not add a second card. Otherwise the capture is
+    /// prepended as a new entry.
+    ///
+    /// Images match on `content_hash`, which is only known for entries
+    /// captured in this session, so an image copied again after a restart is
+    /// added as new.
+    pub fn capture(
+        &mut self,
+        entry: ClipboardEntry,
+        move_repeats: bool,
+    ) -> (ClipboardEntry, Captured) {
         if let Some(existing) = self.entries.first() {
             if content_matches(existing, &entry) {
-                return (existing.clone(), false);
+                return (existing.clone(), Captured::Unchanged);
             }
         }
-
-        (self.push(entry), true)
+        if move_repeats {
+            if let Some(pos) = self.entries.iter().position(|e| content_matches(e, &entry)) {
+                let mut existing = self.entries.remove(pos);
+                existing.timestamp = entry.timestamp;
+                if existing.content_hash.is_none() {
+                    existing.content_hash = entry.content_hash;
+                }
+                self.entries.insert(0, existing);
+                let id = self.entries[0].id.clone();
+                self.write_rows(std::slice::from_ref(&id));
+                return (self.entries[0].clone(), Captured::Moved);
+            }
+        }
+        (self.push(entry), Captured::Added)
     }
 
     /// Insert or replace a synced entry by id.  Used by the cloud-sync merge:
@@ -1441,6 +1477,58 @@ mod tests {
         assert!(!hist.top_matches(&ClipboardEntry::new_text("goodbye".into())));
         // Same bytes, different kind, is not the same content.
         assert!(!hist.top_matches(&ClipboardEntry::new_file("hello".into())));
+    }
+
+    /// A repeat copy moves the entry it repeats to the top, keeping its id and
+    /// what the user did to it, instead of adding a second card.
+    #[test]
+    fn capture_moves_a_repeat_to_the_top() {
+        let mut hist = ClipboardHistory::new();
+        let (a, _) = hist.capture(ClipboardEntry::new_text("A".into()), true);
+        hist.pin(&a.id);
+        hist.add_group(&a.id, "Work");
+        hist.capture(ClipboardEntry::new_text("B".into()), true);
+
+        let mut again = ClipboardEntry::new_text("A".into());
+        again.timestamp = a.timestamp + 1_000;
+        let (moved, what) = hist.capture(again, true);
+
+        assert_eq!(what, Captured::Moved);
+        assert_eq!(moved.id, a.id);
+        assert_eq!(moved.timestamp, a.timestamp + 1_000);
+        assert!(moved.pinned);
+        assert_eq!(moved.groups, vec!["Work".to_string()]);
+        let order: Vec<&str> = hist.all().iter().map(|e| e.content.as_str()).collect();
+        assert_eq!(order, ["A", "B"]);
+    }
+
+    /// With the setting off every copy is kept, but the newest entry is
+    /// still never repeated.
+    #[test]
+    fn capture_keeps_repeats_when_asked() {
+        let mut hist = ClipboardHistory::new();
+        hist.capture(ClipboardEntry::new_text("A".into()), false);
+        hist.capture(ClipboardEntry::new_text("B".into()), false);
+        let (_, what) = hist.capture(ClipboardEntry::new_text("A".into()), false);
+        assert_eq!(what, Captured::Added);
+        assert_eq!(hist.all().len(), 3);
+
+        let (_, what) = hist.capture(ClipboardEntry::new_text("A".into()), false);
+        assert_eq!(what, Captured::Unchanged);
+        let (_, what) = hist.capture(ClipboardEntry::new_text("A".into()), true);
+        assert_eq!(what, Captured::Unchanged);
+        assert_eq!(hist.all().len(), 3);
+    }
+
+    /// Same bytes as a different kind is different content, so it is added.
+    #[test]
+    fn capture_matches_kind_and_content() {
+        let mut hist = ClipboardHistory::new();
+        hist.capture(ClipboardEntry::new_text("C:\\a.txt".into()), true);
+        hist.capture(ClipboardEntry::new_text("B".into()), true);
+        let (_, what) = hist.capture(ClipboardEntry::new_file("C:\\a.txt".into()), true);
+        assert_eq!(what, Captured::Added);
+        assert_eq!(hist.all().len(), 3);
     }
 
     /// Content with no marker at all — entries written before the Html kind

@@ -25,11 +25,15 @@
 -->
 
 ### New
+- Copying something already in your history moves that entry to the top instead of adding it again, so repeat copies no longer fill the list with duplicates. The entry keeps its pin, groups and label. To keep every copy, turn off Move repeat copies to the top in Settings.
 
 ### Improved
+- Right-click an entry or a note and choose Select to start selecting with that item already picked. You no longer have to turn on select mode first.
+- The paste popup appears in place, at its final size, on the first frame. It used to grow, jump up near the bottom of the screen, and scale and fade in before it settled.
 - On Linux the app no longer draws its own startup notice or copy and paste popups. Those windows could not be placed reliably on every desktop. A clip that is too large for history, and the short wait for sync when you quit, now show as normal desktop notifications. Update checks work as before.
 
 ### Fixed
+- The paste popup pastes again on Windows. Since 0.5.1 the "Pasted" notice took the keyboard just before the paste, so the entry reached the clipboard but not the app you were in. The "Copied" notice no longer takes the keyboard from the app you copied in either.
 - Updates now install on Linux. A copy installed from the deb package used to download the update and then fail with an error. It now installs the new deb after asking for your password, then reopens.
 
 ### Internal
@@ -37,3 +41,4 @@
 - The release workflow can now finish a release whose first publish stopped at a draft.
 - Linux ships as a deb only. The AppImage is no longer built; an AppImage install sees no update and has to install the deb once.
 - A feed with no entry for this install is treated as no update on every platform, not as a failed check.
+- Windows: the toast is shown with a non-activating SetWindowPos instead of tao's show(), which activates since tao 0.37 (bug #37 in docs/bugfix-history.md).

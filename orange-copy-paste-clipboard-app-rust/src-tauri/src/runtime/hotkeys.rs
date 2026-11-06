@@ -7,7 +7,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutS
 
 use crate::clipboard::commands::{read_clipboard_capture, Capture};
 use crate::{
-    clipboard::history::{ClipboardEntry, ClipboardHistory},
+    clipboard::history::{Captured, ClipboardEntry, ClipboardHistory},
     runtime::platform,
     state::{
         CopyPopupPayload, PastePopupPayload, COPY_POPUP_H, COPY_POPUP_W, PASTE_HISTORY_CAP,
@@ -132,22 +132,23 @@ fn handle_copy_shortcut(
             Capture::Nothing => return,
         };
 
-        let (entry, inserted): (ClipboardEntry, bool) = {
-            let mut hist = history.lock();
-            hist.push_if_distinct_with_flag(entry)
-        };
+        let move_repeats = app
+            .state::<crate::state::app_state::AppState>()
+            .move_repeats
+            .load(Ordering::Relaxed);
+        let (entry, captured) = history.lock().capture(entry, move_repeats);
 
         // The active-clipboard pointer tracks what the OS clipboard now holds,
-        // which is true whether or not this was a new entry, so it is set either
-        // way. The popup is confirmation of a *capture*, so it only appears when
-        // something new was actually captured: pressing Ctrl+Shift+C on content
-        // that already tops the history deduped (inserted == false) and must not
-        // flash a popup for a copy that added nothing.
+        // which is true whether or not this changed the history, so it is set
+        // either way. The popup is confirmation of a *capture*, so it only
+        // appears when the history changed: a new entry, or a repeat moved to
+        // the top. Pressing Ctrl+Shift+C on content that already tops the
+        // history changes nothing and must not flash a popup.
         crate::clipboard::commands::set_active_clipboard_id(&app, &entry.id);
-        if inserted {
+        if captured != Captured::Unchanged {
             // Ctrl+Shift+C entries bypass the watcher (suppress flag is set),
             // so run the shared post-capture bookkeeping here directly.
-            crate::runtime::clipboard_watcher::after_new_entry(&app, &history, &entry);
+            crate::runtime::clipboard_watcher::after_capture(&app, &history, &entry, captured);
             show_copy_popup(&app, &entry);
         }
     });

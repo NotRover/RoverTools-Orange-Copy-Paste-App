@@ -673,6 +673,7 @@ fn setup_runtime(
         ("os_notifications", &state_ref.os_notifications, true),
         ("start_minimized", &state_ref.start_minimized, false),
         ("autosave", &state_ref.autosave, true),
+        ("move_repeats", &state_ref.move_repeats, true),
         ("show_splash", &state_ref.show_splash, true),
         // notification defaults to true when the key is absent from settings.json.
         // Operation-based notification flags also default to true.
@@ -906,6 +907,7 @@ pub fn run() {
         notif_copy: Arc::new(AtomicBool::new(true)),
         notif_paste: Arc::new(AtomicBool::new(true)),
         autosave: Arc::new(AtomicBool::new(true)),
+        move_repeats: Arc::new(AtomicBool::new(true)),
         show_splash: Arc::new(AtomicBool::new(true)),
         splash_updating: Arc::new(AtomicBool::new(false)),
         active_clipboard_id: Arc::new(parking_lot::Mutex::new(String::new())),

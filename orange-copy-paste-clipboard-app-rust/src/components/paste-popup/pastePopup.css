@@ -97,25 +97,24 @@ body {
   flex-direction: column;
   opacity: 0;
   pointer-events: none;
-  transform: scale(0.93) translateY(5px);
-  will-change: transform, opacity;
   box-sizing: border-box;
 }
 
+/* No entrance animation: the popup is a tool you summon to act on at once, so
+   it appears in place, at full size, on the first frame. A scale-and-fade put
+   half-transparent, still-moving content over whatever was behind it. */
 .paste-container.visible {
+  opacity: 1;
   pointer-events: auto;
-  animation: pasteFadeIn 0.12s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-@keyframes pasteFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.92) translate3d(0, 4px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translate3d(0, 0, 0);
-  }
+/* The render that opens the popup also swaps in the new entries, resets the
+   selection and the tab. With transitions live those resets animate (a row
+   fading out of "selected" while row one fades in), so they are off until the
+   first frame has painted. */
+.paste-container.opening,
+.paste-container.opening * {
+  transition: none !important;
 }
 
 /* ── Header ── */
@@ -661,7 +660,11 @@ body {
   border-radius: var(--radius-xs);
   background: var(--surface);
   overflow: hidden;
-  /* Slide + fade in when the panel opens (it mounts fresh on toggle). */
+}
+
+/* Slide + fade in only when the user opens the panel with its toggle. Never on
+   a popup open: there it replayed over the freshly shown popup. */
+.paste-preview--enter {
   animation: pastePreviewIn 0.16s cubic-bezier(0.22, 1, 0.36, 1);
 }
 

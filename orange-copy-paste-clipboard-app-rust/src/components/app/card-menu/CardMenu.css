@@ -120,7 +120,8 @@
 
 /* View button */
 
-.card-menu-item--view:hover {
+.card-menu-item--view:hover,
+.card-menu-item--select:hover {
   background: var(--accent-dim);
   color: var(--accent);
 }

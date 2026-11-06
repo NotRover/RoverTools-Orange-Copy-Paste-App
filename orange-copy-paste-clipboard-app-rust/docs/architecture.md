@@ -325,6 +325,7 @@ AppState
 ├── notif_copy: Arc<AtomicBool>             ← show notification on copy action
 ├── notif_paste: Arc<AtomicBool>            ← show notification on paste action
 ├── autosave: Arc<AtomicBool>               ← auto-add "Saved" group to new entries, default on
+├── move_repeats: Arc<AtomicBool>           ← a repeat copy moves its entry to the top, default on
 ├── show_splash: Arc<AtomicBool>            ← show the startup splash on launch
 ├── splash_updating: Arc<AtomicBool>        ← splash is mid auto-update; holds its close timer
 ├── active_clipboard_id: Arc<Mutex<String>> ← ID of the entry currently in the OS clipboard
@@ -423,7 +424,7 @@ ClipboardEntry {
 | Method                              | Behavior                                                  |
 | ----------------------------------- | --------------------------------------------------------- |
 | `push(entry)`                       | Prepend, externalising an inline image. No count cap      |
-| `push_if_distinct_with_flag(entry)` | Skip if top entry matches (kind + content); returns whether insertion happened |
+| `capture(entry, move_repeats)`      | Take a capture: `Unchanged` if the top entry matches (kind + content); with `move_repeats`, `Moved` if an older entry matches (it takes the capture's timestamp, keeps its id, pin, groups and label, and moves to the top); else `Added` |
 | `top_matches(entry)`                | Whether the newest entry holds this content, taking no copy |
 | `drop_oversized()`                  | Drop entries past `MAX_TEXT_BYTES`, returning their sizes  |
 | `top(n)`                            | First N entries                                           |
@@ -1639,10 +1640,11 @@ real client would refuse.
     commits the row, the "Saved" group and the sync queue, each with an fsync, and a
     popup placed after them lagged the copy by that much (bug #36). The history lock is
     not held across it.
-  - Pushes to history through `push_if_distinct_with_flag` (the dedupe above and the
-    push are two lock holds, so the push checks again), emits `clipboard:new-entry` to
-    all windows.
-  - Updates `active_clipboard_id` and emits `clipboard:active-id`.
+  - Takes it into history through `capture` (the dedupe above and the capture are two
+    lock holds, so the capture checks again). On `Added` it emits `clipboard:new-entry`
+    and pushes the entry to sync; on `Moved` it emits `clipboard:entry-moved` and sends
+    the new timestamp as an update to the same id, so other devices reorder too.
+  - On `Added` or `Moved`, updates `active_clipboard_id` and emits `clipboard:active-id`.
 - Advances the sequence token only when capture succeeds. If the clipboard was locked, the next poll retries.
 
 #### `hotkeys.rs` - Global Shortcut Handlers
@@ -1653,9 +1655,9 @@ real client would refuse.
 2. Set suppress flag (prevents watcher race).
 3. Simulate Ctrl+C (with 120ms delays before/after).
 4. Read the clipboard.
-5. Push to history (deduplicated).
+5. Take it into history through `capture`, as the watcher does.
 6. Update `active_clipboard_id`, emit `clipboard:active-id`.
-7. Only if step 5 inserted a new entry: emit `clipboard:new-entry` and show the copy popup with the entry preview.
+7. Only if step 5 added or moved an entry: emit `clipboard:new-entry` or `clipboard:entry-moved` and show the copy popup with the entry preview.
 
 **Ctrl+Shift+V** (`handle_paste_shortcut`):
 
@@ -1820,6 +1822,7 @@ summarizes the emitted events; the code is authoritative.
 | Event | Emitted from | Meaning |
 | --- | --- | --- |
 | `clipboard:new-entry` | `runtime/clipboard_watcher.rs` | A capture was added |
+| `clipboard:entry-moved` | `runtime/clipboard_watcher.rs` | A repeat copy moved an existing entry to the top (same id, new timestamp) |
 | `clipboard:entry-deleted` | `clipboard/commands.rs` | An entry (or bulk selection) was removed |
 | `clipboard:entry-pinned` | `clipboard/commands.rs` | An entry's pinned flag changed |
 | `clipboard:entry-groups-changed` | `clipboard/commands.rs` | An entry's group tags changed |
@@ -1945,7 +1948,7 @@ rejection string.
 
 **Initialization (on mount):**
 
-1. Subscribe to `clipboard:new-entry` events (prepend to state, deduplicated by ID).
+1. Subscribe to `clipboard:new-entry` events (prepend to state, deduplicated by ID) and `clipboard:entry-moved` (move that ID's card to the front with the new payload).
 2. Subscribe to `clipboard:entry-deleted` events (remove from state).
 3. Subscribe to `clipboard:active-id` events (update `activeClipboardId` state).
 4. Fetch `get_history` and `get_active_clipboard_id` from Rust, **merge** with any entries already received via events. A rejected `get_history` is logged and retried twice, a second apart. If the last try also fails and no other read has landed meanwhile, a persistent error toast (key `history-load`) says so, rather than an empty list that reads as no history.
@@ -2019,6 +2022,7 @@ Among its settings (the screen is the full list):
 - **`Number-key paste slots`**: how many entries the paste popup numbers (3-10, default 3). Persisted to `localStorage.sc-paste-slots`.
 - **`Keep history across restarts`**: on by default, per device. Off keeps only pinned, Saved, and cloud or space entries across a restart (History keeping, section 4.2). Setting `keep_history` in `settings.json`.
 - **`Auto-save copied entries`**: on by default, per device. Tags each new capture Saved. Setting `autosave`.
+- **`Move repeat copies to the top`**: on by default, per device. A copy of content already in history moves that entry to the top instead of adding another. Setting `move_repeats`. Images match only within a session, since their hash is not persisted.
 - **`Close to system tray`**: hide to the system tray on close instead of quitting. Setting `close_to_tray`.
 - **`Start minimized`**: launch hidden in the tray. Setting `start_minimized`.
 - **`In-app popup`**: master toggle (`notification`) plus checkboxes for the copy and paste notifications (`notif_copy`, `notif_paste`).

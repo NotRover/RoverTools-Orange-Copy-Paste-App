@@ -2,6 +2,7 @@ import { sharedNow, startClock } from "../../clock";
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -52,6 +53,8 @@ const WIDE_W = 540;
 // Height budget (logical px). The body flexes between the search bar and the
 // hint row; these figures decide how tall the *window* is asked to be so the
 // list shows as many rows as it has (up to a cap) without leaving dead space.
+// The native side shows the window at this size before React measures it, from
+// a copy of these: change `PASTE_*` in src-tauri/src/state/popup_state.rs too.
 const CHROME_H = 138; // header + search + hints + container/body padding
 const ITEM_H = 44; // row min-height (40) + gap (3) + border
 const LIST_MAX_H = 10 * ITEM_H; // cap; fits all ten number-keyed rows, scrolls past
@@ -102,6 +105,8 @@ const PastePopup: React.FC = () => {
   const [slots, setSlots] = useState(readSlots);
   const [query, setQuery] = useState("");
   const [previewOpen, setPreviewOpen] = useState(true);
+  // Set by the toggle when it opens the panel, so only that open slides in.
+  const [previewEnter, setPreviewEnter] = useState(false);
   // When true (default), copying an entry from the popup leaves it open so you
   // can copy or act on another; a plain paste still closes it.
   const [keepOpenAfterCopy, setKeepOpenAfterCopy] = useState(true);
@@ -111,6 +116,10 @@ const PastePopup: React.FC = () => {
   const [showNonce, setShowNonce] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const listRef = useRef<HTMLDivElement>(null);
+  // True for the render that opens the popup and its first painted frame;
+  // see `.paste-container.opening` in the stylesheet.
+  const [opening, setOpening] = useState(false);
   // Whether the last selection change came from the keyboard. Only then should
   // the list auto-scroll to follow it — on hover the row must stay put under
   // the cursor rather than scrolling itself into view.
@@ -201,6 +210,8 @@ const PastePopup: React.FC = () => {
       setSelectedIdx(0);
       setTab("recent");
       setQuery("");
+      setOpening(true);
+      setPreviewEnter(false);
       setVisible(true);
       setShowNonce((n) => n + 1);
     }).then((fn) => {
@@ -212,6 +223,22 @@ const PastePopup: React.FC = () => {
       unlisten?.();
     };
   }, []);
+
+  // Every open starts at the top of the list, where the selection is, and
+  // turns transitions back on once that first frame is on screen. Layout
+  // effect, so the scroll reset lands before the frame paints.
+  useLayoutEffect(() => {
+    if (showNonce === 0) return;
+    if (listRef.current) listRef.current.scrollTop = 0;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setOpening(false));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [showNonce]);
 
   // Dismiss on blur.
   useEffect(() => {
@@ -316,6 +343,7 @@ const PastePopup: React.FC = () => {
       invoke("set_setting", { key: "paste_preview_open", value: next }).catch(
         console.error,
       );
+      setPreviewEnter(next);
       return next;
     });
     requestAnimationFrame(() => searchRef.current?.focus());
@@ -405,7 +433,7 @@ const PastePopup: React.FC = () => {
 
   return (
     <div
-      className={`paste-container${visible ? " visible" : ""}${previewOpen ? " paste-container--wide" : ""}`}
+      className={`paste-container${visible ? " visible" : ""}${opening ? " opening" : ""}${previewOpen ? " paste-container--wide" : ""}`}
       data-theme={theme}
     >
       {/* Header */}
@@ -526,7 +554,7 @@ const PastePopup: React.FC = () => {
             <span>{query ? "No matches" : tab === "pinned" ? "No pinned items" : "No recent items"}</span>
           </div>
         ) : (
-          <div className="paste-list">
+          <div className="paste-list" ref={listRef}>
             {entries.map((entry, index) => (
               <button
                 key={entry.id}
@@ -609,7 +637,7 @@ const PastePopup: React.FC = () => {
           </div>
         )}
 
-        {previewOpen && selected && <PreviewPanel entry={selected} onPaste={handlePaste} onPin={handlePin} onCopy={handleCopyOnly} onDelete={handleDelete} stop={stop} />}
+        {previewOpen && selected && <PreviewPanel entry={selected} enter={previewEnter} onPaste={handlePaste} onPin={handlePin} onCopy={handleCopyOnly} onDelete={handleDelete} stop={stop} />}
       </div>
 
       {/* Hints */}
@@ -663,6 +691,7 @@ const PreviewPanelIcon: React.FC<{ open: boolean }> = ({ open }) => (
 
 interface PreviewProps {
   entry: ClipboardEntry;
+  enter: boolean;
   onPaste: (id: string) => void;
   onPin: (entry: ClipboardEntry) => void;
   onCopy: (id: string) => void;
@@ -670,7 +699,7 @@ interface PreviewProps {
   stop: (e: React.MouseEvent) => void;
 }
 
-const PreviewPanel: React.FC<PreviewProps> = ({ entry, onPaste, onPin, onCopy, onDelete, stop }) => {
+const PreviewPanel: React.FC<PreviewProps> = ({ entry, enter, onPaste, onPin, onCopy, onDelete, stop }) => {
   const files = entry.type === "file" ? getFilePaths(entry.content) : [];
   const firstFile = files[0] ?? "";
   const isImg = entry.type === "image";
@@ -751,7 +780,7 @@ const PreviewPanel: React.FC<PreviewProps> = ({ entry, onPaste, onPin, onCopy, o
   const hiddenChips = chips.slice(MAX_CHIPS);
 
   return (
-    <div className="paste-preview" onMouseDown={stop}>
+    <div className={`paste-preview${enter ? " paste-preview--enter" : ""}`} onMouseDown={stop}>
       <div className="paste-preview-kind">Preview</div>
       <div className={`paste-preview-media${showsImage ? " paste-preview-media--image" : ""}`}>
         {isImg ? (

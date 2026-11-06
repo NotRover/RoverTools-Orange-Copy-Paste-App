@@ -7,8 +7,10 @@ use crate::clipboard::history::ClipboardEntry;
 pub(crate) const COPY_POPUP_W: f64 = 340.0;
 pub(crate) const COPY_POPUP_H: f64 = 260.0;
 
-/// List-only width (side preview collapsed).
-pub(crate) const PASTE_POPUP_W: f64 = 360.0;
+/// List-only width (side preview collapsed). Must match `BASE_W` in
+/// `PastePopup.tsx`, or the window is shown at one width and resized to the
+/// other a frame later.
+pub(crate) const PASTE_POPUP_W: f64 = 388.0;
 /// Width when the side preview panel is open.
 pub(crate) const PASTE_POPUP_W_WIDE: f64 = 540.0;
 pub(crate) const PASTE_POPUP_H: f64 = 540.0;
@@ -19,7 +21,7 @@ pub(crate) const PASTE_POPUP_H: f64 = 540.0;
 // constants of the same name in `src/components/paste-popup/PastePopup.tsx`.
 const PASTE_CHROME_H: f64 = 138.0; // header + search + hints + padding
 const PASTE_ITEM_H: f64 = 44.0; // one list row
-const PASTE_LIST_MAX_H: f64 = 8.0 * PASTE_ITEM_H; // list scrolls past this
+const PASTE_LIST_MAX_H: f64 = 10.0 * PASTE_ITEM_H; // list scrolls past this
 const PASTE_MIN_LIST_H: f64 = 84.0;
 const PASTE_PREVIEW_MIN_H: f64 = 286.0; // keep the side preview panel tall enough
 

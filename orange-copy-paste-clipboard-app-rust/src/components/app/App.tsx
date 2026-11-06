@@ -489,6 +489,19 @@ const App: React.FC = () => {
     loadHistory(2);
 
     let unlistenDeleted: (() => void) | undefined;
+    let unlistenMoved: (() => void) | undefined;
+
+    // A repeat copy moved an existing entry to the top: same id, new time.
+    listen<ClipboardEntry>("clipboard:entry-moved", (event) => {
+      if (cancelled) return;
+      setEntries((prev) => [
+        event.payload,
+        ...prev.filter((e) => e.id !== event.payload.id),
+      ]);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenMoved = fn;
+    });
 
     listen<ClipboardEntry>("clipboard:new-entry", (event) => {
       if (cancelled) return;
@@ -559,6 +572,7 @@ const App: React.FC = () => {
       cancelled = true;
       unlisten?.();
       unlistenDeleted?.();
+      unlistenMoved?.();
       unlistenPinned?.();
       unlistenGroups?.();
       unlistenActiveId?.();

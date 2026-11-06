@@ -163,6 +163,7 @@ const DEFAULTS = {
   keepHistory: true,
   clickToView: false,
   autosave: true,
+  moveRepeats: true,
   pasteKeepOpenAfterCopy: true,
   encryptAtRest: false,
   autoCheckUpdates: true,
@@ -190,6 +191,7 @@ const SettingsScreen: React.FC = () => {
   const [notifCopy, setNotifCopy] = useState(true);
   const [notifPaste, setNotifPaste] = useState(true);
   const [autosave, setAutosave] = useState(true);
+  const [moveRepeats, setMoveRepeats] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [showSyncBadges, setShowSyncBadges] = useState(true);
   const [developerMode, setDeveloperMode] = useState(false);
@@ -239,6 +241,7 @@ const SettingsScreen: React.FC = () => {
     loadBool("notif_copy", setNotifCopy, true);
     loadBool("notif_paste", setNotifPaste, true);
     loadBool("autosave", setAutosave, true);
+    loadBool("move_repeats", setMoveRepeats, true);
     loadBool("paste_keep_open_after_copy", setPasteKeepOpenAfterCopy, true);
     loadBool("show_splash", setShowSplash, true);
     loadBool("show_sync_badges", setShowSyncBadges, true);
@@ -415,7 +418,7 @@ const SettingsScreen: React.FC = () => {
     confirmSyncDelete, confirmSpaceRemove, confirmCloudRemove,
     osNotifications, notificationEnabled, notifCopy, notifPaste,
     sound, soundCopy, soundPaste, pasteSlots,
-    keepHistory, clickToView, autosave, pasteKeepOpenAfterCopy,
+    keepHistory, clickToView, autosave, moveRepeats, pasteKeepOpenAfterCopy,
     encryptAtRest, autoCheckUpdates, autoInstallUpdates, betaChannel, developerMode,
   };
   // Settings Linux does not show cannot mark a section as changed there: a
@@ -431,7 +434,7 @@ const SettingsScreen: React.FC = () => {
     differs("osNotifications", "notificationEnabled", "notifCopy", "notifPaste") && "set-notifications",
     differs("sound", "soundCopy", "soundPaste") && "set-sounds",
     differs("pasteSlots") && "set-quick-paste",
-    differs("keepHistory", "clickToView", "autosave", "pasteKeepOpenAfterCopy") && "set-history",
+    differs("keepHistory", "clickToView", "autosave", "moveRepeats", "pasteKeepOpenAfterCopy") && "set-history",
     differs("encryptAtRest") && "set-data",
     differs("autoCheckUpdates", "autoInstallUpdates", "betaChannel") && "set-updates",
     (differs("developerMode") || devChanged) && "set-developer",
@@ -847,6 +850,13 @@ const SettingsScreen: React.FC = () => {
               active={autosave}
               defaultActive={DEFAULTS.autosave}
               onToggle={() => toggleBoolSetting(autosave, setAutosave, "autosave")}
+            />
+            <ToggleRow
+              label="Move repeat copies to the top"
+              desc="Copying something already in your history moves it to the top instead of adding it again. Turn off to keep every copy. Applies to this PC only."
+              active={moveRepeats}
+              defaultActive={DEFAULTS.moveRepeats}
+              onToggle={() => toggleBoolSetting(moveRepeats, setMoveRepeats, "move_repeats")}
             />
             <ToggleRow
               label="Keep paste popup open after copying"

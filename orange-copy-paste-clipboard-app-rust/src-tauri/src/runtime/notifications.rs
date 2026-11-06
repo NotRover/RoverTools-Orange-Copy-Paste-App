@@ -62,22 +62,37 @@ fn show_window_toast(
             detail,
             note,
         };
-        // After a popup handed focus back (`hide_popup` on macOS) the app is
-        // hidden, and a hidden app's windows do not appear. Unhide it without
-        // taking focus, or this toast is queued until the user next opens us.
-        #[cfg(target_os = "macos")]
-        crate::runtime::platform::macos::unhide_quietly(app);
-        // Position first, then show, then set always-on-top to force Z-order.
-        let _ = win.set_position(crate::runtime::platform::position_at(px, py));
-        let _ = win.show();
-        // Make the notification click-through. This MUST run after `show()`:
-        // the window is created hidden/unrealized, and on GTK/Linux calling
-        // `set_ignore_cursor_events` before the GDK window exists panics in tao.
-        let _ = win.set_ignore_cursor_events(true);
-        // Toggle always_on_top off then on to force the window manager to
-        // re-stack this window above everything else.
-        let _ = win.set_always_on_top(false);
-        let _ = win.set_always_on_top(true);
+        // The toast must never take focus: a paste sends its Ctrl+V right
+        // after this, and it has to reach the app the user is in. Every tao
+        // call that touches a visible window's flags re-shows it with
+        // SW_SHOW, which activates, so on Windows the click-through flag is
+        // set first (a no-op once it is set) and the show, position and
+        // Z-order are one non-activating call. See `platform/windows.rs`.
+        #[cfg(windows)]
+        {
+            let _ = win.set_ignore_cursor_events(true);
+            if let Ok(hwnd) = win.hwnd() {
+                crate::runtime::platform::show_without_focus(hwnd.0 as isize, px, py);
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            // After a popup handed focus back (`hide_popup` on macOS) the app is
+            // hidden, and a hidden app's windows do not appear. Unhide it without
+            // taking focus, or this toast is queued until the user next opens us.
+            #[cfg(target_os = "macos")]
+            crate::runtime::platform::macos::unhide_quietly(app);
+            // Position first, then show, then set always-on-top to force Z-order.
+            let _ = win.set_position(crate::runtime::platform::position_at(px, py));
+            let _ = win.show();
+            // Make the notification click-through. This must run after `show()`
+            // where the window is only realized on first show.
+            let _ = win.set_ignore_cursor_events(true);
+            // Toggle always_on_top off then on to force the window manager to
+            // re-stack this window above everything else.
+            let _ = win.set_always_on_top(false);
+            let _ = win.set_always_on_top(true);
+        }
         let _ = win.emit("notification:show", &payload);
     }
 }

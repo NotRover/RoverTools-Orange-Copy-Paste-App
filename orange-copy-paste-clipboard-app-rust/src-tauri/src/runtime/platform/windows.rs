@@ -7,11 +7,15 @@
 
 use windows_sys::Win32::{
     Foundation::POINT,
+    Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED},
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST},
     UI::{
         HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
         Input::KeyboardAndMouse::{keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_SHIFT},
-        WindowsAndMessaging::GetCursorPos,
+        WindowsAndMessaging::{
+            GetCursorPos, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSIZE,
+            SWP_SHOWWINDOW, SW_HIDE,
+        },
     },
 };
 
@@ -52,6 +56,58 @@ pub fn simulate_paste() {
         key_event(0x56, 0); // 'V'
         key_event(0x56, KEYEVENTF_KEYUP);
         key_event(VK_CONTROL, KEYEVENTF_KEYUP);
+    }
+}
+
+// Showing a window without taking focus
+
+/// Move a window to `(x, y)`, put it on top of every other topmost window and
+/// show it, all without activating it, so the app the user is typing in keeps
+/// the keyboard.
+///
+/// This exists for the toast. tao (from 0.37) shows every window with
+/// `SW_SHOW` after its first show, whatever `focused(false)` said at build
+/// time, and `SW_SHOW` activates. A toast that takes focus swallows the very
+/// next keystroke: the Ctrl+V a paste sends 80 ms after the "Pasted" toast
+/// went up, or whatever the user types after a "Copied" one. `WS_EX_NOACTIVATE`
+/// does not help, `ShowWindow(SW_SHOW)` activates such a window all the same.
+///
+/// tao does not see this show, so it still believes the window is hidden.
+/// Hide it with [`hide_window`], not only `WebviewWindow::hide()`, which tao
+/// skips for a window it thinks is already hidden.
+pub fn show_without_focus(hwnd: isize, x: i32, y: i32) {
+    unsafe {
+        SetWindowPos(
+            hwnd as _,
+            HWND_TOPMOST,
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+    }
+}
+
+/// Turn off the fade Windows plays when a window is shown or hidden. A popup
+/// is summoned to act on at once; the fade put a half-drawn frame of it over
+/// whatever was behind before it settled.
+pub fn disable_show_animation(hwnd: isize) {
+    let disabled: i32 = 1;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd as _,
+            DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+            &disabled as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
+/// Hide a window whatever tao believes about it; see [`show_without_focus`].
+pub fn hide_window(hwnd: isize) {
+    unsafe {
+        ShowWindow(hwnd as _, SW_HIDE);
     }
 }
 

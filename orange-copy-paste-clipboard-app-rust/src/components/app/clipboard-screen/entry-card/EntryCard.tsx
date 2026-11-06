@@ -508,6 +508,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
           onToggleSpace ? (spaceId) => onToggleSpace(entry.id, spaceId) : undefined
         }
         onView={onView ? handleView : undefined}
+        onSelect={onToggleSelect ? () => onToggleSelect(entry.id) : undefined}
       />
     </div>
   );

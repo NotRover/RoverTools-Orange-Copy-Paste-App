@@ -669,6 +669,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 : [...menuNote.groups, group];
               onSetGroups(menuNote.id, next);
             }}
+            onSelect={() => multiSelect.toggleSelect(menuNote.id)}
             isExpandable={isNoteExpandable(menuNote)}
             isExpanded={expandedNoteIds.has(menuNote.id)}
             onToggleExpand={() => {

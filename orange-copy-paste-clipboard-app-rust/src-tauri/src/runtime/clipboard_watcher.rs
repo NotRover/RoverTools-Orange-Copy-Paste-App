@@ -5,7 +5,7 @@ use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 
 use crate::clipboard::commands::{read_clipboard_capture, Capture};
-use crate::clipboard::history::{ClipboardEntry, ClipboardHistory};
+use crate::clipboard::history::{Captured, ClipboardEntry, ClipboardHistory};
 use crate::state::app_state::AppState;
 
 const WATCH_INTERVAL_MS: u64 = 220;
@@ -88,12 +88,45 @@ fn capture_clipboard_change(
     // to the main thread, which may itself be waiting on the history.
     crate::runtime::notifications::notify_if_enabled(app, &entry);
 
-    let (new_entry, inserted) = history.lock().push_if_distinct_with_flag(entry);
-    if inserted {
-        crate::clipboard::commands::set_active_clipboard_id(app, &new_entry.id);
-        after_new_entry(app, history, &new_entry);
-    }
+    let move_repeats = app.state::<AppState>().move_repeats.load(Ordering::Relaxed);
+    let (entry, captured) = history.lock().capture(entry, move_repeats);
+    after_capture(app, history, &entry, captured);
     true
+}
+
+/// What follows a capture, for each thing [`ClipboardHistory::capture`] can
+/// have done. Shared by the watcher and the copy shortcut.
+pub(crate) fn after_capture(
+    app: &tauri::AppHandle,
+    history: &Arc<Mutex<ClipboardHistory>>,
+    entry: &ClipboardEntry,
+    captured: Captured,
+) {
+    match captured {
+        Captured::Added => {
+            crate::clipboard::commands::set_active_clipboard_id(app, &entry.id);
+            after_new_entry(app, history, entry);
+        }
+        Captured::Moved => {
+            crate::clipboard::commands::set_active_clipboard_id(app, &entry.id);
+            after_moved_entry(app, entry);
+        }
+        Captured::Unchanged => {}
+    }
+}
+
+/// A repeat copy moved an existing entry to the top. The UI moves its card,
+/// and the new timestamp goes up as an ordinary update to the same id, so
+/// other devices reorder too. No "Saved" group: autosave already ran when the
+/// entry was first captured, and the user may have taken it out since.
+fn after_moved_entry(app: &tauri::AppHandle, entry: &ClipboardEntry) {
+    let state: tauri::State<'_, AppState> = app.state();
+    crate::clipboard::commands::allow_entry_assets(app, entry);
+    let _ = app.emit("clipboard:entry-moved", entry);
+    let sync = state.sync_client.lock().clone();
+    if let Some(s) = sync {
+        s.on_update_clipboard_entry(entry.clone());
+    }
 }
 
 /// Post-capture bookkeeping shared by the watcher and the copy shortcut:

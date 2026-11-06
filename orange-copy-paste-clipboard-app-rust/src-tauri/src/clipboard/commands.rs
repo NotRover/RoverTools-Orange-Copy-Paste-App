@@ -212,6 +212,7 @@ pub(crate) fn setting_flag<'a>(state: &'a AppState, key: &str) -> Option<&'a Arc
         "notif_copy" => Some(&state.notif_copy),
         "notif_paste" => Some(&state.notif_paste),
         "autosave" => Some(&state.autosave),
+        "move_repeats" => Some(&state.move_repeats),
         _ => None,
     }
 }

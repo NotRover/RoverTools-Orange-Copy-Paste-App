@@ -13,6 +13,7 @@ import {
   TrashIcon,
   ExpandIcon,
   CollapseIcon,
+  MultiSelectIcon,
 } from "../../icons";
 import "./CardMenu.css";
 
@@ -37,6 +38,9 @@ interface CardMenuProps {
   /** Open this item in the full view. Absent leaves the row off the menu.
    *  Clipboard entries use this; notes still expand in place below. */
   onView?: () => void;
+  /** Enter select mode with this item selected. Absent leaves the row off.
+   *  The menu does not open in select mode, so this never deselects. */
+  onSelect?: () => void;
   /** Whether this item can be expanded in place (notes only). */
   isExpandable?: boolean;
   /** Whether it is currently expanded. */
@@ -77,6 +81,7 @@ const CardMenu: React.FC<CardMenuProps> = ({
   entryGroups,
   onToggleGroup,
   onView,
+  onSelect,
   isExpandable,
   isExpanded,
   onToggleExpand,
@@ -197,6 +202,16 @@ const CardMenu: React.FC<CardMenuProps> = ({
         >
           {copied ? <CheckIcon size={13} /> : <CopyIcon />}
           <span>{copied ? "Copied!" : "Copy"}</span>
+        </button>
+      )}
+
+      {onSelect && (
+        <button
+          className="card-menu-item card-menu-item--select"
+          onClick={closeAfter(onSelect)}
+        >
+          <MultiSelectIcon size={13} />
+          <span>Select</span>
         </button>
       )}
 

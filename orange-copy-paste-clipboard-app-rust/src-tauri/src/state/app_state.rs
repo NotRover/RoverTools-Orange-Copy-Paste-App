@@ -58,6 +58,9 @@ pub struct AppState {
     /// When `true` (the default), every new clipboard entry is automatically
     /// added to the "Saved" group so it persists across restarts.
     pub autosave: Arc<AtomicBool>,
+    /// When `true` (the default), copying content already in history moves
+    /// that entry to the top instead of adding a second one.
+    pub move_repeats: Arc<AtomicBool>,
     /// When `true`, show the startup splash screen on launch.
     pub show_splash: Arc<AtomicBool>,
     /// Raised by the splash while it is auto-installing an update on startup, so

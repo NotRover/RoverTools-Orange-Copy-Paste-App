@@ -1566,3 +1566,86 @@ promise in section 7.1.
 **Invariant to keep**: **nothing the user is waiting to see sits behind a disk commit.**
 Show first, then write; and a timer that must match a CSS animation is armed once, on
 mount, never on a callback identity.
+
+---
+
+## #37 - The paste popup stopped pasting on Windows
+
+**Symptom.** Found 2026-11-06 in 0.5.3, fixed the same day, not yet released. Picking an
+entry in the paste popup put it on the clipboard but nothing appeared in the app the user
+was in. Focus ended up on one of this app's windows instead. Only with paste toasts on,
+which is the default.
+
+**Cause.** A dependency bump, not a change of ours. A paste writes the clipboard, shows
+the "Pasted" toast, then sends Ctrl+V 80 ms later to whatever has focus. The toast window
+is built with `focused(false)`, and with tao 0.35.3 that held for every show: tao cleared
+its "don't focus" marker on a copy of its flags, never on the stored ones, so every
+`show()` used `SW_SHOWNOACTIVATE`. tao 0.37.2, which Dependabot brought in on 2026-10-29
+(first shipped in 0.5.1), clears the marker for real at the end of window creation, so
+every `show()` is `SW_SHOW`, which activates. tao also re-runs that `ShowWindow` on any
+flag change to a visible window, so the click-through and always-on-top calls after the
+show activated it again. The toast took focus and the Ctrl+V went to it. The same steal
+followed every "Copied" toast, taking the keyboard from the app the user had just copied
+in.
+
+**Fix.** On Windows the toast is shown by `platform::show_without_focus`, one
+`SetWindowPos(HWND_TOPMOST, SWP_SHOWWINDOW | SWP_NOACTIVATE)` that moves, raises and
+shows it without activating. Click-through is set just before it; after the first toast
+the flag is already set, so the call changes nothing and cannot re-show the window. tao never sees the show and still thinks the window is
+hidden, so `hide_popup` also hides it with a plain `ShowWindow(SW_HIDE)`.
+`WS_EX_NOACTIVATE` (tauri's `focusable(false)`) was tried in isolation and does not help:
+`ShowWindow(SW_SHOW)` activates such a window all the same.
+
+**How a regression is caught.** No test; it needs the real window manager. By hand in
+`tauri dev` on Windows: focus a text box in another app, open the paste popup, pick a
+text entry. The text must land in the box, the box must still have focus, and the
+"Pasted" toast must show and then hide.
+
+**Not fixed.** The startup splash still shows through tao and takes focus when it
+appears. That is a different moment and nothing is typed into it.
+
+**Invariant to keep**: **a window that must not take focus never goes through tao's
+`show()` on Windows.** And read the changelog of a windowing dependency before bumping
+it: the behaviour this app leaned on was a bug upstream fixed.
+
+---
+
+## #38 - The paste popup jumped, scaled and faded before it settled
+
+**Symptom.** Found 2026-11-06, fixed the same day, not yet released. On Windows the paste
+popup did not appear in place. It grew taller a frame after it was shown, jumped up when
+that pushed it past the bottom of the screen, then scaled and faded in over the window
+behind it while the side preview slid in. Frame captures put the popup at rest about
+240 ms after the hotkey.
+
+**Cause.** Five things on one open, none of them new code.
+
+- The window is shown at a height the native side computes from a copy of the popup's
+  sizing constants (`state/popup_state.rs`), so React does not have to resize it. The
+  popup changed its list cap from 8 to 10 rows and its base width from 360 to 388 on
+  2026-09-14, and the copy was not updated. Every open was resized 88 px a frame later,
+  and the clamp onto the monitor then moved it.
+- The container had a 120 ms scale-and-fade entrance animation.
+- The render that opens the popup also resets the selection and the tab, and every row
+  has `transition: all`, so those resets animated too.
+- Windows plays its own fade on a window being shown, which added one half-drawn frame.
+- The preview panel's slide-in, meant for its toggle, played on popup opens as well.
+
+**Fix.** The native constants match the popup's again. The entrance animation is gone;
+the popup appears in place at full opacity. An `opening` class turns transitions off
+for the opening render and its first painted frame, and that render also scrolls the
+list back to the top. The slide-in only runs when the toggle opens the panel. On
+Windows, `DWMWA_TRANSITIONS_FORCEDISABLED` is set on every popup window when it is
+built.
+
+**How a regression is caught.** No test. By hand: open the paste popup near the bottom
+of a screen. It must appear once, at its final size and place, and not move or fade.
+Capturing frames from the hotkey on is the reliable check; by eye a 30 ms jump is easy
+to miss.
+
+**Not fixed.** The popup's first frame still arrives about 100 ms after the hotkey in a
+debug build, mostly WebView2 waking a hidden window. Image thumbnails fill in a frame or
+two after the rest.
+
+**Invariant to keep**: **a constant mirrored across the bridge changes on both sides in
+one commit.** `PastePopup.tsx` and `popup_state.rs` each name the other; update both.
