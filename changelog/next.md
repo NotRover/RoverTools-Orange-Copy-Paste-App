@@ -34,9 +34,11 @@
 - On Linux the app no longer draws its own startup notice or copy and paste popups. Those windows could not be placed reliably on every desktop. A clip that is too large for history, and the short wait for sync when you quit, now show as normal desktop notifications. Update checks work as before.
 
 ### Fixed
-- The light or dark theme now stays as you set it on each device. It used to follow your account, so a launch could pull the theme your other device or build was using over the one you had just chosen here.
+- The light or dark theme now stays as you set it on each device. It used to follow your account, so a launch could pull the theme from another of your devices over the one you had just chosen here.
 - Opening the app no longer plays a run of notification sounds. Items that could not sync, such as images refused because cloud storage is full, used to chime once each while the app caught up. They now land in the notification centre quietly for the first few seconds after launch, and a growing count on one notice sounds once instead of once per item.
-- The paste popup pastes again on Windows. Since 0.5.1 the "Pasted" notice took the keyboard just before the paste, so the entry reached the clipboard but not the app you were in. The "Copied" notice no longer takes the keyboard from the app you copied in either.
+- The paste popup pastes again on Windows. Since 0.5.2 the "Pasted" notice took the keyboard just before the paste, so the entry reached the clipboard but not the app you were in. The "Copied" notice no longer takes the keyboard from the app you copied in either.
+- Going back from an open entry, note or space item returns you to where you were in the list instead of the top. The history also keeps loading older entries as you scroll after coming back.
+- Images copied before an earlier update show again. Their cards appeared broken because the app looked for the image in its old data folder.
 - Updates now install on Linux. A copy installed from the deb package used to download the update and then fail with an error. It now installs the new deb after asking for your password, then reopens.
 
 ### Internal
@@ -45,3 +47,5 @@
 - Linux ships as a deb only. The AppImage is no longer built; an AppImage install sees no update and has to install the deb once.
 - A feed with no entry for this install is treated as no update on every platform, not as a failed check.
 - Windows: the toast is shown with a non-activating SetWindowPos instead of tao's show(), which activates since tao 0.37 (bug #37 in docs/bugfix-history.md).
+- The release workflow keeps the Internal section in each release's changelog file; the 14 files that lost it were restored from history.
+- Removed the Dependabot config.
