@@ -42,6 +42,10 @@ The app comes to the Mac, Settings is one page with a contents list, devices car
 - The copy popup and the desktop notification show the moment you copy, instead of after the entry is written to disk.
 - In-app toasts close when their progress bar ends. They used to stay up for as long as the app was busy after the bar had run out.
 
+### Internal
+- Release workflow builds and signs macOS bundles for both chips; Apple signing and notarization secrets are optional and documented in docs/releasing.md.
+- tauri-plugin-deep-link 2.6.2 -> 2.6.3, which fixes the Linux build against rust-ini 0.21.3 (the failed v0.5.1 run).
+
 ---
 
 ## 0.5.0 (minor, stable) - 2026-10-29
@@ -60,6 +64,12 @@ Your history and notes now live in one local database, you can encrypt it, and t
 
 ### Fixed
 - The startup splash now shows the download progress of an update instead of a spinner that never moved.
+
+### Internal
+- `app.db` (SQLite, WAL, write-through per mutation) replaces the MessagePack files and the JSON sync records; `storage/import.rs` migrates them once. The flush loop, dirty flags, seal and quarantine machinery are gone.
+- `logging.rs` writes every `log` record to `logs/app.log` with size rotation; `crash.log` is folded into it.
+- Encryption at rest is AES-256-GCM on the text columns with a per-install keychain key and a per-row flag (schema v2), not a page cipher.
+- `@tabler/icons-react` replaces `@phosphor-icons/react`; the splash window joins the default Tauri capability; Claude Code settings tweaks.
 
 ---
 
@@ -106,6 +116,17 @@ This release keeps your clipboard history through restarts, reboots and new PCs.
 - Two settings syncs in a row, or a settings file the app could not save, could undo a settings change. Both now keep your newest values.
 - Missing items now come back after a start where the first sync failed, such as starting offline, as soon as a later sync works. Before, they waited for the next sign-in.
 
+### Internal
+- Sync engine: an additive restore sweep downloads account rows this install lacks. It runs after each sign-in, at launch and on Refresh when `id_map` lists missing rows or the own-item count from `/sync/breakdown` is ahead, and on a space's first key arrival (a durable once-per-space gate). Manual mode defers it; the sweep replaces `backfill_pull`.
+- Deletes are write-ahead: every Delete is persisted to `sync_pending.json` before it is sent, and a delete with no client writes a permanent `local_only` marker in `id_map.json` instead of queuing a tombstone.
+- Settings sync: three-way merge of server, local and last-synced base, pulled before the first push and applied to the running app. `keep_history` and `autosave` no longer roam, and empty or unknown values are refused.
+- Settings sync: the PUT sends `base_updated_at`, the stamp of the blob the round pulled, so the server stores it only over that blob; a refused round keeps what it applied in its base and merges again against the newer blob. Needs the backend's conditional PUT deployed; an older server ignores the field and stays last-write-wins.
+- Persistence: `MAX_HISTORY` and the reboot clear removed; the full save no longer sweeps `images/` and `received-files/`; a far smaller file moves the old `.bak` to `.bak.prev`; history is flushed before the cursor moves, at quit and before the updater exits; pins flush with Keep history off.
+- Fixed in passing: the sealed-leftover lock deadlock, a queued Delete dropped when its tombstone could not be built, `backfill_pull` swallowing page errors, a personal-delete race with Pull and Live downloads, and duplicate tombstones from a flush during a delete fan-out.
+- Rust tests cover the uncapped history store and its upgrade, the restore sweep and its delete guards, write-ahead and offline deletes, the settings merge and the `.bak.prev` rotation; the degraded-mode suite is updated.
+- Safe quit: `sync_pending_work.json` is a write-ahead record of uploads and blob downloads, part of the Keep history off keep set and re-driven at launch. `ExitRequested` and `flush_for_restart` stop new sync work and wait up to 10 s, rotation drain included; a relaunch during a quit's wait cancels it; both restart commands are now async; a failed install keeps the downloaded update. The keep set also covers drained queue ops, pending shares and received items, and is read under the history lock; merges write the id_map row before the upsert.
+- Unreadable `id_map.json`, `sync_pending.json` or `sync_pending_work.json` keep everything for the session and are never written that session. File re-extracts are staged and renamed into place. `sync:collect-settings` carries a round number that `sync_settings` checks; the restore gap counts own running downloads, and a sweep rebuilds lost id_map rows for own rows it finds here.
+
 ---
 
 ## 0.4.2 (patch, stable) - 2026-09-27
@@ -119,6 +140,9 @@ This release makes the app's errors and labels say plainly what happened and wha
 - Sign-in and recovery buttons now say what they do: "Continue" and "Use the recovery code" replace the old "Unlock" buttons.
 - Settings descriptions no longer mention Windows on Linux, and the copy and paste notification options describe the action rather than a key combination.
 
+### Internal
+- Docs across the app, backend and website rewritten to the writing guide; command-error handling documented; submodule bumps.
+
 ---
 
 ## 0.4.1 (patch, stable) - 2026-09-26
@@ -127,6 +151,11 @@ This release updates the libraries the app is built on to fix known security iss
 
 ### Fixed
 - The app framework and two of its networking and data libraries are updated to versions that fix published security advisories.
+
+### Internal
+- Bumped tauri to 2.11.1, quinn-proto to 0.11.18, serde_with to 3.23.0 and @tauri-apps/api to 2.11.1.
+- Release workflow: only the owner can start a release; signing secrets live in a main-only release environment. Dependabot config added.
+- Submodule pointer bumps and CLAUDE.md updates.
 
 ---
 
@@ -145,6 +174,10 @@ This release updates the libraries the app is built on to fix known security iss
 - Copied web content is cleaned before it is shown, so a page cannot run scripts or load remote images inside the app.
 - Your account password now stays on your device. Signing in sends a separate login key derived from it, so the service that checks your sign-in never holds the password that unlocks your data. Existing accounts switch over the next time you sign in, with nothing to do and nothing re-encrypted.
 
+### Internal
+- Client: `derive_master` (Argon2id, email-salted) split with HKDF-SHA256 into `derive_auth_key` (the Supabase credential) and `derive_kek` (wraps the UMK, AAD `umk-envelope-v2`). Legacy `umk-envelope-v1` envelopes are opened read-only and re-wrapped on sign-in, then the Supabase credential is replaced.
+- Backend `docs/architecture.md` section 7.1 documents the split and the migration; no backend code change.
+
 ---
 
 ## 0.3.8 (patch, beta) - 2026-09-21
@@ -154,12 +187,20 @@ This release points the in-app updater at the current release location.
 ### Fixed
 - The updater now checks for new versions in the right place, so update checks and downloads work correctly.
 
+### Internal
+- Publish releases from the app repo instead of a separate releases repo; the stable and beta update feeds and the download links now target the app repo.
+- Convert the ASCII architecture diagrams in the READMEs and docs to themed Mermaid.
+- Add a generated CHANGELOG.md index and keep every release instead of pruning old ones.
+
 ---
 
 ## 0.3.7 (patch, beta) - 2026-09-16
 
 ### Improved
 - Account sync now runs on its own dedicated address. Existing sign-ins keep working; just update the app.
+
+### Internal
+- Move the sync API to `api.orangecp.rovertools.ctx.cl` (app-scoped) in the client and backend, with the status dashboard on `status.rovertools.ctx.cl`. The site and password-reset page stay on the current pages.dev host; `rovertools.ctx.cl` is held for a future site. Clean cutover, no alias.
 
 ---
 
@@ -185,6 +226,9 @@ This release adds bulk copy from selection mode and rounds out the paste popup w
 
 ### Fixed
 - The close button in the paste popup is no longer clipped at the window edge.
+
+### Internal
+- Documented the relaunch-focus root cause in the bugfix history.
 
 ---
 
@@ -282,6 +326,10 @@ addresses.
 - The link in your password reset email opens the app again. Requesting a new
   password from the sign-in screen now works from start to finish.
 
+### Internal
+- Reset landing page moved to the public site, with the API host forwarding to it.
+  Client, backend and website docs updated to match.
+
 ---
 
 ## 0.2.2 (patch, beta) - 2026-08-28
@@ -327,6 +375,15 @@ the item was, and they say who took it out.
 - The picture on a "Shared by" chip no longer shows a broken-image icon. A profile
   picture that cannot be loaded falls back to initials, the way every other picture in
   the app already did.
+
+### Internal
+- Backend: creating a space now announces it to the creator, so their connection picks up
+  the new space. The owner could not see anything a new member shared until they
+  restarted the app.
+- Backend: the realtime hub re-resolves a user's channels itself when their membership
+  changes, rather than depending on the client to ask.
+- Backend: a removal record names the remover's own row as the author when there is one,
+  instead of whichever row the database returned first.
 
 ---
 
@@ -375,6 +432,22 @@ gains zoom.
   what the window was holding. Cut, copy, and paste still work wherever you can type.
 - The list of spaces lines up with the buttons underneath it.
 
+### Internal
+- Backend moved to a self-hosted VPS behind Docker and Caddy, with the deploy runbook,
+  hardening notes, and design memo in the backend docs.
+- Dropped 29 unused icons, an orphaned component, 46 dead CSS rules, a Tiptap dependency,
+  5 dead Tauri commands, and 5 dead Rust helpers; the bridge reconciles at 129 to 129.
+- Removed the unread settings_updated_at field, with tests pinning that an older
+  sync_state.json still parses.
+- Space removals now travel on pull as well as the socket, behind serde(default) so a
+  client ahead of the backend still parses.
+- MAX_INLINE_SYNC_BYTES derives from the server row limit so the two cannot drift; history
+  files written before the cap are pruned and the amount reported.
+- Extracted the HTML sanitiser into a shared module so the card and the viewer cannot
+  disagree.
+- Docs: migration-safety guidance for the VPS deploy, the DEPLOY.md home row, bugfix
+  history for the empty-spaces-list regressions, and several backend submodule bumps.
+
 ---
 
 ## 0.1.16 (patch, beta) - 2026-08-21
@@ -398,6 +471,25 @@ session no longer throws that session away.
   if the app closed part way through a sync, which brought the item back.
 - Release notes in the Settings update card show their headings and lists instead of raw
   markdown.
+
+### Internal
+- Client: one construction site for the sync client, so startup begins the same
+  background loops the commands do. Flush and pull is serialised on its own lock, and the
+  pending queue keeps a write-ahead copy across a flush so an interrupted one replays.
+- Client: a rotation guard marks the window where a refresh token has been spent but its
+  replacement is not yet stored. Every exit path drains it, and a relaunch waits on a
+  marker file before force-killing the instance it replaces.
+- Backend: the Redis pool health-checks and retries, since building it from a URL
+  inherited zero retries and no health check. Presence lookups degrade to offline instead
+  of failing a request and are batched into two round trips per space, publishes are
+  best-effort with a dropped-event gauge, and the pub/sub listener reconnects instead of
+  stopping silently.
+- Backend: an unreachable JWKS endpoint answers 503 with a retry hint rather than 401,
+  and token decoding allows 30 seconds of clock skew.
+- Docs: bugfix history entries 18 and 19, a shutdown and rotation window section in the
+  client architecture doc, the presence hint contract in the backend architecture doc,
+  and a correction to the migration claim in CLAUDE.md.
+- Website submodule updated with the landing page bento and hero mockup work.
 
 ---
 
@@ -433,6 +525,10 @@ a password reset that could leave you locked out of your account.
   status code.
 - Opening the app no longer announces every space you already belong to as newly
   available; you are told once, when access actually arrives.
+
+### Internal
+- Release pipeline now mirrors the changelog into the releases repo, and every past
+  release has been backfilled into the changelog directory.
 
 ---
 
