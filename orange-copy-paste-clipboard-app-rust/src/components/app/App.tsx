@@ -105,7 +105,6 @@ const ROAMING_STORAGE: Record<
   string,
   { key: string; valid: (v: string) => boolean; empty?: string }
 > = {
-  theme: { key: "sc-theme", valid: (v) => v === "dark" || v === "light" },
   layout: { key: "sc-layout", valid: isClipboardLayout },
   sort: { key: "sc-sort", valid: isSortMode },
   paste_slots: { key: "sc-paste-slots", valid: (v) => /^\d+$/.test(v) && +v >= 3 && +v <= 10 },
@@ -346,13 +345,14 @@ const App: React.FC = () => {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
+  // Per device, on purpose: a look is chosen for the screen in front of you,
+  // so it is not a roaming key and no settings round follows it.
   const toggleTheme = useCallback(() => {
     setTheme((t) => {
       const next = t === "dark" ? "light" : "dark";
       localStorage.setItem("sc-theme", next);
       return next;
     });
-    scheduleSettingsSync();
   }, []);
 
   useEffect(() => {
@@ -863,8 +863,7 @@ const App: React.FC = () => {
             continue;
           }
           localStorage.setItem(key, s);
-          // Theme and groups apply at once; layout and sort on the next mount.
-          if (name === "theme") setTheme(s as AppTheme);
+          // Groups apply at once; layout and sort on the next mount.
           if (name === "group_names") setAvailableGroups(sanitizeGroups(parse(s)));
         }
         if (Object.keys(refused).length > 0) {

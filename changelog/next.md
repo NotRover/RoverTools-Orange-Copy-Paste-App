@@ -34,6 +34,7 @@
 - On Linux the app no longer draws its own startup notice or copy and paste popups. Those windows could not be placed reliably on every desktop. A clip that is too large for history, and the short wait for sync when you quit, now show as normal desktop notifications. Update checks work as before.
 
 ### Fixed
+- The light or dark theme now stays as you set it on each device. It used to follow your account, so a launch could pull the theme your other device or build was using over the one you had just chosen here.
 - Opening the app no longer plays a run of notification sounds. Items that could not sync, such as images refused because cloud storage is full, used to chime once each while the app caught up. They now land in the notification centre quietly for the first few seconds after launch, and a growing count on one notice sounds once instead of once per item.
 - The paste popup pastes again on Windows. Since 0.5.1 the "Pasted" notice took the keyboard just before the paste, so the entry reached the clipboard but not the app you were in. The "Copied" notice no longer takes the keyboard from the app you copied in either.
 - Updates now install on Linux. A copy installed from the deb package used to download the update and then fail with an error. It now installs the new deb after asking for your password, then reopens.

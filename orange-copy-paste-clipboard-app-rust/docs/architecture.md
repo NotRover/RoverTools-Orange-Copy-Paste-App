@@ -1518,16 +1518,18 @@ The account holds one settings blob, encrypted under the UMK. Each device merges
 its own values key by key; no device's copy replaces the blob whole.
 
 **Roams (user preferences):**
-- From `localStorage` (`ROAMING_STORAGE` in `App.tsx`): `theme`, `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
+- From `localStorage` (`ROAMING_STORAGE` in `App.tsx`): `layout`, `sort`, `paste_slots`, `group_names`, `group_colors`
 - From `settings.json` (`ROAMING_JSON_KEYS` in `sync/commands.rs`): `close_to_tray`, `start_minimized`, `notification`, `notif_copy`, `notif_paste`, `space_send_filters`
 
 Send filters ride in the blob so they roam between a user's devices; the server never sees
 the plaintext group names they reference.
 
 **Per device (never applied from the blob):**
-- `keep_history` and `autosave` (`NO_LONGER_ROAMING`). Older builds roamed them, so the
-  blob keeps the account's values for those builds to read, but this build never applies
-  or changes them.
+- `keep_history`, `autosave` and `theme` (`NO_LONGER_ROAMING`). Older builds roamed them,
+  so the blob keeps the account's values for those builds to read, but this build never
+  applies or changes them. `theme` (`sc-theme` in `localStorage`) left the roaming set
+  because a look belongs to the screen it was chosen on, and roaming it had each launch
+  pull the account's choice over the one made here.
 - `sync_enabled`, `sync_server_url`, `sync_mode`, `os_notifications`, `space_autocopy:{space_id}` - each device decides independently
 - Window geometry, autostart, and every other `settings.json` key not listed above
 

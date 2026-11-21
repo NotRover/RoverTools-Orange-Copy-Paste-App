@@ -1781,7 +1781,11 @@ pub(crate) const ROAMING_JSON_KEYS: &[&str] = &[
 /// Keys an older build roamed that are now per-device. The blob carries them
 /// as the account has them, so an older build still reads its own value, and
 /// they are never applied here.
-const NO_LONGER_ROAMING: &[&str] = &["keep_history", "autosave"];
+///
+/// `theme` joined them because a look is chosen per screen: a dark Mac and a
+/// light office PC are both right, and a build that roamed it had every launch
+/// pull the account's choice over the one made on this device.
+const NO_LONGER_ROAMING: &[&str] = &["keep_history", "autosave", "theme"];
 
 /// An empty value never roams: an older build sent `""` for an unset layout
 /// and `"[]"` for no groups, and applying those wiped this PC's choice.
@@ -2087,7 +2091,7 @@ mod tests {
             pairs.iter().map(|(k, v)| (k.to_string(), json!(v))).collect()
         };
         let file = map(&[("history_limit", "50")]);
-        let rest = map(&[("theme", "dark")]);
+        let rest = map(&[("paste_slots", "dark")]);
         assert_eq!(landed_values(file.clone(), rest.clone(), false), rest);
         let both = landed_values(file, rest, true);
         assert_eq!(both.len(), 2);
@@ -2108,57 +2112,71 @@ mod tests {
     /// and this PC's values only fill keys the account does not have.
     #[test]
     fn the_first_sync_takes_the_account_values() {
-        let server = map(json!({ "theme": "dark", "notification": true }));
-        let local = map(json!({ "theme": "light", "notification": false, "layout": "list" }));
+        let server = map(json!({ "paste_slots": "dark", "notification": true }));
+        let local = map(json!({ "paste_slots": "light", "notification": false, "layout": "list" }));
 
         let (merged, apply) = merge_settings(&server, &local, None);
 
-        assert_eq!(merged, map(json!({ "theme": "dark", "notification": true, "layout": "list" })));
-        assert_eq!(apply, map(json!({ "theme": "dark", "notification": true })));
+        assert_eq!(merged, map(json!({ "paste_slots": "dark", "notification": true, "layout": "list" })));
+        assert_eq!(apply, map(json!({ "paste_slots": "dark", "notification": true })));
+    }
+
+    /// `theme` is per device now. The blob keeps the account's value for older
+    /// builds, but it is never applied here and this PC's choice never replaces it.
+    #[test]
+    fn the_theme_stays_in_the_blob_but_never_lands_here() {
+        let base = map(json!({ "theme": "dark", "sort": "newest" }));
+        let server = map(json!({ "theme": "light", "sort": "newest" }));
+        let local = map(json!({ "theme": "dark", "sort": "oldest" }));
+
+        let (merged, apply) = merge_settings(&server, &local, Some(&base));
+
+        assert_eq!(merged, map(json!({ "theme": "light", "sort": "oldest" })));
+        assert!(apply.is_empty());
     }
 
     #[test]
     fn only_keys_changed_here_are_pushed() {
-        let base = map(json!({ "theme": "dark", "sort": "newest", "notif_copy": true }));
+        let base = map(json!({ "paste_slots": "dark", "sort": "newest", "notif_copy": true }));
         let server = base.clone();
-        let local = map(json!({ "theme": "light", "sort": "newest", "notif_copy": true }));
+        let local = map(json!({ "paste_slots": "light", "sort": "newest", "notif_copy": true }));
 
         let (merged, apply) = merge_settings(&server, &local, Some(&base));
 
-        assert_eq!(merged, map(json!({ "theme": "light", "sort": "newest", "notif_copy": true })));
+        assert_eq!(merged, map(json!({ "paste_slots": "light", "sort": "newest", "notif_copy": true })));
         assert!(apply.is_empty());
     }
 
     #[test]
     fn server_changes_apply_only_to_keys_not_changed_here() {
-        let base = map(json!({ "theme": "dark", "layout": "tiles" }));
-        let server = map(json!({ "theme": "light", "layout": "list" }));
-        let local = map(json!({ "theme": "dark", "layout": "single" }));
+        let base = map(json!({ "paste_slots": "dark", "layout": "tiles" }));
+        let server = map(json!({ "paste_slots": "light", "layout": "list" }));
+        let local = map(json!({ "paste_slots": "dark", "layout": "single" }));
 
         let (merged, apply) = merge_settings(&server, &local, Some(&base));
 
-        assert_eq!(merged, map(json!({ "theme": "light", "layout": "single" })));
-        assert_eq!(apply, map(json!({ "theme": "light" })));
+        assert_eq!(merged, map(json!({ "paste_slots": "light", "layout": "single" })));
+        assert_eq!(apply, map(json!({ "paste_slots": "light" })));
     }
 
     #[test]
     fn empty_values_are_never_pushed_or_applied() {
         let server = map(json!({
-            "layout": "", "group_names": "[]", "group_colors": "{}", "sort": null, "theme": "dark"
+            "layout": "", "group_names": "[]", "group_colors": "{}", "sort": null, "paste_slots": "dark"
         }));
         let local = map(json!({
-            "layout": "tiles", "group_names": "[\"Work\"]", "group_colors": "{}", "sort": "", "theme": ""
+            "layout": "tiles", "group_names": "[\"Work\"]", "group_colors": "{}", "sort": "", "paste_slots": ""
         }));
-        let base = map(json!({ "theme": "light" }));
+        let base = map(json!({ "paste_slots": "light" }));
 
         for base in [None, Some(&base)] {
             let (merged, apply) = merge_settings(&server, &local, base);
 
             assert_eq!(
                 merged,
-                map(json!({ "layout": "tiles", "group_names": "[\"Work\"]", "theme": "dark" }))
+                map(json!({ "layout": "tiles", "group_names": "[\"Work\"]", "paste_slots": "dark" }))
             );
-            assert_eq!(apply, map(json!({ "theme": "dark" })));
+            assert_eq!(apply, map(json!({ "paste_slots": "dark" })));
         }
     }
 
@@ -2183,7 +2201,7 @@ mod tests {
     /// emptied one, so the account's value comes back.
     #[test]
     fn an_absent_key_takes_the_account_value() {
-        let base = map(json!({ "group_names": "[\"Work\"]", "theme": "dark" }));
+        let base = map(json!({ "group_names": "[\"Work\"]", "paste_slots": "dark" }));
         let local = map(json!({}));
 
         let (merged, apply) = merge_settings(&base, &local, Some(&base));
@@ -2217,29 +2235,29 @@ mod tests {
     /// live push.
     #[test]
     fn a_refused_push_keeps_both_changes_on_the_next_round() {
-        let base = map(json!({ "theme": "light", "layout": "tiles" }));
-        let pulled = map(json!({ "theme": "dark", "layout": "tiles" }));
-        let mut local = map(json!({ "theme": "light", "layout": "list" }));
+        let base = map(json!({ "paste_slots": "light", "layout": "tiles" }));
+        let pulled = map(json!({ "paste_slots": "dark", "layout": "tiles" }));
+        let mut local = map(json!({ "paste_slots": "light", "layout": "list" }));
 
         let (_, apply) = merge_settings(&pulled, &local, Some(&base));
-        assert_eq!(apply, map(json!({ "theme": "dark" })));
+        assert_eq!(apply, map(json!({ "paste_slots": "dark" })));
         local.extend(apply.clone());
         let mut kept = base.clone();
         kept.extend(apply);
 
-        let stored = map(json!({ "theme": "blue", "layout": "tiles" }));
+        let stored = map(json!({ "paste_slots": "blue", "layout": "tiles" }));
         let (merged, apply) = merge_settings(&stored, &local, Some(&kept));
-        assert_eq!(merged, map(json!({ "theme": "blue", "layout": "list" })));
-        assert_eq!(apply, map(json!({ "theme": "blue" })));
+        assert_eq!(merged, map(json!({ "paste_slots": "blue", "layout": "list" })));
+        assert_eq!(apply, map(json!({ "paste_slots": "blue" })));
 
         let (stale, _) = merge_settings(&stored, &local, Some(&base));
-        assert_eq!(stale["theme"], "dark", "the old base reads the applied theme as a change here");
+        assert_eq!(stale["paste_slots"], "dark", "the old base reads the applied theme as a change here");
     }
 
     #[test]
     fn nothing_changed_means_merged_equals_server() {
-        let server = map(json!({ "theme": "dark", "notif_paste": false, "keep_history": true }));
-        let local = map(json!({ "theme": "dark", "notif_paste": false }));
+        let server = map(json!({ "paste_slots": "dark", "notif_paste": false, "keep_history": true }));
+        let local = map(json!({ "paste_slots": "dark", "notif_paste": false }));
         let base = local.clone();
 
         let (merged, apply) = merge_settings(&server, &local, Some(&base));
