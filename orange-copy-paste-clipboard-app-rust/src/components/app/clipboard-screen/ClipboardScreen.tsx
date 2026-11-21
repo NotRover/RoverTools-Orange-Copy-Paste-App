@@ -2,6 +2,7 @@ import { sharedNow } from "../../../clock";
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -207,6 +208,27 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   const viewportRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  // The entry being read in full, if any. Held as an id rather than the entry
+  // so a live update (a group change, a sync badge) reaches the open panel.
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const viewingEntry = viewingId
+    ? (entries.find((e) => e.id === viewingId) ?? null)
+    : null;
+  const listShown = viewingEntry === null;
+
+  // The viewer replaces the list, so its scroller comes back at the top. Keep
+  // the offset it had and put it back before the list paints. The render
+  // window lives in this component and survives, so every card that was above
+  // the fold is rendered again and the offset lands on the same one.
+  const listScrollTop = useRef(0);
+  const openViewer = useCallback((id: string) => {
+    listScrollTop.current = viewportRef.current?.scrollTop ?? 0;
+    setViewingId(id);
+  }, []);
+  useLayoutEffect(() => {
+    if (listShown) viewportRef.current?.scrollTo({ top: listScrollTop.current });
+  }, [listShown]);
+
   // Search & filter (delegated to sub-component). The cloud context is built
   // below, after the sync hooks — see `cloudFilterContext`.
 
@@ -327,6 +349,8 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
   // Grow the window when the sentinel scrolls near the viewport bottom. The
   // windowedGroups dependency re-arms the observer after each growth, so a
   // viewport that isn't full yet keeps loading until it is (or all are shown).
+  // listShown re-arms it on the new sentinel after the viewer closes; the old
+  // one went with the list.
   useEffect(() => {
     if (!hasMore) return;
     const el = sentinelRef.current;
@@ -341,7 +365,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, windowedGroups]);
+  }, [hasMore, windowedGroups, listShown]);
 
   // Stable range-select handler: reads the latest id list from a ref so the
   // callback identity never changes (keeps EntryCard's memoisation intact).
@@ -423,13 +447,6 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
     }
     return undefined;
   }, [entries, multiSelect.selectedIds]);
-
-  // The entry being read in full, if any. Held as an id rather than the entry
-  // so a live update (a group change, a sync badge) reaches the open panel.
-  const [viewingId, setViewingId] = useState<string | null>(null);
-  const viewingEntry = viewingId
-    ? (entries.find((e) => e.id === viewingId) ?? null)
-    : null;
 
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
@@ -729,7 +746,7 @@ const ClipboardScreen: React.FC<ClipboardScreenProps> = ({
                             isSelected={multiSelect.selectedIds.has(entry.id)}
                             onToggleSelect={multiSelect.toggleSelect}
                             onRangeSelect={handleRangeSelect}
-                            onView={setViewingId}
+                            onView={openViewer}
                             clickAction={clickAction}
                             isInClipboard={activeClipboardIds.includes(entry.id)}
                             syncState={

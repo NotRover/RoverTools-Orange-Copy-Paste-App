@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -165,13 +166,36 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
       .catch(() => setEditorFullscreen(false));
   }, []);
 
+  // Opening the editor narrows the list or hides it (full screen, or a narrow
+  // window), and closing it widens it again. A narrower list reflows the
+  // masonry columns and a hidden one loses its scroll offset, so a saved
+  // scrollTop would land on a different note. Instead keep the card at the top
+  // of the list and how far below the top edge it sat, and put it back there.
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const scrollAnchor = useRef<{ el: Element; offset: number } | null>(null);
+  const captureScrollAnchor = useCallback(() => {
+    const vp = viewportRef.current;
+    const grid = vp?.querySelector(".ns-grid");
+    // Hidden: keep the anchor taken while it was last on screen.
+    if (!vp || !grid || vp.clientHeight === 0) return;
+    const top = vp.getBoundingClientRect().top;
+    let best: { el: Element; offset: number } | null = null;
+    for (const el of grid.children) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom <= top) continue;
+      if (!best || r.top - top < best.offset) best = { el, offset: r.top - top };
+    }
+    scrollAnchor.current = best;
+  }, []);
+
   const toggleEditorFullscreen = useCallback(() => {
+    captureScrollAnchor();
     setEditorFullscreen((prev) => {
       const next = !prev;
       void invoke("set_setting", { key: NOTES_FULLSCREEN_KEY, value: next });
       return next;
     });
-  }, []);
+  }, [captureScrollAnchor]);
   const mainRef = useRef<HTMLDivElement>(null);
 
   // Close filter dropdown on outside click
@@ -212,6 +236,17 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
   useEffect(() => {
     if (editingId && !notes.some((n) => n.id === editingId)) setEditingId(null);
   }, [notes, editingId]);
+
+  // The editor opened, closed, or went full screen: the list just changed
+  // width or came back, so return the anchored card to where it was.
+  const editing = editingNote !== null;
+  useLayoutEffect(() => {
+    const vp = viewportRef.current;
+    const a = scrollAnchor.current;
+    if (!vp || !a || !a.el.isConnected || vp.clientHeight === 0) return;
+    const now = a.el.getBoundingClientRect().top - vp.getBoundingClientRect().top;
+    vp.scrollTop += now - a.offset;
+  }, [editing, editorFullscreen]);
 
   useEffect(() => {
     if (menuState && !notes.some((n) => n.id === menuState.id)) {
@@ -255,8 +290,9 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
 
   const handleCreate = useCallback(async () => {
     const note = await onCreate();
+    captureScrollAnchor();
     setEditingId(note.id);
-  }, [onCreate]);
+  }, [onCreate, captureScrollAnchor]);
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -305,7 +341,13 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
     },
     [multiSelect.selectRange, multiSelect.toggleSelect],
   );
-  const handleOpen = useCallback((id: string) => setEditingId(id), []);
+  const handleOpen = useCallback(
+    (id: string) => {
+      captureScrollAnchor();
+      setEditingId(id);
+    },
+    [captureScrollAnchor],
+  );
   const handleContextMenu = useCallback(
     (id: string, x: number, y: number) => setMenuState({ id, x, y }),
     [],
@@ -499,6 +541,7 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
       >
         {/* ── Masonry grid ── */}
         <div
+          ref={viewportRef}
           className={`ns-viewport${fading ? " ns-viewport--fading" : ""}`}
           style={
             editingNote
@@ -645,7 +688,10 @@ const NotesScreen: React.FC<NotesScreenProps> = ({
                 onDelete={handleDelete}
                 onPin={onPin}
                 onSetGroups={onSetGroups}
-                onBack={() => setEditingId(null)}
+                onBack={() => {
+                  captureScrollAnchor();
+                  setEditingId(null);
+                }}
                 fullscreen={editorFullscreen}
                 onToggleFullscreen={toggleEditorFullscreen}
                 readOnly={remoteKeys.has(`note:${editingNote.id}`)}

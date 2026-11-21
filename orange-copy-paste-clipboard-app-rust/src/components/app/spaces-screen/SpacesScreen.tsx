@@ -2289,6 +2289,33 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
   );
   // Never a placeholder: there is nothing to open.
   const [detailItem, setDetailItem] = useState<ContentFeedItem | null>(null);
+  // An open item replaces the feed, so the feed's scroller comes back at the
+  // top. Keep the offset it had, and the space it belongs to, and put it back
+  // before the feed paints. Another space's feed starts at the top: a
+  // notification can switch spaces and close the item in one go.
+  const feedScrollRef = useRef<HTMLDivElement>(null);
+  const feedScroll = useRef<{ spaceId: string | null; top: number } | null>(
+    null,
+  );
+  const openDetail = useCallback(
+    (item: ContentFeedItem) => {
+      feedScroll.current = {
+        spaceId: selectedId,
+        top: feedScrollRef.current?.scrollTop ?? 0,
+      };
+      setDetailItem(item);
+    },
+    [selectedId],
+  );
+  const feedShown = detailItem === null;
+  useLayoutEffect(() => {
+    const saved = feedScroll.current;
+    if (!feedShown || !saved) return;
+    feedScroll.current = null;
+    if (saved.spaceId === selectedId) {
+      feedScrollRef.current?.scrollTo({ top: saved.top });
+    }
+  }, [feedShown, selectedId]);
   const {
     marks: commentMarks,
     refresh: refreshCommentCounts,
@@ -3842,7 +3869,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                 />
               )
             ) : (
-              <div className="sp-feed-scroll">
+              <div ref={feedScrollRef} className="sp-feed-scroll">
                 {feedItems.length === 0 ? (
                   <div className="sp-feed-empty">
                     <IconSearch size={38} />
@@ -3926,7 +3953,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       entry={item.entry}
                                       onCopy={onCopyEntry}
                                       onView={(e) =>
-                                        setDetailItem({
+                                        openDetail({
                                           kind: "clipboard",
                                           entry: e,
                                         })
@@ -3989,7 +4016,7 @@ const SpacesScreen: React.FC<SpacesScreenProps> = ({
                                       note={item.note}
                                       entries={entries}
                                       onView={(n) =>
-                                        setDetailItem({ kind: "note", note: n })
+                                        openDetail({ kind: "note", note: n })
                                       }
                                       layout={layout}
                                       showSourceBadge={feedFilter === "all"}
