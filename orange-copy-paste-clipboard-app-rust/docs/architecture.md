@@ -642,6 +642,13 @@ Four rules the sources follow:
   row carries the count and goes back to unread whenever the count moves.
   `clear_skipped` dismisses it; otherwise the centre would keep quoting a number
   the Account screen no longer shows.
+- **A row always lands; the sound and toast are gated** (`AlertGate` in
+  `notifications/mod.rs`). Nothing alerts for the first 20 seconds after launch
+  (`mark_started` in setup), and one id may alert at most once per 30 seconds.
+  **Why:** startup replays the world (queue flush, reminder sweep, invite
+  reconcile), and the rolling `sync-skipped` row moves once per refused item, so
+  a launch with ten refused images opened with ten cues and ten toasts. The row
+  still goes unread, so the badge carries what the gate kept quiet.
 - **Reminders describe a state, not an event,** so they are true on every sweep
   and would nag. `reminder_id` folds the current day into the id, so the store's
   own idempotence does the rate limiting. Repeats inside a day land on the

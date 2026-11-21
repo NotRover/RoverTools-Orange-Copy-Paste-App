@@ -12,7 +12,67 @@ pub mod store;
 
 pub use store::{Notification, NotificationKind, NotificationStore};
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use tauri::{Emitter, Manager};
+
+/// How long after launch a row lands in the feed without a sound or a toast.
+///
+/// Startup replays the world: the pending queue is flushed, reminders are
+/// swept, invites are reconciled. Everything that produces is news the user
+/// was away for, and the unread badge is the right way to deliver it. A cue per
+/// row is what made every launch open with a run of sounds.
+const STARTUP_QUIET: Duration = Duration::from_secs(20);
+
+/// How soon the same row may make a sound again.
+///
+/// A rolling summary moves once per item in a burst ("1 item", "2 items", ...)
+/// and each move is a real change to the feed, but it is one event to a person.
+/// The first move alerts; the rest only update the row.
+const REPEAT_QUIET: Duration = Duration::from_secs(30);
+
+/// Decides whether a row that just changed also gets a sound and a toast.
+///
+/// Only the alert is gated. The row itself always lands in the feed, unread, so
+/// nothing is lost: the gate chooses between telling the user now and letting
+/// the badge tell them.
+struct AlertGate {
+    started: Option<Instant>,
+    last: HashMap<String, Instant>,
+}
+
+impl AlertGate {
+    fn admits(&mut self, id: &str, now: Instant) -> bool {
+        if let Some(started) = self.started {
+            if now.duration_since(started) < STARTUP_QUIET {
+                return false;
+            }
+        }
+        if let Some(last) = self.last.get(id) {
+            if now.duration_since(*last) < REPEAT_QUIET {
+                return false;
+            }
+        }
+        self.last.insert(id.to_string(), now);
+        true
+    }
+}
+
+fn gate() -> &'static Mutex<AlertGate> {
+    static GATE: OnceLock<Mutex<AlertGate>> = OnceLock::new();
+    GATE.get_or_init(|| Mutex::new(AlertGate { started: None, last: HashMap::new() }))
+}
+
+/// Record the launch, so the first [`STARTUP_QUIET`] of alerts stay silent.
+/// Called once from setup; a second call is ignored.
+pub fn mark_started() {
+    let mut gate = gate().lock().unwrap_or_else(|e| e.into_inner());
+    if gate.started.is_none() {
+        gate.started = Some(Instant::now());
+    }
+}
 
 /// A sound worth making. Deliberately short of a cue per event: the point is a
 /// family a user can learn, so two things that mean the same to a person share
@@ -107,6 +167,7 @@ pub fn raise_cued(app: &tauri::AppHandle, notification: Notification, cue: Optio
 /// says the row was new: reconcile re-reads the server's invites on every panel
 /// open, and a sound or a toast per re-read would be unbearable.
 struct Alert {
+    id: String,
     title: String,
     body: String,
     cue: Cue,
@@ -119,6 +180,7 @@ struct Alert {
 impl Alert {
     fn from(n: &Notification, cue: Option<Cue>) -> Self {
         Self {
+            id: n.id.clone(),
             title: n.title.clone(),
             body: n.body.clone(),
             cue: cue.unwrap_or_else(|| Cue::for_kind(n.kind)),
@@ -129,6 +191,9 @@ impl Alert {
 
     fn fire(self, app: &tauri::AppHandle, changed: bool) {
         if !changed {
+            return;
+        }
+        if !gate().lock().unwrap_or_else(|e| e.into_inner()).admits(&self.id, Instant::now()) {
             return;
         }
         cue(app, self.cue);
@@ -186,4 +251,41 @@ pub fn raise_rolling(app: &tauri::AppHandle, notification: Notification) {
         .announce(notification);
     commands::commit(app, changed);
     alert.fire(app, changed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gate_started(ago: Duration) -> AlertGate {
+        AlertGate { started: Some(Instant::now() - ago), last: HashMap::new() }
+    }
+
+    #[test]
+    fn a_burst_on_one_row_alerts_once() {
+        let mut gate = gate_started(Duration::from_secs(3600));
+        let now = Instant::now();
+        assert!(gate.admits("sync-skipped", now));
+        for i in 1..10 {
+            assert!(!gate.admits("sync-skipped", now + Duration::from_millis(200 * i)));
+        }
+        // Another row is another event.
+        assert!(gate.admits("invite:1", now + Duration::from_millis(500)));
+        // Once the window has passed the same row may speak again.
+        assert!(gate.admits("sync-skipped", now + REPEAT_QUIET));
+    }
+
+    #[test]
+    fn nothing_alerts_right_after_launch() {
+        let mut gate = gate_started(Duration::ZERO);
+        let now = Instant::now();
+        assert!(!gate.admits("invite:1", now));
+        assert!(gate.admits("invite:1", now + STARTUP_QUIET));
+    }
+
+    #[test]
+    fn an_unmarked_start_does_not_mute() {
+        let mut gate = AlertGate { started: None, last: HashMap::new() };
+        assert!(gate.admits("invite:1", Instant::now()));
+    }
 }

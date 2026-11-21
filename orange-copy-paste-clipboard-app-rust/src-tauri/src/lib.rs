@@ -1134,6 +1134,8 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // The notification centre mutes its sounds for a while after this.
+            crate::notifications::mark_started();
             // Before anything reads app_data_dir: carry an existing install's
             // data across the identifier rename (see migrate_legacy_app_data),
             // so the diag dir and every store below resolve to the migrated
