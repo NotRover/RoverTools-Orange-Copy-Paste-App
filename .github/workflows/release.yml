@@ -229,31 +229,41 @@ jobs:
           last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
 
           if [ -f "$src" ]; then
+            # Two outputs from one file. RELEASE_NOTES.md is what users read: the
+            # app's "What's new", latest.json and the GitHub release body.
+            # RECORD_NOTES.md is the permanent changelog/<version>.md: the same text
+            # with the "### Internal" section kept, because changelog/README.md
+            # promises that section is kept for the record. Until 0.5.3 the record
+            # was written from RELEASE_NOTES.md and every Internal entry was lost.
+            #
             # 1. Strip the HTML guidance comment (perl spans the multi-line block).
-            # 2. Drop the "### Internal" section whole — backend, MCP plumbing, CI,
-            #    docs and dependency bumps are kept in the file for the record but are
-            #    never shown to users. Skip from that heading to the next heading.
-            # 3. Drop any remaining "### Section" with no body — an untouched template
+            # 2. RELEASE_NOTES.md only: drop the "### Internal" section whole -
+            #    backend, MCP plumbing, CI, docs and dependency bumps are never shown
+            #    to users. Skip from that heading to the next heading.
+            # 3. Drop any remaining "### Section" with no body - an untouched template
             #    is empty headings, and those must never reach users. The awk withholds
             #    a heading until a content line follows it; a heading followed only by
             #    another heading (or EOF) is dropped. Lead lines pass straight through.
-            # 4. Fold typographic punctuation to ASCII — a stray em dash in the
+            # 4. Fold typographic punctuation to ASCII - a stray em dash in the
             #    changelog would otherwise carry into the app's "What's new" panel.
             # 5. Trim blank lines from both ends (sed twice around tac).
-            perl -0777 -pe 's/<!--.*?-->//gs' "$src" \
-              | awk '
-                  /^#{1,6}[[:space:]]+[Ii]nternal[[:space:]]*$/ { skip=1; next }
-                  /^#{1,6}[[:space:]]/ { skip=0 }
-                  !skip { print }
-                ' \
-              | awk '
+            tidy() {
+              awk '
                   /^#{1,6}[[:space:]]/ { pending=$0; next }
                   /[^[:space:]]/ { if (pending!="") { print pending; pending="" } print; next }
                   { if (pending=="") print "" }
                 ' \
               | sed -e 's/—/-/g' -e 's/–/-/g' -e 's/“/"/g' -e 's/”/"/g' -e "s/’/'/g" -e "s/‘/'/g" -e 's/…/.../g' \
-              | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac \
-              > RELEASE_NOTES.md || true
+              | sed -e '/./,$!d' | tac | sed -e '/./,$!d' | tac
+            }
+            perl -0777 -pe 's/<!--.*?-->//gs' "$src" > notes.raw
+            tidy < notes.raw > RECORD_NOTES.md || true
+            awk '
+                /^#{1,6}[[:space:]]+[Ii]nternal[[:space:]]*$/ { skip=1; next }
+                /^#{1,6}[[:space:]]/ { skip=0 }
+                !skip { print }
+              ' notes.raw \
+              | tidy > RELEASE_NOTES.md || true
           fi
 
           # No real notes staged. First release gets a one-liner (nobody updates *to* a
@@ -393,13 +403,17 @@ jobs:
           # open a fresh next.md from the template. The filename states the version,
           # the bump and the channel — all known here, none of them guessed — so the
           # directory reads like the run-name: 0.2.0-minor-stable.md, 0.1.14-patch-beta.md.
-          # The file body is exactly what shipped (RELEASE_NOTES.md), under a heading
-          # that repeats the same facts for anyone opening the file directly.
+          # The file body is what shipped plus the Internal section (RECORD_NOTES.md,
+          # see "Collect release notes"), under a heading that repeats the same facts
+          # for anyone opening the file directly. A first release has no staged notes,
+          # so it falls back to the one-liner that shipped.
+          record=RECORD_NOTES.md
+          if [ ! -f "$record" ] || ! grep -q '[^[:space:]]' "$record"; then record=RELEASE_NOTES.md; fi
           dest="changelog/${VERSION}-${BUMP}-${channel}.md"
           {
             echo "# ${VERSION} (${BUMP}, ${channel}) - ${date}"
             echo
-            cat RELEASE_NOTES.md
+            cat "$record"
           } > "$dest"
           cp changelog/TEMPLATE.md changelog/next.md
 
