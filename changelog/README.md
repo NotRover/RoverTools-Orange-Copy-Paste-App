@@ -15,8 +15,10 @@ and how releases are cut ([`../docs/releasing.md`](../docs/releasing.md)).
   `0.2.0-minor-stable.md`, `0.1.14-patch-beta.md`, `1.0.0-major-stable.md`. The
   workflow creates it by renaming `next.md` on release, so the name always states the
   real version, the bump, and the channel it went out on. You never name these by hand.
-- Every shipped release from `0.1.0` on has a file here; the published assets also live
-  on this repo's [Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases).
+- Every shipped release from `0.1.0` on has a file here, and this folder is the public
+  record of them. This repo's [Releases](https://github.com/NotRover/RoverTools-Orange-Copy-Paste-App/releases)
+  page carries notes and installers from `0.3.8` on; earlier versions were published
+  elsewhere, and their notes live only here and in `../CHANGELOG.md`.
 - **`../CHANGELOG.md`** (repo root) is a browsable index of every release, newest first,
   generated from the files here by
   [`../.github/scripts/gen-changelog.sh`](../.github/scripts/gen-changelog.sh) on each
