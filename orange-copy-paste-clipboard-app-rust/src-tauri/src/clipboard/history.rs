@@ -1032,20 +1032,39 @@ impl ClipboardHistory {
         self.externalize_images();
     }
 
-    /// Migrate any in-memory data-URL images to on-disk files.
+    /// Migrate any in-memory data-URL images to on-disk files, and point any
+    /// image path outside the images directory back into it.
     /// Called after loading entries from a previous session so that old
     /// inline images are externalised to the images directory.
+    ///
+    /// The rebase covers images captured before the bundle-identifier rename:
+    /// their rows still name the old app-data folder. The webview may only load
+    /// files under the current one, so their cards rendered broken while copy,
+    /// which reads the file from Rust, still worked. Only a path whose file is
+    /// present in the images directory under the same name is rewritten.
     fn externalize_images(&mut self) {
         let Some(ref dir) = self.images_dir else {
             return;
         };
         let mut changed = Vec::new();
         for entry in &mut self.entries {
-            if entry.kind == EntryKind::Image && entry.content.starts_with("data:") {
+            if entry.kind != EntryKind::Image {
+                continue;
+            }
+            if entry.content.starts_with("data:") {
                 if let Some(path) = save_image_to_disk(entry, dir) {
                     entry.content = path;
                     changed.push(entry.id.clone());
                 }
+                continue;
+            }
+            let path = Path::new(&entry.content);
+            if path.parent() == Some(dir.as_path()) {
+                continue;
+            }
+            if let Some(here) = path.file_name().map(|n| dir.join(n)).filter(|p| p.is_file()) {
+                entry.content = here.to_string_lossy().into_owned();
+                changed.push(entry.id.clone());
             }
         }
         if !changed.is_empty() {
@@ -1225,6 +1244,46 @@ mod tests {
         assert!(recv.join("live-id").exists(), "live entry's dir removed");
         assert!(recv.join("stray-id").exists(), "unnamed dir swept");
         assert_eq!(ids(&reload(&db)), ["live-id"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Images captured before the bundle-identifier rename named the old
+    /// app-data folder, which the webview may not load from, so their cards
+    /// rendered broken. A load points them at the copy in the images directory
+    /// and leaves a path with no such copy alone.
+    #[test]
+    fn a_load_rebases_image_paths_into_the_images_dir() {
+        let db = Db::open_in_memory();
+        let dir = scratch();
+        let (old, images) = (dir.join("old-identifier").join("images"), dir.join("images"));
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&images).unwrap();
+        for name in ["moved.png", "current.png"] {
+            fs::write(images.join(name), b"png").unwrap();
+        }
+        fs::write(old.join("moved.png"), b"png").unwrap();
+        fs::write(old.join("only-old.png"), b"png").unwrap();
+
+        let mut hist = with_db(&db);
+        for (id, path) in [
+            ("moved", old.join("moved.png")),
+            ("only-old", old.join("only-old.png")),
+            ("current", images.join("current.png")),
+        ] {
+            let mut e = ClipboardEntry::new_image(path.to_string_lossy().into_owned());
+            e.id = id.to_string();
+            hist.push(e);
+        }
+
+        let mut again = with_db(&db);
+        again.set_images_dir(images.clone());
+        assert!(again.load_from_db());
+        let content = |id: &str| PathBuf::from(&again.find(id).unwrap().content);
+        assert_eq!(content("moved"), images.join("moved.png"));
+        assert_eq!(content("only-old"), old.join("only-old.png"));
+        assert_eq!(content("current"), images.join("current.png"));
+        // The rewrite reached the row, not just memory.
+        assert_eq!(PathBuf::from(&reload(&db).find("moved").unwrap().content), images.join("moved.png"));
         let _ = fs::remove_dir_all(&dir);
     }
 
